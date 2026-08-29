@@ -22,42 +22,10 @@ pub(crate) use commit_pages::use_viewer_commit_pages;
 #[cfg(feature = "desktop")]
 pub(crate) use diff_history::history_navigation;
 #[cfg(feature = "desktop")]
-use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
 #[cfg(feature = "desktop")]
 pub(crate) use rows::ViewerRowEvent;
 pub(crate) use rows::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
-#[cfg(feature = "desktop")]
-pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
-    theme.as_str()
-}
-
-#[cfg(feature = "desktop")]
-pub(crate) const fn theme_label(theme: ViewerTheme) -> &'static str {
-    match theme {
-        ViewerTheme::Dark => "Dark",
-        ViewerTheme::Light => "Light",
-        ViewerTheme::Hearth => "Hearth",
-        ViewerTheme::Mirage => "Mirage",
-        ViewerTheme::Glacier => "Glacier",
-        ViewerTheme::Noir => "Noir",
-        ViewerTheme::Graphite => "Graphite",
-    }
-}
-
-#[cfg(feature = "desktop")]
-pub(crate) fn theme_from_value(value: &str) -> Option<ViewerTheme> {
-    match value {
-        "dark" => Some(ViewerTheme::Dark),
-        "light" => Some(ViewerTheme::Light),
-        "hearth" => Some(ViewerTheme::Hearth),
-        "mirage" => Some(ViewerTheme::Mirage),
-        "glacier" => Some(ViewerTheme::Glacier),
-        "noir" => Some(ViewerTheme::Noir),
-        "graphite" => Some(ViewerTheme::Graphite),
-        _ => None,
-    }
-}
-
 #[cfg(feature = "desktop")]
 pub(crate) const fn layout_label(layout: ViewerDiffLayout) -> &'static str {
     match layout {

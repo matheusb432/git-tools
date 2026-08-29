@@ -22,6 +22,11 @@ help: _preflight
 up:
     just desktop up
 
+# Serve the development-only component story catalog in a browser.
+[group('build')]
+preview-components *args:
+    cargo run --quiet -p xtask -- web-stories {{ args }}
+
 # Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]
 build:

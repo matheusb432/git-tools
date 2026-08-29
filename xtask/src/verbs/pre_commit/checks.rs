@@ -33,6 +33,7 @@ impl CheckPaths {
 
 fn is_dioxus_source_path(path: &Path) -> bool {
     path.starts_with(Path::new("crates/gtl-web/src"))
+        || path.starts_with(Path::new("crates/gtl-web/dev"))
 }
 
 #[cfg(test)]
@@ -50,6 +51,7 @@ mod tests {
         let classified = CheckPaths::classify(&paths(&[
             "crates/gtl-models/src/lib.rs",
             "crates/gtl-web/src/app.rs",
+            "crates/gtl-web/dev/stories/button.rs",
             "Cargo.toml",
             "docs/Guide Name.md",
             "crates/gtl-artifacts/src/styles/base.css",
@@ -58,9 +60,19 @@ mod tests {
 
         assert_eq!(
             classified.rust,
-            paths(&["crates/gtl-models/src/lib.rs", "crates/gtl-web/src/app.rs"])
+            paths(&[
+                "crates/gtl-models/src/lib.rs",
+                "crates/gtl-web/src/app.rs",
+                "crates/gtl-web/dev/stories/button.rs",
+            ])
         );
-        assert_eq!(classified.dioxus, paths(&["crates/gtl-web/src/app.rs"]));
+        assert_eq!(
+            classified.dioxus,
+            paths(&[
+                "crates/gtl-web/src/app.rs",
+                "crates/gtl-web/dev/stories/button.rs",
+            ])
+        );
         assert_eq!(classified.toml, paths(&["Cargo.toml"]));
         assert_eq!(classified.markdown, paths(&["docs/Guide Name.md"]));
     }

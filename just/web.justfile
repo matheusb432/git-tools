@@ -19,3 +19,8 @@ styles:
 [group('web')]
 serve *args:
     cargo run --quiet -p xtask -- web-serve {{ args }}
+
+# Regenerate the tracked component-preview Tailwind stylesheet.
+[group('web')]
+story-styles:
+    cargo run --quiet -p xtask -- web-story-styles

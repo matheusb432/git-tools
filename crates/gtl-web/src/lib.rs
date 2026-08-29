@@ -2,11 +2,14 @@
 mod app;
 #[cfg(feature = "artifact")]
 mod artifact;
+#[cfg(feature = "component-preview")]
+#[path = "../dev/lib.rs"]
+mod component_preview;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod entities;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
+#[cfg(any(feature = "artifact", feature = "interactive-ui"))]
 mod shared;
-#[cfg(test)]
+#[cfg(all(test, any(feature = "artifact", feature = "desktop")))]
 mod test_support;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod views;
@@ -22,4 +25,9 @@ pub use views::diffs::diff_workspace::commits_panel::{CommitsPanel, CommitsPanel
 #[cfg(feature = "desktop")]
 pub fn launch_desktop() {
     dioxus::launch(app::App);
+}
+
+#[cfg(feature = "component-preview")]
+pub fn launch_component_preview() {
+    component_preview::launch();
 }

@@ -7,7 +7,13 @@ use anyhow::{Result, bail};
 use super::{dioxus_web, lock_web_assets, repository_root};
 
 /// Tracked generated paths paired with the command that regenerates them.
-const BUNDLES: &[(&str, &str)] = &[("crates/gtl-web/assets/tailwind.css", "just web styles")];
+const BUNDLES: &[(&str, &str)] = &[
+    ("crates/gtl-web/assets/tailwind.css", "just web styles"),
+    (
+        "crates/gtl-web/assets/component-preview.css",
+        "just web story-styles",
+    ),
+];
 
 /// Fail if any generated path has checkout changes after a rebuild. `is_clean(path)` reports
 /// whether the path matches its committed state; injected so the
@@ -35,6 +41,7 @@ pub fn run() -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
     dioxus_web::build_release_unlocked(&root)?;
+    dioxus_web::build_component_preview_styles_unlocked(&root)?;
     check_drift(BUNDLES, &git_clean)
 }
 
@@ -53,5 +60,18 @@ mod tests {
 
         assert!(err.contains("assets/tailwind.css is stale"), "{err}");
         assert!(err.contains("just web styles"), "{err}");
+    }
+
+    #[test]
+    fn component_preview_styles_have_an_owned_rebuild_command() {
+        let err = check_drift(&BUNDLES[1..], &|_| false)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("assets/component-preview.css is stale"),
+            "{err}"
+        );
+        assert!(err.contains("just web story-styles"), "{err}");
     }
 }

@@ -5,11 +5,12 @@ use gtl_wire::viewer::ViewerUserSettings;
 use lucide_dioxus::{FileCog, Settings};
 
 use crate::{
-    entities::diffs::{density_label, layout_label, theme_label, viewer_server},
+    entities::diffs::{density_label, layout_label, viewer_server},
     shared::{
         browser,
         ui::{Button, ButtonVariant, ScrollArea, Skeleton},
         viewer_client::ViewerClientError,
+        viewer_theme::viewer_theme_label,
     },
     views::user_settings::ui::DiffExtensionExclusions,
 };
@@ -124,7 +125,7 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
     projects.sort_by(|left, right| left.project_name.cmp(&right.project_name));
     let configured_theme = settings.configured_theme.map_or_else(
         || "Not configured".to_owned(),
-        |theme| theme_label(theme).to_owned(),
+        |theme| viewer_theme_label(theme).to_owned(),
     );
     let configuration_path = settings
         .configuration_path
@@ -148,7 +149,9 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
             dl { class: "divide-y divide-line",
                 SettingsRow { term: "Configuration file", "{configuration_path}" }
                 SettingsRow { term: "Configured theme", "{configured_theme}" }
-                SettingsRow { term: "Effective theme", "{theme_label(settings.effective_theme).to_owned()}" }
+                SettingsRow { term: "Effective theme",
+                    "{viewer_theme_label(settings.effective_theme).to_owned()}"
+                }
                 SettingsRow { term: "Diff layout", "{layout_label(settings.render_options.layout).to_owned()}" }
                 SettingsRow { term: "Diff density",
                     "{density_label(settings.render_options.density).to_owned()}"

@@ -109,6 +109,16 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<String>,
     },
+    /// Serve the development-only component story catalog in a browser.
+    #[command(name = Verb::WEB_STORIES.as_str())]
+    WebStories {
+        /// Arguments forwarded to `dx serve`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<String>,
+    },
+    /// Generate the tracked component-preview Tailwind stylesheet.
+    #[command(name = Verb::WEB_STORY_STYLES.as_str())]
+    WebStoryStyles,
     /// Generate the tracked shared Tailwind stylesheet.
     #[command(name = Verb::WEB_STYLES.as_str())]
     WebStyles,

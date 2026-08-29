@@ -5,19 +5,20 @@ use gtl_wire::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
     ViewerTabState, ViewerTheme,
 };
-use lucide_dioxus::{CircleDot, Ellipsis, History, LoaderCircle, Settings, TriangleAlert, X};
+use lucide_dioxus::{Ellipsis, History, LoaderCircle, Settings, TriangleAlert, X};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
     application_router::Route,
 };
 use crate::{
-    entities::diffs::{theme_from_value, theme_label, theme_value, viewer_server},
+    entities::diffs::viewer_server,
     shared::{
         browser,
         ui::{
             Button, ButtonSize, ButtonVariant, CountBadge, IconPopover, IconPopoverIconMotion,
-            MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea, ScrollAreaVariant, use_toast,
+            MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea, ScrollAreaVariant,
+            ViewerThemePicker, use_toast,
         },
     },
 };
@@ -35,9 +36,16 @@ pub(crate) fn ApplicationNavigation() -> Element {
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => Vec::new(),
     });
     let shell_state = shell.read();
-    let (active_tab_id, tabs) = match &*shell_state {
-        ViewerShellLoad::Ready(shell) => (active_tab_id(&shell.active), shell.tabs.as_slice()),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (None, &[] as &[ViewerTab]),
+    let (active_tab_id, tabs, theme, shell_ready) = match &*shell_state {
+        ViewerShellLoad::Ready(shell) => (
+            active_tab_id(&shell.active),
+            shell.tabs.as_slice(),
+            shell.preferences.theme,
+            true,
+        ),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
+            (None, &[] as &[ViewerTab], ViewerTheme::Dark, false)
+        }
     };
 
     rsx! {
@@ -184,7 +192,13 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             }
                         }
                     }
-                    ThemePicker {}
+                    ViewerThemePicker {
+                        theme,
+                        disabled: !shell_ready || viewer.render_command_pending(),
+                        onthemechange: move |theme| {
+                            viewer.set_preference(SetViewerPreference::Theme(theme));
+                        },
+                    }
                     Link {
                         class: MENU_ACTION_HOST_CLASSES,
                         to: Route::Settings {},
@@ -198,50 +212,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             description: "Viewer defaults",
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-// TODO: move to settings view
-#[component]
-fn ThemePicker() -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let shell = viewer.shell();
-    let shell = shell.read();
-    let (theme, shell_ready) = match &*shell {
-        ViewerShellLoad::Ready(shell) => (shell.preferences.theme, true),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (ViewerTheme::Dark, false),
-    };
-
-    rsx! {
-        label { class: "flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
-            span { class: "text-acc", aria_hidden: "true",
-                CircleDot { size: 9, fill: "currentColor" }
-            }
-            span { class: "sr-only", "Theme" }
-            select {
-                class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
-                value: theme_value(theme),
-                disabled: !shell_ready || viewer.render_command_pending(),
-                aria_label: "Theme",
-                onchange: move |event| {
-                    if let Some(theme) = theme_from_value(&event.value()) {
-                        viewer.set_preference(SetViewerPreference::Theme(theme));
-                    }
-                },
-                for option in [
-                    ViewerTheme::Dark,
-                    ViewerTheme::Light,
-                    ViewerTheme::Hearth,
-                    ViewerTheme::Mirage,
-                    ViewerTheme::Glacier,
-                    ViewerTheme::Noir,
-                    ViewerTheme::Graphite,
-                ]
-                {
-                    option { value: theme_value(option), "{theme_label(option)}" }
                 }
             }
         }

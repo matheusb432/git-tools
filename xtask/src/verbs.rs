@@ -49,6 +49,8 @@ impl Verb {
     pub(crate) const UNINSTALL: Self = Self("uninstall");
     pub(crate) const WEB_BUILD: Self = Self("web-build");
     pub(crate) const WEB_SERVE: Self = Self("web-serve");
+    pub(crate) const WEB_STORIES: Self = Self("web-stories");
+    pub(crate) const WEB_STORY_STYLES: Self = Self("web-story-styles");
     pub(crate) const WEB_STYLES: Self = Self("web-styles");
 
     pub(crate) const fn as_str(self) -> &'static str {

@@ -16,7 +16,7 @@ pub(crate) enum IconPopoverPlacement {
 pub(crate) enum IconPopoverIconMotion {
     #[default]
     Static,
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "interactive-ui")]
     QuarterTurn,
 }
 
@@ -24,7 +24,7 @@ impl IconPopoverIconMotion {
     const fn classes(self) -> &'static str {
         match self {
             Self::Static => "",
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::QuarterTurn => {
                 "transition-transform duration-150 ease-out group-has-[:popover-open]/icon-popover:rotate-90 motion-reduce:transition-none"
             }

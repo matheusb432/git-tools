@@ -5,9 +5,7 @@ use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
     ViewerHistoryEntry, ViewerHistoryPage,
 };
-use lucide_dioxus::{
-    Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, ExternalLink, History,
-};
+use lucide_dioxus::{Check, ChevronLeft, ChevronRight, Copy, ExternalLink, History};
 
 use crate::{
     app::{application_layout::ViewerContext, application_router::Route},
@@ -352,100 +350,50 @@ fn HistoryFooter(
     let navigation = history_navigation(&page);
     let page_number = u32::from(position.number());
     let page_count = u32::from(position.count());
-    let progress = position.progress_percent();
+    let previous = navigation.previous;
+    let next = navigation.next;
+    let item_count_label = format!("{} renders", page.total_count);
 
     rsx! {
-        footer { class: "relative flex min-h-14 items-center justify-between gap-3 border-t border-line bg-surface px-3 sm:px-4",
-            div {
-                class: "absolute inset-x-3 top-0 h-px bg-line sm:inset-x-4",
-                role: "progressbar",
-                aria_label: "History page position",
-                aria_valuemin: "1",
-                aria_valuemax: page_count.to_string(),
-                aria_valuenow: page_number.to_string(),
-                span { class: "block h-full bg-acc", style: "width:{progress}%" }
-            }
+        footer { class: "flex min-h-14 items-center justify-between gap-3 border-t border-line bg-surface px-3 sm:px-4",
             p { class: "hidden font-mono text-xs tabular-nums text-ink-3 sm:block",
-                "{page.total_count} renders"
+                "{item_count_label}"
             }
             nav {
                 class: "ml-auto flex items-center gap-1",
                 aria_label: "History pages",
-                HistoryPageButton {
-                    label: "First page",
-                    cursor: navigation.first,
-                    onclick: onnavigate,
-                    icon: HistoryPageIcon::First,
-                }
-                HistoryPageButton {
-                    label: "Previous page",
-                    cursor: navigation.previous,
-                    onclick: onnavigate,
-                    icon: HistoryPageIcon::Previous,
+                Button {
+                    size: ButtonSize::IconMedium,
+                    variant: ButtonVariant::Ghost,
+                    state: if previous.is_some() { ButtonState::Enabled } else { ButtonState::Disabled },
+                    aria_label: "Previous history page",
+                    onclick: move |_| {
+                        if let Some(cursor) = previous {
+                            onnavigate.call(cursor);
+                        }
+                    },
+                    span { aria_hidden: "true",
+                        ChevronLeft { size: 15 }
+                    }
                 }
                 output {
                     class: "min-w-20 px-2 text-center font-mono text-xs tabular-nums text-ink",
-                    aria_label: "Page {page_number} of {page_count}",
+                    aria_label: "History page {page_number} of {page_count}",
                     "{page_number:02} / {page_count:02}"
                 }
-                HistoryPageButton {
-                    label: "Next page",
-                    cursor: navigation.next,
-                    onclick: onnavigate,
-                    icon: HistoryPageIcon::Next,
-                }
-                HistoryPageButton {
-                    label: "Last page",
-                    cursor: navigation.last,
-                    onclick: onnavigate,
-                    icon: HistoryPageIcon::Last,
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HistoryPageIcon {
-    First,
-    Previous,
-    Next,
-    Last,
-}
-
-#[component]
-fn HistoryPageButton(
-    label: String,
-    cursor: Option<ViewerHistoryCursor>,
-    onclick: EventHandler<ViewerHistoryCursor>,
-    icon: HistoryPageIcon,
-) -> Element {
-    rsx! {
-        Button {
-            size: ButtonSize::IconMedium,
-            variant: ButtonVariant::Ghost,
-            state: if cursor.is_some() { ButtonState::Enabled } else { ButtonState::Disabled },
-            aria_label: label.clone(),
-            title: label,
-            onclick: move |_| {
-                if let Some(cursor) = cursor {
-                    onclick.call(cursor);
-                }
-            },
-            span { aria_hidden: "true",
-                match icon {
-                    HistoryPageIcon::First => rsx! {
-                        ChevronsLeft { size: 15 }
+                Button {
+                    size: ButtonSize::IconMedium,
+                    variant: ButtonVariant::Ghost,
+                    state: if next.is_some() { ButtonState::Enabled } else { ButtonState::Disabled },
+                    aria_label: "Next history page",
+                    onclick: move |_| {
+                        if let Some(cursor) = next {
+                            onnavigate.call(cursor);
+                        }
                     },
-                    HistoryPageIcon::Previous => rsx! {
-                        ChevronLeft { size: 15 }
-                    },
-                    HistoryPageIcon::Next => rsx! {
+                    span { aria_hidden: "true",
                         ChevronRight { size: 15 }
-                    },
-                    HistoryPageIcon::Last => rsx! {
-                        ChevronsRight { size: 15 }
-                    },
+                    }
                 }
             }
         }

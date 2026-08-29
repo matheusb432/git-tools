@@ -45,6 +45,10 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
+        cli::Command::WebStories { arguments } => {
+            verbs::dioxus_web::serve_component_preview(&arguments)
+        }
+        cli::Command::WebStoryStyles => verbs::dioxus_web::build_component_preview_styles(),
         cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
         cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
         cli::Command::PreCommit => verbs::pre_commit::run(),

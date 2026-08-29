@@ -13,6 +13,7 @@ use anyhow::{Context, Result, bail, ensure};
 use crate::{process, task::Step};
 
 const PACKAGE: &str = "gtl-web";
+const SOURCE_DIRECTORIES: &[&str] = &["src", "dev"];
 const SOURCE_FILE_COUNT_MAX: usize = 512;
 
 pub(super) fn check_step(directory: &Path) -> Step {
@@ -25,8 +26,11 @@ fn check_arguments() -> [&'static str; 5] {
 
 pub(super) fn check() -> Result<()> {
     let web_root = std::env::current_dir()?.join("crates/gtl-web");
-    let source_root = web_root.join("src");
-    let files = source_files(&source_root)?;
+    let source_roots = SOURCE_DIRECTORIES
+        .iter()
+        .map(|directory| web_root.join(directory))
+        .collect::<Vec<_>>();
+    let files = source_files(&source_roots)?;
     let mut drifted = Vec::new();
     for path in files {
         let source =
@@ -56,14 +60,20 @@ pub(super) fn check() -> Result<()> {
     );
 }
 
-fn source_files(root: &Path) -> Result<Vec<PathBuf>> {
+fn source_files(roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_source_files(root, &mut files)?;
+    for root in roots {
+        collect_source_files(root, &mut files)?;
+    }
     files.sort();
     ensure!(
         !files.is_empty(),
         "Dioxus source inventory is empty: {}",
-        root.display()
+        roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     ensure!(
         files.len() <= SOURCE_FILE_COUNT_MAX,
@@ -103,5 +113,6 @@ mod tests {
             check_arguments(),
             ["fmt", "--check", "--package", "gtl-web", "--locked"]
         );
+        assert_eq!(SOURCE_DIRECTORIES, ["src", "dev"]);
     }
 }

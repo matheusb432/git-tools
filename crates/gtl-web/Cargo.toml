@@ -56,10 +56,17 @@ workspace = true
 [features]
 default = ["desktop"]
 artifact = ["dep:dioxus-ssr", "dep:thiserror"]
-desktop = ["web", "dioxus/router", "dep:gtl-client"]
+component-preview = ["interactive-ui", "web", "dioxus/router"]
+desktop = ["interactive-ui", "web", "dioxus/router", "dep:gtl-client"]
+interactive-ui = []
 web = ["dioxus/web"]
 
 [[bin]]
 name = "gtl-web"
 path = "src/main.rs"
 required-features = ["desktop"]
+
+[[example]]
+name = "component-preview"
+path = "dev/main.rs"
+required-features = ["component-preview"]

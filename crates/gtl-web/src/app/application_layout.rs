@@ -8,7 +8,7 @@ use gtl_wire::viewer::{
 
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
-    entities::diffs::{theme_value, viewer_server},
+    entities::diffs::viewer_server,
     shared::{
         browser,
         retry_delay::RetryDelay,
@@ -454,13 +454,13 @@ fn ApplicationLayoutContent() -> Element {
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerTheme::Dark,
     };
     use_effect(use_reactive((&theme,), move |(theme,)| {
-        browser::apply_theme(theme_value(theme));
+        browser::apply_theme(theme.as_str());
     }));
 
     rsx! {
         div {
             class: "flex h-screen min-h-128 flex-col overflow-hidden bg-bg text-ink antialiased",
-            "data-theme": theme_value(theme),
+            "data-theme": theme.as_str(),
             div {
                 class: if connection.is_connected() { "flex min-h-0 flex-1 flex-col" } else { "flex min-h-0 flex-1 flex-col opacity-70 saturate-50" },
                 "inert": (!connection.is_connected()).then_some(""),

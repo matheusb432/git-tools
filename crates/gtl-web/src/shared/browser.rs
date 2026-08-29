@@ -3,13 +3,16 @@ use std::time::Duration;
 
 #[cfg(feature = "desktop")]
 use dioxus::prelude::spawn;
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen::JsCast;
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "desktop")]
 use web_sys::{HtmlDetailsElement, HtmlElement};
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 use web_sys::{HtmlDocument, HtmlTextAreaElement};
 
-#[cfg(feature = "desktop")]
+#[cfg(feature = "interactive-ui")]
 pub(crate) fn apply_theme(theme: &'static str) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -54,6 +57,7 @@ pub(crate) fn scroll_to_file(id: &str) {
     details.scroll_into_view_with_bool(true);
 }
 
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) async fn copy_text(text: &str) -> bool {
     if let Some(window) = web_sys::window()
         && JsFuture::from(window.navigator().clipboard().write_text(text))
@@ -65,6 +69,7 @@ pub(crate) async fn copy_text(text: &str) -> bool {
     exec_copy(text)
 }
 
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 fn exec_copy(text: &str) -> bool {
     let Some(document) = document().and_then(|document| document.dyn_into::<HtmlDocument>().ok())
     else {

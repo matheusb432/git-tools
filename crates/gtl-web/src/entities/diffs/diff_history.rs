@@ -2,10 +2,8 @@ use gtl_wire::viewer::{ViewerHistoryCursor, ViewerHistoryPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HistoryNavigation {
-    pub(crate) first: Option<ViewerHistoryCursor>,
     pub(crate) previous: Option<ViewerHistoryCursor>,
     pub(crate) next: Option<ViewerHistoryCursor>,
-    pub(crate) last: Option<ViewerHistoryCursor>,
 }
 
 pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation {
@@ -16,7 +14,6 @@ pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation 
     let next_page = history_page.and_then(gtl_models::viewer::HistoryPage::next);
 
     HistoryNavigation {
-        first: page.has_newer.then_some(ViewerHistoryCursor::Newest),
         previous: page
             .has_newer
             .then_some(())
@@ -33,7 +30,6 @@ pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation 
                 render_id: entry.id,
                 page,
             }),
-        last: page.has_older.then_some(ViewerHistoryCursor::Oldest),
     }
 }
 
@@ -62,7 +58,7 @@ mod tests {
     }
 
     #[test]
-    fn navigation_uses_page_edge_ids_for_all_four_directions() -> TestResult {
+    fn navigation_uses_page_edge_ids_for_adjacent_pages() -> TestResult {
         let page = ViewerHistoryPage {
             entries: vec![entry(90)?, entry(81)?],
             total_count: HistoryRenderCount::new(42),
@@ -73,7 +69,6 @@ mod tests {
 
         let navigation = history_navigation(&page);
 
-        assert_eq!(navigation.first, Some(ViewerHistoryCursor::Newest));
         assert_eq!(
             navigation.previous,
             Some(ViewerHistoryCursor::NewerThan {
@@ -88,7 +83,6 @@ mod tests {
                 page: history_page_number(4)?,
             })
         );
-        assert_eq!(navigation.last, Some(ViewerHistoryCursor::Oldest));
         Ok(())
     }
 }

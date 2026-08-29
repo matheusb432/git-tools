@@ -32,7 +32,7 @@ pub(crate) enum ButtonVariant {
     Primary,
     Secondary,
     Pressed,
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "interactive-ui")]
     Destructive,
     Failure,
     Outline,
@@ -52,7 +52,7 @@ impl ButtonVariant {
             Self::Pressed => {
                 "border border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
             }
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::Destructive => {
                 "border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
             }
@@ -77,10 +77,10 @@ pub(crate) enum ButtonSize {
     Small,
     #[default]
     Medium,
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "interactive-ui")]
     IconCompact,
     IconSmall,
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "interactive-ui")]
     IconMedium,
 }
 
@@ -91,10 +91,10 @@ impl ButtonSize {
             Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-xs",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::IconCompact => "size-6 p-0",
             Self::IconSmall => "size-8 p-0",
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::IconMedium => "size-9 p-0",
         }
     }
@@ -105,7 +105,7 @@ pub(crate) enum ButtonState {
     #[default]
     Enabled,
     Disabled,
-    #[cfg(feature = "desktop")]
+    #[cfg(feature = "interactive-ui")]
     Loading,
 }
 
@@ -114,7 +114,7 @@ impl ButtonState {
         match self {
             Self::Enabled => false,
             Self::Disabled => true,
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::Loading => true,
         }
     }
@@ -123,7 +123,7 @@ impl ButtonState {
         match self {
             Self::Enabled => false,
             Self::Disabled => false,
-            #[cfg(feature = "desktop")]
+            #[cfg(feature = "interactive-ui")]
             Self::Loading => true,
         }
     }

@@ -1,9 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use tempfile::TempDir;
+use tempfile::{Builder, TempDir};
 
-use crate::{process, task::Step};
+use crate::{process, task::Step, verbs::repository_root};
 
 pub(super) struct StagedSnapshot {
     directory: TempDir,
@@ -28,7 +28,7 @@ impl StagedSnapshot {
             return Ok(None);
         }
 
-        let directory = tempfile::tempdir().context("creating staged snapshot directory")?;
+        let directory = create_snapshot_directory(&repository_root())?;
         let directory_text = directory
             .path()
             .to_str()
@@ -61,6 +61,21 @@ impl StagedSnapshot {
     pub(super) fn paths(&self) -> &[PathBuf] {
         &self.paths
     }
+}
+
+/// Keep the snapshot beside the repository so workspace-relative sibling dependencies still
+/// resolve from its copied manifest.
+fn create_snapshot_directory(repository: &Path) -> Result<TempDir> {
+    let repository = repository
+        .canonicalize()
+        .context("resolving repository root for a staged snapshot")?;
+    let parent = repository
+        .parent()
+        .context("repository has no parent for a staged snapshot")?;
+    Builder::new()
+        .prefix(".git-tools-staged-")
+        .tempdir_in(parent)
+        .context("creating staged snapshot directory")
 }
 
 fn parse_paths(raw: &[u8]) -> Result<Vec<PathBuf>> {
@@ -106,5 +121,24 @@ mod tests {
     fn paths_reject_non_utf8_bytes() {
         let error = parse_paths(b"invalid-\xff.rs\0").unwrap_err();
         assert!(error.to_string().contains("staged path is not UTF-8"));
+    }
+
+    #[test]
+    fn snapshot_is_created_beside_the_repository() {
+        let parent = tempfile::tempdir().unwrap();
+        let repository = parent.path().join("git-tools");
+        std::fs::create_dir(&repository).unwrap();
+
+        let snapshot = create_snapshot_directory(&repository).unwrap();
+
+        assert_eq!(snapshot.path().parent(), Some(parent.path()));
+        assert!(
+            snapshot
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".git-tools-staged-")
+        );
     }
 }
