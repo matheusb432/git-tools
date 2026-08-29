@@ -26,7 +26,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<Theme>) -> 
     let count = view.commits.len();
     let suffix = if count == 1 { "" } else { "s" };
     let title = format!(
-        "{} — {} · {count} commit{suffix}",
+        "{} - {} · {count} commit{suffix}",
         view.repo_name, view.title
     );
     build_document(&title, std::slice::from_ref(view), options, theme)
@@ -132,13 +132,12 @@ mod tests {
 
     #[test]
     fn document_contains_complete_static_markup() {
-        let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some(Theme::Dark))
-            .expect("build static artifact");
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
         let policy =
             content_security_policy(static_artifact_enhancement_script(), assets::TAILWIND_CSS);
 
         assert!(html.starts_with("<!doctype html>"));
-        assert!(html.contains("<title>api — diff · 0 commits</title>"));
+        assert!(html.contains("<title>api - diff · 0 commits</title>"));
         assert!(html.contains("static_rendered"));
         assert!(html.contains("data-gtl-diff-file"));
         assert!(html.contains("data-gtl-diff-row"));
@@ -176,7 +175,7 @@ mod tests {
         view.files[0].path = gtl_models::paths::RepositoryRelativePath::try_new(
             "src/<script>path_attack()</script>.rs".into(),
         )
-        .expect("dangerous-looking path remains a valid relative path");
+        .unwrap();
         view.files[0].lines[0] = "@@ -1 +1,2 @@".to_owned();
         view.files[0]
             .lines
@@ -189,7 +188,7 @@ mod tests {
             RenderOptions::DEFAULT,
             None,
         )
-        .expect("build escaped static artifact");
+        .unwrap();
 
         assert_eq!(html.matches("<script>").count(), 1);
         assert!(!html.contains("<script>head_attack()"));
@@ -218,13 +217,13 @@ mod tests {
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
             None,
         )
-        .expect("build unified artifact");
+        .unwrap();
         let split = build_html(
             &view,
             RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
             None,
         )
-        .expect("build split artifact");
+        .unwrap();
 
         assert!(unified.contains("data-layout=\"unified\""));
         assert!(unified.contains("text-[var(--sy-kw)]"));
@@ -249,7 +248,7 @@ mod tests {
             RenderOptions::DEFAULT,
             None,
         )
-        .expect("build tabbed static artifact");
+        .unwrap();
 
         assert_eq!(html.matches("role=\"tab\"").count(), 2);
         assert_eq!(html.matches("role=\"tabpanel\"").count(), 2);
@@ -283,10 +282,8 @@ mod tests {
     #[test]
     fn tiny_artifact_is_deterministic_and_records_size_evidence() {
         let view = tiny_size_view();
-        let first = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
-            .expect("build tiny artifact");
-        let second = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
-            .expect("rebuild tiny artifact");
+        let first = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
+        let second = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
         let evidence = size_evidence(&first);
 
         eprintln!("tiny static artifact size evidence: {evidence:?}");
@@ -303,8 +300,7 @@ mod tests {
     #[test]
     fn representative_large_artifact_records_complete_document_size() {
         let view = large_size_view();
-        let html = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
-            .expect("build representative large artifact");
+        let html = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
         let evidence = size_evidence(&html);
 
         eprintln!("large static artifact size evidence: {evidence:?}");
@@ -331,37 +327,35 @@ mod tests {
 
     fn large_size_view() -> View {
         let mut view = sample_view();
-        view.files = (0..205)
-            .map(|file_index| {
-                let mut lines = vec!["@@ -1,100 +1,100 @@".to_owned()];
-                lines.extend((0..100).map(|line_index| {
-                    format!(
-                        "+pub fn fixture_{file_index}_{line_index}() -> usize {{ {file_index} + {line_index} }}"
-                    )
-                }));
-                FileDiff {
-                    path: gtl_models::paths::RepositoryRelativePath::try_new(
-                        format!("src/generated_{file_index}.rs").into(),
-                    )
-                    .unwrap(),
-                    added: DiffLineCount::new(100),
-                    removed: DiffLineCount::default(),
-                    full_lines: Some(lines.clone()),
-                    lines,
-                }
-            })
-            .collect();
+        view.files = (0..205).map(large_file).collect();
         view
+    }
+
+    fn large_file(file_index: usize) -> FileDiff {
+        let mut lines = vec!["@@ -1,100 +1,100 @@".to_owned()];
+        lines.extend((0..100).map(|line_index| {
+            format!(
+                "+pub fn fixture_{file_index}_{line_index}() -> usize {{ {file_index} + {line_index} }}"
+            )
+        }));
+        FileDiff {
+            path: gtl_models::paths::RepositoryRelativePath::try_new(
+                format!("src/generated_{file_index}.rs").into(),
+            )
+            .unwrap(),
+            added: DiffLineCount::new(100),
+            removed: DiffLineCount::default(),
+            full_lines: Some(lines.clone()),
+            lines,
+        }
     }
 
     fn size_evidence(html: &str) -> ArtifactSizeEvidence {
         let mut encoder = GzBuilder::new()
             .mtime(0)
             .write(Vec::new(), Compression::best());
-        encoder
-            .write_all(html.as_bytes())
-            .expect("gzip static artifact");
-        let gzip = encoder.finish().expect("finish static artifact gzip").len();
+        encoder.write_all(html.as_bytes()).unwrap();
+        let gzip = encoder.finish().unwrap().len();
         ArtifactSizeEvidence {
             html: html.len(),
             gzip,

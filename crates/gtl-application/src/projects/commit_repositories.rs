@@ -92,18 +92,22 @@ pub struct CommitResult {
 }
 
 impl CommitResult {
+    #[must_use]
     pub fn new(name: ProjectName, outcome: CommitOutcome) -> Self {
         Self { name, outcome }
     }
 
+    #[must_use]
     pub fn name(&self) -> &ProjectName {
         &self.name
     }
 
+    #[must_use]
     pub const fn outcome(&self) -> &CommitOutcome {
         &self.outcome
     }
 
+    #[must_use]
     pub const fn action(&self) -> CommitAction {
         match self.outcome {
             CommitOutcome::Absent => CommitAction::Absent,
@@ -115,10 +119,12 @@ impl CommitResult {
         }
     }
 
+    #[must_use]
     pub const fn is_present(&self) -> bool {
         !matches!(self.outcome, CommitOutcome::Absent)
     }
 
+    #[must_use]
     pub const fn is_dirty(&self) -> bool {
         !matches!(
             self.outcome,
@@ -131,6 +137,7 @@ impl CommitResult {
         )
     }
 
+    #[must_use]
     pub fn files(&self) -> &[CommitFile] {
         match &self.outcome {
             CommitOutcome::WouldCommit { files }
@@ -150,6 +157,7 @@ impl CommitResult {
         }
     }
 
+    #[must_use]
     pub fn detail(&self) -> Cow<'_, str> {
         match &self.outcome {
             CommitOutcome::Absent => Cow::Borrowed("not present on this machine"),
@@ -164,6 +172,7 @@ impl CommitResult {
         }
     }
 
+    #[must_use]
     pub const fn id(&self) -> Option<&CommitId> {
         match &self.outcome {
             CommitOutcome::Committed { id, .. } => Some(id),
@@ -171,6 +180,7 @@ impl CommitResult {
         }
     }
 
+    #[must_use]
     pub const fn staged(&self) -> bool {
         matches!(
             self.outcome,
@@ -442,7 +452,7 @@ mod tests {
             },
             &git,
         )
-        .expect("selected repository commit succeeds");
+        .unwrap();
 
         assert_eq!(result.results.len(), 1);
         assert_eq!(result.results[0].name().as_str(), "selected");
@@ -454,7 +464,7 @@ mod tests {
             status: status.into(),
             path: crate::utils::repository_relative_path(path),
         }])
-        .expect("fixture changed files are non-empty")
+        .unwrap()
     }
 
     #[test]
@@ -467,7 +477,7 @@ mod tests {
 
         let result =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect("Git transport remains available");
+                .unwrap();
 
         assert_eq!(result.exit, CommitExit::Clean);
         assert_eq!(
@@ -493,7 +503,7 @@ mod tests {
 
         let result =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect("Git transport remains available");
+                .unwrap();
 
         assert_eq!(
             result.results[0].id(),
@@ -513,7 +523,7 @@ mod tests {
 
         let result =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect("Git transport remains available");
+                .unwrap();
 
         assert_eq!(
             result.results[0].id(),
@@ -530,7 +540,7 @@ mod tests {
             commit(vec![repo("api"), repo("web")], Some("save"), false),
             &git,
         )
-        .expect("Git transport remains available");
+        .unwrap();
 
         assert_eq!(result.exit, CommitExit::Clean);
         assert_eq!(result.results[0].action(), CommitAction::Absent);
@@ -543,8 +553,8 @@ mod tests {
     fn dry_run_reports_dirty_files_and_warns_without_a_message() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("?? notes.txt\n")]);
 
-        let result = commit_repositories::execute(commit(vec![repo("api")], None, true), &git)
-            .expect("Git transport remains available");
+        let result =
+            commit_repositories::execute(commit(vec![repo("api")], None, true), &git).unwrap();
 
         assert_eq!(result.exit, CommitExit::Warn);
         assert_eq!(result.results[0].action(), CommitAction::WouldCommit);
@@ -556,8 +566,8 @@ mod tests {
     fn missing_real_message_is_a_closed_skip_and_warn() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(" M src/lib.rs\n")]);
 
-        let result = commit_repositories::execute(commit(vec![repo("api")], None, false), &git)
-            .expect("Git transport remains available");
+        let result =
+            commit_repositories::execute(commit(vec![repo("api")], None, false), &git).unwrap();
 
         assert_eq!(result.exit, CommitExit::Warn);
         assert_eq!(result.results[0].action(), CommitAction::Skipped);
@@ -573,7 +583,7 @@ mod tests {
 
         let result =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect("a Git rejection is a closed commit failure");
+                .unwrap();
 
         assert_eq!(result.exit, CommitExit::Fail);
         assert_eq!(result.results[0].action(), CommitAction::Fail);
@@ -597,7 +607,7 @@ mod tests {
 
         let result =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect("a Git rejection is a closed commit failure");
+                .unwrap();
 
         assert_eq!(result.exit, CommitExit::Fail);
         assert_eq!(result.results[0].action(), CommitAction::Fail);
@@ -613,7 +623,7 @@ mod tests {
 
         let error =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect_err("transport failure must remain an error");
+                .unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -638,7 +648,7 @@ mod tests {
             commit(vec![repo("api"), repo("web")], Some("save"), false),
             &git,
         )
-        .expect_err("the second repository transport must fail");
+        .unwrap_err();
 
         let CommitRepositoriesError::Transport {
             failed_repo,
@@ -668,7 +678,7 @@ mod tests {
 
         let error =
             commit_repositories::execute(commit(vec![repo("api")], Some("save"), false), &git)
-                .expect_err("the commit transport must fail");
+                .unwrap_err();
 
         let CommitRepositoriesError::Transport {
             failed_repo,
@@ -678,7 +688,7 @@ mod tests {
         } = error;
         assert_eq!(failed_repo.as_str(), "api");
         assert_eq!(completed_results, Vec::new());
-        let failed_result = failed_result.expect("known dirty state must be preserved");
+        let failed_result = failed_result.unwrap();
         assert_eq!(failed_result.name().as_str(), "api");
         assert_eq!(failed_result.action(), CommitAction::Fail);
         assert_eq!(failed_result.detail(), "git commit failed");

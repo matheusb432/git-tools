@@ -71,23 +71,29 @@ fn excluded_extensions(
     value: Option<RawSettingValue>,
 ) -> Result<Option<Vec<String>>, UserSettingsLoadError> {
     value
-        .map(|value| {
-            let RawSettingValue::Array(values) = value else {
-                return Err(invalid_configuration(
-                    path,
-                    format!("`{field}` must be an array of strings"),
-                ));
-            };
-            values
-                .into_iter()
-                .map(|value| {
-                    value.as_str().map(str::to_owned).ok_or_else(|| {
-                        invalid_configuration(path, format!("`{field}` must contain only strings"))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .map(|value| string_array(path, field, value))
         .transpose()
+}
+
+fn string_array(
+    path: &Path,
+    field: &str,
+    value: RawSettingValue,
+) -> Result<Vec<String>, UserSettingsLoadError> {
+    let RawSettingValue::Array(values) = value else {
+        return Err(invalid_configuration(
+            path,
+            format!("`{field}` must be an array of strings"),
+        ));
+    };
+    values
+        .into_iter()
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                invalid_configuration(path, format!("`{field}` must contain only strings"))
+            })
+        })
+        .collect()
 }
 
 fn project_settings(
@@ -221,16 +227,19 @@ pub struct TomlSettingsStore {
 
 impl TomlSettingsStore {
     /// Creates a store for an explicit path, or an unresolved production path.
+    #[must_use]
     pub const fn new(path: Option<PathBuf>) -> Self {
         Self { path }
     }
 
     /// Resolves the production configuration path from the process environment.
+    #[must_use]
     pub fn from_environment() -> Self {
         Self::new(config_path())
     }
 
     /// Returns the resolved configuration path when one is available.
+    #[must_use]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
@@ -310,26 +319,24 @@ mod tests {
 
     #[test]
     fn load_from_reads_theme_from_file() {
-        let mut file = NamedTempFile::new().expect("create temp config");
-        write!(file, "theme = \"light\"").expect("write temp config");
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "theme = \"light\"").unwrap();
         assert_eq!(
-            load_from(Some(file.path()))
-                .expect("valid settings")
-                .theme(),
+            load_from(Some(file.path())).unwrap().theme(),
             Some(Theme::Light)
         );
     }
 
     #[test]
     fn load_from_none_is_default() {
-        assert_eq!(load_from(None).expect("default settings").theme(), None);
+        assert_eq!(load_from(None).unwrap().theme(), None);
     }
 
     #[test]
     fn load_from_nonexistent_path_is_default() {
         assert_eq!(
             load_from(Some(Path::new("/no/such/git-tools/config.toml")))
-                .expect("missing settings use defaults")
+                .unwrap()
                 .theme(),
             None
         );
@@ -337,7 +344,7 @@ mod tests {
 
     #[test]
     fn load_from_unreadable_path_is_an_error() {
-        let directory = tempfile::tempdir().expect("create temp directory");
+        let directory = tempfile::tempdir().unwrap();
 
         assert!(matches!(
             load_from(Some(directory.path())),
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn load_from_malformed_or_invalid_settings_is_an_error() {
-        let file = NamedTempFile::new().expect("create temp config");
+        let file = NamedTempFile::new().unwrap();
         for raw in [
             "theme = {{{\n",
             "layout = \"diagonal\"\n",
@@ -358,7 +365,7 @@ mod tests {
             "[[projects]]\nname = \"repo\"\nexcluded_from_push_all = \"yes\"\n",
             "[[projects]]\nname = \"repo\"\ndiff = { exclude = \"md\" }\n",
         ] {
-            std::fs::write(file.path(), raw).expect("write invalid config");
+            std::fs::write(file.path(), raw).unwrap();
             assert!(matches!(
                 load_from(Some(file.path())),
                 Err(UserSettingsLoadError::InvalidConfiguration { .. })
@@ -384,10 +391,10 @@ name = "sample_project"
 diff = { exclude = [] }
 "#,
         )
-        .expect("project settings are valid");
-        let git_tools = ProjectName::try_from("git-tools").expect("project name");
-        let sample_project = ProjectName::try_from("sample_project").expect("project name");
-        let unconfigured = ProjectName::try_from("unconfigured").expect("project name");
+        .unwrap();
+        let git_tools = ProjectName::try_from("git-tools").unwrap();
+        let sample_project = ProjectName::try_from("sample_project").unwrap();
+        let unconfigured = ProjectName::try_from("unconfigured").unwrap();
 
         assert!(settings.push_all_exclusions().contains(&git_tools));
         assert!(!settings.push_all_exclusions().contains(&sample_project));
@@ -426,7 +433,7 @@ name = "git-tools"
 excluded_from_push_all = true
 "#,
         )
-        .expect_err("duplicate project names are invalid");
+        .unwrap_err();
 
         assert!(
             error
@@ -441,7 +448,7 @@ excluded_from_push_all = true
             Path::new("config.toml"),
             "[diff.exclude]\ndefaults = [\"md\"]\ngit-tools = [\"js\"]\n",
         )
-        .expect_err("map-based diff exclusions are unsupported");
+        .unwrap_err();
 
         assert!(
             error
@@ -452,8 +459,8 @@ excluded_from_push_all = true
 
     #[test]
     fn load_from_non_utf8_settings_is_an_invalid_configuration_error() {
-        let file = NamedTempFile::new().expect("create temp config");
-        std::fs::write(file.path(), [0xff, 0xfe]).expect("write non-UTF-8 config");
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), [0xff, 0xfe]).unwrap();
 
         assert!(matches!(
             load_from(Some(file.path())),
@@ -468,59 +475,44 @@ excluded_from_push_all = true
             Path::new("config.example.toml"),
             include_str!("../../../config/local/config.example.toml"),
         )
-        .expect("checked-in settings example is valid");
+        .unwrap();
 
         assert_eq!(settings.theme(), Some(Theme::Dark));
         assert_eq!(settings.viewer_render_options(), RenderOptions::DEFAULT);
         assert!(settings.push_confirmation_required());
-        let git_tools = ProjectName::try_from("git-tools").expect("valid fixture project name");
+        let git_tools = ProjectName::try_from("git-tools").unwrap();
         assert!(settings.push_all_exclusions().contains(&git_tools));
         assert!(
             settings
                 .diff_exclusions()
                 .for_project_or_default(&git_tools)
-                .matches(
-                    &RepositoryRelativePath::try_new("frontend.js".into())
-                        .expect("valid fixture repository-relative path"),
-                )
+                .matches(&RepositoryRelativePath::try_new("frontend.js".into()).unwrap(),)
         );
         assert!(
             settings
                 .diff_exclusions()
-                .for_project_or_default(
-                    &ProjectName::try_from("unconfigured").expect("valid fixture project name"),
-                )
-                .matches(
-                    &RepositoryRelativePath::try_new("README.md".into())
-                        .expect("valid fixture repository-relative path"),
-                )
+                .for_project_or_default(&ProjectName::try_from("unconfigured").unwrap(),)
+                .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap(),)
         );
     }
 
     #[test]
     fn toml_settings_store_reads_fresh_snapshot() {
-        let file = NamedTempFile::new().expect("create temp config");
-        std::fs::write(file.path(), "theme = \"light\"").expect("write first config");
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "theme = \"light\"").unwrap();
         let store = TomlSettingsStore::new(Some(file.path().to_path_buf()));
 
-        assert_eq!(
-            store.load().expect("first settings").theme(),
-            Some(Theme::Light)
-        );
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Light));
 
-        std::fs::write(file.path(), "theme = \"hearth\"").expect("write second config");
-        assert_eq!(
-            store.load().expect("second settings").theme(),
-            Some(Theme::Hearth)
-        );
+        std::fs::write(file.path(), "theme = \"hearth\"").unwrap();
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Hearth));
     }
 
     #[test]
     fn set_and_remove_operations_affect_load_and_notify_the_viewer() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "# settings\ntheme = \"dark\"\nlayout = \"split\"\n")
-            .expect("seed config");
+        std::fs::write(&path, "# settings\ntheme = \"dark\"\nlayout = \"split\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let viewer = gtl_application::viewer::ViewerState::new();
 
@@ -529,29 +521,23 @@ excluded_from_push_all = true
             &mut store,
             &viewer,
         )
-        .expect("set theme");
+        .unwrap();
         let removed = remove_setting_key::execute(
             gtl_models::settings::SettingKey::Layout,
             &mut store,
             &viewer,
         )
-        .expect("remove layout");
+        .unwrap();
 
         assert!(!set.viewer_rows_changed);
         assert!(removed.viewer_rows_changed);
         assert_eq!(
-            viewer.version().expect("viewer version remains available"),
+            viewer.version().unwrap(),
             gtl_models::viewer::ViewerVersion::new(2)
         );
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Light));
         assert_eq!(
-            store.load().expect("updated settings").theme(),
-            Some(Theme::Light)
-        );
-        assert_eq!(
-            store
-                .load()
-                .expect("updated settings")
-                .viewer_render_options(),
+            store.load().unwrap().viewer_render_options(),
             gtl_models::viewer::RenderOptions::DEFAULT
         );
         assert!(
@@ -563,10 +549,10 @@ excluded_from_push_all = true
 
     #[test]
     fn remove_operation_rejects_a_non_string_without_changing_the_target() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = b"layout = [\"split\"]\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let viewer = gtl_application::viewer::ViewerState::new();
 
@@ -575,7 +561,7 @@ excluded_from_push_all = true
             &mut store,
             &viewer,
         )
-        .expect_err("non-string layout is rejected");
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -587,10 +573,10 @@ excluded_from_push_all = true
 
     #[test]
     fn set_operation_reports_invalid_configuration_without_changing_malformed_toml() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = b"theme = {{{\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let viewer = gtl_application::viewer::ViewerState::new();
 
@@ -599,7 +585,7 @@ excluded_from_push_all = true
             &mut store,
             &viewer,
         )
-        .expect_err("malformed TOML is rejected");
+        .unwrap_err();
         assert!(matches!(
             error,
             set_setting_key::SetSettingKeyError::Settings(

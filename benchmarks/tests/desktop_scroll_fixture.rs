@@ -5,8 +5,7 @@ use gtl_benchmarks::desktop_scroll::{
 
 #[test]
 fn committed_fixture_reconstructs_the_bounded_desktop_workload() {
-    let evidence =
-        verify_fixture(&fixture_root()).expect("committed desktop scroll fixture is valid");
+    let evidence = verify_fixture(&fixture_root()).unwrap();
     let manifest = evidence.manifest;
 
     assert_eq!(manifest.workload.commit_count, COMMIT_COUNT);

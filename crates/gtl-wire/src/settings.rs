@@ -81,7 +81,7 @@ mod tests {
         };
 
         assert_eq!(
-            serde_json::to_value(document).expect("settings document serializes"),
+            serde_json::to_value(document).unwrap(),
             json!({
                 "theme": "dark",
                 "layout": "split",
@@ -111,19 +111,13 @@ mod tests {
                 "diff": { "exclude": ["rs", 3] }
             }]
         }))
-        .expect("raw settings document deserializes");
+        .unwrap();
 
         assert_eq!(document.theme, Some(json!(7)));
         assert_eq!(document.layout, Some(json!(["split"])));
         assert_eq!(document.density, Some(json!("diagonal")));
-        assert_eq!(
-            document.push.expect("push section is present").confirm,
-            Some(json!("yes"))
-        );
-        assert_eq!(
-            document.diff.expect("diff section is present").exclude,
-            Some(json!(["md", 3]))
-        );
+        assert_eq!(document.push.unwrap().confirm, Some(json!("yes")));
+        assert_eq!(document.diff.unwrap().exclude, Some(json!(["md", 3])));
         assert_eq!(document.projects[0].name, Some(json!(7)));
         assert_eq!(
             document.projects[0].excluded_from_push_all,
@@ -133,8 +127,7 @@ mod tests {
 
     #[test]
     fn omitted_sections_and_values_remain_absent() {
-        let document: UserSettingsDocument =
-            serde_json::from_value(json!({})).expect("empty settings document deserializes");
+        let document: UserSettingsDocument = serde_json::from_value(json!({})).unwrap();
 
         assert_eq!(document.theme, None);
         assert_eq!(document.layout, None);
@@ -149,7 +142,7 @@ mod tests {
         let error = serde_json::from_value::<UserSettingsDocument>(json!({
             "push": { "confrm": false }
         }))
-        .expect_err("unknown setting must be rejected");
+        .unwrap_err();
 
         assert!(error.to_string().contains("unknown field `confrm`"));
     }
@@ -159,7 +152,7 @@ mod tests {
         let error = serde_json::from_value::<UserSettingsDocument>(json!({
             "projects": [{ "name": "git-tools", "exclude_from_push_all": true }]
         }))
-        .expect_err("unknown project setting must be rejected");
+        .unwrap_err();
 
         assert!(
             error

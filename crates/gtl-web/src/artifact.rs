@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
-use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows};
+use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows, ViewerFileSummary};
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
@@ -27,35 +27,57 @@ impl StaticArtifactView {
             .iter()
             .map(|file| file.id.clone())
             .collect::<HashSet<_>>();
-        let mut file_rows = HashMap::with_capacity(files.len());
-        for file in files {
-            if !expected.contains(&file.file) {
-                return Err(StaticArtifactViewError::UnknownFileRows {
-                    file: file.file.as_str().to_owned(),
-                });
-            }
-            if file_rows.insert(file.file.clone(), file.rows).is_some() {
-                return Err(StaticArtifactViewError::DuplicateFileRows {
-                    file: file.file.as_str().to_owned(),
-                });
-            }
-        }
+        let mut file_rows = collect_file_rows(&expected, files)?;
         let files = view
             .files
             .iter()
             .cloned()
-            .map(|summary| {
-                let rows = file_rows.remove(&summary.id).ok_or_else(|| {
-                    StaticArtifactViewError::MissingFileRows {
-                        file: summary.id.as_str().to_owned(),
-                    }
-                })?;
-                Ok((summary, rows))
-            })
+            .map(|summary| take_file_rows(&mut file_rows, summary))
             .collect::<Result<Vec<_>, StaticArtifactViewError>>()?;
         let workspace = static_diff_workspace(view.identity, files);
         Ok(Self { view, workspace })
     }
+}
+
+fn collect_file_rows(
+    expected: &HashSet<ViewerDiffFileId>,
+    files: Vec<StaticArtifactFileRows>,
+) -> Result<HashMap<ViewerDiffFileId, ViewerFileRows>, StaticArtifactViewError> {
+    let mut file_rows = HashMap::with_capacity(files.len());
+    for file in files {
+        insert_file_rows(expected, &mut file_rows, file)?;
+    }
+    Ok(file_rows)
+}
+
+fn insert_file_rows(
+    expected: &HashSet<ViewerDiffFileId>,
+    file_rows: &mut HashMap<ViewerDiffFileId, ViewerFileRows>,
+    file: StaticArtifactFileRows,
+) -> Result<(), StaticArtifactViewError> {
+    if !expected.contains(&file.file) {
+        return Err(StaticArtifactViewError::Unknown {
+            file: file.file.as_str().to_owned(),
+        });
+    }
+    if file_rows.insert(file.file.clone(), file.rows).is_some() {
+        return Err(StaticArtifactViewError::Duplicate {
+            file: file.file.as_str().to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn take_file_rows(
+    file_rows: &mut HashMap<ViewerDiffFileId, ViewerFileRows>,
+    summary: ViewerFileSummary,
+) -> Result<(ViewerFileSummary, ViewerFileRows), StaticArtifactViewError> {
+    let rows = file_rows
+        .remove(&summary.id)
+        .ok_or_else(|| StaticArtifactViewError::Missing {
+            file: summary.id.as_str().to_owned(),
+        })?;
+    Ok((summary, rows))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,11 +89,11 @@ pub struct StaticArtifactFileRows {
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum StaticArtifactViewError {
     #[error("artifact rows contain unknown diff file {file}")]
-    UnknownFileRows { file: String },
+    Unknown { file: String },
     #[error("artifact rows contain diff file {file} more than once")]
-    DuplicateFileRows { file: String },
+    Duplicate { file: String },
     #[error("artifact rows are missing diff file {file}")]
-    MissingFileRows { file: String },
+    Missing { file: String },
 }
 
 #[must_use]
@@ -253,7 +275,7 @@ mod tests {
                     rows: file_rows("orphan"),
                 }],
             ),
-            Err(StaticArtifactViewError::UnknownFileRows {
+            Err(StaticArtifactViewError::Unknown {
                 file: orphan.as_str().to_owned(),
             })
         );
@@ -274,13 +296,13 @@ mod tests {
                     },
                 ],
             ),
-            Err(StaticArtifactViewError::DuplicateFileRows {
+            Err(StaticArtifactViewError::Duplicate {
                 file: file.as_str().to_owned(),
             })
         );
         assert_eq!(
             StaticArtifactView::try_new(one_file, Vec::new()),
-            Err(StaticArtifactViewError::MissingFileRows {
+            Err(StaticArtifactViewError::Missing {
                 file: file.as_str().to_owned(),
             })
         );

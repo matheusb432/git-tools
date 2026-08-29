@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn system_clock_returns_a_validated_utc_machine_timestamp() {
-        let timestamp = SystemClock.now().expect("current system time is supported");
+        let timestamp = SystemClock.now().unwrap();
 
         assert!(timestamp.as_ref().ends_with('Z'));
     }

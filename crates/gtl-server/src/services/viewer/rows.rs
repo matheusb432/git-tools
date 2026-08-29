@@ -87,77 +87,65 @@ fn produce_rows(
         sender,
     };
     for file_id in files {
-        if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
-            v1::ViewerFileStarted {
-                file_id: file_id.as_str().to_owned(),
-            },
-        )) {
+        if !produce_file_rows(&mut writer, view, &file_id) {
             return;
         }
-        let Some(source) = viewer_diff_file_source(view, &file_id, identity.render_options.density)
-        else {
-            if !writer.file_failed(
-                &file_id,
-                v1::ViewerFileFailureCode::SourceUnavailable,
-                "The diff source is no longer available.",
-                false,
-            ) {
-                return;
-            }
-            continue;
-        };
-        let mut parser = ViewerFileRowParser::new(identity.render_options.layout, source.path);
-        let mut failed = false;
+    }
+}
 
-        for lines in source.lines.chunks(SOURCE_CHUNK_LINES) {
-            let result = send_projected_rows(&mut writer, &file_id, parser.push(lines));
-            match result {
-                BatchResult::Sent => {}
-                BatchResult::Cancelled => return,
-                BatchResult::RowTooLarge => {
-                    failed = true;
-                    break;
-                }
-            }
-        }
-        if failed {
-            if !writer.file_failed(
-                &file_id,
-                v1::ViewerFileFailureCode::RowTooLarge,
-                "A diff row is too large to display.",
-                false,
-            ) {
-                return;
-            }
-            continue;
-        }
+fn produce_file_rows(
+    writer: &mut StreamWriter,
+    view: &gtl_application::diffs::View,
+    file_id: &ViewerDiffFileId,
+) -> bool {
+    if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
+        v1::ViewerFileStarted {
+            file_id: file_id.as_str().to_owned(),
+        },
+    )) {
+        return false;
+    }
+    let Some(source) =
+        viewer_diff_file_source(view, file_id, writer.identity.render_options.density)
+    else {
+        return writer.file_failed(
+            file_id,
+            v1::ViewerFileFailureCode::SourceUnavailable,
+            "The diff source is no longer available.",
+            false,
+        );
+    };
+    let mut parser = ViewerFileRowParser::new(writer.identity.render_options.layout, source.path);
 
-        let parsed = parser.finish();
-        let line_number_digits = parsed.line_number_digits;
-        let result = send_projected_rows(&mut writer, &file_id, parsed);
-        if result == BatchResult::Cancelled {
-            return;
+    for lines in source.lines.chunks(SOURCE_CHUNK_LINES) {
+        match send_projected_rows(writer, file_id, parser.push(lines)) {
+            BatchResult::Sent => {}
+            BatchResult::Cancelled => return false,
+            BatchResult::RowTooLarge => return report_oversized_row(writer, file_id),
         }
-        if result == BatchResult::RowTooLarge {
-            if !writer.file_failed(
-                &file_id,
-                v1::ViewerFileFailureCode::RowTooLarge,
-                "A diff row is too large to display.",
-                false,
-            ) {
-                return;
-            }
-            continue;
-        }
-        if !writer.send(v1::stream_viewer_rows_response::Event::FileFinished(
+    }
+
+    let parsed = parser.finish();
+    let line_number_digits = parsed.line_number_digits;
+    match send_projected_rows(writer, file_id, parsed) {
+        BatchResult::Sent => writer.send(v1::stream_viewer_rows_response::Event::FileFinished(
             v1::ViewerFileFinished {
                 file_id: file_id.as_str().to_owned(),
                 line_number_digits,
             },
-        )) {
-            return;
-        }
+        )),
+        BatchResult::Cancelled => false,
+        BatchResult::RowTooLarge => report_oversized_row(writer, file_id),
     }
+}
+
+fn report_oversized_row(writer: &mut StreamWriter, file_id: &ViewerDiffFileId) -> bool {
+    writer.file_failed(
+        file_id,
+        v1::ViewerFileFailureCode::RowTooLarge,
+        "A diff row is too large to display.",
+        false,
+    )
 }
 
 struct StreamWriter {
@@ -304,57 +292,85 @@ where
     let mut batch = Vec::new();
     let mut rows_encoded_len = 0_usize;
     for row in rows {
-        if row.encoded_len() > VIEWER_ROW_MAX_ENCODED_BYTES {
-            return BatchResult::RowTooLarge;
-        }
-        let framed_row_len = prost::encoding::message::encoded_len(2, &row);
-        let Some(candidate_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
-            return BatchResult::RowTooLarge;
-        };
-        let Some(candidate_response_len) = row_batch_response_encoded_len(
-            empty_response_encoded_len,
+        let result = append_bounded_row(
+            writer,
+            &mut batch,
+            row,
+            &mut rows_encoded_len,
+            &mut empty_response_encoded_len,
             empty_event_encoded_len,
-            candidate_rows_encoded_len,
-        ) else {
-            return BatchResult::RowTooLarge;
-        };
-        let crosses_bound = !batch.is_empty()
-            && (batch.len() >= VIEWER_ROW_BATCH_MAX_ROWS
-                || candidate_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES);
-        if crosses_bound && !writer.send(event(std::mem::take(&mut batch))) {
-            return BatchResult::Cancelled;
-        }
-        if crosses_bound {
-            rows_encoded_len = 0;
-            empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
-        }
-        let Some(next_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
-            return BatchResult::RowTooLarge;
-        };
-        rows_encoded_len = next_rows_encoded_len;
-        batch.push(row);
-        if batch.len() == 1 {
-            let Some(single_response_len) = row_batch_response_encoded_len(
-                empty_response_encoded_len,
-                empty_event_encoded_len,
-                rows_encoded_len,
-            ) else {
-                return BatchResult::RowTooLarge;
-            };
-            if single_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES
-                && !writer.send(event(std::mem::take(&mut batch)))
-            {
-                return BatchResult::Cancelled;
-            }
-            if batch.is_empty() {
-                rows_encoded_len = 0;
-                empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
-            }
+            &event,
+        );
+        if result != BatchResult::Sent {
+            return result;
         }
     }
     if !batch.is_empty() && !writer.send(event(batch)) {
         return BatchResult::Cancelled;
     }
+    BatchResult::Sent
+}
+
+fn append_bounded_row<Row>(
+    writer: &mut StreamWriter,
+    batch: &mut Vec<Row>,
+    row: Row,
+    rows_encoded_len: &mut usize,
+    empty_response_encoded_len: &mut usize,
+    empty_event_encoded_len: usize,
+    event: &impl Fn(Vec<Row>) -> v1::stream_viewer_rows_response::Event,
+) -> BatchResult
+where
+    Row: prost::Message,
+{
+    if row.encoded_len() > VIEWER_ROW_MAX_ENCODED_BYTES {
+        return BatchResult::RowTooLarge;
+    }
+    let framed_row_len = prost::encoding::message::encoded_len(2, &row);
+    let Some(candidate_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
+        return BatchResult::RowTooLarge;
+    };
+    let Some(candidate_response_len) = row_batch_response_encoded_len(
+        *empty_response_encoded_len,
+        empty_event_encoded_len,
+        candidate_rows_encoded_len,
+    ) else {
+        return BatchResult::RowTooLarge;
+    };
+    let crosses_bound = !batch.is_empty()
+        && (batch.len() >= VIEWER_ROW_BATCH_MAX_ROWS
+            || candidate_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES);
+    if crosses_bound && !writer.send(event(std::mem::take(batch))) {
+        return BatchResult::Cancelled;
+    }
+    if crosses_bound {
+        *rows_encoded_len = 0;
+        *empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
+    }
+
+    let Some(next_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
+        return BatchResult::RowTooLarge;
+    };
+    *rows_encoded_len = next_rows_encoded_len;
+    batch.push(row);
+    if batch.len() != 1 {
+        return BatchResult::Sent;
+    }
+    let Some(single_response_len) = row_batch_response_encoded_len(
+        *empty_response_encoded_len,
+        empty_event_encoded_len,
+        *rows_encoded_len,
+    ) else {
+        return BatchResult::RowTooLarge;
+    };
+    if single_response_len <= VIEWER_ROW_BATCH_MAX_ENCODED_BYTES {
+        return BatchResult::Sent;
+    }
+    if !writer.send(event(std::mem::take(batch))) {
+        return BatchResult::Cancelled;
+    }
+    *rows_encoded_len = 0;
+    *empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
     BatchResult::Sent
 }
 

@@ -102,14 +102,10 @@ mod tests {
                 DiffKind::TwoDot,
                 Some(pinned_range("a", "b")),
             )
-            .expect("range artifact identity"),
+            .unwrap(),
             range_label: "main..HEAD".into(),
-            head_committed_at: Some(
-                MachineTimestamp::try_from("2026-07-03T00:00:00Z")
-                    .expect("fixture commit timestamp is valid"),
-            ),
-            generated_at: MachineTimestamp::try_from("2026-07-03T00:01:00Z")
-                .expect("fixture generation timestamp is valid"),
+            head_committed_at: Some(MachineTimestamp::try_from("2026-07-03T00:00:00Z").unwrap()),
+            generated_at: MachineTimestamp::try_from("2026-07-03T00:01:00Z").unwrap(),
             title: "diff".into(),
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             theme: Some(Theme::Dark),
@@ -131,8 +127,7 @@ mod tests {
     #[test]
     fn list_history_reads_back_placed_sidecars() {
         let dir = tempfile::tempdir().unwrap();
-        let repo_id = RepositoryStoreId::try_new("0123456789abcdef".to_owned())
-            .expect("valid fixture repository store ID");
+        let repo_id = RepositoryStoreId::try_new("0123456789abcdef".to_owned()).unwrap();
         let sidecar = Sidecar {
             repo_id: repo_id.to_string(),
             repo_name: "git-tools".into(),
@@ -152,7 +147,7 @@ mod tests {
             theme_recorded: true,
             renderer_version: crate::store::RENDERER_VERSION,
         };
-        let metadata = sidecar.try_into_metadata().expect("valid fixture sidecar");
+        let metadata = sidecar.try_into_metadata().unwrap();
         crate::store::place(dir.path(), &repo_id, "<html></html>", &metadata).unwrap();
         let expected_hash = crate::store::content_hash("<html></html>");
 

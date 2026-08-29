@@ -77,7 +77,7 @@ mod tests {
             },
             &git(GitRepositoryState::NotFound),
         )
-        .expect("snapshot probe policy succeeds");
+        .unwrap();
 
         assert_eq!(response, ProbeRecipeOutcome::Ready);
     }
@@ -94,7 +94,7 @@ mod tests {
             },
             &git(GitRepositoryState::NotFound),
         )
-        .expect("live probe succeeds");
+        .unwrap();
 
         assert_eq!(
             response,
@@ -119,7 +119,7 @@ mod tests {
             },
             &git(GitRepositoryState::NotARepository),
         )
-        .expect("live probe succeeds");
+        .unwrap();
 
         assert_eq!(
             response,
@@ -146,7 +146,7 @@ mod tests {
                 top_level: crate::utils::repository_root("/repos/project"),
             }),
         )
-        .expect("live probe succeeds");
+        .unwrap();
 
         assert_eq!(response, ProbeRecipeOutcome::Ready);
     }
@@ -166,7 +166,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect_err("unexpected probe failure returns");
+        .unwrap_err();
 
         assert_eq!(error.to_string(), "probe failed");
     }

@@ -652,51 +652,58 @@ fn safe_fixture_path(root: &Path, relative: &str) -> Result<PathBuf, DesktopScro
 fn collect_text_files(
     root: &Path,
 ) -> Result<BTreeMap<PathBuf, Vec<u8>>, DesktopScrollFixtureError> {
-    fn collect(
-        current: &Path,
-        files: &mut BTreeMap<PathBuf, Vec<u8>>,
-    ) -> Result<(), DesktopScrollFixtureError> {
-        let entries =
-            fs::read_dir(current).map_err(file_system_error("read fixture directory", current))?;
-        for entry in entries {
-            let entry =
-                entry.map_err(file_system_error("read fixture directory entry", current))?;
-            let path = entry.path();
-            let file_type = entry
-                .file_type()
-                .map_err(file_system_error("read fixture entry type", &path))?;
-            if file_type.is_dir() {
-                collect(&path, files)?;
-            } else if file_type.is_file() {
-                let bytes =
-                    fs::read(&path).map_err(file_system_error("read fixture text file", &path))?;
-                if bytes.contains(&0) {
-                    return Err(invalid(format!(
-                        "fixture file contains a NUL byte: {}",
-                        path.display()
-                    )));
-                }
-                std::str::from_utf8(&bytes).map_err(|error| {
-                    invalid(format!(
-                        "fixture file is not UTF-8 at byte {}: {}",
-                        error.valid_up_to(),
-                        path.display()
-                    ))
-                })?;
-                files.insert(path, bytes);
-            } else {
-                return Err(invalid(format!(
-                    "fixture contains a symlink or special entry: {}",
-                    path.display()
-                )));
-            }
-        }
-        Ok(())
+    let mut files = BTreeMap::new();
+    collect_text_files_in_directory(root, &mut files)?;
+    Ok(files)
+}
+
+fn collect_text_files_in_directory(
+    current: &Path,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<(), DesktopScrollFixtureError> {
+    let entries =
+        fs::read_dir(current).map_err(file_system_error("read fixture directory", current))?;
+    for entry in entries {
+        let entry = entry.map_err(file_system_error("read fixture directory entry", current))?;
+        collect_text_file_entry(&entry, files)?;
+    }
+    Ok(())
+}
+
+fn collect_text_file_entry(
+    entry: &fs::DirEntry,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<(), DesktopScrollFixtureError> {
+    let path = entry.path();
+    let file_type = entry
+        .file_type()
+        .map_err(file_system_error("read fixture entry type", &path))?;
+    if file_type.is_dir() {
+        return collect_text_files_in_directory(&path, files);
+    }
+    if !file_type.is_file() {
+        return Err(invalid(format!(
+            "fixture contains a symlink or special entry: {}",
+            path.display()
+        )));
     }
 
-    let mut files = BTreeMap::new();
-    collect(root, &mut files)?;
-    Ok(files)
+    let bytes = fs::read(&path).map_err(file_system_error("read fixture text file", &path))?;
+    if bytes.contains(&0) {
+        return Err(invalid(format!(
+            "fixture file contains a NUL byte: {}",
+            path.display()
+        )));
+    }
+    std::str::from_utf8(&bytes).map_err(|error| {
+        invalid(format!(
+            "fixture file is not UTF-8 at byte {}: {}",
+            error.valid_up_to(),
+            path.display()
+        ))
+    })?;
+    files.insert(path, bytes);
+    Ok(())
 }
 
 fn validate_sanitized_text(path: &Path, bytes: &[u8]) -> Result<(), DesktopScrollFixtureError> {

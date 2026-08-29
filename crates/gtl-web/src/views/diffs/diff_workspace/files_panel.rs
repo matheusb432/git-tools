@@ -72,12 +72,15 @@ impl WorkspaceFilesModel {
         let filter = filter.to_lowercase();
         let mut tree = WorkspaceFileTree::default();
         let mut matching_count = 0;
-        for (file_index, file) in view.files.iter().enumerate() {
+        for (file_index, file) in view
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| file_path_matches(file, &filter))
+        {
             let path = file.path.to_string_lossy();
-            if path.to_lowercase().contains(&filter) {
-                tree.insert(path.as_ref(), file_index);
-                matching_count += 1;
-            }
+            tree.insert(path.as_ref(), file_index);
+            matching_count += 1;
         }
         Self {
             totals: WorkspaceLineTotals::from_files(&view.files),
@@ -97,6 +100,10 @@ impl WorkspaceFilesModel {
     pub(super) const fn commit_count(&self) -> usize {
         self.commit_count
     }
+}
+
+fn file_path_matches(file: &ViewerFileSummary, filter: &str) -> bool {
+    file.path.to_string_lossy().to_lowercase().contains(filter)
 }
 
 #[component]

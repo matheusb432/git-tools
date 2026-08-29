@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn linux_adapter_uses_the_live_process_executable() {
         assert_eq!(
-            compiler_adapter().expect("resolve compiler adapter"),
+            compiler_adapter().unwrap(),
             PathBuf::from(format!("/proc/{}/exe", std::process::id()))
         );
     }

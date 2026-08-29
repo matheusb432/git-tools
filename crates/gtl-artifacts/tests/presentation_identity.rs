@@ -15,17 +15,17 @@ use gtl_models::{
 };
 
 fn repository_root(path: &std::path::Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
 fn pinned_range() -> PinnedRange {
     PinnedRange {
         base: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             .try_into()
-            .expect("fixture base commit ID is valid"),
+            .unwrap(),
         head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             .try_into()
-            .expect("fixture head commit ID is valid"),
+            .unwrap(),
     }
 }
 
@@ -33,10 +33,8 @@ fn view(repo_root: &RepositoryRoot) -> View {
     View {
         repo_name: ProjectName::try_from("git-tools").unwrap(),
         repo_root: repo_root.clone(),
-        branch: GitHead::Branch(
-            BranchName::try_new("feature").expect("fixture branch name is non-empty"),
-        ),
-        upstream: GitRevision::try_new("origin/main").expect("fixture Git revision is non-empty"),
+        branch: GitHead::Branch(BranchName::try_new("feature").unwrap()),
+        upstream: GitRevision::try_new("origin/main").unwrap(),
         commits: Vec::new(),
         files: vec![FileDiff {
             path: RepositoryRelativePath::try_new("src/lib.rs".into()).unwrap(),
@@ -68,15 +66,13 @@ fn artifact_meta(repo_root: &RepositoryRoot, render_options: RenderOptions) -> A
     ArtifactMeta {
         repo_root: repo_root.clone(),
         repo_name: ProjectName::try_from("git-tools").unwrap(),
-        identity: ArtifactDiffIdentity::from_parts(DiffKind::TwoDot, Some(pinned_range()))
-            .expect("range artifact identity"),
+        identity: ArtifactDiffIdentity::from_parts(DiffKind::TwoDot, Some(pinned_range())).unwrap(),
         range_label: "aaaa..bbbb".into(),
         head_committed_at: Some(
-            gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:00:00Z")
-                .expect("fixture commit timestamp is valid"),
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:00:00Z").unwrap(),
         ),
         generated_at: gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:01:00Z")
-            .expect("fixture generation timestamp is valid"),
+            .unwrap(),
         title: "diff".into(),
         render_options,
         theme: None,
@@ -106,10 +102,10 @@ fn presentation_options_have_distinct_artifact_identities() {
     let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
     let html_default = ArtifactRenderer
         .build_html(&view, options_default, None)
-        .expect("embedded syntax assets should load");
+        .unwrap();
     let html_split_full = ArtifactRenderer
         .build_html(&view, options_split_full, None)
-        .expect("embedded syntax assets should load");
+        .unwrap();
 
     assert_ne!(html_default, html_split_full);
 

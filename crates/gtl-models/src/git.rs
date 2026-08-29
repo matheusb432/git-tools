@@ -18,6 +18,7 @@ pub enum GitHead {
 
 impl GitHead {
     /// Returns the checked-out branch, if `HEAD` is attached.
+    #[must_use]
     pub const fn branch(&self) -> Option<&BranchName> {
         match self {
             Self::Branch(branch) => Some(branch),
@@ -63,6 +64,7 @@ pub enum GitEffectMode {
 }
 
 impl GitEffectMode {
+    #[must_use]
     pub const fn is_dry_run(self) -> bool {
         matches!(self, Self::DryRun)
     }
@@ -120,6 +122,7 @@ pub struct BranchName(String);
 
 impl BranchName {
     /// Returns the conventional default branch name.
+    #[must_use]
     pub fn main() -> Self {
         known_valid(Self::try_new("main"))
     }
@@ -149,6 +152,7 @@ pub struct TagName(String);
 
 impl TagName {
     /// Builds the canonical `vN.N.N` tag for a stable semantic version.
+    #[must_use]
     pub fn semantic_version(major: u64, minor: u64, patch: u64) -> Self {
         known_valid(Self::try_new(format!("v{major}.{minor}.{patch}")))
     }
@@ -178,6 +182,7 @@ pub struct RemoteName(String);
 
 impl RemoteName {
     /// Returns the conventional primary remote name.
+    #[must_use]
     pub fn origin() -> Self {
         known_valid(Self::try_new("origin"))
     }
@@ -225,46 +230,55 @@ pub struct GitRevision(String);
 
 impl GitRevision {
     /// Returns Git's symbolic current revision.
+    #[must_use]
     pub fn head() -> Self {
         known_valid(Self::try_new("HEAD"))
     }
 
     /// Returns the configured upstream revision.
+    #[must_use]
     pub fn upstream() -> Self {
         known_valid(Self::try_new("@{u}"))
     }
 
     /// Returns the ancestor `count` commits before `HEAD`.
+    #[must_use]
     pub fn head_ancestor(count: NonZeroU32) -> Self {
         known_valid(Self::try_new(format!("HEAD~{count}")))
     }
 
     /// Returns the conventional default branch revision.
+    #[must_use]
     pub fn main() -> Self {
         known_valid(Self::try_new("main"))
     }
 
     /// Returns the full local reference for `branch` as a revision expression.
+    #[must_use]
     pub fn local_branch(branch: &BranchName) -> Self {
         known_valid(Self::try_new(format!("refs/heads/{branch}")))
     }
 
     /// Returns the previous reflog position of `branch`.
+    #[must_use]
     pub fn previous_position(branch: &BranchName) -> Self {
         known_valid(Self::try_new(format!("{branch}@{{1}}")))
     }
 
     /// Returns the full remote-tracking reference for `branch`.
+    #[must_use]
     pub fn remote_branch(remote: &RemoteName, branch: &BranchName) -> Self {
         known_valid(Self::try_new(format!("refs/remotes/{remote}/{branch}")))
     }
 
     /// Returns the abbreviated remote-tracking revision for `branch`.
+    #[must_use]
     pub fn remote_tracking(remote: &RemoteName, branch: &BranchName) -> Self {
         known_valid(Self::try_new(format!("{remote}/{branch}")))
     }
 
     /// Returns a commit ID at a supported presentation width as a revision.
+    #[must_use]
     pub fn abbreviated_commit(id: &CommitId, abbreviation: CommitIdAbbreviation) -> Self {
         known_valid(Self::try_new(id.abbreviated(abbreviation)))
     }
@@ -322,26 +336,31 @@ pub struct GitRange(String);
 
 impl GitRange {
     /// Builds a two-dot range from two validated revisions.
+    #[must_use]
     pub fn two_dot(base: &GitRevision, head: &GitRevision) -> Self {
         known_valid(Self::try_new(format!("{base}..{head}")))
     }
 
     /// Builds a three-dot range from two validated revisions.
+    #[must_use]
     pub fn three_dot(left: &GitRevision, right: &GitRevision) -> Self {
         known_valid(Self::try_new(format!("{left}...{right}")))
     }
 
     /// Returns the commits on `HEAD` that are not in its configured upstream.
+    #[must_use]
     pub fn upstream_to_head() -> Self {
         known_valid(Self::try_new("@{u}..HEAD"))
     }
 
     /// Returns the range containing only `commit`.
+    #[must_use]
     pub fn single_commit(commit: &CommitId) -> Self {
         known_valid(Self::try_new(format!("{commit}^!")))
     }
 
     /// Returns the latest `count` commits ending at `HEAD`.
+    #[must_use]
     pub fn head_commits(count: NonZeroU32) -> Self {
         known_valid(Self::try_new(format!("HEAD~{count}..HEAD")))
     }
@@ -358,6 +377,7 @@ pub enum GitDiffSpec {
 
 impl GitDiffSpec {
     /// Returns the validated argument passed to Git.
+    #[must_use]
     pub fn as_arg(&self) -> &str {
         match self {
             Self::AgainstWorkingTree(revision) => revision.as_ref(),
@@ -396,6 +416,7 @@ pub struct GitRefName(String);
 
 impl GitRefName {
     /// Builds the full reference used to push one tag.
+    #[must_use]
     pub fn for_tag(tag: &TagName) -> Self {
         known_valid(Self::try_new(format!("refs/tags/{tag}")))
     }
@@ -471,8 +492,7 @@ mod tests {
         assert!(GitRefName::try_new(String::new()).is_err());
         assert!(GitRevision::try_new("  ".to_owned()).is_err());
 
-        let revision = GitRevision::try_new("HEAD^{tree}:path with spaces".to_owned())
-            .expect("Git owns revision syntax");
+        let revision = GitRevision::try_new("HEAD^{tree}:path with spaces".to_owned()).unwrap();
         assert_eq!(revision.as_ref(), "HEAD^{tree}:path with spaces");
     }
 
@@ -498,8 +518,8 @@ mod tests {
     #[test]
     fn object_ids_accept_full_sha_one_and_sha_two_fifty_six_hashes() {
         let uppercase = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
-        let sha_one = GitObjectId::try_new(uppercase.to_owned()).expect("full SHA-1");
-        let sha_two_fifty_six = GitObjectId::try_new("a".repeat(64)).expect("full SHA-256");
+        let sha_one = GitObjectId::try_new(uppercase.to_owned()).unwrap();
+        let sha_two_fifty_six = GitObjectId::try_new("a".repeat(64)).unwrap();
 
         assert_eq!(sha_one.as_ref(), "abcdef0123456789abcdef0123456789abcdef01");
         assert_eq!(sha_two_fifty_six.as_ref().len(), 64);
@@ -508,11 +528,10 @@ mod tests {
 
     #[test]
     fn serde_keeps_git_roles_as_strings_and_revalidates_input() {
-        let branch = BranchName::try_new("feature/domain-types".to_owned())
-            .expect("fixture branch is non-empty");
+        let branch = BranchName::try_new("feature/domain-types".to_owned()).unwrap();
 
         assert_eq!(
-            serde_json::to_string(&branch).expect("branch serializes"),
+            serde_json::to_string(&branch).unwrap(),
             "\"feature/domain-types\""
         );
         assert!(serde_json::from_str::<BranchName>("\"\"").is_err());

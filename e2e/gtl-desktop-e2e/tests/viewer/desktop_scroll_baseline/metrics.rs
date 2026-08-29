@@ -131,7 +131,7 @@ mod tests {
                 inner_height_css_pixels: 700,
             },
         )
-        .expect("summarize valid frame timestamps");
+        .unwrap();
 
         assert_eq!(sample.frame_gaps_ms, [16.0, 17.0, 35.0, 20.0]);
         assert!((sample.total_duration_ms - 88.0).abs() < f64::EPSILON);
@@ -156,7 +156,7 @@ mod tests {
                 inner_height_css_pixels: 700,
             },
         )
-        .expect_err("reject insufficient scroll range");
+        .unwrap_err();
 
         assert!(error.to_string().contains("only 120 CSS pixels"));
     }

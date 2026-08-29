@@ -43,24 +43,21 @@ mod tests {
 
     #[test]
     fn production_config_load_reports_its_source_path() {
-        let root = TempDir::new().expect("temporary repository");
-        let error = load_production_config(root.path())
-            .expect_err("missing production config must fail")
-            .to_string();
+        let root = TempDir::new().unwrap();
+        let error = load_production_config(root.path()).unwrap_err().to_string();
 
         assert!(error.contains(PRODUCTION_CONFIG_PATH), "{error}");
     }
 
     #[test]
     fn production_config_load_preserves_the_overlay() {
-        let root = TempDir::new().expect("temporary repository");
+        let root = TempDir::new().unwrap();
         let path = root.path().join(PRODUCTION_CONFIG_PATH);
-        fs::create_dir_all(path.parent().expect("config parent"))
-            .expect("config parent is writable");
-        fs::write(&path, "{\"build\":{}}\n").expect("config is writable");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{\"build\":{}}\n").unwrap();
 
         assert_eq!(
-            load_production_config(root.path()).expect("config loads"),
+            load_production_config(root.path()).unwrap(),
             "{\"build\":{}}\n"
         );
     }

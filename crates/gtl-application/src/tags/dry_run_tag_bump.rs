@@ -205,11 +205,13 @@ mod tests {
             },
             &git,
         )
-        .expect("local tag preview should succeed without origin access");
+        .unwrap();
 
-        let DryRunTagBumpOk::Ready(preview) = result else {
-            panic!("expected a ready tag bump preview");
-        };
+        let preview = match result {
+            DryRunTagBumpOk::Ready(preview) => Some(preview),
+            DryRunTagBumpOk::Rejected { .. } => None,
+        }
+        .unwrap();
         assert_eq!(preview.next_tag.as_ref(), "v1.2.4");
     }
 }

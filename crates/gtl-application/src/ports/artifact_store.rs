@@ -52,6 +52,7 @@ pub enum PlacedArtifact {
 
 impl PlacedArtifact {
     /// Returns the placed artifact's filesystem path.
+    #[must_use]
     pub fn path(&self) -> &AbsoluteFilePath {
         match self {
             Self::Created { path } | Self::Reused { path } => path,
@@ -59,6 +60,7 @@ impl PlacedArtifact {
     }
 
     /// Consumes the placement and returns its filesystem path.
+    #[must_use]
     pub fn into_path(self) -> AbsoluteFilePath {
         match self {
             Self::Created { path } | Self::Reused { path } => path,
@@ -66,6 +68,7 @@ impl PlacedArtifact {
     }
 
     /// Reports whether placement reused an identical artifact.
+    #[must_use]
     pub const fn is_reused(&self) -> bool {
         matches!(self, Self::Reused { .. })
     }

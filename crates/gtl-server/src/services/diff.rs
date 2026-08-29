@@ -648,8 +648,7 @@ mod tests {
 
     #[test]
     fn rejects_a_missing_diff_target_selection() {
-        let error = diff_target(Some(v1::DiffTarget { selection: None }))
-            .expect_err("missing selection must fail");
+        let error = diff_target(Some(v1::DiffTarget { selection: None })).unwrap_err();
 
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
         assert_eq!(error.message(), "target.selection is required");

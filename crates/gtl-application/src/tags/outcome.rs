@@ -150,6 +150,7 @@ impl TagActionOutcome {
     }
 
     /// Derives the presentation classification from the closed outcome.
+    #[must_use]
     pub const fn status(&self) -> TagActionStatus {
         match self {
             Self::Created(_) => TagActionStatus::Created,
@@ -160,11 +161,13 @@ impl TagActionOutcome {
     }
 
     /// Reports whether the action ended in a closed failure.
+    #[must_use]
     pub const fn is_failed(&self) -> bool {
         matches!(self, Self::Failed(_))
     }
 
     /// Returns the exact user-facing workflow detail.
+    #[must_use]
     pub fn detail(&self) -> &str {
         match self {
             Self::Created(outcome) => &outcome.detail,
@@ -175,6 +178,7 @@ impl TagActionOutcome {
     }
 
     /// Returns effects completed before the outcome was reached.
+    #[must_use]
     pub const fn progress(&self) -> &TagOperationProgress {
         match self {
             Self::Created(outcome) => &outcome.progress,

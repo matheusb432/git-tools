@@ -39,18 +39,11 @@ impl TagRefs {
     }
 
     pub(super) fn into_listed(mut self) -> Vec<Tag> {
-        if let Some(remote) = &self.remote {
-            for tag in self.local.values_mut() {
-                let state = if remote
-                    .get(tag.name())
-                    .is_some_and(|object| object == tag.object())
-                {
-                    TagState::Remote
-                } else {
-                    TagState::Local
-                };
-                tag.set_state(state);
-            }
+        let Some(remote) = &self.remote else {
+            return self.local.into_values().collect();
+        };
+        for tag in self.local.values_mut() {
+            tag.set_state(listed_state(remote, tag));
         }
         self.local.into_values().collect()
     }
@@ -61,6 +54,17 @@ impl TagRefs {
                 .get(tag.name())
                 .is_some_and(|object| object == tag.object())
         })
+    }
+}
+
+fn listed_state(remote: &BTreeMap<TagName, GitObjectId>, tag: &Tag) -> TagState {
+    if remote
+        .get(tag.name())
+        .is_some_and(|object| object == tag.object())
+    {
+        TagState::Remote
+    } else {
+        TagState::Local
     }
 }
 
@@ -120,10 +124,7 @@ mod tests {
         Tag::lightweight(
             crate::utils::tag_name(name),
             crate::utils::commit_id_fixture(object),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at).unwrap()),
         )
     }
 

@@ -39,6 +39,7 @@ pub struct StreamValidator {
 }
 
 impl StreamValidator {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             digest: Sha256::new(),
@@ -111,40 +112,69 @@ impl StreamValidator {
     ) -> Result<(), StreamValidationError> {
         match event {
             stream_viewer_rows_response::Event::FileStarted(started) => {
-                if started.file_id.is_empty()
-                    || self.open_file.is_some()
-                    || self.finished_files.contains(&started.file_id)
-                {
-                    return Err(file_lifecycle("file-started is duplicate or nested"));
-                }
-                self.open_file = Some(started.file_id.clone());
+                self.validate_file_started(started)
             }
             stream_viewer_rows_response::Event::UnifiedRows(batch) => {
-                self.require_open_file(&batch.file_id)?;
-                for row in &batch.rows {
-                    validate_unified_row(row)?;
-                }
-                self.row_count = self.row_count.saturating_add(batch.rows.len());
+                self.validate_unified_rows(batch)
             }
-            stream_viewer_rows_response::Event::SplitRows(batch) => {
-                self.require_open_file(&batch.file_id)?;
-                for row in &batch.rows {
-                    validate_split_row(row)?;
-                }
-                self.row_count = self.row_count.saturating_add(batch.rows.len());
-            }
+            stream_viewer_rows_response::Event::SplitRows(batch) => self.validate_split_rows(batch),
             stream_viewer_rows_response::Event::FileFinished(finished) => {
-                self.require_open_file(&finished.file_id)?;
-                self.open_file = None;
-                self.finished_files.insert(finished.file_id.clone());
+                self.validate_file_finished(finished)
             }
             stream_viewer_rows_response::Event::FileFailed(failed) => {
-                return Err(StreamValidationError::FileFailure {
+                Err(StreamValidationError::FileFailure {
                     file_id: failed.file_id.clone(),
                     message: failed.message.clone(),
-                });
+                })
             }
         }
+    }
+
+    fn validate_file_started(
+        &mut self,
+        started: &v1::ViewerFileStarted,
+    ) -> Result<(), StreamValidationError> {
+        if started.file_id.is_empty()
+            || self.open_file.is_some()
+            || self.finished_files.contains(&started.file_id)
+        {
+            return Err(file_lifecycle("file-started is duplicate or nested"));
+        }
+        self.open_file = Some(started.file_id.clone());
+        Ok(())
+    }
+
+    fn validate_unified_rows(
+        &mut self,
+        batch: &v1::ViewerUnifiedRows,
+    ) -> Result<(), StreamValidationError> {
+        self.require_open_file(&batch.file_id)?;
+        for row in &batch.rows {
+            validate_unified_row(row)?;
+        }
+        self.row_count = self.row_count.saturating_add(batch.rows.len());
+        Ok(())
+    }
+
+    fn validate_split_rows(
+        &mut self,
+        batch: &v1::ViewerSplitRows,
+    ) -> Result<(), StreamValidationError> {
+        self.require_open_file(&batch.file_id)?;
+        for row in &batch.rows {
+            validate_split_row(row)?;
+        }
+        self.row_count = self.row_count.saturating_add(batch.rows.len());
+        Ok(())
+    }
+
+    fn validate_file_finished(
+        &mut self,
+        finished: &v1::ViewerFileFinished,
+    ) -> Result<(), StreamValidationError> {
+        self.require_open_file(&finished.file_id)?;
+        self.open_file = None;
+        self.finished_files.insert(finished.file_id.clone());
         Ok(())
     }
 
@@ -257,14 +287,16 @@ mod tests {
     #[test]
     fn validator_rejects_non_utf8_span_boundaries() {
         let mut messages = valid_stream();
-        let Some(stream_viewer_rows_response::Event::UnifiedRows(batch)) =
-            messages[1].event.as_mut()
-        else {
-            panic!("fixture row batch");
-        };
-        let Some(viewer_unified_row::Row::Added(source)) = batch.rows[0].row.as_mut() else {
-            panic!("fixture added row");
-        };
+        let batch = match messages[1].event.as_mut() {
+            Some(stream_viewer_rows_response::Event::UnifiedRows(batch)) => Some(batch),
+            _ => None,
+        }
+        .unwrap();
+        let source = match batch.rows[0].row.as_mut() {
+            Some(viewer_unified_row::Row::Added(source)) => Some(source),
+            _ => None,
+        }
+        .unwrap();
         source.code.as_mut().unwrap().spans[0].byte_end = 1;
 
         let error = evidence(messages).unwrap_err();

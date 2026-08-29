@@ -31,44 +31,57 @@ impl DiffSyntaxHighlighter {
         let mut output = SyntaxBatch::default();
 
         for row in rows {
-            if self.disabled {
-                output.rows.push(row);
-                continue;
-            }
-
-            if row.kind() == DiffRowKind::Hunk {
-                self.flush(&mut output);
-                if self.disabled {
-                    output.rows.push(row);
-                } else {
-                    self.state = HunkState::Collecting(HunkBuffer::new(row));
-                }
-                continue;
-            }
-
-            match &mut self.state {
-                HunkState::BetweenHunks | HunkState::PassThrough => output.rows.push(row),
-                HunkState::Collecting(hunk) => {
-                    if let Some(side) = hunk.push(row, self.max_hunk_bytes) {
-                        let HunkState::Collecting(hunk) =
-                            mem::replace(&mut self.state, HunkState::PassThrough)
-                        else {
-                            continue;
-                        };
-                        output.rows.extend(hunk.rows);
-                        output.diagnostics.push(SyntaxDiagnostic::new(
-                            side,
-                            format!(
-                                "syntax hunk {side:?} source exceeds the {}-byte limit",
-                                self.max_hunk_bytes.into_inner()
-                            ),
-                        ));
-                    }
-                }
-            }
+            self.push_row(row, &mut output);
         }
 
         output
+    }
+
+    fn push_row(&mut self, row: DiffRow, output: &mut SyntaxBatch) {
+        if self.disabled {
+            output.rows.push(row);
+            return;
+        }
+
+        if row.kind() == DiffRowKind::Hunk {
+            self.start_hunk(row, output);
+            return;
+        }
+
+        let oversized_side = match &mut self.state {
+            HunkState::BetweenHunks | HunkState::PassThrough => {
+                output.rows.push(row);
+                None
+            }
+            HunkState::Collecting(hunk) => hunk.push(row, self.max_hunk_bytes),
+        };
+        if let Some(side) = oversized_side {
+            self.pass_through_oversized_hunk(side, output);
+        }
+    }
+
+    fn start_hunk(&mut self, row: DiffRow, output: &mut SyntaxBatch) {
+        self.flush(output);
+        if self.disabled {
+            output.rows.push(row);
+        } else {
+            self.state = HunkState::Collecting(HunkBuffer::new(row));
+        }
+    }
+
+    fn pass_through_oversized_hunk(&mut self, side: DiffSide, output: &mut SyntaxBatch) {
+        let HunkState::Collecting(hunk) = mem::replace(&mut self.state, HunkState::PassThrough)
+        else {
+            return;
+        };
+        output.rows.extend(hunk.rows);
+        output.diagnostics.push(SyntaxDiagnostic::new(
+            side,
+            format!(
+                "syntax hunk {side:?} source exceeds the {}-byte limit",
+                self.max_hunk_bytes.into_inner()
+            ),
+        ));
     }
 
     pub(crate) fn finish(mut self) -> SyntaxBatch {
@@ -250,39 +263,49 @@ fn tokens_by_row(
             first_candidate += 1;
         }
 
-        for row in source.rows.iter().skip(first_candidate) {
-            if row.byte_range.start >= token.end {
-                break;
-            }
-            if row.suppress_tokens {
-                continue;
-            }
-
-            let start = token.start.max(row.byte_range.start);
-            let end = token.end.min(row.byte_range.end);
-            if start >= end {
-                continue;
-            }
-            let prefix = source
-                .text
-                .get(row.byte_range.start..start)
-                .ok_or_else(|| "highlight start is not on a UTF-8 boundary".to_owned())?;
-            let text = source
-                .text
-                .get(start..end)
-                .ok_or_else(|| "highlight end is not on a UTF-8 boundary".to_owned())?;
-            let character_start = prefix.chars().count();
-            let character_end = character_start + text.chars().count();
-            push_syntax_token(
-                &mut output[row.row_index],
-                character_start,
-                character_end,
-                token.class,
-            );
-        }
+        append_token_to_rows(source, token, first_candidate, &mut output)?;
     }
 
     Ok(output)
+}
+
+fn append_token_to_rows(
+    source: &HunkSource,
+    token: &ByteSyntaxToken,
+    first_candidate: usize,
+    output: &mut [Vec<SyntaxToken>],
+) -> Result<(), String> {
+    for row in source.rows.iter().skip(first_candidate) {
+        if row.byte_range.start >= token.end {
+            break;
+        }
+        if row.suppress_tokens {
+            continue;
+        }
+
+        let start = token.start.max(row.byte_range.start);
+        let end = token.end.min(row.byte_range.end);
+        if start >= end {
+            continue;
+        }
+        let prefix = source
+            .text
+            .get(row.byte_range.start..start)
+            .ok_or_else(|| "highlight start is not on a UTF-8 boundary".to_owned())?;
+        let text = source
+            .text
+            .get(start..end)
+            .ok_or_else(|| "highlight end is not on a UTF-8 boundary".to_owned())?;
+        let character_start = prefix.chars().count();
+        let character_end = character_start + text.chars().count();
+        push_syntax_token(
+            &mut output[row.row_index],
+            character_start,
+            character_end,
+            token.class,
+        );
+    }
+    Ok(())
 }
 
 fn push_syntax_token(
@@ -316,10 +339,7 @@ mod tests {
     }
 
     fn token_overlaps(row: &DiffRow, needle: &str, class: SyntaxTokenClass) -> bool {
-        let start = row
-            .body()
-            .find(needle)
-            .expect("fixture should contain token");
+        let start = row.body().find(needle).unwrap();
         let start = row.body()[..start].chars().count();
         let end = start + needle.chars().count();
         row.syntax_tokens().iter().any(|token| {
@@ -442,13 +462,10 @@ mod tests {
             "r#async",
             SyntaxTokenClass::Keyword
         ));
-        let string_start = raw_identifier_and_string
-            .body()
-            .find("r##\"")
-            .expect("fixture should contain raw string");
+        let string_start = raw_identifier_and_string.body().find("r##\"").unwrap();
         let async_in_string = raw_identifier_and_string.body()[string_start..]
             .find("async")
-            .expect("fixture should contain async in raw string")
+            .unwrap()
             + string_start;
         let async_in_string = raw_identifier_and_string.body()[..async_in_string]
             .chars()
@@ -473,7 +490,7 @@ mod tests {
             .syntax_tokens()
             .iter()
             .find(|token| token.class() == SyntaxTokenClass::String)
-            .expect("fixture should contain a string token");
+            .unwrap();
 
         assert_eq!(string.start().into_inner(), 11);
         assert_eq!(string.end().into_inner(), 14);
@@ -547,10 +564,7 @@ mod tests {
             SyntaxTokenClass::Keyword
         ));
         assert!(!html.rows()[2].syntax_tokens().iter().any(|token| {
-            let color_start = html.rows()[2]
-                .body()
-                .find("color")
-                .expect("fixture should contain CSS text");
+            let color_start = html.rows()[2].body().find("color").unwrap();
             token.start().into_inner() < color_start + "color".len()
                 && color_start < token.end().into_inner()
         }));

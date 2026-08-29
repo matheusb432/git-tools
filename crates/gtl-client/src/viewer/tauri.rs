@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::VecDeque};
 
 use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
@@ -13,10 +13,10 @@ use super::{ViewerClientError, validate_viewer_protocol};
 
 const CONNECT_COMMAND: &str = "viewer_connect";
 const ROWS_START_COMMAND: &str = "viewer_stream_rows_start";
-const ROWS_NEXT_COMMAND: &str = "viewer_stream_rows_next";
+const ROWS_NEXT_BATCH_COMMAND: &str = "viewer_stream_rows_next_batch";
 const ROWS_CANCEL_COMMAND: &str = "viewer_stream_rows_cancel";
 const WATCH_START_COMMAND: &str = "viewer_watch_start";
-const WATCH_NEXT_COMMAND: &str = "viewer_watch_next";
+const WATCH_NEXT_BATCH_COMMAND: &str = "viewer_watch_next_batch";
 const WATCH_CANCEL_COMMAND: &str = "viewer_watch_cancel";
 
 thread_local! {
@@ -128,66 +128,93 @@ impl ViewerClient {
     ) -> Result<ViewerRowStream, ViewerClientError> {
         let stream_id = invoke_with_request(ROWS_START_COMMAND, request).await?;
         Ok(ViewerRowStream {
-            stream_id,
-            finished: false,
+            stream: IpcPullStream::new(stream_id, ROWS_NEXT_BATCH_COMMAND, ROWS_CANCEL_COMMAND),
         })
     }
 
     pub async fn watch(&mut self) -> Result<ViewerVersionStream, ViewerClientError> {
         let stream_id = invoke_without_arguments(WATCH_START_COMMAND).await?;
         Ok(ViewerVersionStream {
-            stream_id,
-            finished: false,
+            stream: IpcPullStream::new(stream_id, WATCH_NEXT_BATCH_COMMAND, WATCH_CANCEL_COMMAND),
         })
     }
 }
 
 pub struct ViewerRowStream {
-    stream_id: u32,
-    finished: bool,
+    stream: IpcPullStream<ViewerRowStreamItem>,
 }
 
 impl ViewerRowStream {
     pub async fn message(&mut self) -> Result<Option<ViewerRowStreamItem>, ViewerClientError> {
-        if self.finished {
-            return Ok(None);
-        }
-        let response: Option<ViewerRowStreamItem> =
-            invoke_with_stream_id(ROWS_NEXT_COMMAND, self.stream_id).await?;
-        self.finished = response.is_none();
-        Ok(response)
+        self.stream.message().await
     }
 }
 
 impl Drop for ViewerRowStream {
     fn drop(&mut self) {
-        if !self.finished {
-            cancel_stream(ROWS_CANCEL_COMMAND, self.stream_id);
-        }
+        self.stream.cancel();
     }
 }
 
 pub struct ViewerVersionStream {
-    stream_id: u32,
-    finished: bool,
+    stream: IpcPullStream<ViewerStateChanged>,
 }
 
 impl ViewerVersionStream {
     pub async fn message(&mut self) -> Result<Option<ViewerStateChanged>, ViewerClientError> {
-        if self.finished {
-            return Ok(None);
-        }
-        let response: Option<ViewerStateChanged> =
-            invoke_with_stream_id(WATCH_NEXT_COMMAND, self.stream_id).await?;
-        self.finished = response.is_none();
-        Ok(response)
+        self.stream.message().await
     }
 }
 
 impl Drop for ViewerVersionStream {
     fn drop(&mut self) {
+        self.stream.cancel();
+    }
+}
+
+struct IpcPullStream<Item> {
+    stream_id: u32,
+    next_batch_command: &'static str,
+    cancel_command: &'static str,
+    buffered_items: VecDeque<Item>,
+    finished: bool,
+}
+
+impl<Item> IpcPullStream<Item>
+where
+    Item: DeserializeOwned,
+{
+    fn new(stream_id: u32, next_batch_command: &'static str, cancel_command: &'static str) -> Self {
+        Self {
+            stream_id,
+            next_batch_command,
+            cancel_command,
+            buffered_items: VecDeque::new(),
+            finished: false,
+        }
+    }
+
+    async fn message(&mut self) -> Result<Option<Item>, ViewerClientError> {
+        if let Some(item) = self.buffered_items.pop_front() {
+            return Ok(Some(item));
+        }
+        if self.finished {
+            return Ok(None);
+        }
+        let batch: Vec<Item> =
+            invoke_with_stream_id(self.next_batch_command, self.stream_id).await?;
+        if batch.is_empty() {
+            self.finished = true;
+            return Ok(None);
+        }
+        self.buffered_items = batch.into();
+        Ok(self.buffered_items.pop_front())
+    }
+
+    fn cancel(&mut self) {
         if !self.finished {
-            cancel_stream(WATCH_CANCEL_COMMAND, self.stream_id);
+            self.finished = true;
+            cancel_stream(self.cancel_command, self.stream_id);
         }
     }
 }

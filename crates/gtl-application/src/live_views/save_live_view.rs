@@ -1,6 +1,3 @@
-//! The `live_views/save` vertical slice: validate a directory as a git repo
-//! and persist (or refresh) a saved live view for it.
-
 use std::path::PathBuf;
 
 use anyhow::Context as _;
@@ -13,31 +10,24 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Validate `path` as a git repo and save (or refresh) a live view for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveLiveView {
     pub path: PathBuf,
 }
 
-/// The outcome plus every message the save wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveLiveViewOk {
     pub outcome: SaveLiveViewOutcome,
     pub notes: Vec<Note>,
 }
 
-/// What a save produced: a persisted record, or a rejected candidate directory.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SaveLiveViewOutcome {
-    /// A new source identity was persisted.
     Created { record: LiveViewRecord },
-    /// An existing source identity had its presentation metadata refreshed.
     Refreshed { record: LiveViewRecord },
-    /// `path` did not validate as a saveable git repo.
     Rejected { rejection: LiveViewRejection },
 }
 
-/// Why a live-view save was rejected — typed codes with the service-owned messages.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LiveViewRejection {
     #[error("The git repo's directory at `{path}` was not found.")]
@@ -47,7 +37,7 @@ pub enum LiveViewRejection {
 }
 
 impl LiveViewRejection {
-    /// The stable machine-readable code for this rejection.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             Self::DirNotFound { .. } => "DirNotFound",
@@ -56,14 +46,12 @@ impl LiveViewRejection {
     }
 }
 
-/// Everything that can go wrong saving a live view.
 #[derive(Debug, thiserror::Error)]
 pub enum SaveLiveViewError {
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Saves a live view by probing `path` and writing through the application database connection.
 pub fn execute(
     req: SaveLiveView,
     git: &impl GitClient,
@@ -100,7 +88,7 @@ pub fn execute(
         }
         StoredLiveView::Refreshed(record) => {
             let text = format!(
-                "live view for `{}` already saved — refreshed",
+                "live view for `{}` already saved; refreshed",
                 record.display_name
             );
             (SaveLiveViewOutcome::Refreshed { record }, text)
@@ -174,8 +162,6 @@ fn save_live_view(
     })
 }
 
-/// Builds the rejected response: a [`SaveLiveViewOutcome::Rejected`] outcome
-/// carrying the rejection's `Display` text as a warn-level note.
 fn rejected(rejection: LiveViewRejection) -> SaveLiveViewOk {
     SaveLiveViewOk {
         notes: vec![Note::warn(rejection.to_string())],
@@ -209,15 +195,15 @@ mod tests {
     }
 
     fn list_views(connection: &Connection) -> Vec<LiveViewRecord> {
-        list_live_views::execute(list_live_views::ListLiveViews, connection).expect("list succeeds")
+        list_live_views::execute(list_live_views::ListLiveViews, connection).unwrap()
     }
 
     fn created_at(raw: &str) -> gtl_models::timestamps::MachineTimestamp {
-        raw.try_into().expect("fixture creation timestamp is valid")
+        raw.try_into().unwrap()
     }
 
     fn opened_at(raw: &str) -> gtl_models::timestamps::MachineTimestamp {
-        raw.try_into().expect("fixture opened timestamp is valid")
+        raw.try_into().unwrap()
     }
 
     #[test]
@@ -231,20 +217,18 @@ mod tests {
             &mut connection,
             &clock,
         )
-        .expect("save succeeds with a rejected outcome");
+        .unwrap();
 
-        match &response.outcome {
-            SaveLiveViewOutcome::Rejected { rejection } => {
-                assert_eq!(rejection.code(), "DirNotFound");
-                assert_eq!(
-                    rejection.to_string(),
-                    "The git repo's directory at `/gone` was not found."
-                );
-            }
-            SaveLiveViewOutcome::Created { .. } | SaveLiveViewOutcome::Refreshed { .. } => {
-                panic!("expected Rejected, got a persisted outcome")
-            }
+        let rejection = match &response.outcome {
+            SaveLiveViewOutcome::Rejected { rejection } => Some(rejection),
+            SaveLiveViewOutcome::Created { .. } | SaveLiveViewOutcome::Refreshed { .. } => None,
         }
+        .unwrap();
+        assert_eq!(rejection.code(), "DirNotFound");
+        assert_eq!(
+            rejection.to_string(),
+            "The git repo's directory at `/gone` was not found."
+        );
         assert_eq!(response.notes.len(), 1);
         assert_eq!(response.notes[0].level, NoteLevel::Warn);
         assert_eq!(
@@ -265,20 +249,18 @@ mod tests {
             &mut connection,
             &clock,
         )
-        .expect("save succeeds with a rejected outcome");
+        .unwrap();
 
-        match &response.outcome {
-            SaveLiveViewOutcome::Rejected { rejection } => {
-                assert_eq!(rejection.code(), "DirNotGitRepo");
-                assert_eq!(
-                    rejection.to_string(),
-                    "The directory `/plain` is not a git repository."
-                );
-            }
-            SaveLiveViewOutcome::Created { .. } | SaveLiveViewOutcome::Refreshed { .. } => {
-                panic!("expected Rejected, got a persisted outcome")
-            }
+        let rejection = match &response.outcome {
+            SaveLiveViewOutcome::Rejected { rejection } => Some(rejection),
+            SaveLiveViewOutcome::Created { .. } | SaveLiveViewOutcome::Refreshed { .. } => None,
         }
+        .unwrap();
+        assert_eq!(rejection.code(), "DirNotGitRepo");
+        assert_eq!(
+            rejection.to_string(),
+            "The directory `/plain` is not a git repository."
+        );
         assert_eq!(
             response.notes[0].text,
             "The directory `/plain` is not a git repository."
@@ -299,24 +281,22 @@ mod tests {
             &mut connection,
             &clock,
         )
-        .expect("save succeeds");
+        .unwrap();
 
-        match &response.outcome {
-            SaveLiveViewOutcome::Created { record } => {
-                assert_eq!(
-                    record,
-                    &LiveViewRecord {
-                        source: LiveSource::local_repo(crate::utils::repository_root("/repos/gt")),
-                        display_name: crate::utils::project_name("gt"),
-                        created_at: created_at("2026-01-01T00:00:00Z"),
-                        last_opened_at: None,
-                    }
-                );
-            }
-            SaveLiveViewOutcome::Refreshed { .. } | SaveLiveViewOutcome::Rejected { .. } => {
-                panic!("expected Created")
-            }
+        let record = match &response.outcome {
+            SaveLiveViewOutcome::Created { record } => Some(record),
+            SaveLiveViewOutcome::Refreshed { .. } | SaveLiveViewOutcome::Rejected { .. } => None,
         }
+        .unwrap();
+        assert_eq!(
+            record,
+            &LiveViewRecord {
+                source: LiveSource::local_repo(crate::utils::repository_root("/repos/gt")),
+                display_name: crate::utils::project_name("gt"),
+                created_at: created_at("2026-01-01T00:00:00Z"),
+                last_opened_at: None,
+            }
+        );
         assert_eq!(response.notes.len(), 1);
         assert_eq!(response.notes[0].level, NoteLevel::Info);
         assert_eq!(response.notes[0].text, "saved live view for `gt`");
@@ -336,7 +316,7 @@ mod tests {
                  '2025-01-01T00:00:00Z', '2025-06-01T00:00:00Z')",
                 [],
             )
-            .expect("seed live view");
+            .unwrap();
 
         let response = save_live_view::execute(
             SaveLiveView {
@@ -346,11 +326,13 @@ mod tests {
             &mut connection,
             &clock,
         )
-        .expect("save succeeds");
+        .unwrap();
 
-        let SaveLiveViewOutcome::Refreshed { record } = &response.outcome else {
-            panic!("expected Refreshed");
-        };
+        let record = match &response.outcome {
+            SaveLiveViewOutcome::Refreshed { record } => Some(record),
+            SaveLiveViewOutcome::Created { .. } | SaveLiveViewOutcome::Rejected { .. } => None,
+        }
+        .unwrap();
         assert_eq!(record.created_at.as_ref(), "2025-01-01T00:00:00Z");
         assert_eq!(
             record.last_opened_at.as_ref().map(AsRef::as_ref),
@@ -358,7 +340,7 @@ mod tests {
         );
         assert_eq!(
             response.notes[0].text,
-            "live view for `gt` already saved — refreshed"
+            "live view for `gt` already saved; refreshed"
         );
         assert_eq!(
             list_views(&connection),
@@ -383,7 +365,7 @@ mod tests {
                  VALUES ('LocalRepo', '/repos/gt', 'old name', '2025-01-01T00:00:00')",
                 [],
             )
-            .expect("seed malformed live view");
+            .unwrap();
 
         save_live_view::execute(
             SaveLiveView {
@@ -393,7 +375,7 @@ mod tests {
             &mut connection,
             &clock,
         )
-        .expect_err("malformed persisted timestamp must reject");
+        .unwrap_err();
 
         let display_name = connection
             .query_row(
@@ -401,7 +383,7 @@ mod tests {
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .expect("read preserved live view");
+            .unwrap();
         assert_eq!(display_name, "old name");
     }
 }

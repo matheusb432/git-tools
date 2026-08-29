@@ -11,6 +11,7 @@ use crate::{cli::TagCommand, server_client::ServerClient};
 
 pub mod bump;
 
+#[must_use]
 pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
     match command {
         Some(TagCommand::Bump {
@@ -168,6 +169,7 @@ pub enum ListTagsOk {
     Failed { detail: String },
 }
 
+#[must_use]
 pub fn render_list(list: &ListTagsOk, commits: bool) -> String {
     let groups = match list {
         ListTagsOk::Listed { groups } => groups,
@@ -435,10 +437,7 @@ mod tests {
             tag_name(name),
             git_object_id("f"),
             commit_id(commit_prefix),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(100)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(100).unwrap()),
             Some(message.into()),
         )
     }
@@ -447,10 +446,7 @@ mod tests {
         Tag::lightweight(
             tag_name(name),
             commit_id(commit_prefix),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(110)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(110).unwrap()),
         )
     }
 

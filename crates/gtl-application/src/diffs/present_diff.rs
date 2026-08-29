@@ -176,7 +176,7 @@ mod tests {
             }),
             batch_id: "0198a859-7c4e-7e5f-9e63-ec7bb768d841"
                 .parse::<RecipeBatchId>()
-                .expect("fixture batch ID is valid"),
+                .unwrap(),
             recipes: vec![DiffRecipeIntent {
                 repo_root: crate::utils::repository_root("/repo"),
                 operation: RecipeOp::Diff {
@@ -258,14 +258,15 @@ mod tests {
         )
         .unwrap();
 
-        let PresentDiffOk::Artifact {
-            outcome,
-            route,
-            notes,
-        } = outcome
-        else {
-            panic!("viewer failure must fall back to an artifact");
-        };
+        let (outcome, route, notes) = match outcome {
+            PresentDiffOk::Artifact {
+                outcome,
+                route,
+                notes,
+            } => Some((outcome, route, notes)),
+            PresentDiffOk::Viewer { .. } => None,
+        }
+        .unwrap();
         assert!(matches!(outcome, DiffRenderOutcome::Rendered(_)));
         assert_eq!(
             route,

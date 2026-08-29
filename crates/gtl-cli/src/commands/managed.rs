@@ -24,6 +24,7 @@ pub enum ManagedExit {
 }
 
 impl ManagedExit {
+    #[must_use]
     pub fn code(self) -> i32 {
         match self {
             ManagedExit::Clean => 0,
@@ -48,6 +49,7 @@ pub enum ManagedOutput {
 }
 
 impl ManagedOutput {
+    #[must_use]
     pub const fn from_flags(json: bool, color: bool) -> Self {
         if json {
             Self::Json
@@ -56,10 +58,12 @@ impl ManagedOutput {
         }
     }
 
+    #[must_use]
     pub const fn is_json(self) -> bool {
         matches!(self, Self::Json)
     }
 
+    #[must_use]
     pub const fn color_enabled(self) -> bool {
         matches!(self, Self::Text { color: true })
     }

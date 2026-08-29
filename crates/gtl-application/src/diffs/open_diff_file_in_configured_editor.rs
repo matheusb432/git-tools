@@ -215,10 +215,7 @@ mod tests {
         }
 
         fn canonicalize_results_remaining(&self) -> usize {
-            self.canonicalize_results
-                .lock()
-                .expect("canonicalize results lock")
-                .len()
+            self.canonicalize_results.lock().unwrap().len()
         }
     }
 
@@ -230,17 +227,13 @@ mod tests {
         fn canonicalize(&self, _: &Path) -> Result<PathBuf, FileSystemClientError> {
             self.canonicalize_results
                 .lock()
-                .expect("canonicalize results lock")
+                .unwrap()
                 .pop_front()
-                .expect("a scripted canonicalize result")
+                .unwrap()
         }
 
         fn entry_kind(&self, _: &Path) -> Result<FileSystemEntryKind, FileSystemClientError> {
-            self.entry_kind_results
-                .lock()
-                .expect("entry kind results lock")
-                .pop_front()
-                .expect("a scripted entry kind result")
+            self.entry_kind_results.lock().unwrap().pop_front().unwrap()
         }
     }
 
@@ -277,24 +270,17 @@ mod tests {
         }
 
         fn opened(&self) -> Option<RecordedOpen> {
-            self.opens.lock().expect("opens lock").first().cloned()
+            self.opens.lock().unwrap().first().cloned()
         }
 
         fn commands_remaining(&self) -> usize {
-            self.command_results
-                .lock()
-                .expect("command results lock")
-                .len()
+            self.command_results.lock().unwrap().len()
         }
     }
 
     impl TextEditorClient for ScriptedTextEditor {
         fn read_command(&self, _: &RepositoryRoot) -> anyhow::Result<String> {
-            self.command_results
-                .lock()
-                .expect("command results lock")
-                .pop_front()
-                .expect("a scripted configured command result")
+            self.command_results.lock().unwrap().pop_front().unwrap()
         }
 
         fn open_in_file(
@@ -303,16 +289,12 @@ mod tests {
             arguments: &[String],
             working_directory: &RepositoryRoot,
         ) -> anyhow::Result<()> {
-            self.opens.lock().expect("opens lock").push(RecordedOpen {
+            self.opens.lock().unwrap().push(RecordedOpen {
                 program: program.to_path_buf(),
                 arguments: arguments.to_vec(),
                 working_directory: working_directory.as_ref().to_path_buf(),
             });
-            self.open_result
-                .lock()
-                .expect("open result lock")
-                .take()
-                .unwrap_or(Ok(()))
+            self.open_result.lock().unwrap().take().unwrap_or(Ok(()))
         }
     }
 
@@ -337,8 +319,7 @@ mod tests {
     }
 
     fn command(diff_file_path: impl AsRef<Path>) -> RepositoryRelativePath {
-        RepositoryRelativePath::try_new(diff_file_path.as_ref().to_path_buf())
-            .expect("fixture diff path is repository-relative")
+        RepositoryRelativePath::try_new(diff_file_path.as_ref().to_path_buf()).unwrap()
     }
 
     fn available_file_system() -> ScriptedFileSystem {
@@ -367,7 +348,7 @@ mod tests {
                 &utils::repository_root("/repos/git-tools"),
                 &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
             )
-            .expect("configured command parses");
+            .unwrap();
 
             assert_eq!(invocation.program, PathBuf::from(expected_program));
             assert!(
@@ -396,7 +377,7 @@ mod tests {
             &file_system,
             &text_editor,
         )
-        .expect("configured text editor opens");
+        .unwrap();
 
         assert_eq!(
             text_editor.opened(),
@@ -415,7 +396,7 @@ mod tests {
             &utils::repository_root("/repos/git-tools"),
             &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
         )
-        .expect("configured command parses");
+        .unwrap();
 
         assert_eq!(invocation.program, PathBuf::from("/opt/IDE Suite/editor"));
         assert_eq!(
@@ -456,7 +437,7 @@ mod tests {
                 &file_system,
                 &text_editor,
             )
-            .expect_err("invalid diff entry is rejected");
+            .unwrap_err();
 
             assert_eq!(error.to_string(), expected_error.to_string());
             assert_eq!(file_system.canonicalize_results_remaining(), 1);
@@ -487,7 +468,7 @@ mod tests {
             &not_found_file_system,
             &not_found_editor,
         )
-        .expect_err("missing file is unavailable");
+        .unwrap_err();
         assert!(matches!(
             not_found_error,
             OpenDiffFileInConfiguredEditorError::DiffFileUnavailable
@@ -509,7 +490,7 @@ mod tests {
             &non_file_system,
             &non_file_editor,
         )
-        .expect_err("non-file is unavailable");
+        .unwrap_err();
         assert!(matches!(
             non_file_error,
             OpenDiffFileInConfiguredEditorError::DiffFileUnavailable
@@ -528,7 +509,7 @@ mod tests {
             &escaping_file_system,
             &escaping_editor,
         )
-        .expect_err("escaping file is rejected");
+        .unwrap_err();
         assert!(matches!(
             escaping_error,
             OpenDiffFileInConfiguredEditorError::DiffFileOutsideRepository
@@ -548,7 +529,7 @@ mod tests {
                 &available_file_system(),
                 &text_editor,
             )
-            .expect_err("invalid configured command is rejected");
+            .unwrap_err();
 
             assert!(matches!(
                 error,
@@ -569,7 +550,7 @@ mod tests {
             ))]),
             &ScriptedTextEditor::default(),
         )
-        .expect_err("filesystem failure is surfaced");
+        .unwrap_err();
         assert!(matches!(
             file_system_error,
             OpenDiffFileInConfiguredEditorError::FileSystem(_)
@@ -581,7 +562,7 @@ mod tests {
             &available_file_system(),
             &ScriptedTextEditor::with_command(Err(anyhow::anyhow!("discovery failure"))),
         )
-        .expect_err("configured editor discovery failure is surfaced");
+        .unwrap_err();
         assert!(matches!(
             discovery_error,
             OpenDiffFileInConfiguredEditorError::ConfiguredEditorDiscovery(_)
@@ -596,7 +577,7 @@ mod tests {
                 Err(anyhow::anyhow!("open failure")),
             ),
         )
-        .expect_err("configured editor open failure is surfaced");
+        .unwrap_err();
         assert!(matches!(
             open_error,
             OpenDiffFileInConfiguredEditorError::ConfiguredEditorOpen(_)

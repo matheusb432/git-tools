@@ -18,11 +18,13 @@ impl CharacterSpan {
     }
 
     /// Returns the first character index covered by the span.
+    #[must_use]
     pub const fn start(&self) -> CharacterOffset {
         self.start
     }
 
     /// Returns the exclusive character index after the span.
+    #[must_use]
     pub const fn end(&self) -> CharacterOffset {
         self.end
     }

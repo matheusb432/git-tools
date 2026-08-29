@@ -200,7 +200,7 @@ mod tests {
 
         let response = execute_with(remote, vec![repo("a")], request)
             .await
-            .expect("pull succeeds");
+            .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::WouldPull);
         assert_eq!(response.results[0].detail, "behind by 3 - fast-forward");
@@ -217,7 +217,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("pull succeeds");
+        .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -238,7 +238,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("pull succeeds");
+        .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::UpToDate);
         assert_eq!(
@@ -262,7 +262,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("pull succeeds");
+        .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::Pulled);
         assert_eq!(response.results[0].detail, "fast-forwarded 1 commit");
@@ -282,7 +282,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("pull succeeds");
+        .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -302,7 +302,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("pull succeeds");
+        .unwrap();
 
         assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(response.results[0].detail, "no 'main' branch on origin");

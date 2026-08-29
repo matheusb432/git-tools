@@ -7,19 +7,18 @@ use std::{fs, path::Path};
 fn cargo_config_pins_windows_msvc_linker_flags() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cargo/config.toml"))
-            .expect(".cargo/config.toml must exist (crt-static for the win-msvc ship)");
-    let config: toml::Value =
-        toml::from_str(&source).expect(".cargo/config.toml must contain valid TOML");
+            .unwrap();
+    let config: toml::Value = toml::from_str(&source).unwrap();
     let rustflags = config
         .get("target")
         .and_then(|target| target.get("x86_64-pc-windows-msvc"))
         .and_then(|target| target.get("rustflags"))
         .and_then(toml::Value::as_array)
-        .expect("Windows MSVC target must define rustflags")
+        .unwrap()
         .iter()
         .map(toml::Value::as_str)
         .collect::<Option<Vec<_>>>()
-        .expect("Windows MSVC rustflags must contain only strings");
+        .unwrap();
 
     assert!(
         rustflags

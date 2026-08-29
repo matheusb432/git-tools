@@ -268,10 +268,10 @@ mod tests {
         let state = viewer::ViewerTabState::Error {
             reason: "git failed in /private/repository".into(),
         };
-        let tab_id = gtl_models::viewer::ViewerTabId::try_new(7).expect("positive tab ID");
+        let tab_id = gtl_models::viewer::ViewerTabId::try_new(7).unwrap();
 
-        let projected = non_ready_active_state(tab_id, &state).expect("non-ready state");
-        let json = serde_json::to_string(&projected).expect("state serializes");
+        let projected = non_ready_active_state(tab_id, &state).unwrap();
+        let json = serde_json::to_string(&projected).unwrap();
 
         assert!(!json.contains("/private/repository"));
         assert!(json.contains(RENDER_FAILED_MESSAGE));

@@ -656,46 +656,55 @@ fn write_text(path: &Path, text: &str) -> Result<(), DesktopScrollFixtureError> 
 }
 
 fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, DesktopScrollFixtureError> {
-    fn collect(
-        root: &Path,
-        current: &Path,
-        files: &mut BTreeMap<PathBuf, Vec<u8>>,
-    ) -> Result<(), DesktopScrollFixtureError> {
-        let entries = fs::read_dir(current).map_err(file_system_error(
-            "read generated fixture directory",
+    let mut files = BTreeMap::new();
+    collect_generated_files(root, root, &mut files)?;
+    Ok(files)
+}
+
+fn collect_generated_files(
+    root: &Path,
+    current: &Path,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<(), DesktopScrollFixtureError> {
+    let entries = fs::read_dir(current).map_err(file_system_error(
+        "read generated fixture directory",
+        current,
+    ))?;
+    for entry in entries {
+        let entry = entry.map_err(file_system_error(
+            "read generated fixture directory entry",
             current,
         ))?;
-        for entry in entries {
-            let entry = entry.map_err(file_system_error(
-                "read generated fixture directory entry",
-                current,
-            ))?;
-            let path = entry.path();
-            let file_type = entry.file_type().map_err(file_system_error(
-                "read generated fixture entry type",
-                &path,
-            ))?;
-            if file_type.is_dir() {
-                collect(root, &path, files)?;
-            } else if file_type.is_file() {
-                let relative = path
-                    .strip_prefix(root)
-                    .map_err(|_| invalid(format!("fixture path escaped root: {}", path.display())))?
-                    .to_path_buf();
-                let bytes = fs::read(&path)
-                    .map_err(file_system_error("read generated fixture file", &path))?;
-                files.insert(relative, bytes);
-            } else {
-                return Err(invalid(format!(
-                    "generated fixture contains a non-file entry: {}",
-                    path.display()
-                )));
-            }
-        }
-        Ok(())
+        collect_generated_entry(root, &entry, files)?;
+    }
+    Ok(())
+}
+
+fn collect_generated_entry(
+    root: &Path,
+    entry: &fs::DirEntry,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<(), DesktopScrollFixtureError> {
+    let path = entry.path();
+    let file_type = entry.file_type().map_err(file_system_error(
+        "read generated fixture entry type",
+        &path,
+    ))?;
+    if file_type.is_dir() {
+        return collect_generated_files(root, &path, files);
+    }
+    if !file_type.is_file() {
+        return Err(invalid(format!(
+            "generated fixture contains a non-file entry: {}",
+            path.display()
+        )));
     }
 
-    let mut files = BTreeMap::new();
-    collect(root, root, &mut files)?;
-    Ok(files)
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| invalid(format!("fixture path escaped root: {}", path.display())))?
+        .to_path_buf();
+    let bytes = fs::read(&path).map_err(file_system_error("read generated fixture file", &path))?;
+    files.insert(relative, bytes);
+    Ok(())
 }

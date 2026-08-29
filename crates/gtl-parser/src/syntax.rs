@@ -107,24 +107,11 @@ impl SideHighlighter {
         let mut tokens = Vec::new();
 
         for event in events {
-            match event.map_err(|error| error.to_string())? {
-                HighlightEvent::HighlightStart(highlight) => {
-                    let Some((_, class)) = HIGHLIGHT_CLASSES.get(highlight.0) else {
-                        return Err(format!("highlight index {} is out of bounds", highlight.0));
-                    };
-                    classes.push(*class);
-                }
-                HighlightEvent::HighlightEnd => {
-                    if classes.pop().is_none() {
-                        return Err("highlight event ended without a matching start".to_owned());
-                    }
-                }
-                HighlightEvent::Source { start, end } => {
-                    if let Some(class) = classes.last().copied() {
-                        push_byte_token(&mut tokens, start, end, class);
-                    }
-                }
-            }
+            observe_highlight_event(
+                event.map_err(|error| error.to_string())?,
+                &mut classes,
+                &mut tokens,
+            )?;
         }
 
         if !classes.is_empty() {
@@ -135,6 +122,32 @@ impl SideHighlighter {
         }
         Ok(tokens)
     }
+}
+
+fn observe_highlight_event(
+    event: HighlightEvent,
+    classes: &mut Vec<SyntaxTokenClass>,
+    tokens: &mut Vec<ByteSyntaxToken>,
+) -> Result<(), String> {
+    match event {
+        HighlightEvent::HighlightStart(highlight) => {
+            let Some((_, class)) = HIGHLIGHT_CLASSES.get(highlight.0) else {
+                return Err(format!("highlight index {} is out of bounds", highlight.0));
+            };
+            classes.push(*class);
+        }
+        HighlightEvent::HighlightEnd => {
+            if classes.pop().is_none() {
+                return Err("highlight event ended without a matching start".to_owned());
+            }
+        }
+        HighlightEvent::Source { start, end } => {
+            if let Some(class) = classes.last().copied() {
+                push_byte_token(tokens, start, end, class);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn push_byte_token(
@@ -493,9 +506,7 @@ mod tests {
             (SyntaxLanguage::Swift, "let value = 1"),
             (SyntaxLanguage::CSharp, "var value = 1;"),
         ] {
-            let tokens = SideHighlighter::new()
-                .tokens(language, source)
-                .expect("upstream query should highlight the fixture");
+            let tokens = SideHighlighter::new().tokens(language, source).unwrap();
             assert!(!tokens.is_empty(), "no tokens for {language:?}");
         }
     }
@@ -505,9 +516,7 @@ mod tests {
         let configurations = SyntaxConfigurations::new();
 
         assert!(configurations.rust.get().is_none());
-        configurations
-            .for_language(SyntaxLanguage::Rust)
-            .expect("Rust highlight query should compile");
+        configurations.for_language(SyntaxLanguage::Rust).unwrap();
 
         assert!(configurations.rust.get().is_some());
         assert!(configurations.javascript.get().is_none());
@@ -530,14 +539,14 @@ mod tests {
 
         configurations
             .for_language(SyntaxLanguage::Markdown)
-            .expect("Markdown highlight query should compile");
+            .unwrap();
         assert!(configurations.markdown.get().is_some());
         assert!(configurations.markdown_inline.get().is_none());
 
         assert!(
             configurations
                 .for_injection("markdown_inline")
-                .expect("Markdown inline highlight query should compile")
+                .unwrap()
                 .is_some()
         );
         assert!(configurations.markdown_inline.get().is_some());

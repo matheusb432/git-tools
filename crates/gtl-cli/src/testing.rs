@@ -6,31 +6,31 @@ use gtl_models::{
 };
 
 pub(crate) fn project_name(raw: &str) -> ProjectName {
-    ProjectName::try_from(raw).expect("fixture project name is non-empty")
+    ProjectName::try_from(raw).unwrap()
 }
 
 pub(crate) fn repository_root(raw: &str) -> RepositoryRoot {
-    RepositoryRoot::try_new(raw.into()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(raw.into()).unwrap()
 }
 
 pub(crate) fn repository_relative_path(raw: &str) -> RepositoryRelativePath {
-    RepositoryRelativePath::try_new(raw.into()).expect("fixture repository-relative path is valid")
+    RepositoryRelativePath::try_new(raw.into()).unwrap()
 }
 
 pub(crate) fn branch_name(raw: &str) -> BranchName {
-    BranchName::try_new(raw.to_owned()).expect("fixture branch name is non-empty")
+    BranchName::try_new(raw.to_owned()).unwrap()
 }
 
 pub(crate) fn tag_name(raw: &str) -> TagName {
-    TagName::try_new(raw.to_owned()).expect("fixture tag name is non-empty")
+    TagName::try_new(raw.to_owned()).unwrap()
 }
 
 pub(crate) fn remote_name(raw: &str) -> RemoteName {
-    RemoteName::try_new(raw.to_owned()).expect("fixture remote name is non-empty")
+    RemoteName::try_new(raw.to_owned()).unwrap()
 }
 
 pub(crate) fn remote_url(raw: &str) -> RemoteUrl {
-    RemoteUrl::try_new(raw.to_owned()).expect("fixture remote URL is non-empty")
+    RemoteUrl::try_new(raw.to_owned()).unwrap()
 }
 
 pub(crate) fn commit_id(seed: &str) -> CommitId {
@@ -39,7 +39,7 @@ pub(crate) fn commit_id(seed: &str) -> CommitId {
         .take(40)
         .collect::<String>()
         .try_into()
-        .expect("fixture commit ID is valid")
+        .unwrap()
 }
 
 pub(crate) fn git_object_id(seed: &str) -> GitObjectId {

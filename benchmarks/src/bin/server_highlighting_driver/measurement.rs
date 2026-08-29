@@ -96,16 +96,7 @@ impl RssSampler {
         let thread_stop = Arc::clone(&stop);
         let thread = thread::Builder::new()
             .name("server-highlighting-rss".to_owned())
-            .spawn(move || {
-                let mut peak = initial.current.max(initial.high_water);
-                while !thread_stop.load(Ordering::Acquire) {
-                    let sample = read_process_rss(process_id).context("sample server RSS")?;
-                    peak = peak.max(sample.current).max(sample.high_water);
-                    thread::sleep(interval);
-                }
-                let sample = read_process_rss(process_id).context("sample final server RSS")?;
-                Ok(peak.max(sample.current).max(sample.high_water))
-            })
+            .spawn(move || sample_peak_rss(&thread_stop, process_id, interval, initial))
             .context("start server RSS sampler")?;
         Ok(Self {
             stop,
@@ -121,6 +112,22 @@ impl RssSampler {
             .join()
             .map_err(|_| anyhow::anyhow!("server RSS sampler panicked"))?
     }
+}
+
+fn sample_peak_rss(
+    stop: &AtomicBool,
+    process_id: u32,
+    interval: Duration,
+    initial: gtl_benchmarks::server_highlighting::ProcessRss,
+) -> Result<u64> {
+    let mut peak = initial.current.max(initial.high_water);
+    while !stop.load(Ordering::Acquire) {
+        let sample = read_process_rss(process_id).context("sample server RSS")?;
+        peak = peak.max(sample.current).max(sample.high_water);
+        thread::sleep(interval);
+    }
+    let sample = read_process_rss(process_id).context("sample final server RSS")?;
+    Ok(peak.max(sample.current).max(sample.high_water))
 }
 
 impl Drop for RssSampler {

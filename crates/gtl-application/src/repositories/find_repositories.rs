@@ -58,21 +58,22 @@ pub fn execute(req: FindRepositories) -> Result<Vec<RepositoryTarget>, FindRepos
             root: root.clone(),
             source,
         })?;
-        if entry.file_type().is_dir() && entry.path().join(".git").exists() {
-            let path = entry.into_path();
-            let resolved =
-                std::fs::canonicalize(&path).map_err(|source| FindRepositoriesError::Resolve {
-                    path: path.clone(),
-                    source,
-                })?;
-            let repository_root = RepositoryRoot::try_new(resolved.clone()).map_err(|source| {
-                FindRepositoriesError::InvalidRoot {
-                    path: resolved,
-                    source,
-                }
-            })?;
-            repos.push(repository_root);
+        if !entry.file_type().is_dir() || !entry.path().join(".git").exists() {
+            continue;
         }
+        let path = entry.into_path();
+        let resolved =
+            std::fs::canonicalize(&path).map_err(|source| FindRepositoriesError::Resolve {
+                path: path.clone(),
+                source,
+            })?;
+        let repository_root = RepositoryRoot::try_new(resolved.clone()).map_err(|source| {
+            FindRepositoriesError::InvalidRoot {
+                path: resolved,
+                source,
+            }
+        })?;
+        repos.push(repository_root);
     }
     repos.sort();
     Ok(repos
@@ -152,7 +153,7 @@ mod tests {
 
     #[test]
     fn skips_linked_worktrees_by_default() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         utils::make_repository(&root.join("api"));
         utils::make_linked_worktree(
@@ -164,7 +165,7 @@ mod tests {
             root: root.to_path_buf(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
-        .expect("repository discovery succeeds");
+        .unwrap();
 
         assert_eq!(repositories.len(), 1);
         assert_eq!(repositories[0].path.as_ref(), root.join("api"));
@@ -172,7 +173,7 @@ mod tests {
 
     #[test]
     fn includes_linked_worktrees_when_requested() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         utils::make_repository(&root.join("api"));
         let worktree = root.join("api/.worktrees/feature");
@@ -182,7 +183,7 @@ mod tests {
             root: root.to_path_buf(),
             scope: RepositoryTraversalScope::IncludeLinkedWorktrees,
         })
-        .expect("repository discovery succeeds");
+        .unwrap();
 
         assert_eq!(
             repositories
@@ -195,7 +196,7 @@ mod tests {
 
     #[test]
     fn prunes_build_and_dependency_directories() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         utils::make_repository(&root.join("app"));
         utils::make_repository(&root.join("app/libs/inner"));
@@ -206,7 +207,7 @@ mod tests {
             root: root.to_path_buf(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
-        .expect("repository discovery succeeds");
+        .unwrap();
 
         assert_eq!(
             repositories
@@ -222,7 +223,7 @@ mod tests {
 
     #[test]
     fn keeps_submodule_git_pointers() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         utils::make_repository(&root.join("api"));
         utils::make_linked_worktree(&root.join("submodule"), "/repo/.git/modules/submodule");
@@ -231,7 +232,7 @@ mod tests {
             root: root.to_path_buf(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
-        .expect("repository discovery succeeds");
+        .unwrap();
 
         assert_eq!(
             repositories
@@ -244,21 +245,22 @@ mod tests {
 
     #[test]
     fn missing_root_reports_the_failed_traversal() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("missing");
 
         let error = find_repositories::execute(FindRepositories {
             root: root.clone(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
-        .expect_err("missing traversal root fails");
+        .unwrap_err();
 
-        let FindRepositoriesError::Walk {
-            root: failed_root, ..
-        } = error
-        else {
-            panic!("missing root must fail traversal");
-        };
+        let failed_root = match error {
+            FindRepositoriesError::Walk { root, .. } => Some(root),
+            FindRepositoriesError::Resolve { .. } | FindRepositoriesError::InvalidRoot { .. } => {
+                None
+            }
+        }
+        .unwrap();
         assert_eq!(failed_root, root);
     }
 }

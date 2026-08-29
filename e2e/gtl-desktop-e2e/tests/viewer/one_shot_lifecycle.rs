@@ -8,92 +8,82 @@ use crate::support::{self, fixture::OneShotFixture, wait};
 #[tokio::test(flavor = "multi_thread")]
 async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
     support::run_test("viewer-one-shot-lifecycle", |session| {
-        Box::pin(async move {
-            let fixture = OneShotFixture::create(session.data_root())?;
-            fixture.forward()?;
-            support::wait_for_active_diff(
-                session.driver(),
-                "one-shot-alpha",
-                "alpha-one-shot-marker",
-            )
-            .await?;
-            let copied = support::copy_selected_diff_line(
-                session.driver(),
-                "work.txt",
-                "alpha-one-shot-marker",
-            )
-            .await?;
-            ensure!(
-                copied == "// * work.txt, lines: 2\nalpha-one-shot-marker",
-                "the desktop viewer copied an unexpected source payload: {copied:?}"
-            );
-            let copy_toast = support::selectors::by_test_id(session.driver(), test_ids::TOAST)
-                .await
-                .context("show copied-line feedback in the global viewport")?;
-            ensure!(
-                copy_toast.text().await?.starts_with("Copied with context"),
-                "copied-line toast has unexpected text"
-            );
-            support::selectors::by_test_id(session.driver(), test_ids::TOAST_DISMISS)
-                .await?
-                .click()
-                .await
-                .context("dismiss copied-line feedback")?;
-            wait::until(
-                "dismissed copied-line feedback",
-                wait::ASSERTION_TIMEOUT,
-                || async {
-                    Ok(session
-                        .driver()
-                        .find_all(By::Css(test_ids::TOAST.selector()))
-                        .await?
-                        .is_empty()
-                        .then_some(()))
-                },
-            )
-            .await?;
-            assert_path_copy_popover(session.driver()).await?;
-
-            support::selectors::by_test_id(session.driver(), test_ids::VIEWER_TAB_CLOSE)
-                .await?
-                .click()
-                .await
-                .context("close the snapshot")?;
-            wait_for_empty_workspace(session.driver()).await?;
-            ensure!(
-                session
-                    .driver()
-                    .find_all(By::Css(test_ids::TOAST.selector()))
-                    .await?
-                    .is_empty(),
-                "closing a snapshot enqueued a toast"
-            );
-
-            support::selectors::by_test_id(session.driver(), test_ids::VIEWER_MENU_TRIGGER)
-                .await?
-                .click()
-                .await
-                .context("open the viewer menu")?;
-            support::selectors::by_test_id(session.driver(), test_ids::VIEWER_HISTORY_OPEN)
-                .await?
-                .click()
-                .await
-                .context("open diff history")?;
-            support::selectors::by_test_id(session.driver(), test_ids::HISTORY_ENTRY_OPEN)
-                .await?
-                .click()
-                .await
-                .context("reopen the snapshot from history")?;
-
-            support::wait_for_active_diff(
-                session.driver(),
-                "one-shot-alpha",
-                "alpha-one-shot-marker",
-            )
-            .await
-        })
+        Box::pin(run_one_shot_lifecycle(session))
     })
     .await
+}
+
+async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> Result<()> {
+    let fixture = OneShotFixture::create(session.data_root())?;
+    fixture.forward()?;
+    support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker")
+        .await?;
+    let copied =
+        support::copy_selected_diff_line(session.driver(), "work.txt", "alpha-one-shot-marker")
+            .await?;
+    ensure!(
+        copied == "// * work.txt, lines: 2\nalpha-one-shot-marker",
+        "the desktop viewer copied an unexpected source payload: {copied:?}"
+    );
+    let copy_toast = support::selectors::by_test_id(session.driver(), test_ids::TOAST)
+        .await
+        .context("show copied-line feedback in the global viewport")?;
+    ensure!(
+        copy_toast.text().await?.starts_with("Copied with context"),
+        "copied-line toast has unexpected text"
+    );
+    support::selectors::by_test_id(session.driver(), test_ids::TOAST_DISMISS)
+        .await?
+        .click()
+        .await
+        .context("dismiss copied-line feedback")?;
+    wait::until(
+        "dismissed copied-line feedback",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(session
+                .driver()
+                .find_all(By::Css(test_ids::TOAST.selector()))
+                .await?
+                .is_empty()
+                .then_some(()))
+        },
+    )
+    .await?;
+    assert_path_copy_popover(session.driver()).await?;
+
+    support::selectors::by_test_id(session.driver(), test_ids::VIEWER_TAB_CLOSE)
+        .await?
+        .click()
+        .await
+        .context("close the snapshot")?;
+    wait_for_empty_workspace(session.driver()).await?;
+    ensure!(
+        session
+            .driver()
+            .find_all(By::Css(test_ids::TOAST.selector()))
+            .await?
+            .is_empty(),
+        "closing a snapshot enqueued a toast"
+    );
+
+    support::selectors::by_test_id(session.driver(), test_ids::VIEWER_MENU_TRIGGER)
+        .await?
+        .click()
+        .await
+        .context("open the viewer menu")?;
+    support::selectors::by_test_id(session.driver(), test_ids::VIEWER_HISTORY_OPEN)
+        .await?
+        .click()
+        .await
+        .context("open diff history")?;
+    support::selectors::by_test_id(session.driver(), test_ids::HISTORY_ENTRY_OPEN)
+        .await?
+        .click()
+        .await
+        .context("reopen the snapshot from history")?;
+
+    support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
 }
 
 #[derive(Deserialize)]

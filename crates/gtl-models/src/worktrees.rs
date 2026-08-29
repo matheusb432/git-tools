@@ -27,6 +27,7 @@ pub struct Worktree {
 }
 
 impl Worktree {
+    #[must_use]
     pub fn new(
         path: RepositoryRoot,
         id: CommitId,
@@ -43,26 +44,32 @@ impl Worktree {
         }
     }
 
+    #[must_use]
     pub const fn path(&self) -> &RepositoryRoot {
         &self.path
     }
 
+    #[must_use]
     pub fn into_path(self) -> RepositoryRoot {
         self.path
     }
 
+    #[must_use]
     pub const fn id(&self) -> &CommitId {
         &self.id
     }
 
+    #[must_use]
     pub const fn kind(&self) -> &WorktreeKind {
         &self.kind
     }
 
+    #[must_use]
     pub fn locked(&self) -> Option<&str> {
         self.locked.as_deref()
     }
 
+    #[must_use]
     pub fn prunable(&self) -> Option<&str> {
         self.prunable.as_deref()
     }

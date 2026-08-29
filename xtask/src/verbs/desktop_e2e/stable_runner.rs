@@ -16,10 +16,10 @@ mod tests {
 
     #[test]
     fn copies_the_running_xtask_to_a_stable_path() {
-        let temporary_directory = tempfile::tempdir().expect("temporary directory");
+        let temporary_directory = tempfile::tempdir().unwrap();
         let destination = temporary_directory.path().join("xtask-copy");
 
-        let copied = copy_current_executable(&destination).expect("copy current xtask");
+        let copied = copy_current_executable(&destination).unwrap();
 
         assert!(copied > 0);
         assert!(destination.is_file());

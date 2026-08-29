@@ -21,10 +21,7 @@ pub(crate) fn canonical_working_directory() -> anyhow::Result<PathBuf> {
         .with_context(|| format!("canonicalizing current directory {}", current.display()))
 }
 
-/// Renders `path` as a `file://` URL for the terminal. Not full RFC 8089
-/// percent-encoding — store artifact paths are built from repo names/content
-/// hashes, never arbitrary user input — just forward-slash normalization so a
-/// Windows-style `C:\...` path (Git Bash) still yields a well-formed URL.
+/// Does not percent-encode trusted artifact paths.
 pub(crate) fn file_url(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('\\', "/");
     if let Some(rest) = normalized.strip_prefix('/') {

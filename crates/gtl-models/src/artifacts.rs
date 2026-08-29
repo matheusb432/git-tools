@@ -30,6 +30,7 @@ pub struct RepositoryStoreId(String);
 
 impl RepositoryStoreId {
     /// Builds the lowercase store ID represented by the first eight digest bytes.
+    #[must_use]
     pub fn from_digest_prefix(prefix: [u8; 8]) -> Self {
         known_valid(Self::try_new(encode_digest_prefix(prefix)))
     }
@@ -64,6 +65,7 @@ pub struct ArtifactContentHash(String);
 
 impl ArtifactContentHash {
     /// Builds the lowercase content address represented by the first eight digest bytes.
+    #[must_use]
     pub fn from_digest_prefix(prefix: [u8; 8]) -> Self {
         known_valid(Self::try_new(encode_digest_prefix(prefix)))
     }
@@ -161,6 +163,7 @@ impl ArtifactDiffIdentity {
         }
     }
 
+    #[must_use]
     pub const fn kind(&self) -> DiffKind {
         match self {
             Self::WorkTree => DiffKind::WorkTree,
@@ -175,6 +178,7 @@ impl ArtifactDiffIdentity {
         }
     }
 
+    #[must_use]
     pub const fn commits(&self) -> Option<&PinnedRange> {
         match self {
             Self::WorkTree | Self::CommitRange { commits: None, .. } => None,
@@ -185,6 +189,7 @@ impl ArtifactDiffIdentity {
         }
     }
 
+    #[must_use]
     pub fn matches_commit_range(&self, range: &ArtifactCommitRange) -> bool {
         matches!(
             self,
@@ -247,17 +252,15 @@ mod tests {
 
     fn pinned_range() -> PinnedRange {
         PinnedRange {
-            base: CommitId::try_from("a".repeat(40)).expect("valid base"),
-            head: CommitId::try_from("b".repeat(40)).expect("valid head"),
+            base: CommitId::try_from("a".repeat(40)).unwrap(),
+            head: CommitId::try_from("b".repeat(40)).unwrap(),
         }
     }
 
     #[test]
     fn store_hash_roles_validate_and_normalize_the_same_wire_shape() {
-        let repository = RepositoryStoreId::try_new("ABCDEF0123456789".to_owned())
-            .expect("valid repository store ID");
-        let content = ArtifactContentHash::try_new("0123456789ABCDEF".to_owned())
-            .expect("valid artifact content hash");
+        let repository = RepositoryStoreId::try_new("ABCDEF0123456789".to_owned()).unwrap();
+        let content = ArtifactContentHash::try_new("0123456789ABCDEF".to_owned()).unwrap();
 
         assert_eq!(repository.as_ref(), "abcdef0123456789");
         assert_eq!(content.as_ref(), "0123456789abcdef");

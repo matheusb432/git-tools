@@ -66,12 +66,27 @@ mod tests {
     const DETACHED_CHILD_MARKER: &str = "detached-child.marker";
     const DETACHED_CHILD_PID: &str = "detached-child.pid";
 
+    fn read_process_id(path: &Path) -> Option<u32> {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|value| value.trim().parse().ok())
+    }
+
+    fn wait_for_process_id(path: &Path, timeout: Duration) -> Option<u32> {
+        let deadline = Instant::now() + timeout;
+        let mut process_id = None;
+        while process_id.is_none() && Instant::now() < deadline {
+            process_id = read_process_id(path);
+            thread::sleep(Duration::from_millis(10));
+        }
+        process_id
+    }
+
     #[test]
     fn detached_short_lived_child_is_not_left_as_a_zombie() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
-        fs::write(temporary.path().join(DETACHED_CHILD_MARKER), b"ready")
-            .expect("write child marker");
-        let current_executable = std::env::current_exe().expect("current test executable");
+        let temporary = tempfile::tempdir().unwrap();
+        fs::write(temporary.path().join(DETACHED_CHILD_MARKER), b"ready").unwrap();
+        let current_executable = std::env::current_exe().unwrap();
 
         spawn_in(
             &current_executable,
@@ -82,32 +97,23 @@ mod tests {
             ],
             temporary.path(),
         )
-        .expect("spawn detached child");
+        .unwrap();
 
-        let wait_for_process_id = |path: &Path, timeout| -> u32 {
-            let deadline = Instant::now() + timeout;
-            while Instant::now() < deadline {
-                if let Ok(value) = fs::read_to_string(path) {
-                    return value.trim().parse().expect("numeric process id");
-                }
-                thread::sleep(Duration::from_millis(10));
-            }
-            panic!("timed out waiting for {}", path.display());
-        };
         let process_id = wait_for_process_id(
             &temporary.path().join(DETACHED_CHILD_PID),
             Duration::from_secs(1),
-        );
+        )
+        .unwrap();
         let process_path = std::path::PathBuf::from(format!("/proc/{process_id}"));
         let deadline = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < deadline {
-            if !process_path.exists() {
-                return;
-            }
+        while process_path.exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
         let state = fs::read_to_string(process_path.join("stat")).unwrap_or_default();
-        panic!("detached process {process_id} was not reaped: {state}");
+        assert!(
+            !process_path.exists(),
+            "detached process {process_id} was not reaped: {state}"
+        );
     }
 
     #[test]
@@ -116,7 +122,6 @@ mod tests {
         if !Path::new(DETACHED_CHILD_MARKER).is_file() {
             return;
         }
-        fs::write(DETACHED_CHILD_PID, std::process::id().to_string())
-            .expect("write detached child pid");
+        fs::write(DETACHED_CHILD_PID, std::process::id().to_string()).unwrap();
     }
 }

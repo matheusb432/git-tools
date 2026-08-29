@@ -119,16 +119,7 @@ fn merge_submodule_statuses(
         let path = repository_path(submodule_path.as_bstr())?;
         let ignore = global_ignore.or(submodule.ignore()?).unwrap_or_default();
         match ignore {
-            gix::submodule::config::Ignore::All => {
-                let remove = files.get_mut(&path).is_some_and(|file| {
-                    file.worktree = None;
-                    file.untracked = false;
-                    file.index.is_none()
-                });
-                if remove {
-                    files.remove(&path);
-                }
-            }
+            gix::submodule::config::Ignore::All => remove_ignored_submodule(files, &path),
             _ if submodule_is_dirty(
                 &submodule,
                 ignore,
@@ -145,6 +136,20 @@ fn merge_submodule_statuses(
         }
     }
     Ok(())
+}
+
+fn remove_ignored_submodule(
+    files: &mut BTreeMap<RepositoryRelativePath, FileState>,
+    path: &RepositoryRelativePath,
+) {
+    let remove = files.get_mut(path).is_some_and(|file| {
+        file.worktree = None;
+        file.untracked = false;
+        file.index.is_none()
+    });
+    if remove {
+        files.remove(path);
+    }
 }
 
 fn submodule_is_dirty(

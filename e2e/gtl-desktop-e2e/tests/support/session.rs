@@ -42,75 +42,19 @@ impl TestSession {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
         let mut server_child = start_server(&data_root).await?;
-        let mut failure = None;
-
-        for attempt in 1..=START_ATTEMPTS_MAX {
-            let ports = available_port_pair().context("select distinct driver ports")?;
-            let (webdriver_port, native_driver_port) = ports.ports()?;
-            let mut command = Command::new("tauri-driver");
-            command
-                .arg("--port")
-                .arg(webdriver_port.to_string())
-                .arg("--native-port")
-                .arg(native_driver_port.to_string())
-                .env("GIT_TOOLS_DATA_DIR", &data_root);
-            deny_external_proxies(&mut command);
-            drop(ports);
-            let mut driver_child = match command.group_spawn() {
-                Ok(child) => child,
-                Err(error) => {
-                    failure = Some(
-                        anyhow::Error::new(error)
-                            .context(format!("spawn tauri-driver attempt {attempt}")),
-                    );
-                    continue;
-                }
-            };
-
-            match timeout(
-                START_ATTEMPT_TIMEOUT,
-                connect_driver(webdriver_port, &viewer_binary, &mut driver_child),
-            )
-            .await
-            {
-                Ok(Ok(driver)) => {
-                    return Ok(Self {
-                        driver: Some(driver),
-                        driver_child: Some(driver_child),
-                        server_child: Some(server_child),
-                        data_root,
-                    });
-                }
-                Ok(Err(error)) => {
-                    failure = Some(
-                        error.context(format!("connect to tauri-driver on attempt {attempt}")),
-                    );
-                }
-                Err(_) => {
-                    failure = Some(anyhow!(
-                        "tauri-driver attempt {attempt} exceeded {START_ATTEMPT_TIMEOUT:?}"
-                    ));
-                }
-            }
-
-            terminate_child("tauri-driver", &mut driver_child)
-                .await
-                .with_context(|| format!("clean up tauri-driver attempt {attempt}"))?;
-        }
-
-        let error = failure.unwrap_or_else(|| anyhow!("tauri-driver did not start"));
-        match terminate_child("gtl-server", &mut server_child).await {
-            Ok(()) => Err(error),
-            Err(cleanup_error) => {
-                Err(error.context(format!("gtl-server cleanup also failed: {cleanup_error:#}")))
-            }
+        match start_driver_with_retries(&data_root, &viewer_binary).await {
+            Ok((driver, driver_child)) => Ok(Self {
+                driver: Some(driver),
+                driver_child: Some(driver_child),
+                server_child: Some(server_child),
+                data_root,
+            }),
+            Err(error) => Err(cleanup_start_failure("gtl-server", &mut server_child, error).await),
         }
     }
 
     pub fn driver(&self) -> &WebDriver {
-        self.driver
-            .as_ref()
-            .expect("driver remains available until session cleanup")
+        self.driver.as_ref().unwrap()
     }
 
     pub fn driver_if_active(&self) -> Option<&WebDriver> {
@@ -155,14 +99,7 @@ impl TestSession {
 
     async fn shutdown(&mut self) -> Result<()> {
         let driver_result = match self.driver.take() {
-            Some(driver) => {
-                wait::within(
-                    "quit WebDriver session",
-                    WEBDRIVER_OPERATION_TIMEOUT,
-                    async { driver.quit().await.map_err(anyhow::Error::from) },
-                )
-                .await
-            }
+            Some(driver) => quit_driver(driver).await,
             None => Ok(()),
         };
         let child_result = match self.driver_child.as_mut() {
@@ -195,6 +132,68 @@ impl TestSession {
                 .context(format!("gtl-server cleanup also failed: {server_error:#}")),
         }
     }
+}
+
+async fn start_driver_with_retries(
+    data_root: &Path,
+    viewer_binary: &str,
+) -> Result<(WebDriver, GroupChild)> {
+    let mut failure = None;
+    for attempt in 1..=START_ATTEMPTS_MAX {
+        match start_driver_attempt(data_root, viewer_binary, attempt).await {
+            Ok(started) => return Ok(started),
+            Err(error) => failure = Some(error),
+        }
+    }
+    Err(failure.unwrap_or_else(|| anyhow!("tauri-driver did not start")))
+}
+
+async fn start_driver_attempt(
+    data_root: &Path,
+    viewer_binary: &str,
+    attempt: usize,
+) -> Result<(WebDriver, GroupChild)> {
+    let ports = available_port_pair().context("select distinct driver ports")?;
+    let (webdriver_port, native_driver_port) = ports.ports()?;
+    let mut command = Command::new("tauri-driver");
+    command
+        .arg("--port")
+        .arg(webdriver_port.to_string())
+        .arg("--native-port")
+        .arg(native_driver_port.to_string())
+        .env("GIT_TOOLS_DATA_DIR", data_root);
+    deny_external_proxies(&mut command);
+    drop(ports);
+    let mut driver_child = command
+        .group_spawn()
+        .with_context(|| format!("spawn tauri-driver attempt {attempt}"))?;
+    let connection = timeout(
+        START_ATTEMPT_TIMEOUT,
+        connect_driver(webdriver_port, viewer_binary, &mut driver_child),
+    )
+    .await
+    .map_err(|_| anyhow!("tauri-driver attempt {attempt} exceeded {START_ATTEMPT_TIMEOUT:?}"))
+    .and_then(|result| result)
+    .with_context(|| format!("connect to tauri-driver on attempt {attempt}"));
+
+    match connection {
+        Ok(driver) => Ok((driver, driver_child)),
+        Err(error) => {
+            terminate_child("tauri-driver", &mut driver_child)
+                .await
+                .with_context(|| format!("clean up tauri-driver attempt {attempt}"))?;
+            Err(error)
+        }
+    }
+}
+
+async fn quit_driver(driver: WebDriver) -> Result<()> {
+    wait::within(
+        "quit WebDriver session",
+        WEBDRIVER_OPERATION_TIMEOUT,
+        async { driver.quit().await.map_err(anyhow::Error::from) },
+    )
+    .await
 }
 
 fn suite_data_root(name: &str) -> Result<PathBuf> {
@@ -256,19 +255,26 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
             bail!("gtl-server exited before endpoint publication ({status})");
         }
         if Instant::now() >= deadline {
-            let cleanup = terminate_child("gtl-server", &mut child).await;
             let error = anyhow!(
                 "gtl-server did not publish {} within {SERVER_READY_TIMEOUT:?}",
                 endpoint.display()
             );
-            return match cleanup {
-                Ok(()) => Err(error),
-                Err(cleanup_error) => {
-                    Err(error.context(format!("gtl-server cleanup also failed: {cleanup_error:#}")))
-                }
-            };
+            return Err(cleanup_start_failure("gtl-server", &mut child, error).await);
         }
         sleep(CONNECTION_RETRY_INTERVAL).await;
+    }
+}
+
+async fn cleanup_start_failure(
+    name: &str,
+    child: &mut GroupChild,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    match terminate_child(name, child).await {
+        Ok(()) => error,
+        Err(cleanup_error) => {
+            error.context(format!("{name} cleanup also failed: {cleanup_error:#}"))
+        }
     }
 }
 
@@ -447,6 +453,7 @@ mod tests {
         time::Duration,
     };
 
+    use anyhow::{Context as _, Result, ensure};
     use command_group::CommandGroup;
 
     use super::{request_group_termination, wait_for_exit};
@@ -454,6 +461,11 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn terminating_driver_reaps_its_process_group() {
+        terminate_driver_process_group().await.unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn terminate_driver_process_group() -> Result<()> {
         let temporary_directory = tempfile::tempdir().unwrap();
         let child_pid_path = temporary_directory.path().join("child.pid");
         let mut command = Command::new("sh");
@@ -464,56 +476,60 @@ mod tests {
                 "sleep 2147483647 & child=$!; printf '%s' \"$child\" > \"$GTL_E2E_CHILD_PID_PATH\"; trap 'exit 0' TERM; wait",
             ]);
         let mut child = command.group_spawn().unwrap();
-        let Some(child_pid) = wait_for_child_pid(&child_pid_path).await else {
+        let child_pid = wait_for_child_pid(&child_pid_path).await;
+        if child_pid.is_none() {
             let _ = child.kill();
             let _ = wait_for_exit(&mut child, Duration::from_secs(1)).await;
-            panic!("child pid was not written");
-        };
+        }
+        let child_pid = child_pid.context("child pid was not written")?;
 
         let termination_requested = request_group_termination(&child);
         if !matches!(&termination_requested, Ok(true)) {
             let _ = child.kill();
             let _ = wait_for_exit(&mut child, Duration::from_secs(1)).await;
         }
-        assert!(termination_requested.unwrap());
+        ensure!(
+            termination_requested?,
+            "process-group termination was not requested"
+        );
         let exited = wait_for_process_exit(child_pid, Duration::from_secs(1)).await;
         if !exited {
             let _ = child.kill();
         }
         let reaped = wait_for_exit(&mut child, Duration::from_secs(1)).await;
 
-        assert!(exited);
-        assert!(reaped.unwrap());
+        ensure!(
+            exited,
+            "child process remained live after group termination"
+        );
+        ensure!(reaped?, "driver process group was not reaped");
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
     async fn wait_for_child_pid(path: &Path) -> Option<u32> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-        loop {
-            if let Ok(pid) = fs::read_to_string(path)
-                && let Ok(pid) = pid.trim().parse()
-            {
-                return Some(pid);
+        while tokio::time::Instant::now() < deadline {
+            match read_child_pid(path) {
+                Some(pid) => return Some(pid),
+                None => tokio::time::sleep(Duration::from_millis(10)).await,
             }
-            if tokio::time::Instant::now() >= deadline {
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        read_child_pid(path)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn read_child_pid(path: &Path) -> Option<u32> {
+        fs::read_to_string(path).ok()?.trim().parse().ok()
     }
 
     #[cfg(target_os = "linux")]
     async fn wait_for_process_exit(pid: u32, duration: Duration) -> bool {
         let process_path = PathBuf::from(format!("/proc/{pid}"));
         let deadline = tokio::time::Instant::now() + duration;
-        loop {
-            if !process_path.exists() {
-                return true;
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return false;
-            }
+        while process_path.exists() && tokio::time::Instant::now() < deadline {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        !process_path.exists()
     }
 }

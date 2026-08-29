@@ -12,19 +12,22 @@ impl CheckPaths {
     pub(super) fn classify(paths: &[PathBuf]) -> Self {
         let mut checks = Self::default();
         for path in paths {
-            match path.extension().and_then(|extension| extension.to_str()) {
-                Some("rs") => checks.rust.push(path.clone()),
-                Some("toml") => checks.toml.push(path.clone()),
-                Some("md") => checks.markdown.push(path.clone()),
-                _ => {}
-            }
-            if is_dioxus_source_path(path)
-                && path.extension().is_some_and(|extension| extension == "rs")
-            {
-                checks.dioxus.push(path.clone());
-            }
+            checks.classify_path(path);
         }
         checks
+    }
+
+    fn classify_path(&mut self, path: &Path) {
+        let extension = path.extension().and_then(|extension| extension.to_str());
+        match extension {
+            Some("rs") => self.rust.push(path.to_path_buf()),
+            Some("toml") => self.toml.push(path.to_path_buf()),
+            Some("md") => self.markdown.push(path.to_path_buf()),
+            _ => {}
+        }
+        if extension == Some("rs") && is_dioxus_source_path(path) {
+            self.dioxus.push(path.to_path_buf());
+        }
     }
 }
 

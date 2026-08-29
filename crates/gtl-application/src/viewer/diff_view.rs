@@ -201,7 +201,7 @@ mod tests {
 
     fn identity(density: ViewerDiffDensity) -> ViewerViewIdentity {
         ViewerViewIdentity {
-            tab_id: ViewerTabId::try_new(7).expect("positive tab ID"),
+            tab_id: ViewerTabId::try_new(7).unwrap(),
             range_generation: ViewerRangeGeneration::new(8),
             selection_generation: ViewerSelectionGeneration::new(9),
             render_options: ViewerRenderOptions {
@@ -303,7 +303,7 @@ mod tests {
         assert_eq!(
             active
                 .exclusions
-                .expect("applied exclusions")
+                .unwrap()
                 .hidden_paths
                 .into_iter()
                 .map(|path| path.to_string_lossy().into_owned())

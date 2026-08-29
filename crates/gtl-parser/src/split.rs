@@ -18,36 +18,43 @@ pub struct SplitDiffCell {
 
 impl SplitDiffCell {
     /// Returns the line number for this side.
+    #[must_use]
     pub const fn line_number(&self) -> SourceLineNumber {
         self.line_number
     }
 
     /// Returns the raw diff line, including its leading marker.
+    #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
     /// Returns semantic syntax tokens indexed over the marker-free body.
+    #[must_use]
     pub fn syntax_tokens(&self) -> &[SyntaxToken] {
         &self.syntax_tokens
     }
 
     /// Returns intraline changed spans indexed over the marker-free body.
+    #[must_use]
     pub fn intraline_spans(&self) -> &[CharacterSpan] {
         &self.intraline_spans
     }
 
     /// Returns flat syntax and intraline spans over [`Self::body`].
+    #[must_use]
     pub fn semantic_spans(&self) -> &[SemanticTextSpan] {
         &self.semantic_spans
     }
 
     /// Returns the marker-free source text.
+    #[must_use]
     pub fn body(&self) -> &str {
         crate::diff_line_body(&self.text)
     }
 
     /// Returns the source character count when this cell exceeds the parser limit.
+    #[must_use]
     pub const fn long_line_character_count(&self) -> Option<CharacterCount> {
         self.long_line_character_count
     }
@@ -85,6 +92,7 @@ pub struct SplitDiffStream {
 
 impl SplitDiffStream {
     /// Starts an empty side-by-side stream.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             removed: Vec::new(),
@@ -97,39 +105,44 @@ impl SplitDiffStream {
         let mut output = Vec::new();
 
         for row in rows {
-            match row.kind() {
-                DiffRowKind::Removed => self.removed.push(row),
-                DiffRowKind::Added => self.added.push(row),
-                DiffRowKind::Meta => {
-                    self.flush_pairs(&mut output);
-                    output.push(SplitDiffRow::Meta {
-                        text: row.text().to_owned(),
-                    });
-                }
-                DiffRowKind::Hunk => {
-                    self.flush_pairs(&mut output);
-                    output.push(SplitDiffRow::Hunk {
-                        text: row.text().to_owned(),
-                    });
-                }
-                DiffRowKind::Context => {
-                    self.flush_pairs(&mut output);
-                    output.push(SplitDiffRow::Context {
-                        old_line_number: row.old_line_number().unwrap_or_default(),
-                        new_line_number: row.new_line_number().unwrap_or_default(),
-                        text: row.text().to_owned(),
-                        syntax_tokens: row.syntax_tokens().to_vec(),
-                        semantic_spans: row.semantic_spans().to_vec(),
-                        long_line_character_count: row.long_line_character_count(),
-                    });
-                }
-            }
+            self.push_row(row, &mut output);
         }
 
         output
     }
 
+    fn push_row(&mut self, row: DiffRow, output: &mut Vec<SplitDiffRow>) {
+        match row.kind() {
+            DiffRowKind::Removed => self.removed.push(row),
+            DiffRowKind::Added => self.added.push(row),
+            DiffRowKind::Meta => {
+                self.flush_pairs(output);
+                output.push(SplitDiffRow::Meta {
+                    text: row.text().to_owned(),
+                });
+            }
+            DiffRowKind::Hunk => {
+                self.flush_pairs(output);
+                output.push(SplitDiffRow::Hunk {
+                    text: row.text().to_owned(),
+                });
+            }
+            DiffRowKind::Context => {
+                self.flush_pairs(output);
+                output.push(SplitDiffRow::Context {
+                    old_line_number: row.old_line_number().unwrap_or_default(),
+                    new_line_number: row.new_line_number().unwrap_or_default(),
+                    text: row.text().to_owned(),
+                    syntax_tokens: row.syntax_tokens().to_vec(),
+                    semantic_spans: row.semantic_spans().to_vec(),
+                    long_line_character_count: row.long_line_character_count(),
+                });
+            }
+        }
+    }
+
     /// Flushes a trailing change run and completes the stream.
+    #[must_use]
     pub fn finish(mut self) -> Vec<SplitDiffRow> {
         let mut output = Vec::new();
         self.flush_pairs(&mut output);
@@ -141,15 +154,7 @@ impl SplitDiffStream {
             let old = self.removed.get(index);
             let new = self.added.get(index);
 
-            let spans = match (old, new) {
-                (Some(old), Some(new))
-                    if old.long_line_character_count().is_none()
-                        && new.long_line_character_count().is_none() =>
-                {
-                    changed_spans(old.body(), new.body())
-                }
-                _ => ChangedLineSpans::default(),
-            };
+            let spans = changed_line_spans(old, new);
 
             output.push(SplitDiffRow::Pair {
                 old: old.map(|row| split_cell(row, spans.old.clone(), true)),
@@ -158,6 +163,18 @@ impl SplitDiffStream {
         }
         self.removed.clear();
         self.added.clear();
+    }
+}
+
+fn changed_line_spans(old: Option<&DiffRow>, new: Option<&DiffRow>) -> ChangedLineSpans {
+    match (old, new) {
+        (Some(old), Some(new))
+            if old.long_line_character_count().is_none()
+                && new.long_line_character_count().is_none() =>
+        {
+            changed_spans(old.body(), new.body())
+        }
+        _ => ChangedLineSpans::default(),
     }
 }
 
@@ -202,13 +219,14 @@ mod tests {
         let rows = split(&["@@ -1,3 +1,2 @@", "-a", "-b", "+c"]);
 
         assert!(matches!(rows[0], SplitDiffRow::Hunk { .. }));
-        let SplitDiffRow::Pair {
-            old: Some(old),
-            new: Some(new),
-        } = &rows[1]
-        else {
-            panic!("first pair row must have both sides");
-        };
+        let (old, new) = match &rows[1] {
+            SplitDiffRow::Pair {
+                old: Some(old),
+                new: Some(new),
+            } => Some((old, new)),
+            _ => None,
+        }
+        .unwrap();
         assert_eq!(
             (old.line_number(), old.text()),
             (SourceLineNumber::new(1), "-a")
@@ -238,15 +256,16 @@ mod tests {
                 new: None
             }
         ));
-        let SplitDiffRow::Context {
-            old_line_number,
-            new_line_number,
-            text,
-            ..
-        } = &rows[2]
-        else {
-            panic!("context row expected");
-        };
+        let (old_line_number, new_line_number, text) = match &rows[2] {
+            SplitDiffRow::Context {
+                old_line_number,
+                new_line_number,
+                text,
+                ..
+            } => Some((old_line_number, new_line_number, text)),
+            _ => None,
+        }
+        .unwrap();
         assert_eq!(
             (*old_line_number, *new_line_number, text.as_str()),
             (SourceLineNumber::new(2), SourceLineNumber::new(1), " mid")
@@ -256,13 +275,14 @@ mod tests {
     #[test]
     fn paired_short_lines_receive_intraline_spans() {
         let rows = split(&["@@ -1 +1 @@", "-let x = 1;", "+let x = 2;"]);
-        let SplitDiffRow::Pair {
-            old: Some(old),
-            new: Some(new),
-        } = &rows[1]
-        else {
-            panic!("pair expected");
-        };
+        let (old, new) = match &rows[1] {
+            SplitDiffRow::Pair {
+                old: Some(old),
+                new: Some(new),
+            } => Some((old, new)),
+            _ => None,
+        }
+        .unwrap();
 
         assert_eq!(old.intraline_spans(), [CharacterSpan::new(8, 9)]);
         assert_eq!(new.intraline_spans(), [CharacterSpan::new(8, 9)]);
@@ -277,13 +297,14 @@ mod tests {
         let rows = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
             .parse(&lines)
             .split_rows();
-        let SplitDiffRow::Pair {
-            old: Some(old),
-            new: Some(new),
-        } = &rows[1]
-        else {
-            panic!("pair expected");
-        };
+        let (old, new) = match &rows[1] {
+            SplitDiffRow::Pair {
+                old: Some(old),
+                new: Some(new),
+            } => Some((old, new)),
+            _ => None,
+        }
+        .unwrap();
 
         assert!(old.intraline_spans().is_empty());
         assert!(new.intraline_spans().is_empty());
@@ -292,13 +313,14 @@ mod tests {
     #[test]
     fn unpaired_and_trailing_runs_are_retained_without_spans() {
         let rows = split(&["@@ -1,2 +1 @@", "-a", "-b", "+c"]);
-        let SplitDiffRow::Pair {
-            old: Some(old),
-            new: None,
-        } = &rows[2]
-        else {
-            panic!("second removed line should be retained");
-        };
+        let old = match &rows[2] {
+            SplitDiffRow::Pair {
+                old: Some(old),
+                new: None,
+            } => Some(old),
+            _ => None,
+        }
+        .unwrap();
 
         assert!(old.intraline_spans().is_empty());
         assert_eq!(old.text(), "-b");

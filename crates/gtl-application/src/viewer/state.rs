@@ -20,6 +20,7 @@ pub enum ViewerStateError {
 
 impl ViewerState {
     /// Creates an empty per-server viewer session with the default cache bound.
+    #[must_use]
     pub fn new() -> Self {
         let version = ViewerVersion::default();
         let (version_sender, _) = tokio::sync::watch::channel(version);
@@ -74,6 +75,7 @@ impl ViewerState {
     }
 
     /// Subscribes to the current version and every later visible state change.
+    #[must_use]
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<ViewerVersion> {
         self.version_sender.subscribe()
     }
@@ -95,15 +97,13 @@ mod tests {
         let mut receiver = state.subscribe();
 
         assert_eq!(*receiver.borrow(), ViewerVersion::default());
-        state.inspect(|_| ()).expect("state inspection succeeds");
-        assert!(!receiver.has_changed().expect("watch remains open"));
+        state.inspect(|_| ()).unwrap();
+        assert!(!receiver.has_changed().unwrap());
 
-        let version = state
-            .mark_shell_changed()
-            .expect("visible state change succeeds");
+        let version = state.mark_shell_changed().unwrap();
 
         assert_eq!(version, ViewerVersion::new(1));
-        assert!(receiver.has_changed().expect("watch remains open"));
+        assert!(receiver.has_changed().unwrap());
         assert_eq!(*receiver.borrow_and_update(), version);
     }
 }

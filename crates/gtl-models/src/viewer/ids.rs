@@ -80,6 +80,7 @@ pub struct RenderHistoryId(i64);
 pub struct ViewerRangeGeneration(u64);
 
 impl ViewerRangeGeneration {
+    #[must_use]
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
@@ -89,6 +90,7 @@ impl ViewerRangeGeneration {
         Self::new(self.0.wrapping_add(1))
     }
 
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }
@@ -112,6 +114,7 @@ impl ViewerRangeGeneration {
 pub struct ViewerSelectionGeneration(u64);
 
 impl ViewerSelectionGeneration {
+    #[must_use]
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
@@ -126,6 +129,7 @@ impl ViewerSelectionGeneration {
         Self::new(self.0.wrapping_sub(1))
     }
 
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }
@@ -149,21 +153,23 @@ impl ViewerSelectionGeneration {
 pub struct ViewerVersion(u64);
 
 impl ViewerVersion {
+    #[must_use]
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
     #[must_use]
-    #[allow(clippy::expect_used)]
     /// Returns the next process-local shell version.
     ///
     /// # Panics
     ///
     /// Panics after version `u64::MAX`; the server never wraps a viewer version.
     pub const fn next(self) -> Self {
-        Self::new(self.0.checked_add(1).expect("viewer version exhausted u64"))
+        assert!(self.0 < u64::MAX, "viewer version exhausted u64");
+        Self::new(self.0 + 1)
     }
 
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }
@@ -176,17 +182,14 @@ mod tests {
     #[test]
     fn zero_is_not_a_viewer_tab_id() {
         assert!(ViewerTabId::try_new(0).is_err());
-        assert_eq!(u64::from(ViewerTabId::try_new(7).expect("positive id")), 7);
+        assert_eq!(u64::from(ViewerTabId::try_new(7).unwrap()), 7);
     }
 
     #[test]
     fn non_positive_values_are_not_render_history_ids() {
         assert!(RenderHistoryId::try_new(-1).is_err());
         assert!(RenderHistoryId::try_new(0).is_err());
-        assert_eq!(
-            i64::from(RenderHistoryId::try_new(11).expect("positive id")),
-            11
-        );
+        assert_eq!(i64::from(RenderHistoryId::try_new(11).unwrap()), 11);
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub enum FileStatus {
 
 impl FileDiff {
     /// Classifies the file from Git's raw diff metadata.
+    #[must_use]
     pub fn status(&self) -> FileStatus {
         if self
             .lines

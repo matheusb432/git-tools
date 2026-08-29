@@ -71,7 +71,7 @@ mod tests {
     };
 
     fn repository_root() -> tempfile::TempDir {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         utils::make_repository(&temporary.path().join("api"));
         utils::make_repository(&temporary.path().join("web"));
         temporary
@@ -102,7 +102,7 @@ mod tests {
             },
             &git,
         )
-        .expect("repository recipes build");
+        .unwrap();
 
         assert_eq!(
             recipes
@@ -151,7 +151,7 @@ mod tests {
             },
             &git,
         )
-        .expect("repository recipes build");
+        .unwrap();
 
         assert_eq!(
             recipes
@@ -182,7 +182,7 @@ mod tests {
             },
             &git,
         )
-        .expect("pin failures are optional optimizations");
+        .unwrap();
 
         assert!(recipes.iter().all(|recipe| recipe.op
             == RecipeOp::Diff {

@@ -24,6 +24,7 @@ pub struct CommitId(String);
 
 impl CommitId {
     /// Returns this commit ID at a supported presentation width.
+    #[must_use]
     pub fn abbreviated(&self, abbreviation: CommitIdAbbreviation) -> String {
         self.as_ref()
             .chars()
@@ -77,7 +78,7 @@ mod tests {
     const COMMIT_ID_UPPERCASE: &str = "0123456789ABCDEF0123456789ABCDEF01234567";
 
     fn commit_id(raw: &str) -> CommitId {
-        raw.try_into().expect("fixture commit ID is valid")
+        raw.try_into().unwrap()
     }
 
     #[test]

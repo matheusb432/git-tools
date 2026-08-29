@@ -65,18 +65,13 @@ impl ServerHarness {
         let authorization = ServerHarnessAuthorization::new(&capability)?;
         let (shutdown, shutdown_receiver) = oneshot::channel();
         let server_state = state.clone();
-        let task = tokio::spawn(async move {
-            serve(
-                listeners,
-                async move {
-                    let _ = shutdown_receiver.await;
-                },
-                SHUTDOWN_GRACE_PERIOD,
-                capability,
-                server_state,
-            )
-            .await
-        });
+        let task = tokio::spawn(serve(
+            listeners,
+            wait_for_shutdown(shutdown_receiver),
+            SHUTDOWN_GRACE_PERIOD,
+            capability,
+            server_state,
+        ));
         tokio::task::yield_now().await;
         #[cfg(test)]
         let native_channel = connect_harness_channel(&endpoint).await?;
@@ -98,6 +93,7 @@ impl ServerHarness {
     }
 
     #[cfg(feature = "benchmark-support")]
+    #[must_use]
     pub const fn auth(&self) -> &LocalAuth {
         &self.auth
     }
@@ -139,6 +135,10 @@ impl ServerHarness {
     pub(crate) fn authorization(&self) -> ServerHarnessAuthorization {
         self.authorization.clone()
     }
+}
+
+async fn wait_for_shutdown(shutdown_receiver: oneshot::Receiver<()>) {
+    let _ = shutdown_receiver.await;
 }
 
 #[cfg(unix)]

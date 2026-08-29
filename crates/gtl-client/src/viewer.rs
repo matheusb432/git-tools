@@ -64,9 +64,7 @@ mod tests {
     #[test]
     fn viewer_protocol_mismatch_has_a_clear_client_error() {
         let current = gtl_wire::viewer::VIEWER_PROTOCOL_VERSION;
-        let different = current
-            .checked_add(1)
-            .expect("protocol version can advance");
+        let different = current.checked_add(1).unwrap();
 
         assert_eq!(validate_viewer_protocol(current), Ok(()));
         assert_eq!(
@@ -86,9 +84,8 @@ mod tests {
             ViewerClientError::Unavailable,
             ViewerClientError::Internal,
         ] {
-            let encoded = serde_json::to_string(&error).expect("serialize viewer client error");
-            let decoded =
-                serde_json::from_str::<ViewerClientError>(&encoded).expect("deserialize error");
+            let encoded = serde_json::to_string(&error).unwrap();
+            let decoded = serde_json::from_str::<ViewerClientError>(&encoded).unwrap();
             assert_eq!(decoded, error);
         }
     }

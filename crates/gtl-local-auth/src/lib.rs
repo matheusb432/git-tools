@@ -113,38 +113,28 @@ mod tests {
     use super::*;
 
     fn local_auth(directory: &tempfile::TempDir) -> LocalAuth {
-        LocalAuth::from_data_root(directory.path()).expect("absolute temporary data root")
+        LocalAuth::from_data_root(directory.path()).unwrap()
     }
 
     #[cfg(unix)]
     fn server_endpoint(auth: &LocalAuth, instance_id: ServerInstanceId) -> ServerEndpoint {
-        auth.server_endpoint(instance_id)
-            .expect("deterministic UDS endpoint")
+        auth.server_endpoint(instance_id).unwrap()
     }
 
     #[cfg(windows)]
     fn server_endpoint(_auth: &LocalAuth, instance_id: ServerInstanceId) -> ServerEndpoint {
-        ServerEndpoint::try_new(
-            "127.0.0.1:4318"
-                .parse::<SocketAddr>()
-                .expect("parse loopback address"),
-            instance_id,
-        )
-        .expect("bound native endpoint")
+        ServerEndpoint::try_new("127.0.0.1:4318".parse::<SocketAddr>().unwrap(), instance_id)
+            .unwrap()
     }
 
     #[test]
     fn capability_persists_across_server_restarts() {
-        let directory = tempfile::tempdir().expect("temporary data root");
+        let directory = tempfile::tempdir().unwrap();
         let auth = local_auth(&directory);
 
-        let provisioned = auth
-            .load_or_create_server_token()
-            .expect("provision capability");
-        let restarted = auth
-            .load_or_create_server_token()
-            .expect("load persisted capability");
-        let client = auth.load_client_token().expect("load client capability");
+        let provisioned = auth.load_or_create_server_token().unwrap();
+        let restarted = auth.load_or_create_server_token().unwrap();
+        let client = auth.load_client_token().unwrap();
 
         assert!(provisioned.authenticates(restarted.expose_secret()));
         assert!(provisioned.authenticates(client.expose_secret()));
@@ -153,23 +143,21 @@ mod tests {
 
     #[test]
     fn endpoint_publication_is_instance_owned() {
-        let directory = tempfile::tempdir().expect("temporary data root");
+        let directory = tempfile::tempdir().unwrap();
         let auth = local_auth(&directory);
         let endpoint = server_endpoint(&auth, ServerInstanceId::generate());
 
-        let published = auth
-            .publish_endpoint(endpoint.clone())
-            .expect("publish endpoint");
-        assert_eq!(auth.load_endpoint().expect("load endpoint"), endpoint);
+        let published = auth.publish_endpoint(endpoint.clone()).unwrap();
+        assert_eq!(auth.load_endpoint().unwrap(), endpoint);
         let record: serde_json::Value = serde_json::from_slice(
             &std::fs::read(
                 auth.data_root()
                     .join(SERVER_DIRECTORY_NAME)
                     .join(endpoint::ENDPOINT_FILE_NAME),
             )
-            .expect("read endpoint record"),
+            .unwrap(),
         )
-        .expect("decode endpoint record");
+        .unwrap();
         #[cfg(unix)]
         {
             assert_eq!(record["transport"], "uds");
@@ -195,14 +183,12 @@ mod tests {
 
     #[test]
     fn viewer_bootstrap_must_match_the_active_server_instance() {
-        let directory = tempfile::tempdir().expect("temporary data root");
+        let directory = tempfile::tempdir().unwrap();
         let auth = local_auth(&directory);
         let endpoint = server_endpoint(&auth, ServerInstanceId::generate());
-        let _published_endpoint = auth.publish_endpoint(endpoint).expect("publish endpoint");
+        let _published_endpoint = auth.publish_endpoint(endpoint).unwrap();
         let bootstrap = ViewerBootstrap::new(ServerInstanceId::generate(), 1);
-        let _published_viewer = auth
-            .publish_viewer_bootstrap(&bootstrap)
-            .expect("publish viewer bootstrap");
+        let _published_viewer = auth.publish_viewer_bootstrap(&bootstrap).unwrap();
 
         assert!(matches!(
             auth.load_viewer_bootstrap(),
@@ -243,15 +229,12 @@ mod tests {
     fn capability_and_endpoint_are_user_private() {
         use std::os::unix::fs::MetadataExt as _;
 
-        let directory = tempfile::tempdir().expect("temporary data root");
+        let directory = tempfile::tempdir().unwrap();
         let auth = local_auth(&directory);
-        auth.load_or_create_server_token()
-            .expect("provision capability");
+        auth.load_or_create_server_token().unwrap();
         let instance_id = ServerInstanceId::generate();
         let endpoint = server_endpoint(&auth, instance_id.clone());
-        let _published = auth
-            .publish_endpoint(endpoint.clone())
-            .expect("publish endpoint");
+        let _published = auth.publish_endpoint(endpoint.clone()).unwrap();
         let server_directory = auth.data_root().join(SERVER_DIRECTORY_NAME);
 
         assert_eq!(
@@ -259,10 +242,8 @@ mod tests {
             0o700
         );
         let viewer_bootstrap = ViewerBootstrap::new(instance_id, 1);
-        let _published_viewer = auth
-            .publish_viewer_bootstrap(&viewer_bootstrap)
-            .expect("publish viewer bootstrap");
-        let loaded_viewer = auth.load_viewer_bootstrap().expect("load viewer bootstrap");
+        let _published_viewer = auth.publish_viewer_bootstrap(&viewer_bootstrap).unwrap();
+        let loaded_viewer = auth.load_viewer_bootstrap().unwrap();
         assert_eq!(loaded_viewer.instance_id(), endpoint.instance_id());
         assert_eq!(loaded_viewer.protocol_version(), 1);
         for name in [

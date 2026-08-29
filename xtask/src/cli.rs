@@ -24,17 +24,14 @@ pub enum Command {
     /// Build and install both artifacts, and ensure `~/.local/bin` is on PATH.
     #[command(name = Verb::SETUP.as_str())]
     Setup,
-    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-server`) and/or the
-    /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
-    /// already-built artifacts.
+    /// Install prebuilt CLI, server, or viewer artifacts.
     #[command(name = Verb::INSTALL.as_str())]
     Install {
         /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
         #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
         target: InstallTarget,
     },
-    /// Remove the installed CLI binary + `gtl` alias + `gtl-server` and the desktop viewer from
-    /// PATH.
+    /// Remove installed CLI, server, and viewer artifacts.
     #[command(name = Verb::UNINSTALL.as_str())]
     Uninstall {
         /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
@@ -127,13 +124,10 @@ pub enum Command {
     /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
-    /// Cross-build the Win11 shippables (CLI + viewer + gtl-server) from this Linux host via
-    /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
-    /// ship + verify.
+    /// Cross-build Windows CLI, viewer, and server artifacts with cargo-xwin.
     #[command(name = Verb::SHIP.as_str())]
     Ship {
-        /// Debug-profile compile-smoke of all three binaries — a non-authoritative linkage drift
-        /// check (no artifact verify), not a shippable.
+        /// Compile all binaries in debug mode without artifact verification.
         #[arg(long)]
         smoke: bool,
         /// Skip only the `just test --all` preflight.
@@ -142,7 +136,6 @@ pub enum Command {
     },
 }
 
-/// Which release artifact set `build` produces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum BuildTarget {
     Cli,
@@ -150,7 +143,6 @@ pub enum BuildTarget {
     Both,
 }
 
-/// Which artifact(s) `install` places. `both` covers the CLI engine and the desktop viewer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum InstallTarget {
     Cli,

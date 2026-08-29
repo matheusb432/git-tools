@@ -709,9 +709,7 @@ mod tests {
     async fn rejects_a_server_with_a_different_capability() -> TestResult {
         let harness = TestHarness::start(false).await?;
 
-        let error = GtlClient::connect(&harness.auth)
-            .await
-            .expect_err("mismatched capability must fail");
+        let error = GtlClient::connect(&harness.auth).await.unwrap_err();
 
         assert!(matches!(
             error,
@@ -839,12 +837,85 @@ mod tests {
                 .and_then(|value| value.to_str().ok())
                 .and_then(|value| value.strip_prefix("Bearer "))
                 .is_some_and(|candidate| self.capability.authenticates(candidate));
-            if authenticated {
-                Ok(request)
-            } else {
-                Err(Status::unauthenticated("authentication required"))
-            }
+            authenticated
+                .then_some(request)
+                .ok_or_else(|| Status::unauthenticated("authentication required"))
         }
+    }
+
+    fn select_server_capability(
+        matching_capability: bool,
+        stored_capability: CapabilityToken,
+    ) -> TestResult<CapabilityToken> {
+        if matching_capability {
+            Ok(stored_capability)
+        } else {
+            Ok(CapabilityToken::generate()?)
+        }
+    }
+
+    #[cfg(unix)]
+    fn bind_test_listener(
+        auth: &LocalAuth,
+        instance_id: ServerInstanceId,
+    ) -> TestResult<(ServerEndpoint, tokio::net::UnixListener)> {
+        let endpoint = auth.server_endpoint(instance_id)?;
+        let listener = tokio::net::UnixListener::bind(endpoint.uds_path())?;
+        Ok((endpoint, listener))
+    }
+
+    #[cfg(windows)]
+    async fn bind_test_listener(
+        _auth: &LocalAuth,
+        instance_id: ServerInstanceId,
+    ) -> TestResult<(ServerEndpoint, tokio::net::TcpListener)> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let endpoint = ServerEndpoint::try_new(listener.local_addr()?, instance_id)?;
+        Ok((endpoint, listener))
+    }
+
+    #[cfg(unix)]
+    async fn run_test_server(
+        listener: tokio::net::UnixListener,
+        authentication: TestAuthentication,
+        shutdown_receiver: oneshot::Receiver<()>,
+        ready: oneshot::Sender<()>,
+    ) -> Result<(), tonic::transport::Error> {
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_service_status("", tonic_health::ServingStatus::Serving)
+            .await;
+        let _ = ready.send(());
+        Server::builder()
+            .layer(InterceptorLayer::new(authentication))
+            .add_service(health_service)
+            .add_service(DiffServiceServer::new(TestDiff))
+            .serve_with_incoming_shutdown(UnixListenerStream::new(listener), async move {
+                let _ = shutdown_receiver.await;
+            })
+            .await
+    }
+
+    #[cfg(windows)]
+    async fn run_test_server(
+        listener: tokio::net::TcpListener,
+        authentication: TestAuthentication,
+        shutdown_receiver: oneshot::Receiver<()>,
+        ready: oneshot::Sender<()>,
+    ) -> Result<(), tonic::transport::Error> {
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_service_status("", tonic_health::ServingStatus::Serving)
+            .await;
+        let _ = ready.send(());
+        Server::builder()
+            .layer(InterceptorLayer::new(authentication))
+            .add_service(health_service)
+            .add_service(DiffServiceServer::new(TestDiff))
+            .serve_with_incoming_shutdown(TcpIncoming::from(listener), async move {
+                let _ = shutdown_receiver.await;
+            })
+            .await
     }
 
     impl TestHarness {
@@ -852,47 +923,28 @@ mod tests {
             let directory = tempfile::tempdir()?;
             let auth = LocalAuth::from_data_root(directory.path())?;
             let stored_capability = auth.load_or_create_server_token()?;
-            let server_capability = if matching_capability {
-                stored_capability
-            } else {
-                CapabilityToken::generate()?
-            };
+            let server_capability =
+                select_server_capability(matching_capability, stored_capability)?;
             let instance_id = ServerInstanceId::generate();
             #[cfg(unix)]
-            let (endpoint, listener) = {
-                let endpoint = auth.server_endpoint(instance_id)?;
-                let listener = tokio::net::UnixListener::bind(endpoint.uds_path())?;
-                (endpoint, listener)
-            };
+            let (endpoint, listener) = bind_test_listener(&auth, instance_id)?;
             #[cfg(windows)]
-            let (endpoint, listener) = {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-                let endpoint = ServerEndpoint::try_new(listener.local_addr()?, instance_id)?;
-                (endpoint, listener)
-            };
+            let (endpoint, listener) = bind_test_listener(&auth, instance_id).await?;
             let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
             let authentication = TestAuthentication {
                 capability: server_capability,
             };
-            let (health_reporter, health_service) = tonic_health::server::health_reporter();
-            health_reporter
-                .set_service_status("", tonic_health::ServingStatus::Serving)
-                .await;
             let (shutdown, shutdown_receiver) = oneshot::channel();
-            #[cfg(unix)]
-            let incoming = UnixListenerStream::new(listener);
-            #[cfg(windows)]
-            let incoming = TcpIncoming::from(listener);
-            let task = tokio::spawn(async move {
-                Server::builder()
-                    .layer(InterceptorLayer::new(authentication))
-                    .add_service(health_service)
-                    .add_service(DiffServiceServer::new(TestDiff))
-                    .serve_with_incoming_shutdown(incoming, async move {
-                        let _ = shutdown_receiver.await;
-                    })
-                    .await
-            });
+            let (ready, ready_receiver) = oneshot::channel();
+            let task = tokio::spawn(run_test_server(
+                listener,
+                authentication,
+                shutdown_receiver,
+                ready,
+            ));
+            ready_receiver
+                .await
+                .map_err(|_| "test server stopped before readiness")?;
 
             Ok(Self {
                 _directory: directory,

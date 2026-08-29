@@ -37,6 +37,7 @@ path = "src/bin/grpc_transport_driver/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
 gtl-client.workspace = true
 gtl-local-auth.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
@@ -45,6 +46,7 @@ prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+sysinfo.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }

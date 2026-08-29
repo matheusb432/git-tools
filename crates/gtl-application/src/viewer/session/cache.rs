@@ -16,10 +16,12 @@ use crate::{
 pub struct ViewCacheWeight(usize);
 
 impl ViewCacheWeight {
+    #[must_use]
     pub const fn new(value: usize) -> Self {
         Self(value)
     }
 
+    #[must_use]
     pub const fn bytes(self) -> usize {
         self.0
     }
@@ -64,6 +66,7 @@ pub struct CachedView {
 }
 
 impl CachedView {
+    #[must_use]
     pub fn new(view: Arc<View>) -> Self {
         let weight = view_weight(&view);
         Self {
@@ -87,6 +90,7 @@ impl CachedView {
         Self::new(Arc::clone(&self.view))
     }
 
+    #[must_use]
     pub const fn weight(&self) -> ViewCacheWeight {
         self.weight
     }
@@ -107,6 +111,7 @@ pub struct WeightedViewCache {
 }
 
 impl WeightedViewCache {
+    #[must_use]
     pub fn new(max_weight: ViewCacheWeight) -> Self {
         Self {
             entries: LruCache::unbounded(),
@@ -138,17 +143,23 @@ impl WeightedViewCache {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub const fn weight(&self) -> ViewCacheWeight {
         self.weight
     }
 
     fn evict_to_bound(&mut self) {
         while self.weight > self.max_weight {
-            let Some((_, evicted)) = self.entries.pop_lru() else {
-                self.weight = ViewCacheWeight::default();
-                break;
-            };
-            self.weight = self.weight.saturating_sub(evicted.weight());
+            self.evict_lru();
+        }
+    }
+
+    fn evict_lru(&mut self) {
+        match self.entries.pop_lru() {
+            Some((_, evicted)) => {
+                self.weight = self.weight.saturating_sub(evicted.weight());
+            }
+            None => self.weight = ViewCacheWeight::default(),
         }
     }
 }
@@ -245,7 +256,7 @@ mod tests {
     };
 
     fn id(value: u64) -> ViewerTabId {
-        ViewerTabId::try_new(value).expect("positive id")
+        ViewerTabId::try_new(value).unwrap()
     }
 
     fn cached(title: &str) -> CachedView {
@@ -266,6 +277,13 @@ mod tests {
             commits_label: String::new(),
             foot: Foot { cmd: String::new() },
         }))
+    }
+
+    fn touch_older_entry(cache: &mut WeightedViewCache, raw_id: u64) {
+        let Some(older_id) = raw_id.checked_sub(2).filter(|older_id| *older_id > 0) else {
+            return;
+        };
+        let _ = cache.get(id(older_id));
     }
 
     #[test]
@@ -362,9 +380,7 @@ mod tests {
             );
             assert!(cache.weight() <= super::super::DEFAULT_VIEW_CACHE_WEIGHT);
 
-            if raw_id > 2 {
-                let _ = cache.get(id(raw_id - 2));
-            }
+            touch_older_entry(&mut cache, raw_id);
         }
     }
 }

@@ -1,7 +1,3 @@
-//! Plans a recursive push by finding every Git repository under a root and
-//! resolving each one's push destination from local refs through the
-//! [`GitClient`](crate::ports::GitClient) port - read-only, never fetches or pushes.
-
 use std::path::PathBuf;
 
 use gtl_models::{
@@ -15,15 +11,12 @@ use gtl_models::{
 
 use crate::{ports::GitClient, repositories::find_repositories};
 
-/// Everything that can go wrong planning a recursive push.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanRecursivePushError {
     #[error(transparent)]
     Discover(#[from] find_repositories::FindRepositoriesError),
 }
 
-/// Discovers every git repo under the root and resolves each one's push destination.
-/// Linked worktrees are skipped by the repository traversal scope.
 #[cqrsy::query]
 pub fn execute(
     root: PathBuf,
@@ -44,9 +37,6 @@ pub fn execute(
     Ok(SubreposPlan::Ready(targets))
 }
 
-/// Resolves one repo's push destination from local refs only — never fetches. A detached
-/// HEAD or a branch with no `branch.<name>.remote` becomes a [`Dest::Skip`]; a branch with
-/// no unpushed commits becomes a [`Dest::Synced`] so the push is skipped entirely.
 fn inspect(git: &impl GitClient, path: &RepositoryRoot, label: ProjectName) -> RepoTarget {
     let dest = match git.current_branch(path).ok() {
         Some(GitHead::Branch(branch)) => match git.branch_remote(path, &branch).ok().flatten() {
@@ -67,10 +57,6 @@ fn inspect(git: &impl GitClient, path: &RepositoryRoot, label: ProjectName) -> R
     }
 }
 
-/// Whether the current branch has no unpushed commits — the local `@{u}..HEAD` count is
-/// exactly `0`. This mirrors the ahead-count `gtl status --all` reports and the sibling
-/// `diff -r` uses to spot synced repos, and stays purely local (no fetch). An unavailable
-/// count (e.g. no `@{u}` merge ref) is never read as synced — we fall back to pushing.
 fn is_synced(git: &impl GitClient, path: &RepositoryRoot) -> bool {
     git.commit_count(path, &GitRange::upstream_to_head())
         .ok()
@@ -91,8 +77,7 @@ mod tests {
         let runner = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),
-            ScriptedGitClient::applied("2\n"), /* rev-list --count @{u}..HEAD — two unpushed
-                                                * commits */
+            ScriptedGitClient::applied("2\n"),
         ]);
         let target = inspect(
             &runner,
@@ -113,7 +98,7 @@ mod tests {
         let runner = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),
-            ScriptedGitClient::applied("0\n"), // rev-list --count @{u}..HEAD — nothing to push
+            ScriptedGitClient::applied("0\n"),
         ]);
         let target = inspect(
             &runner,
@@ -131,8 +116,6 @@ mod tests {
 
     #[test]
     fn inspect_pushes_when_ahead_count_is_unavailable() {
-        // A failed `rev-list --count` must never read as "0 / already synced" — fall back to
-        // attempting the push, exactly as the sibling checks do.
         let runner = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),
@@ -189,12 +172,12 @@ mod tests {
 
     #[test]
     fn plan_refuses_when_no_repos_are_discovered() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let plan = plan_recursive_push::execute(
             temporary.path().to_path_buf(),
             &ScriptedGitClient::default(),
         )
-        .expect("planning succeeds");
+        .unwrap();
 
         assert_eq!(
             plan,
@@ -207,21 +190,21 @@ mod tests {
 
     #[test]
     fn plan_inspects_every_discovered_repo_with_its_label() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         utils::make_repository(&temporary.path().join("api"));
         utils::make_repository(&temporary.path().join("libs/inner"));
-        // Both repos detached: one scripted rev-parse per repo keeps the fixture minimal.
         let runner = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("HEAD\n"),
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
-        let plan = plan_recursive_push::execute(temporary.path().to_path_buf(), &runner)
-            .expect("planning succeeds");
+        let plan = plan_recursive_push::execute(temporary.path().to_path_buf(), &runner).unwrap();
 
-        let SubreposPlan::Ready(targets) = plan else {
-            panic!("expected a ready plan, got {plan:?}");
-        };
+        let targets = match plan {
+            SubreposPlan::Ready(targets) => Some(targets),
+            SubreposPlan::Refused(_) => None,
+        }
+        .unwrap();
         let labels: Vec<&str> = targets.iter().map(|target| target.label.as_str()).collect();
         assert_eq!(labels, ["api", "libs/inner"]);
     }

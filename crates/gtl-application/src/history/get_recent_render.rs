@@ -56,23 +56,21 @@ mod tests {
 
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {
-        let id = RenderHistoryId::try_new(11).expect("positive id");
+        let id = RenderHistoryId::try_new(11).unwrap();
         let connection = store_test();
         seed_recent_render(&connection, i64::from(id), "render");
 
-        let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
-            .expect("lookup succeeds");
+        let response = get_recent_render::execute(&GetRecentRender { id }, &connection).unwrap();
 
-        assert_eq!(response.expect("record exists").id, id);
+        assert_eq!(response.unwrap().id, id);
     }
 
     #[test]
     fn absent_recent_render_is_a_successful_miss() {
-        let id = RenderHistoryId::try_new(99).expect("positive id");
+        let id = RenderHistoryId::try_new(99).unwrap();
 
         let connection = store_test();
-        let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
-            .expect("lookup succeeds");
+        let response = get_recent_render::execute(&GetRecentRender { id }, &connection).unwrap();
 
         assert!(response.is_none());
     }

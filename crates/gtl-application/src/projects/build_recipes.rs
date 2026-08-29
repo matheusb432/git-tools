@@ -93,7 +93,7 @@ mod tests {
             },
             &git,
         )
-        .expect("project recipes build");
+        .unwrap();
 
         assert_eq!(
             recipes
@@ -134,7 +134,7 @@ mod tests {
             },
             &git,
         )
-        .expect("pin failure is an optional optimization");
+        .unwrap();
 
         assert_eq!(
             recipes[0].op,

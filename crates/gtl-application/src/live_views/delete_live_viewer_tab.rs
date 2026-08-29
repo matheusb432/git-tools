@@ -65,7 +65,7 @@ mod tests {
                  VALUES ('LocalRepo', '/repos/project', 'project', '2026-01-01T00:00:00Z')",
                 [],
             )
-            .expect("seed live view");
+            .unwrap();
     }
 
     fn open_live_tab(viewer: &ViewerState) -> ViewerTabId {
@@ -78,7 +78,7 @@ mod tests {
             gtl_models::recipes::RecipeBatchId::generate(),
             ViewerTabKind::Live,
         )
-        .expect("live tab opens")
+        .unwrap()
         .ticket()
         .tab_id
     }
@@ -90,39 +90,35 @@ mod tests {
         let viewer = ViewerState::new();
         let tab_id = open_live_tab(&viewer);
 
-        let refresh =
-            delete_live_viewer_tab::execute(tab_id, &connection, &viewer).expect("delete succeeds");
+        let refresh = delete_live_viewer_tab::execute(tab_id, &connection, &viewer).unwrap();
 
         assert!(refresh.is_none());
         assert!(
             list_live_views::execute(list_live_views::ListLiveViews, &connection)
-                .expect("list saved views")
+                .unwrap()
                 .is_empty()
         );
         assert!(
             viewer
                 .inspect(|session| session.tab(tab_id).is_none())
-                .expect("viewer remains available")
+                .unwrap()
         );
     }
 
     #[test]
     fn persistence_failure_leaves_the_live_tab_open() {
         let connection = store_test();
-        connection
-            .execute("DROP TABLE live_views", [])
-            .expect("drop live views table");
+        connection.execute("DROP TABLE live_views", []).unwrap();
         let viewer = ViewerState::new();
         let tab_id = open_live_tab(&viewer);
 
-        let error = delete_live_viewer_tab::execute(tab_id, &connection, &viewer)
-            .expect_err("delete failure rejects");
+        let error = delete_live_viewer_tab::execute(tab_id, &connection, &viewer).unwrap_err();
 
         assert!(matches!(error, DeleteLiveViewerTabError::Unexpected(_)));
         assert!(
             viewer
                 .inspect(|session| session.tab(tab_id).is_some())
-                .expect("viewer remains available")
+                .unwrap()
         );
     }
 }

@@ -102,7 +102,7 @@ mod tests {
             return;
         }
 
-        let executable = std::env::current_exe().expect("test executable resolves");
+        let executable = std::env::current_exe().unwrap();
         let step = Step::new(
             "process group child",
             executable.to_string_lossy().into_owned(),
@@ -112,13 +112,13 @@ mod tests {
             ],
         )
         .with_environment(CHILD_MARKER, "1");
-        let parent_group = linux_process_group(std::process::id()).expect("parent process group");
-        let mut child = spawn_step(&step).expect("development child starts");
+        let parent_group = linux_process_group(std::process::id()).unwrap();
+        let mut child = spawn_step(&step).unwrap();
         let child_group = linux_process_group(child.id());
-        child.kill().expect("development child stops");
-        child.wait().expect("development child is reaped");
+        child.kill().unwrap();
+        child.wait().unwrap();
 
-        assert_eq!(child_group.expect("child process group"), parent_group);
+        assert_eq!(child_group.unwrap(), parent_group);
     }
 
     #[cfg(target_os = "linux")]

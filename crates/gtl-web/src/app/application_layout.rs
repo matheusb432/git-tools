@@ -244,17 +244,7 @@ impl ViewerContext {
     }
 
     fn start_render_command(self, ticket: ViewerRenderCommandTicket, command: ViewerRenderCommand) {
-        spawn_forever(async move {
-            let result = match command {
-                ViewerRenderCommand::SetPreference(preference) => {
-                    viewer_server::set_preference(preference).await
-                }
-                ViewerRenderCommand::RefreshTab(request) => {
-                    viewer_server::refresh_tab(request).await
-                }
-            };
-            self.complete_render_command(ticket, result);
-        });
+        spawn_forever(run_render_command(self, ticket, command));
     }
 
     fn complete_render_command(
@@ -317,34 +307,7 @@ impl ViewerContext {
             self.shell.set(ViewerShellLoad::Loading);
         }
 
-        spawn(async move {
-            let result = viewer_server::get_shell().await;
-            let order = (self.shell_order)();
-            if !order.request_is_current(request_generation) {
-                return;
-            }
-            match result {
-                Ok(shell) => {
-                    let Some(order) =
-                        order.accept_query_response(request_generation, shell.version)
-                    else {
-                        return;
-                    };
-                    self.shell_order.set(order);
-                    if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
-                        notification.enqueue(self.toast);
-                    }
-                    self.shell.set(ViewerShellLoad::Ready(shell));
-                }
-                Err(error) => {
-                    if matches!((self.shell)(), ViewerShellLoad::Ready(_)) {
-                        self.toast.error(error.message());
-                    } else {
-                        self.shell.set(ViewerShellLoad::Error(error));
-                    }
-                }
-            }
-        });
+        spawn(refresh_shell(self, request_generation));
     }
 
     fn invalidate(mut self, version: ViewerVersion) {
@@ -356,6 +319,50 @@ impl ViewerContext {
         );
         if !is_current {
             self.refresh(false);
+        }
+    }
+}
+
+async fn run_render_command(
+    context: ViewerContext,
+    ticket: ViewerRenderCommandTicket,
+    command: ViewerRenderCommand,
+) {
+    let result = match command {
+        ViewerRenderCommand::SetPreference(preference) => {
+            viewer_server::set_preference(preference).await
+        }
+        ViewerRenderCommand::RefreshTab(request) => viewer_server::refresh_tab(request).await,
+    };
+    context.complete_render_command(ticket, result);
+}
+
+async fn refresh_shell(
+    mut context: ViewerContext,
+    request_generation: ViewerShellRequestGeneration,
+) {
+    let result = viewer_server::get_shell().await;
+    let order = (context.shell_order)();
+    if !order.request_is_current(request_generation) {
+        return;
+    }
+    match result {
+        Ok(shell) => {
+            let Some(order) = order.accept_query_response(request_generation, shell.version) else {
+                return;
+            };
+            context.shell_order.set(order);
+            if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
+                notification.enqueue(context.toast);
+            }
+            context.shell.set(ViewerShellLoad::Ready(shell));
+        }
+        Err(error) => {
+            if matches!((context.shell)(), ViewerShellLoad::Ready(_)) {
+                context.toast.error(error.message());
+            } else {
+                context.shell.set(ViewerShellLoad::Error(error));
+            }
         }
     }
 }
@@ -527,7 +534,7 @@ fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<ViewerFeed
             let message = if labels.is_empty() {
                 "Skipped snapshot diffs with no commits or changed files.".to_owned()
             } else {
-                let noun = if labels.len() == 1 { "diff" } else { "diffs" };
+                let noun = diff_noun(labels.len());
                 format!(
                     "Skipped {} {noun} with no commits or changed files: {}.",
                     labels.len(),
@@ -537,6 +544,10 @@ fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<ViewerFeed
             Some(ViewerFeedbackToast::Warn(message))
         }
     }
+}
+
+const fn diff_noun(count: usize) -> &'static str {
+    if count == 1 { "diff" } else { "diffs" }
 }
 
 #[cfg(test)]

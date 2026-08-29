@@ -312,93 +312,111 @@ impl ClientDiffLoad {
 
     fn fail_active(&self, error: &ClientDiffFileError) {
         for file_id in &self.files {
-            if let Some(index) = self.active_file_index(file_id)
-                && let Some(file) = self.workspace.files().get(index)
-            {
-                file.state().set(ClientDiffFileState::Error(error.clone()));
-            }
+            self.fail_file(file_id, error);
         }
+    }
+
+    fn fail_file(&self, file_id: &ViewerDiffFileId, error: &ClientDiffFileError) {
+        let Some(index) = self.active_file_index(file_id) else {
+            return;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return;
+        };
+        file.state().set(ClientDiffFileState::Error(error.clone()));
     }
 
     fn accept_event(&self, event: ViewerRowEvent) -> bool {
         match event {
-            ViewerRowEvent::FileStarted { file } => {
-                let Some(index) = self.active_file_index(&file) else {
-                    return false;
-                };
-                let Some(file) = self.workspace.files().get(index) else {
-                    return false;
-                };
-                file.rows().set(ClientDiffRows::default());
-                file.line_number_digits().set(1);
-                file.state().set(ClientDiffFileState::Loading);
-                true
-            }
-            ViewerRowEvent::UnifiedRows { file, rows } => {
-                if self.identity.render_options.layout
-                    != gtl_wire::viewer::ViewerDiffLayout::Unified
-                {
-                    return false;
-                }
-                let Some(index) = self.active_file_index(&file) else {
-                    return false;
-                };
-                let Some(file) = self.workspace.files().get(index) else {
-                    return false;
-                };
-                let mut batches = file.rows().unified();
-                batches.write().extend(bounded_batches(rows));
-                true
-            }
-            ViewerRowEvent::SplitRows { file, rows } => {
-                if self.identity.render_options.layout != gtl_wire::viewer::ViewerDiffLayout::Split
-                {
-                    return false;
-                }
-                let Some(index) = self.active_file_index(&file) else {
-                    return false;
-                };
-                let Some(file) = self.workspace.files().get(index) else {
-                    return false;
-                };
-                let mut batches = file.rows().split();
-                batches.write().extend(bounded_batches(rows));
-                true
-            }
+            ViewerRowEvent::FileStarted { file } => self.accept_file_started(&file),
+            ViewerRowEvent::UnifiedRows { file, rows } => self.accept_unified_rows(&file, rows),
+            ViewerRowEvent::SplitRows { file, rows } => self.accept_split_rows(&file, rows),
             ViewerRowEvent::FileFinished {
                 file,
                 line_number_digits,
-            } => {
-                let Some(index) = self.active_file_index(&file) else {
-                    return false;
-                };
-                let Some(file) = self.workspace.files().get(index) else {
-                    return false;
-                };
-                file.line_number_digits().set(line_number_digits.max(1));
-                file.state().set(ClientDiffFileState::Complete);
-                true
-            }
+            } => self.accept_file_finished(&file, line_number_digits),
             ViewerRowEvent::FileFailed {
                 file,
                 code: _,
                 message,
                 retryable,
-            } => {
-                let Some(index) = self.active_file_index(&file) else {
-                    return false;
-                };
-                let Some(file) = self.workspace.files().get(index) else {
-                    return false;
-                };
-                file.state()
-                    .set(ClientDiffFileState::Error(ClientDiffFileError::Server {
-                        message,
-                        retryable,
-                    }));
-                true
-            }
+            } => self.accept_file_failed(&file, message, retryable),
         }
+    }
+
+    fn accept_file_started(&self, file_id: &ViewerDiffFileId) -> bool {
+        let Some(index) = self.active_file_index(file_id) else {
+            return false;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return false;
+        };
+        file.rows().set(ClientDiffRows::default());
+        file.line_number_digits().set(1);
+        file.state().set(ClientDiffFileState::Loading);
+        true
+    }
+
+    fn accept_unified_rows(&self, file_id: &ViewerDiffFileId, rows: Vec<ViewerUnifiedRow>) -> bool {
+        if self.identity.render_options.layout != gtl_wire::viewer::ViewerDiffLayout::Unified {
+            return false;
+        }
+        let Some(index) = self.active_file_index(file_id) else {
+            return false;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return false;
+        };
+        let mut batches = file.rows().unified();
+        batches.write().extend(bounded_batches(rows));
+        true
+    }
+
+    fn accept_split_rows(&self, file_id: &ViewerDiffFileId, rows: Vec<ViewerSplitRow>) -> bool {
+        if self.identity.render_options.layout != gtl_wire::viewer::ViewerDiffLayout::Split {
+            return false;
+        }
+        let Some(index) = self.active_file_index(file_id) else {
+            return false;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return false;
+        };
+        let mut batches = file.rows().split();
+        batches.write().extend(bounded_batches(rows));
+        true
+    }
+
+    fn accept_file_finished(&self, file_id: &ViewerDiffFileId, line_number_digits: u32) -> bool {
+        let Some(index) = self.active_file_index(file_id) else {
+            return false;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return false;
+        };
+        file.line_number_digits().set(line_number_digits.max(1));
+        file.state().set(ClientDiffFileState::Complete);
+        true
+    }
+
+    fn accept_file_failed(
+        &self,
+        file_id: &ViewerDiffFileId,
+        message: String,
+        retryable: bool,
+    ) -> bool {
+        let Some(index) = self.active_file_index(file_id) else {
+            return false;
+        };
+        let Some(file) = self.workspace.files().get(index) else {
+            return false;
+        };
+        file.state()
+            .set(ClientDiffFileState::Error(ClientDiffFileError::Server {
+                message,
+                retryable,
+            }));
+        true
     }
 }
 

@@ -98,9 +98,8 @@ mod tests {
     ) -> (crate::settings::UserSettingChange, ViewerVersion) {
         let mut store = FixedUserSettingsEditStore::new(outcome);
         let viewer = ViewerState::new();
-        let response =
-            set_setting_key::execute(mutation, &mut store, &viewer).expect("setting edit succeeds");
-        let version = viewer.version().expect("viewer version remains available");
+        let response = set_setting_key::execute(mutation, &mut store, &viewer).unwrap();
+        let version = viewer.version().unwrap();
         (response, version)
     }
 
@@ -141,15 +140,12 @@ mod tests {
             &mut InvalidShapeSettingsStore,
             &viewer,
         )
-        .expect_err("invalid existing shape must fail");
+        .unwrap_err();
 
         assert!(matches!(
             error,
             SetSettingKeyError::InvalidValueShape { key } if key == SettingKey::Theme
         ));
-        assert_eq!(
-            viewer.version().expect("viewer version remains available"),
-            ViewerVersion::default()
-        );
+        assert_eq!(viewer.version().unwrap(), ViewerVersion::default());
     }
 }

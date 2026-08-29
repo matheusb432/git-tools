@@ -283,7 +283,7 @@ impl std::fmt::Display for Scope {
 #[cfg(test)]
 fn selected_test_labels(scope: Scope) -> Vec<&'static str> {
     selected_tests(scope, "xtask".into())
-        .expect("static test declarations are valid")
+        .unwrap()
         .iter()
         .map(TestDeclaration::label)
         .collect()

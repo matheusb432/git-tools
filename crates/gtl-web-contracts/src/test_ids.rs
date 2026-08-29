@@ -13,11 +13,13 @@ impl TestId {
     }
 
     /// Returns the value used in a `data-testid` attribute.
+    #[must_use]
     pub const fn value(self) -> &'static str {
         self.value
     }
 
     /// Returns the CSS selector for the matching `data-testid` attribute.
+    #[must_use]
     pub const fn selector(self) -> &'static str {
         self.selector
     }

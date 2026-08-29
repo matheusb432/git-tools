@@ -182,8 +182,7 @@ mod tests {
     #[test]
     fn operating_system_name_is_decoded_without_quotes() {
         assert_eq!(
-            parse_os_release("NAME=Example\nPRETTY_NAME=\"Example Linux 1\"\n")
-                .expect("parse operating-system name"),
+            parse_os_release("NAME=Example\nPRETTY_NAME=\"Example Linux 1\"\n").unwrap(),
             "Example Linux 1"
         );
     }

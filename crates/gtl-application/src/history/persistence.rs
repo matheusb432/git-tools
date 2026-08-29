@@ -43,19 +43,7 @@ impl RecipeColumns {
         let RecipeSource::LocalRepo(path) = &recipe.source;
         let (operation, target, argument, pinned) = match &recipe.op {
             RecipeOp::Diff { target } => {
-                let (target_name, argument, pinned) = match target {
-                    RecipeTarget::Unpushed { pinned } => ("unpushed", None, pinned.clone()),
-                    RecipeTarget::Base { rev } => ("base", Some(rev.to_string()), None),
-                    RecipeTarget::Range { range, pinned } => {
-                        ("range", Some(range.to_string()), pinned.clone())
-                    }
-                    RecipeTarget::Merge { base, pinned } => {
-                        ("merge", Some(base.to_string()), pinned.clone())
-                    }
-                    RecipeTarget::Last { count, pinned } => {
-                        ("last", Some(count.to_string()), pinned.clone())
-                    }
-                };
+                let (target_name, argument, pinned) = target_columns(target);
                 ("diff", Some(target_name), argument, pinned)
             }
             RecipeOp::MergeDiff { base, pinned } => (
@@ -74,6 +62,16 @@ impl RecipeColumns {
             pinned,
             recipe_name: recipe.name.clone(),
         }
+    }
+}
+
+fn target_columns(target: &RecipeTarget) -> (&'static str, Option<String>, Option<PinnedRange>) {
+    match target {
+        RecipeTarget::Unpushed { pinned } => ("unpushed", None, pinned.clone()),
+        RecipeTarget::Base { rev } => ("base", Some(rev.to_string()), None),
+        RecipeTarget::Range { range, pinned } => ("range", Some(range.to_string()), pinned.clone()),
+        RecipeTarget::Merge { base, pinned } => ("merge", Some(base.to_string()), pinned.clone()),
+        RecipeTarget::Last { count, pinned } => ("last", Some(count.to_string()), pinned.clone()),
     }
 }
 
@@ -210,17 +208,15 @@ impl RecentRenderRow {
                 .clone()
                 .ok_or_else(|| format!("target '{target}' requires an argument"))
         };
+        if target == "base" && pinned.is_some() {
+            return Err("target 'base' does not accept a pin".into());
+        }
         Ok(match target {
             "unpushed" => RecipeTarget::Unpushed { pinned },
-            "base" => {
-                if pinned.is_some() {
-                    return Err("target 'base' does not accept a pin".into());
-                }
-                RecipeTarget::Base {
-                    rev: gtl_models::git::GitRevision::try_new(argument()?)
-                        .map_err(|_| "target 'base' revision is empty".to_owned())?,
-                }
-            }
+            "base" => RecipeTarget::Base {
+                rev: gtl_models::git::GitRevision::try_new(argument()?)
+                    .map_err(|_| "target 'base' revision is empty".to_owned())?,
+            },
             "range" => RecipeTarget::Range {
                 range: gtl_models::git::GitRange::try_new(argument()?)
                     .map_err(|_| "target 'range' expression is empty".to_owned())?,
@@ -262,7 +258,7 @@ pub enum RecentRenderRowError {
 
 #[cfg(test)]
 pub(super) fn store_test() -> Connection {
-    let connection = Connection::open_in_memory().expect("history test connection");
+    let connection = Connection::open_in_memory().unwrap();
     connection
         .execute_batch(
             "CREATE TABLE project_sources (
@@ -313,7 +309,7 @@ pub(super) fn store_test() -> Connection {
         CREATE INDEX project_sources_value_idx
         ON project_sources (value);",
         )
-        .expect("history test schema");
+        .unwrap();
     connection
 }
 
@@ -333,7 +329,7 @@ pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) 
              VALUES ({id}, 7, 1, 1, '{pinned_base}', '{pinned_head}', '{title}', \
              'git-tools', 'main..HEAD', '2026-07-11T00:00:00Z');"
         ))
-        .expect("seed recent render");
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -358,13 +354,13 @@ mod tests {
             &mut connection,
             &FixedClock::from_raw("2026-07-11T00:00:00Z"),
         )
-        .expect("record succeeds");
+        .unwrap();
 
         let entries = list_recent_render_page::execute(
             list_recent_render_page::ListRecentRenderPage::default(),
             &connection,
         )
-        .expect("list succeeds")
+        .unwrap()
         .entries;
 
         assert_eq!(entries.len(), 1, "recipe {recipe:?} persists one row");
@@ -392,7 +388,7 @@ mod tests {
                 pinned: pin.clone(),
             },
             RecipeTarget::Last {
-                count: NonZeroU32::new(3).expect("positive count"),
+                count: NonZeroU32::new(3).unwrap(),
                 pinned: None,
             },
         ];

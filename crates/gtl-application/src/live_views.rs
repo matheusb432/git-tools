@@ -12,6 +12,7 @@ pub use persistence::LiveViewRecord;
 use crate::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 /// Builds the unpushed diff recipe represented by a saved live view.
+#[must_use]
 pub fn recipe_for_record(record: &LiveViewRecord) -> Recipe {
     let LiveSource::LocalRepo { path } = &record.source;
     Recipe {

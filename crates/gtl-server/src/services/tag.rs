@@ -515,8 +515,7 @@ mod tests {
 
     #[test]
     fn rejects_an_unspecified_bump_level_at_the_transport_boundary() {
-        let error = bump_level(v1::TagBumpLevel::Unspecified as i32)
-            .expect_err("unspecified level must fail");
+        let error = bump_level(v1::TagBumpLevel::Unspecified as i32).unwrap_err();
 
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
         assert_eq!(error.message(), "level is required");

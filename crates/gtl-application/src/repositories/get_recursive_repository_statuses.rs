@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn reports_an_empty_traversal_as_a_domain_failure() {
-        let root = tempfile::tempdir().expect("temporary directory");
+        let root = tempfile::tempdir().unwrap();
 
         let error = get_recursive_repository_statuses::execute(
             GetRecursiveRepositoryStatuses {
@@ -73,7 +73,7 @@ mod tests {
             },
             &ScriptedGitClient::default(),
         )
-        .expect_err("empty traversal is rejected");
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn discovers_and_classifies_repositories_in_one_query() {
-        let root = tempfile::tempdir().expect("temporary directory");
+        let root = tempfile::tempdir().unwrap();
         utils::make_repository(&root.path().join("api"));
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("/repos/api\n"),
@@ -99,7 +99,7 @@ mod tests {
             },
             &git,
         )
-        .expect("recursive statuses resolve");
+        .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name().as_ref(), "api");

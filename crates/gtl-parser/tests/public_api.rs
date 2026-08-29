@@ -53,13 +53,15 @@ fn downstream_consumer_can_read_parser_coordinate_values() {
 fn downstream_consumer_receives_typed_offsets_counts_and_digit_widths() {
     let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
         .parse(&lines(&["@@ -9999 +10000 @@", "-abcd", "+abce"]));
-    let SplitDiffRow::Pair {
-        old: Some(old),
-        new: Some(new),
-    } = &parsed.split_rows()[1]
-    else {
-        panic!("changed rows should pair");
-    };
+    let split_rows = parsed.split_rows();
+    let (old, new) = match &split_rows[1] {
+        SplitDiffRow::Pair {
+            old: Some(old),
+            new: Some(new),
+        } => Some((old, new)),
+        _ => None,
+    }
+    .unwrap();
 
     assert_eq!(old.line_number(), SourceLineNumber::new(9_999));
     assert_eq!(new.line_number(), SourceLineNumber::new(10_000));
@@ -70,9 +72,12 @@ fn downstream_consumer_receives_typed_offsets_counts_and_digit_widths() {
     assert_eq!(parsed.line_number_digits().get(), 5);
 
     let parsed = DiffParser::new().parse(&lines(&["@@ -1 +1 @@", "-abcd", "+abce"]));
-    let SplitDiffRow::Pair { old: Some(old), .. } = &parsed.split_rows()[1] else {
-        panic!("short changed rows should pair");
-    };
+    let split_rows = parsed.split_rows();
+    let old = match &split_rows[1] {
+        SplitDiffRow::Pair { old: Some(old), .. } => Some(old),
+        _ => None,
+    }
+    .unwrap();
     assert_eq!(old.intraline_spans()[0].start().into_inner(), 3);
     assert_eq!(old.intraline_spans()[0].end().into_inner(), 4);
 }

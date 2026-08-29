@@ -344,7 +344,7 @@ mod tests {
             },
             &git,
         )
-        .expect("an unavailable ahead count is a closed failure");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -366,7 +366,7 @@ mod tests {
             },
             &git,
         )
-        .expect("a dirty existing-only push is a closed refusal");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -393,7 +393,7 @@ mod tests {
             },
             &git,
         )
-        .expect("a rejected commit is a closed failure");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -422,11 +422,15 @@ mod tests {
             },
             &git,
         )
-        .expect("a rejected push is a closed failure");
+        .unwrap();
 
-        let ApplyPushOk::Failed { progress, .. } = result else {
-            panic!("a rejected push must report failure");
-        };
+        let progress = match result {
+            ApplyPushOk::Failed { progress, .. } => Some(progress),
+            ApplyPushOk::Refused { .. }
+            | ApplyPushOk::Noop { .. }
+            | ApplyPushOk::Completed { .. } => None,
+        }
+        .unwrap();
         assert_eq!(
             progress,
             PushProgress::PushAttempted {
@@ -455,7 +459,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("push transport fails");
+        .unwrap_err();
 
         let ApplyPushError::Transport {
             progress, source, ..
@@ -484,7 +488,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -511,7 +515,7 @@ mod tests {
             },
             &git,
         )
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -539,7 +543,7 @@ mod tests {
             },
             &git,
         )
-        .expect("up-to-date push succeeds");
+        .unwrap();
 
         assert_eq!(
             result,

@@ -1,6 +1,3 @@
-//! The `compute_merge_diff` vertical slice: the structured merge [`View`] for
-//! the native viewer — no HTML, no artifact store.
-
 mod view;
 
 use gtl_models::{
@@ -15,18 +12,8 @@ use crate::{
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
 };
 
-/// Falls back to this base when a merge request omits `base` or supplies a blank value.
-///
-/// # Examples
-///
-/// ```
-/// use gtl_application::diffs::compute_merge_diff::DEFAULT_BASE;
-///
-/// assert_eq!(DEFAULT_BASE, "main");
-/// ```
 pub const DEFAULT_BASE: &str = crate::shared::git_range_pinning::DEFAULT_MERGE_BASE;
 
-/// Compute the merge view of the current branch into `base` (default `main`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeMergeDiff {
     pub repo_root: RepositoryRoot,
@@ -34,7 +21,6 @@ pub struct ComputeMergeDiff {
     pub pinned: Option<PinnedRange>,
 }
 
-/// The computed merge view.
 #[derive(Debug, Clone)]
 pub struct ComputeMergeDiffOk {
     pub view: View,
@@ -46,7 +32,6 @@ pub struct ComputeMergeDiffOk {
     pub excluded_extensions: ExcludedExtensions,
 }
 
-/// Everything that can go wrong computing a merge view.
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeMergeDiffError {
     #[error(transparent)]
@@ -144,7 +129,7 @@ index 333..444 100644\n\
 
         let response =
             compute_merge_diff::execute(request, &FixedUserSettingsStore::default(), &source)
-                .expect("compute succeeds");
+                .unwrap();
 
         assert_eq!(
             response.view.repo_root.as_ref(),
@@ -185,7 +170,7 @@ index 333..444 100644\n\
             &app_settings,
             &source,
         )
-        .expect("compute succeeds");
+        .unwrap();
 
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.excluded_extensions.extensions(), ["md"]);
@@ -194,7 +179,7 @@ index 333..444 100644\n\
             response
                 .view
                 .exclusions
-                .expect("exclusion summary")
+                .unwrap()
                 .hidden_paths
                 .iter()
                 .map(|path| path.to_string_lossy())
@@ -222,7 +207,7 @@ index 333..444 100644\n\
             },
             &source,
         )
-        .expect("compute succeeds");
+        .unwrap();
 
         assert_eq!(response.view.upstream.as_ref(), "main");
         assert_eq!(response.view.branch.to_string(), "feature");
@@ -234,7 +219,7 @@ index 333..444 100644\n\
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            known_revs: vec![], // verify_commit would fail symbolically
+            known_revs: vec![],
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -251,7 +236,7 @@ index 333..444 100644\n\
             },
             &source,
         )
-        .expect("pinned merge compute succeeds");
+        .unwrap();
 
         assert_eq!(response.view.title, "merge-diff");
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -274,11 +259,13 @@ index 333..444 100644\n\
             },
             &source,
         )
-        .expect_err("unknown base errors");
+        .unwrap_err();
 
-        let ComputeMergeDiffError::Unexpected(err) = error else {
-            panic!("expected Git computation error");
-        };
+        let err = match error {
+            ComputeMergeDiffError::Unexpected(error) => Some(error),
+            ComputeMergeDiffError::Settings(_) => None,
+        }
+        .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 }

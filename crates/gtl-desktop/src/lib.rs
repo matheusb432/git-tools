@@ -18,8 +18,8 @@ use viewer_ipc::{
     viewer_connect, viewer_delete_live_tab, viewer_get_history_copy, viewer_get_settings,
     viewer_get_shell, viewer_list_commits, viewer_list_history, viewer_open_diff_file,
     viewer_open_history, viewer_refresh_tab, viewer_select_commit, viewer_set_preference,
-    viewer_stream_rows_cancel, viewer_stream_rows_next, viewer_stream_rows_start,
-    viewer_watch_cancel, viewer_watch_next, viewer_watch_start,
+    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
+    viewer_watch_cancel, viewer_watch_next_batch, viewer_watch_start,
 };
 
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
@@ -88,12 +88,14 @@ fn focus_main(window: &tauri::WebviewWindow) {
         lifecycle.mark_hidden_by_close();
     }
     if let Some(xid) = window_xid(window) {
-        std::thread::spawn(move || {
-            for _ in 0..3 {
-                std::thread::sleep(std::time::Duration::from_millis(60));
-                window_activation::activate(xid);
-            }
-        });
+        std::thread::spawn(move || activate_window_repeatedly(xid));
+    }
+}
+
+fn activate_window_repeatedly(xid: u64) {
+    for _ in 0..3 {
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        window_activation::activate(xid);
     }
 }
 
@@ -208,10 +210,10 @@ pub fn run() -> anyhow::Result<()> {
             viewer_get_settings,
             viewer_open_diff_file,
             viewer_stream_rows_start,
-            viewer_stream_rows_next,
+            viewer_stream_rows_next_batch,
             viewer_stream_rows_cancel,
             viewer_watch_start,
-            viewer_watch_next,
+            viewer_watch_next_batch,
             viewer_watch_cancel,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -255,18 +257,14 @@ mod tests {
             "http://tauri.localhost/index.html",
             "http://127.0.0.1:8080/",
         ] {
-            assert!(viewer_navigation_allowed(
-                &Url::parse(allowed).expect("parse allowed viewer URL")
-            ));
+            assert!(viewer_navigation_allowed(&Url::parse(allowed).unwrap()));
         }
         for rejected in [
             "https://example.com/",
             "http://127.0.0.1:4317/",
             "http://localhost:8080/",
         ] {
-            assert!(!viewer_navigation_allowed(
-                &Url::parse(rejected).expect("parse rejected viewer URL")
-            ));
+            assert!(!viewer_navigation_allowed(&Url::parse(rejected).unwrap()));
         }
     }
 

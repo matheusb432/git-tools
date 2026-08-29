@@ -24,8 +24,7 @@ pub(crate) fn commit_with(id: &str, subject: &str, parents: &[&str]) -> Commit {
         id: commit_id_fixture(id),
         subject: subject.into(),
         body: String::new(),
-        committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z")
-            .expect("fixture commit timestamp is valid"),
+        committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z").unwrap(),
         parents: parents
             .iter()
             .map(|parent| commit_id_fixture(parent))

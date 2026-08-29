@@ -82,20 +82,24 @@ impl HistoryPage {
         Ok(Self { number, count })
     }
 
+    #[must_use]
     pub const fn number(self) -> HistoryPageNumber {
         self.number
     }
 
+    #[must_use]
     pub const fn count(self) -> HistoryPageCount {
         self.count
     }
 
+    #[must_use]
     pub fn previous(self) -> Option<HistoryPageNumber> {
         u32::from(self.number)
             .checked_sub(1)
             .and_then(|number| HistoryPageNumber::try_new(number).ok())
     }
 
+    #[must_use]
     pub fn next(self) -> Option<HistoryPageNumber> {
         u32::from(self.number)
             .checked_add(1)
@@ -103,6 +107,7 @@ impl HistoryPage {
             .and_then(|number| HistoryPageNumber::try_new(number).ok())
     }
 
+    #[must_use]
     pub fn progress_percent(self) -> u64 {
         let number = u64::from(u32::from(self.number));
         let count = u64::from(u32::from(self.count));
@@ -142,6 +147,7 @@ pub enum HistoryPagePosition {
 }
 
 impl HistoryPagePosition {
+    #[must_use]
     pub const fn page(self) -> Option<HistoryPage> {
         match self {
             Self::Empty => None,
@@ -162,11 +168,11 @@ mod tests {
     use super::*;
 
     fn number(value: u32) -> HistoryPageNumber {
-        HistoryPageNumber::try_new(value).expect("fixture page number is positive")
+        HistoryPageNumber::try_new(value).unwrap()
     }
 
     fn count(value: u32) -> HistoryPageCount {
-        HistoryPageCount::try_new(value).expect("fixture page count is positive")
+        HistoryPageCount::try_new(value).unwrap()
     }
 
     #[test]
@@ -188,9 +194,9 @@ mod tests {
 
     #[test]
     fn navigation_stays_inside_the_valid_page_range() {
-        let first = HistoryPage::new(number(1), count(3)).expect("valid first page");
-        let middle = HistoryPage::new(number(2), count(3)).expect("valid middle page");
-        let last = HistoryPage::new(number(3), count(3)).expect("valid last page");
+        let first = HistoryPage::new(number(1), count(3)).unwrap();
+        let middle = HistoryPage::new(number(2), count(3)).unwrap();
+        let last = HistoryPage::new(number(3), count(3)).unwrap();
 
         assert_eq!(first.previous(), None);
         assert_eq!(first.next(), Some(number(2)));
@@ -202,17 +208,15 @@ mod tests {
 
     #[test]
     fn position_serde_preserves_the_closed_state() {
-        let position = HistoryPagePosition::Page(
-            HistoryPage::new(number(2), count(3)).expect("valid page position"),
-        );
-        let json = serde_json::to_value(position).expect("position serializes");
+        let position = HistoryPagePosition::Page(HistoryPage::new(number(2), count(3)).unwrap());
+        let json = serde_json::to_value(position).unwrap();
 
         assert_eq!(
             json,
             serde_json::json!({"state": "page", "page": {"number": 2, "count": 3}})
         );
         assert_eq!(
-            serde_json::from_value::<HistoryPagePosition>(json).expect("position deserializes"),
+            serde_json::from_value::<HistoryPagePosition>(json).unwrap(),
             position
         );
         assert!(

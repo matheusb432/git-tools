@@ -76,12 +76,13 @@ mod tests {
             )),
         ]);
 
-        let result = list_worktrees::execute("/repo/nested".into(), &git)
-            .expect("porcelain output should produce a structured list");
+        let result = list_worktrees::execute("/repo/nested".into(), &git).unwrap();
 
-        let ListWorktreesOk::Listed { worktrees } = result else {
-            panic!("Git output should produce listed worktrees");
-        };
+        let worktrees = match result {
+            ListWorktreesOk::Listed { worktrees } => Some(worktrees),
+            ListWorktreesOk::Failed { .. } => None,
+        }
+        .unwrap();
         assert_eq!(worktrees.len(), 2);
         assert!(matches!(
             worktrees[0].kind(),
@@ -103,8 +104,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            list_worktrees::execute("/repo".into(), &git)
-                .expect("a Git rejection is a closed list failure"),
+            list_worktrees::execute("/repo".into(), &git).unwrap(),
             ListWorktreesOk::Failed {
                 detail: "fatal: not a repo".into(),
             }
@@ -119,8 +119,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            list_worktrees::execute("/repo".into(), &git)
-                .expect("empty Git output is a closed list failure"),
+            list_worktrees::execute("/repo".into(), &git).unwrap(),
             ListWorktreesOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
@@ -134,8 +133,7 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = list_worktrees::execute("/repo".into(), &git)
-            .expect_err("transport failure must remain an error");
+        let error = list_worktrees::execute("/repo".into(), &git).unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(

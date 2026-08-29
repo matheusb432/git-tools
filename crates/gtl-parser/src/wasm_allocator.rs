@@ -115,18 +115,13 @@ mod tests {
             let allocation = gtl_tree_sitter_malloc(8).cast::<u8>();
             assert!(!allocation.is_null());
             for index in 0..8 {
-                allocation
-                    .add(index)
-                    .write(u8::try_from(index).expect("fixture byte"));
+                allocation.add(index).write(u8::try_from(index).unwrap());
             }
 
             let resized = gtl_tree_sitter_realloc(allocation.cast(), 32).cast::<u8>();
             assert!(!resized.is_null());
             for index in 0..8 {
-                assert_eq!(
-                    resized.add(index).read(),
-                    u8::try_from(index).expect("fixture byte")
-                );
+                assert_eq!(resized.add(index).read(), u8::try_from(index).unwrap());
             }
             gtl_tree_sitter_free(resized.cast());
         }

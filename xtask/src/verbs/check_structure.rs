@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeSet, path::Path};
 
-use cargo_metadata::{DependencyKind, MetadataCommand};
+use cargo_metadata::{DependencyKind, MetadataCommand, Package};
 
 struct EdgePolicy {
     from: &'static str,
@@ -224,33 +224,42 @@ fn collect_violations(root: &Path) -> Result<Vec<String>, cargo_metadata::Error>
         else {
             continue;
         };
-        for dependency in package.dependencies.iter().filter(|dependency| {
-            matches!(
-                dependency.kind,
-                DependencyKind::Normal | DependencyKind::Development
-            )
-        }) {
-            if dependency_is_forbidden(policy, &dependency.name, &workspace_packages) {
-                violations.push(format!(
-                    "[{}] {} -> {}: {}",
-                    policy.label, policy.from, dependency.name, policy.reason
-                ));
-            }
-            if policy.from == "gtl-application"
-                && dependency.name == "gtl-wire"
-                && dependency_enables_grpc(dependency.uses_default_features, &dependency.features)
-            {
-                violations.push(
-                    "[gtl-application omits generated transport] gtl-application -> gtl-wire/grpc: application code may use hand-written wire contracts but not generated protobuf or Tonic types"
-                        .to_owned(),
-                );
-            }
-        }
+        collect_package_violations(policy, package, &workspace_packages, &mut violations);
     }
 
     violations.sort();
     violations.dedup();
     Ok(violations)
+}
+
+fn collect_package_violations(
+    policy: &EdgePolicy,
+    package: &Package,
+    workspace_packages: &BTreeSet<String>,
+    violations: &mut Vec<String>,
+) {
+    for dependency in package.dependencies.iter().filter(|dependency| {
+        matches!(
+            dependency.kind,
+            DependencyKind::Normal | DependencyKind::Development
+        )
+    }) {
+        if dependency_is_forbidden(policy, &dependency.name, workspace_packages) {
+            violations.push(format!(
+                "[{}] {} -> {}: {}",
+                policy.label, policy.from, dependency.name, policy.reason
+            ));
+        }
+        if policy.from == "gtl-application"
+            && dependency.name == "gtl-wire"
+            && dependency_enables_grpc(dependency.uses_default_features, &dependency.features)
+        {
+            violations.push(
+                "[gtl-application omits generated transport] gtl-application -> gtl-wire/grpc: application code may use hand-written wire contracts but not generated protobuf or Tonic types"
+                    .to_owned(),
+            );
+        }
+    }
 }
 
 fn dependency_enables_grpc(uses_default_features: bool, features: &[String]) -> bool {
@@ -276,7 +285,7 @@ mod tests {
         EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-parser")
-            .expect("parser policy should exist")
+            .unwrap()
     }
 
     #[test]
@@ -308,7 +317,7 @@ mod tests {
         let models_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-models")
-            .expect("models policy should exist");
+            .unwrap();
 
         assert!(dependency_is_forbidden(
             models_policy,
@@ -322,7 +331,7 @@ mod tests {
         let wire_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-wire")
-            .expect("wire policy should exist");
+            .unwrap();
 
         assert!(!dependency_is_forbidden(
             wire_policy,
@@ -341,7 +350,7 @@ mod tests {
         let client_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-client")
-            .expect("client policy should exist");
+            .unwrap();
 
         for dependency in ["gtl-local-auth", "gtl-models", "gtl-wire", "tonic"] {
             assert!(!dependency_is_forbidden(
@@ -362,7 +371,7 @@ mod tests {
         let cli_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-cli")
-            .expect("CLI policy should exist");
+            .unwrap();
 
         for dependency in ["gtl-client", "gtl-models", "gtl-wire"] {
             assert!(!dependency_is_forbidden(
@@ -392,7 +401,7 @@ mod tests {
         let web_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-web")
-            .expect("web policy should exist");
+            .unwrap();
 
         for dependency in [
             "tonic",
@@ -420,7 +429,7 @@ mod tests {
         let server_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-server")
-            .expect("server policy should exist");
+            .unwrap();
 
         assert!(dependency_is_forbidden(
             server_policy,
@@ -441,7 +450,7 @@ mod tests {
         let desktop_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-desktop")
-            .expect("desktop policy should exist");
+            .unwrap();
 
         for dependency in ["gtl-application", "gtl-infra", "gtl-models", "gtl-server"] {
             assert!(dependency_is_forbidden(

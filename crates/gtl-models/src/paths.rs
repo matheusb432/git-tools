@@ -40,6 +40,7 @@ impl RepositoryRoot {
     }
 
     /// Resolves a validated repository-relative path beneath this root.
+    #[must_use]
     pub fn join(&self, path: &RepositoryRelativePath) -> AbsoluteFilePath {
         known_valid(AbsoluteFilePath::try_new(self.0.join(path.as_ref())))
     }
@@ -339,7 +340,7 @@ mod tests {
         }
         assert_eq!(
             RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs"))
-                .expect("normalized path")
+                .unwrap()
                 .as_ref(),
             Path::new("src/lib.rs")
         );
@@ -347,9 +348,8 @@ mod tests {
 
     #[test]
     fn repository_root_joins_validated_relative_paths_into_absolute_files() {
-        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).expect("absolute root");
-        let relative =
-            RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).expect("relative path");
+        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).unwrap();
+        let relative = RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).unwrap();
 
         assert_eq!(
             root.join(&relative).as_ref(),
@@ -359,10 +359,9 @@ mod tests {
 
     #[test]
     fn serde_preserves_primitive_wire_shapes_and_validates_decoding() {
-        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).expect("absolute root");
-        let project = ProjectName::try_new("git-tools".to_owned()).expect("project name");
-        let relative =
-            RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).expect("relative path");
+        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).unwrap();
+        let project = ProjectName::try_new("git-tools".to_owned()).unwrap();
+        let relative = RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).unwrap();
         let absolute = root.join(&relative);
 
         assert_eq!(serde_json::to_value(&root).unwrap(), "/repos/gt");
@@ -385,12 +384,12 @@ mod tests {
 
         let mut root_path = PathBuf::from("/repos");
         root_path.push(std::ffi::OsString::from_vec(vec![b'g', 0x80, b't']));
-        let root = RepositoryRoot::try_new(root_path.clone()).expect("absolute non-UTF-8 root");
+        let root = RepositoryRoot::try_new(root_path.clone()).unwrap();
         let relative =
             RepositoryRelativePath::try_new(PathBuf::from(std::ffi::OsString::from_vec(vec![
                 b'f', 0x80,
             ])))
-            .expect("non-UTF-8 relative path");
+            .unwrap();
 
         assert_eq!(root.as_ref(), root_path);
         assert_eq!(root.project_name().as_ref(), PROJECT_NAME_FALLBACK);

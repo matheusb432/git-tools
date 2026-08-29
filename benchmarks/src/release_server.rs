@@ -102,23 +102,24 @@ impl ReleaseServerProcess {
         }
         send_terminate(self.child.id())?;
         let started = Instant::now();
-        loop {
-            if let Some(status) = self.child.try_wait().context("wait for release server")? {
-                return self.expected_exit(status);
-            }
-            if started.elapsed() >= SHUTDOWN_TIMEOUT {
-                self.child
-                    .kill()
-                    .context("kill unresponsive release server")?;
-                let status = self.child.wait().context("reap killed release server")?;
-                bail!(
-                    "release server exceeded the {}-second shutdown bound (exit {})",
-                    SHUTDOWN_TIMEOUT.as_secs(),
-                    status.code().unwrap_or(-1)
-                );
-            }
+        let mut status = self.child.try_wait().context("wait for release server")?;
+        while status.is_none() && started.elapsed() < SHUTDOWN_TIMEOUT {
             std::thread::sleep(SHUTDOWN_POLL_DELAY);
+            status = self.child.try_wait().context("wait for release server")?;
         }
+        if let Some(status) = status {
+            return self.expected_exit(status);
+        }
+
+        self.child
+            .kill()
+            .context("kill unresponsive release server")?;
+        let status = self.child.wait().context("reap killed release server")?;
+        bail!(
+            "release server exceeded the {}-second shutdown bound (exit {})",
+            SHUTDOWN_TIMEOUT.as_secs(),
+            status.code().unwrap_or(-1)
+        );
     }
 
     fn expected_exit(&self, status: ExitStatus) -> Result<()> {

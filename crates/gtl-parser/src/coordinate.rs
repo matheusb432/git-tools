@@ -53,6 +53,7 @@ impl LineNumberDigitWidth {
     }
 
     /// Returns the number of decimal digits.
+    #[must_use]
     pub const fn get(self) -> u32 {
         self.0.get()
     }

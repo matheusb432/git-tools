@@ -23,9 +23,7 @@ fn parse_diff(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
         if let Some(rest) = line.strip_prefix("diff --git a/")
             && let Some((_, path)) = rest.split_once(" b/")
         {
-            if let Some(file) = cur.take() {
-                files.push(file);
-            }
+            files.extend(cur.take());
             line_classifier = UnifiedDiffLineClassifier::default();
             cur = Some(FileDiff {
                 path: RepositoryRelativePath::try_new(path.into())?,
@@ -80,20 +78,12 @@ fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
     }
 }
 
-/// The assembled data for one diff artifact: commits, changed files, and hidden paths.
 pub(super) struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
     pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
-/// The shared diff generator: log + diff + exclusion filtering + full context.
-/// Does not sort files; callers retain ownership of presentation order.
-///
-/// Exclusions are applied *before* the content diffs run: a cheap `--name-only`
-/// pass discovers the hidden paths, and both content invocations then carry
-/// `:(exclude,literal)` pathspecs, so git never computes — and this module
-/// never parses or counts — an excluded file's line diffs.
 pub(super) fn assemble(
     source: &impl GitClient,
     repo_path: &RepositoryRoot,
@@ -109,8 +99,7 @@ pub(super) fn assemble(
         format: GitDiffFormat::Unified,
         excluded_paths: hidden_paths.clone(),
     };
-    // ? partition again after parsing: a source that ignores the exclude
-    // ? pathspecs (the scripted test fake) must still never leak hidden files.
+    // Enforce exclusions even when a source ignores pathspecs.
     let (mut files, _) = filter_excluded_files(
         parse_diff(&source.diff(repo_path, &content_request)?)?,
         excluded,
@@ -143,9 +132,6 @@ fn filter_excluded_files(
     (kept, hidden.into_iter().map(|file| file.path).collect())
 }
 
-/// The paths the exclusion set hides, in diff order, discovered through a
-/// content-free `--name-only` pass. Skips the extra git call entirely when
-/// nothing is excluded.
 fn hidden_paths(
     source: &impl GitClient,
     repo_path: &RepositoryRoot,
@@ -197,7 +183,7 @@ index 000..333\n\
 
     #[test]
     fn parse_diff_splits_two_file_diff_and_counts_body_changes() {
-        let files = parse_diff(SAMPLE).expect("valid diff paths");
+        let files = parse_diff(SAMPLE).unwrap();
 
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].path.to_string_lossy(), "f.txt");
@@ -210,7 +196,7 @@ index 000..333\n\
 
     #[test]
     fn parse_diff_does_not_count_file_headers_as_changes() {
-        let files = parse_diff("diff --git a/a b/a\n--- a/a\n+++ b/a\n").expect("valid diff path");
+        let files = parse_diff("diff --git a/a b/a\n--- a/a\n+++ b/a\n").unwrap();
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].added, DiffLineCount::default());
@@ -230,7 +216,7 @@ index 111..222 100644\n\
 +++ literal\n\
  keep\n",
         )
-        .expect("valid diff path");
+        .unwrap();
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].removed, DiffLineCount::new(1));
@@ -245,7 +231,7 @@ index 111..222 100644\n\
 
     #[test]
     fn attach_full_context_only_sets_modified_files_with_extra_context() {
-        let mut files = parse_diff(SAMPLE).expect("valid diff paths");
+        let mut files = parse_diff(SAMPLE).unwrap();
         let full = parse_diff(
             "diff --git a/f.txt b/f.txt\n\
 index 111..222 100644\n\
@@ -266,7 +252,7 @@ index 000..333\n\
 @@ -0,0 +1 @@\n\
 +brand new\n",
         )
-        .expect("valid diff paths");
+        .unwrap();
 
         attach_full_context(&mut files, full);
 

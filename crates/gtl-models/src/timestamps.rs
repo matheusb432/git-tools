@@ -58,6 +58,7 @@ impl MachineTimestamp {
     }
 
     /// Returns the calendar date in the timestamp's recorded offset.
+    #[must_use]
     pub fn date(&self) -> String {
         format!(
             "{}-{:02}-{:02}",
@@ -68,6 +69,7 @@ impl MachineTimestamp {
     }
 
     /// Returns the local date and minute in the timestamp's recorded offset.
+    #[must_use]
     pub fn display_minute(&self) -> String {
         format!(
             "{}-{:02}-{:02} {:02}:{:02}",
@@ -357,10 +359,8 @@ mod tests {
 
     #[test]
     fn offset_qualified_values_order_by_instant() {
-        let earlier = MachineTimestamp::try_from("2026-01-01T00:30:00+01:00")
-            .expect("valid earlier timestamp");
-        let later =
-            MachineTimestamp::try_from("2025-12-31T23:45:00Z").expect("valid later timestamp");
+        let earlier = MachineTimestamp::try_from("2026-01-01T00:30:00+01:00").unwrap();
+        let later = MachineTimestamp::try_from("2025-12-31T23:45:00Z").unwrap();
 
         assert!(earlier < later);
     }
@@ -391,8 +391,7 @@ mod tests {
 
     #[test]
     fn minute_display_is_derived_in_the_recorded_offset() {
-        let timestamp =
-            MachineTimestamp::try_from("2026-06-08T13:45:00-03:00").expect("valid timestamp");
+        let timestamp = MachineTimestamp::try_from("2026-06-08T13:45:00-03:00").unwrap();
 
         assert_eq!(timestamp.display_minute(), "2026-06-08 13:45");
         assert_eq!(timestamp.as_ref(), "2026-06-08T13:45:00-03:00");
@@ -400,21 +399,20 @@ mod tests {
 
     #[test]
     fn serde_preserves_the_established_machine_string() {
-        let timestamp =
-            MachineTimestamp::try_from("2026-08-09T10:00:00Z").expect("valid render timestamp");
-        let json = serde_json::to_string(&timestamp).expect("timestamp serializes");
+        let timestamp = MachineTimestamp::try_from("2026-08-09T10:00:00Z").unwrap();
+        let json = serde_json::to_string(&timestamp).unwrap();
 
         assert_eq!(json, r#""2026-08-09T10:00:00Z""#);
         assert_eq!(
-            serde_json::from_str::<MachineTimestamp>(&json).expect("timestamp deserializes"),
+            serde_json::from_str::<MachineTimestamp>(&json).unwrap(),
             timestamp
         );
     }
 
     #[test]
     fn unix_seconds_construct_ordered_utc_timestamps() {
-        let earlier = MachineTimestamp::from_unix_seconds(100).expect("valid epoch seconds");
-        let later = MachineTimestamp::from_unix_seconds(200).expect("valid epoch seconds");
+        let earlier = MachineTimestamp::from_unix_seconds(100).unwrap();
+        let later = MachineTimestamp::from_unix_seconds(200).unwrap();
 
         assert!(earlier < later);
         assert_eq!(earlier.as_ref(), "1970-01-01T00:01:40Z");
@@ -428,8 +426,8 @@ mod tests {
             "2000-02-29T12:34:56.123456789+14:00",
             "2026-08-17T23:59:59-03:00",
         ] {
-            let expected = raw.parse::<Timestamp>().expect("fixture is valid");
-            let actual = MachineTimestamp::try_from(raw).expect("machine parser accepts fixture");
+            let expected = raw.parse::<Timestamp>().unwrap();
+            let actual = MachineTimestamp::try_from(raw).unwrap();
 
             assert_eq!(actual.instant, expected, "{raw}");
         }
@@ -439,7 +437,7 @@ mod tests {
     #[test]
     fn native_clock_conversion_derives_utc_calendar_fields() {
         let system_time = std::time::UNIX_EPOCH - std::time::Duration::from_millis(500);
-        let timestamp = MachineTimestamp::try_from(system_time).expect("fixture is in range");
+        let timestamp = MachineTimestamp::try_from(system_time).unwrap();
 
         assert_eq!(timestamp.as_ref(), "1969-12-31T23:59:59.5Z");
         assert_eq!(timestamp.date(), "1969-12-31");

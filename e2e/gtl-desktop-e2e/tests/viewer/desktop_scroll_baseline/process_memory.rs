@@ -33,6 +33,29 @@ struct AttributedProcessInventory {
     server_roots: Vec<u32>,
 }
 
+#[derive(Default)]
+struct AttributedProcessTotals {
+    rss_bytes: u64,
+    measured_process_count: usize,
+    cpu_clock_ticks_by_process: BTreeMap<u32, u64>,
+}
+
+impl AttributedProcessTotals {
+    fn observe(&mut self, process_id: u32, measurement: Option<(u64, u64)>) -> Result<()> {
+        let Some((rss_bytes, cpu_clock_ticks)) = measurement else {
+            return Ok(());
+        };
+        self.rss_bytes = self
+            .rss_bytes
+            .checked_add(rss_bytes)
+            .context("sum attributed application RSS")?;
+        self.measured_process_count += 1;
+        self.cpu_clock_ticks_by_process
+            .insert(process_id, cpu_clock_ticks);
+        Ok(())
+    }
+}
+
 pub struct ReadinessProcessSampler {
     data_root: PathBuf,
     cpu_clock_ticks_by_process_started: BTreeMap<u32, u64>,
@@ -148,36 +171,36 @@ impl AttributedProcessInventory {
         let mut roots = self.viewer_roots;
         roots.extend(self.server_roots);
         let attributed_ids = descendant_processes(&roots, &self.identities);
-        let mut rss_bytes = 0_u64;
-        let mut measured_process_count = 0_usize;
-        let mut cpu_clock_ticks_by_process = BTreeMap::new();
+        let mut totals = AttributedProcessTotals::default();
         for process_id in attributed_ids {
-            match process_rss_bytes(process_id) {
-                Ok(bytes) => {
-                    rss_bytes = rss_bytes
-                        .checked_add(bytes)
-                        .context("sum attributed application RSS")?;
-                    measured_process_count += 1;
-                    cpu_clock_ticks_by_process
-                        .insert(process_id, self.identities[&process_id].cpu_clock_ticks);
-                }
-                Err(error) if !roots.contains(&process_id) && process_disappeared(&error) => {}
-                Err(error) => return Err(error),
-            }
+            let measurement = measure_attributed_process(process_id, &roots, &self.identities)?;
+            totals.observe(process_id, measurement)?;
         }
         ensure!(
-            measured_process_count >= roots.len(),
+            totals.measured_process_count >= roots.len(),
             "RSS attribution lost a required application process"
         );
 
         Ok(AttributedProcessSnapshot {
             memory: DesktopScrollProcessMemory {
                 attribution: ATTRIBUTION.to_owned(),
-                process_count: measured_process_count,
-                rss_bytes,
+                process_count: totals.measured_process_count,
+                rss_bytes: totals.rss_bytes,
             },
-            cpu_clock_ticks_by_process,
+            cpu_clock_ticks_by_process: totals.cpu_clock_ticks_by_process,
         })
+    }
+}
+
+fn measure_attributed_process(
+    process_id: u32,
+    roots: &[u32],
+    identities: &BTreeMap<u32, ProcessIdentity>,
+) -> Result<Option<(u64, u64)>> {
+    match process_rss_bytes(process_id) {
+        Ok(rss_bytes) => Ok(Some((rss_bytes, identities[&process_id].cpu_clock_ticks))),
+        Err(error) if !roots.contains(&process_id) && process_disappeared(&error) => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -276,11 +299,12 @@ fn descendant_processes(
     let mut attributed = roots.iter().copied().collect::<BTreeSet<_>>();
     loop {
         let count_before = attributed.len();
-        for identity in identities.values() {
-            if attributed.contains(&identity.parent_process_id) {
-                attributed.insert(identity.process_id);
-            }
-        }
+        let descendants = identities
+            .values()
+            .filter(|identity| attributed.contains(&identity.parent_process_id))
+            .map(|identity| identity.process_id)
+            .collect::<Vec<_>>();
+        attributed.extend(descendants);
         if attributed.len() == count_before {
             return attributed;
         }
@@ -294,25 +318,31 @@ fn outermost_processes(
     processes
         .iter()
         .copied()
-        .filter(|process_id| {
-            let mut visited = BTreeSet::new();
-            let mut ancestor = identities
-                .get(process_id)
-                .map(|identity| identity.parent_process_id);
-            while let Some(ancestor_id) = ancestor {
-                if processes.contains(&ancestor_id) {
-                    return false;
-                }
-                if !visited.insert(ancestor_id) {
-                    break;
-                }
-                ancestor = identities
-                    .get(&ancestor_id)
-                    .map(|identity| identity.parent_process_id);
-            }
-            true
-        })
+        .filter(|process_id| is_outermost_process(*process_id, processes, identities))
         .collect()
+}
+
+fn is_outermost_process(
+    process_id: u32,
+    processes: &BTreeSet<u32>,
+    identities: &BTreeMap<u32, ProcessIdentity>,
+) -> bool {
+    let mut visited = BTreeSet::new();
+    let mut ancestor = identities
+        .get(&process_id)
+        .map(|identity| identity.parent_process_id);
+    while let Some(ancestor_id) = ancestor {
+        if processes.contains(&ancestor_id) {
+            return false;
+        }
+        if !visited.insert(ancestor_id) {
+            return true;
+        }
+        ancestor = identities
+            .get(&ancestor_id)
+            .map(|identity| identity.parent_process_id);
+    }
+    true
 }
 
 fn process_rss_bytes(process_id: u32) -> Result<u64> {

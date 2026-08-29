@@ -48,8 +48,7 @@ mod tests {
         );
         let store = FixedUserSettingsStore::new(settings.clone());
 
-        let response =
-            get_user_settings::execute(GetUserSettings, &store).expect("settings query succeeds");
+        let response = get_user_settings::execute(GetUserSettings, &store).unwrap();
 
         assert_eq!(response, settings);
     }
@@ -58,8 +57,7 @@ mod tests {
     fn query_preserves_a_typed_settings_load_failure() {
         let store = SequenceUserSettingsStore::new([]);
 
-        let error =
-            get_user_settings::execute(GetUserSettings, &store).expect_err("empty sequence fails");
+        let error = get_user_settings::execute(GetUserSettings, &store).unwrap_err();
 
         assert!(matches!(
             error,

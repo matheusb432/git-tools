@@ -1,18 +1,10 @@
-//! Live-view sources: the adapter-shaped identity (`kind` + `value`) of a
-//! repository a saved live view renders from. Only `LocalRepo` exists today;
-//! the enum leaves room for network-backed kinds without reshaping consumers.
-//! Parsing stored parts is fallible by design — a persisted row with an
-//! unknown kind must surface as a typed broken state, never a panic.
-
 use serde::{Deserialize, Serialize};
 
 use crate::paths::{ProjectName, RepositoryRoot, RepositoryRootError};
 
-/// The identity of a live-view source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source_kind")]
 pub enum LiveSource {
-    /// A repository on the local filesystem, keyed by its canonical top-level path.
     #[serde(rename = "LocalRepo")]
     LocalRepo {
         #[serde(rename = "source_value")]
@@ -21,33 +13,32 @@ pub enum LiveSource {
 }
 
 impl LiveSource {
-    /// A local-repo source for `path` (callers pass the canonical repo top-level).
+    #[must_use]
     pub fn local_repo(path: RepositoryRoot) -> Self {
         Self::LocalRepo { path }
     }
 
-    /// The stable kind discriminant persisted as `source_kind`.
+    #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
             Self::LocalRepo { .. } => "LocalRepo",
         }
     }
 
-    /// The identity payload persisted as `source_value`.
+    #[must_use]
     pub fn value(&self) -> String {
         match self {
             Self::LocalRepo { path } => path.display().to_string(),
         }
     }
 
-    /// A human-facing default label for this source.
+    #[must_use]
     pub fn display_name(&self) -> ProjectName {
         match self {
             Self::LocalRepo { path } => path.project_name(),
         }
     }
 
-    /// Rebuilds a source from persisted scalar columns.
     pub fn from_parts(kind: &str, value: &str) -> Result<Self, ParseLiveSourceError> {
         match kind {
             "LocalRepo" => RepositoryRoot::try_new(value.into())
@@ -60,7 +51,6 @@ impl LiveSource {
     }
 }
 
-/// Reports an unsupported persisted live-source kind.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseLiveSourceError {
     #[error("unknown live-view source kind `{kind}`")]
@@ -74,7 +64,7 @@ mod tests {
     use super::*;
 
     fn root(path: &str) -> RepositoryRoot {
-        RepositoryRoot::try_new(path.into()).expect("absolute repository root")
+        RepositoryRoot::try_new(path.into()).unwrap()
     }
 
     #[test]
@@ -92,7 +82,7 @@ mod tests {
 
     #[test]
     fn from_parts_round_trips_local_repo() {
-        let source = LiveSource::from_parts("LocalRepo", "/x/y").expect("known kind parses");
+        let source = LiveSource::from_parts("LocalRepo", "/x/y").unwrap();
         assert_eq!(source, LiveSource::local_repo(root("/x/y")));
     }
 

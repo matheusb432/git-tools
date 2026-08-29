@@ -26,7 +26,7 @@ use gtl_models::{
 };
 
 fn repository_root(path: &Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -60,7 +60,7 @@ fn assemble_excludes_extensions_at_the_git_level() {
     let project = d
         .file_name()
         .and_then(|name| name.to_str())
-        .expect("temporary repository has a UTF-8 project name")
+        .unwrap()
         .to_owned();
     let settings = UserSettings::new(
         None,
@@ -76,15 +76,14 @@ fn assemble_excludes_extensions_at_the_git_level() {
         ComputeDiff {
             repo_root: repository_root(d),
             target: DiffTarget::Merge {
-                base: gtl_models::git::GitRevision::try_new("main")
-                    .expect("fixture revision is non-empty"),
+                base: gtl_models::git::GitRevision::try_new("main").unwrap(),
                 pinned: None,
             },
         },
         &FixedUserSettingsStore::new(settings),
         &HybridGitClient,
     )
-    .expect("compute diff succeeds");
+    .unwrap();
 
     let paths: Vec<&Path> = response
         .view
@@ -98,11 +97,7 @@ fn assemble_excludes_extensions_at_the_git_level() {
         "git must not emit the excluded file"
     );
     assert_eq!(
-        response
-            .view
-            .exclusions
-            .expect("excluded path metadata")
-            .hidden_paths,
+        response.view.exclusions.unwrap().hidden_paths,
         [RepositoryRelativePath::try_new("docs plan.MD".into()).unwrap()],
         "hidden paths come from the name-only pass, case-insensitively"
     );
@@ -130,13 +125,13 @@ fn commit_patch_matches_root_and_first_parent_git_semantics() {
 
     let source = HybridGitClient;
     let repo_root = repository_root(d);
-    let selected_commit = GitRange::try_new("HEAD^!").expect("fixture range is non-empty");
+    let selected_commit = GitRange::try_new("HEAD^!").unwrap();
     let root = source
         .log_commits(&repo_root, &selected_commit)
         .unwrap()
         .into_iter()
         .next()
-        .expect("root commit");
+        .unwrap();
     let root_patch = compute_commit_patch::execute(
         ComputeCommitPatch {
             repo_root: repo_root.clone(),
@@ -145,7 +140,7 @@ fn commit_patch_matches_root_and_first_parent_git_semantics() {
         &FixedUserSettingsStore::default(),
         &source,
     )
-    .expect("root patch");
+    .unwrap();
     assert_eq!(
         (
             root_patch.files[0].added.value(),
@@ -161,7 +156,7 @@ fn commit_patch_matches_root_and_first_parent_git_semantics() {
         .unwrap()
         .into_iter()
         .next()
-        .expect("selected commit");
+        .unwrap();
     let selected_patch = compute_commit_patch::execute(
         ComputeCommitPatch {
             repo_root,
@@ -170,7 +165,7 @@ fn commit_patch_matches_root_and_first_parent_git_semantics() {
         &FixedUserSettingsStore::default(),
         &source,
     )
-    .expect("first-parent patch");
+    .unwrap();
 
     assert_eq!(
         (

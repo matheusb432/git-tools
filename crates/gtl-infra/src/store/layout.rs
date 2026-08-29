@@ -150,6 +150,7 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Find an existing artifact for a pure commit range rendered under the same
 /// layout, density, theme, and exclusion set. Returns `None` on a miss and
 /// scans the flat store's validated sidecar projections.
+#[must_use]
 pub fn lookup_by_range(
     store_root: &Path,
     repo_id: &RepositoryStoreId,
@@ -171,6 +172,7 @@ pub fn lookup_by_range(
 
 /// All sidecars across all repos, for the viewer's history.
 /// Each entry pairs the sidecar with its content hash.
+#[must_use]
 pub fn list_history_with_hash(store_root: &Path) -> Vec<(ArtifactContentHash, ArtifactMetadata)> {
     read_sidecars_paired(store_root)
         .into_iter()
@@ -179,40 +181,31 @@ pub fn list_history_with_hash(store_root: &Path) -> Vec<(ArtifactContentHash, Ar
 }
 
 fn read_sidecars_paired(store_root: &Path) -> Vec<StoredArtifact> {
-    let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(store_root) else {
-        return out;
+        return Vec::new();
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "json") {
-            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-                continue;
-            };
-            let Some(content_hash) = content_hash_from_stem(stem) else {
-                continue;
-            };
-            let html_path = path.with_extension("html");
-            if !html_path.exists() {
-                continue;
-            }
-            let Ok(text) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(sidecar) = serde_json::from_str::<Sidecar>(&text) else {
-                continue;
-            };
-            let Ok(metadata) = sidecar.try_into_metadata() else {
-                continue;
-            };
-            out.push(StoredArtifact {
-                content_hash,
-                html_path,
-                metadata,
-            });
-        }
-    }
-    out
+    entries
+        .flatten()
+        .filter_map(|entry| stored_artifact_from_sidecar(&entry.path()))
+        .collect()
+}
+
+fn stored_artifact_from_sidecar(path: &Path) -> Option<StoredArtifact> {
+    path.extension()
+        .is_some_and(|extension| extension == "json")
+        .then_some(())?;
+    let stem = path.file_stem()?.to_str()?;
+    let content_hash = content_hash_from_stem(stem)?;
+    let html_path = path.with_extension("html");
+    html_path.exists().then_some(())?;
+    let text = fs::read_to_string(path).ok()?;
+    let sidecar = serde_json::from_str::<Sidecar>(&text).ok()?;
+    let metadata = sidecar.try_into_metadata().ok()?;
+    Some(StoredArtifact {
+        content_hash,
+        html_path,
+        metadata,
+    })
 }
 
 fn content_hash_from_stem(stem: &str) -> Option<ArtifactContentHash> {
@@ -282,7 +275,7 @@ mod tests {
     fn range_key(kind: DiffKind, base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
         ArtifactRangeKey {
             range: ArtifactCommitRange {
-                kind: ArtifactRangeKind::try_from(kind).expect("fixture kind is range-addressable"),
+                kind: ArtifactRangeKind::try_from(kind).unwrap(),
                 commits: pinned_range(base_sha, head_sha),
             },
             render_options: RenderOptions::DEFAULT,

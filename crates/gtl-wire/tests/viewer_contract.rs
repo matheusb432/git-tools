@@ -77,12 +77,12 @@ fn identity() -> TestResult<ViewerViewIdentity> {
 #[test]
 fn closed_value_tokens_keep_their_wire_contracts() {
     let values = [
-        serde_json::to_value(ViewerTheme::Graphite).expect("theme serializes"),
-        serde_json::to_value(ViewerDiffLayout::Unified).expect("layout serializes"),
-        serde_json::to_value(ViewerDiffDensity::Compact).expect("density serializes"),
-        serde_json::to_value(ViewerTabKind::Snapshot).expect("tab kind serializes"),
-        serde_json::to_value(ViewerFileStatus::Renamed).expect("file status serializes"),
-        serde_json::to_value(ViewerRecipeKind::MergeDiff).expect("recipe kind serializes"),
+        serde_json::to_value(ViewerTheme::Graphite).unwrap(),
+        serde_json::to_value(ViewerDiffLayout::Unified).unwrap(),
+        serde_json::to_value(ViewerDiffDensity::Compact).unwrap(),
+        serde_json::to_value(ViewerTabKind::Snapshot).unwrap(),
+        serde_json::to_value(ViewerFileStatus::Renamed).unwrap(),
+        serde_json::to_value(ViewerRecipeKind::MergeDiff).unwrap(),
     ];
 
     assert_eq!(
@@ -112,13 +112,12 @@ fn viewer_failure_codes_use_full_variant_names() {
         (ViewerFailureCode::SourceUnavailable, "SourceUnavailable"),
         (ViewerFailureCode::RenderFailed, "RenderFailed"),
     ] {
-        let value = serde_json::to_value(code).expect("failure code serializes");
+        let value = serde_json::to_value(code).unwrap();
 
         assert_eq!(code.as_str(), name);
         assert_eq!(value, json!(name));
         assert_eq!(
-            serde_json::from_value::<ViewerFailureCode>(value)
-                .expect("full failure code deserializes"),
+            serde_json::from_value::<ViewerFailureCode>(value).unwrap(),
             code
         );
     }
@@ -131,7 +130,7 @@ fn viewer_failure_codes_use_full_variant_names() {
 #[test]
 fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
     assert_eq!(
-        serde_json::to_value(ViewerTabState::Broken).expect("tab state serializes"),
+        serde_json::to_value(ViewerTabState::Broken).unwrap(),
         json!({"state": "broken"})
     );
     assert_eq!(
@@ -139,7 +138,7 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
             id: commit_id()?,
             message: "The commit could not be rendered.".into(),
         })
-        .expect("commit selection serializes"),
+        .unwrap(),
         json!({
             "state": "error",
             "id": COMMIT_ID,
@@ -147,8 +146,7 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
         })
     );
     assert_eq!(
-        serde_json::to_value(ViewerActiveState::Pending { tab_id: tab_id(7)? })
-            .expect("active state serializes"),
+        serde_json::to_value(ViewerActiveState::Pending { tab_id: tab_id(7)? }).unwrap(),
         json!({"state": "pending", "tab_id": 7})
     );
     assert_eq!(
@@ -156,19 +154,18 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
             render_id: render_id(41)?,
             page: page_number(3)?,
         })
-        .expect("history cursor serializes"),
+        .unwrap(),
         json!({"cursor": "older_than", "render_id": 41, "page": 3})
     );
     assert_eq!(
-        serde_json::to_value(SetViewerPreference::Theme(ViewerTheme::Glacier))
-            .expect("preference serializes"),
+        serde_json::to_value(SetViewerPreference::Theme(ViewerTheme::Glacier)).unwrap(),
         json!({"preference": "theme", "value": "glacier"})
     );
     assert_eq!(
         serde_json::to_value(ViewerFeedback::SnapshotRecipesSkipped {
             labels: vec!["api".into()],
         })
-        .expect("feedback serializes"),
+        .unwrap(),
         json!({"kind": "snapshot_recipes_skipped", "labels": ["api"]})
     );
     Ok(())
@@ -243,7 +240,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         feedback: None,
     };
 
-    let value = serde_json::to_value(&shell).expect("shell serializes");
+    let value = serde_json::to_value(&shell).unwrap();
     assert_eq!(value["active"]["state"], "ready");
     assert_eq!(
         value["active"]["view"]["files"][0]["anchor_id"],
@@ -267,10 +264,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     );
     assert!(value.pointer("/active/view/files/0/lines").is_none());
     assert!(value.pointer("/active/view/repository_root").is_none());
-    assert_eq!(
-        serde_json::from_value::<ViewerShell>(value).expect("shell deserializes"),
-        shell
-    );
+    assert_eq!(serde_json::from_value::<ViewerShell>(value).unwrap(), shell);
 
     Ok(())
 }
@@ -358,7 +352,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         },
     };
 
-    let history_json = serde_json::to_value(&history).expect("history serializes");
+    let history_json = serde_json::to_value(&history).unwrap();
     assert_eq!(
         history_json["entries"][0]["rendered_at"],
         "2026-08-09T10:00:00Z"
@@ -366,14 +360,12 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
     assert!(history_json.pointer("/entries/0/recipe").is_none());
     assert!(!history_json.to_string().contains("/repos/git-tools"));
     assert_eq!(
-        serde_json::from_value::<ViewerHistoryPage>(history_json).expect("history deserializes"),
+        serde_json::from_value::<ViewerHistoryPage>(history_json).unwrap(),
         history
     );
     assert_eq!(
-        serde_json::from_value::<ViewerUserSettings>(
-            serde_json::to_value(&settings).expect("settings serialize")
-        )
-        .expect("settings deserialize"),
+        serde_json::from_value::<ViewerUserSettings>(serde_json::to_value(&settings).unwrap())
+            .unwrap(),
         settings
     );
     Ok(())
@@ -392,14 +384,14 @@ fn history_copy_payload_carries_server_formatted_json() -> TestResult {
     };
 
     assert_eq!(
-        serde_json::to_value(payload).expect("history copy payload serializes"),
+        serde_json::to_value(payload).unwrap(),
         json!({"json": json})
     );
     assert_eq!(
         serde_json::to_value(GetViewerHistoryCopy {
             render_id: render_id(31)?,
         })
-        .expect("history copy request serializes"),
+        .unwrap(),
         json!({"render_id": 31})
     );
     Ok(())

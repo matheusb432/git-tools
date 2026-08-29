@@ -15,16 +15,13 @@ fn git(repository: &Path, arguments: &[&str]) -> String {
         .arg(repository)
         .args(arguments)
         .output()
-        .expect("git starts");
+        .unwrap();
     assert!(
         output.status.success(),
         "git {arguments:?} failed in {}",
         repository.display()
     );
-    String::from_utf8(output.stdout)
-        .expect("git output is UTF-8")
-        .trim()
-        .to_string()
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
 fn init_repo(repository: &Path) {
@@ -80,7 +77,7 @@ fn real_git_repository_build_pins_each_repository_independently() {
         },
         &HybridGitClient,
     )
-    .expect("repository recipes build through real Git");
+    .unwrap();
     let json = serde_json::to_value(recipes).unwrap();
 
     assert_eq!(json.as_array().unwrap().len(), 2);

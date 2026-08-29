@@ -120,8 +120,7 @@ mod tests {
 
     #[test]
     fn zero_last_count_is_rejected_with_the_request_contract_message() {
-        let error = DiffTarget::try_from(DiffTargetRequest::Last { count: 0 })
-            .expect_err("zero cannot form a valid last-count target");
+        let error = DiffTarget::try_from(DiffTargetRequest::Last { count: 0 }).unwrap_err();
 
         assert_eq!(error.to_string(), "last count must be >= 1");
     }

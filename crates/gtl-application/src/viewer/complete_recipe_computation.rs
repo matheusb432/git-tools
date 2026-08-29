@@ -123,7 +123,7 @@ mod tests {
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Last {
-                        count: NonZeroU32::new(1).expect("non-zero"),
+                        count: NonZeroU32::new(1).unwrap(),
                         pinned: None,
                     },
                 },
@@ -148,9 +148,11 @@ mod tests {
                 kind: ViewerTabKind::Live,
                 view,
             });
-            let CompleteRecipeComputationOk::Publish { label, .. } = response else {
-                panic!("live recipe must publish");
-            };
+            let label = match response {
+                CompleteRecipeComputationOk::Publish { label, .. } => Some(label),
+                CompleteRecipeComputationOk::Skipped { .. } => None,
+            }
+            .unwrap();
 
             assert_eq!(label, expected);
         }

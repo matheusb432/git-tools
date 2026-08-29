@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
 use sha2::{Digest, Sha256};
@@ -127,35 +127,46 @@ fn run_development_server(step: &Step, root: &Path) -> Result<()> {
     // afterward. Restarting only for new Rust paths refreshes that map without sacrificing normal
     // RSX hot reloads.
     let mut known_sources = development_rust_sources(root)?;
-    loop {
-        let mut server = DevelopmentServer::spawn(step)?;
-        loop {
-            if let Some(status) = server.try_wait()? {
-                return development_server_result(step, status);
-            }
+    while let Some(current_sources) =
+        run_development_server_until_source_change(step, root, &known_sources)?
+    {
+        known_sources = current_sources;
+    }
+    Ok(())
+}
 
-            let current_sources = development_rust_sources(root)?;
-            let new_sources = new_development_rust_sources(&known_sources, &current_sources);
-            if !new_sources.is_empty() {
-                let paths = new_sources
-                    .iter()
-                    .map(|path| {
-                        path.strip_prefix(root)
-                            .unwrap_or(path)
-                            .display()
-                            .to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                eprintln!(
-                    "dioxus-web-serve: restarting Dioxus to register new Rust source: {paths}"
-                );
-                server.stop()?;
-                known_sources = current_sources;
-                break;
-            }
-            thread::sleep(DEVELOPMENT_POLL_INTERVAL);
+fn run_development_server_until_source_change(
+    step: &Step,
+    root: &Path,
+    known_sources: &BTreeSet<PathBuf>,
+) -> Result<Option<BTreeSet<PathBuf>>> {
+    let mut server = DevelopmentServer::spawn(step)?;
+    loop {
+        if let Some(status) = server.try_wait()? {
+            development_server_result(step, status)?;
+            return Ok(None);
         }
+
+        let current_sources = development_rust_sources(root)?;
+        let new_sources = new_development_rust_sources(known_sources, &current_sources);
+        if new_sources.is_empty() {
+            thread::sleep(DEVELOPMENT_POLL_INTERVAL);
+            continue;
+        }
+
+        let paths = new_sources
+            .iter()
+            .map(|path| {
+                path.strip_prefix(root)
+                    .unwrap_or(path)
+                    .display()
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!("dioxus-web-serve: restarting Dioxus to register new Rust source: {paths}");
+        server.stop()?;
+        return Ok(Some(current_sources));
     }
 }
 
@@ -172,11 +183,11 @@ fn development_server_result(step: &Step, status: ExitStatus) -> Result<()> {
 fn development_rust_sources(root: &Path) -> Result<BTreeSet<PathBuf>> {
     let mut sources = BTreeSet::new();
     for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
-        for path in collect_tree_files(&root.join(directory))? {
-            if path.extension().is_some_and(|extension| extension == "rs") {
-                sources.insert(path);
-            }
-        }
+        sources.extend(
+            collect_tree_files(&root.join(directory))?
+                .into_iter()
+                .filter(|path| path.extension().is_some_and(|extension| extension == "rs")),
+        );
     }
     ensure!(
         sources.len() <= FILE_COUNT_MAX,
@@ -218,23 +229,21 @@ impl DevelopmentServer {
 
         self.request_stop()?;
         let deadline = Instant::now() + DEVELOPMENT_STOP_GRACE_PERIOD;
-        loop {
-            if self.try_wait()?.is_some() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                if let Err(error) = self.child.kill()
-                    && self.try_wait()?.is_none()
-                {
-                    return Err(error).context(format!("kill {} process", self.label));
-                }
-                self.child
-                    .wait()
-                    .with_context(|| format!("reap {} process", self.label))?;
-                return Ok(());
-            }
+        while Instant::now() < deadline && self.try_wait()?.is_none() {
             thread::sleep(DEVELOPMENT_POLL_INTERVAL);
         }
+        if self.try_wait()?.is_some() {
+            return Ok(());
+        }
+        if let Err(error) = self.child.kill()
+            && self.try_wait()?.is_none()
+        {
+            return Err(error).context(format!("kill {} process", self.label));
+        }
+        self.child
+            .wait()
+            .with_context(|| format!("reap {} process", self.label))?;
+        Ok(())
     }
 
     #[cfg(unix)]
@@ -543,18 +552,7 @@ fn fingerprint_sources(root: &Path, include_generated: bool) -> Result<String> {
             .with_context(|| format!("source escaped repository root: {}", path.display()))?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
-        let mut file =
-            File::open(&path).with_context(|| format!("open Dioxus source {}", path.display()))?;
-        let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .with_context(|| format!("read Dioxus source {}", path.display()))?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&buffer[..count]);
-        }
+        update_digest_from_file(&mut digest, &path, "Dioxus source")?;
         digest.update([0xff]);
     }
     let bytes = digest.finalize();
@@ -576,18 +574,7 @@ fn bundle_fingerprint(root: &Path) -> Result<String> {
             .with_context(|| format!("staged asset escaped public root: {}", path.display()))?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
-        let mut file =
-            File::open(&path).with_context(|| format!("open staged asset {}", path.display()))?;
-        let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .with_context(|| format!("read staged asset {}", path.display()))?;
-            if count == 0 {
-                break;
-            }
-            digest.update(&buffer[..count]);
-        }
+        update_digest_from_file(&mut digest, &path, "staged asset")?;
         digest.update([0xff]);
     }
     let bytes = digest.finalize();
@@ -596,6 +583,28 @@ fn bundle_fingerprint(root: &Path) -> Result<String> {
         write!(&mut fingerprint, "{byte:02x}").context("encode Dioxus bundle fingerprint")?;
     }
     Ok(fingerprint)
+}
+
+fn update_digest_from_file(digest: &mut Sha256, path: &Path, description: &str) -> Result<()> {
+    let mut file =
+        File::open(path).with_context(|| format!("open {description} {}", path.display()))?;
+    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+    let mut count = read_digest_chunk(&mut file, &mut buffer, path, description)?;
+    while count > 0 {
+        digest.update(&buffer[..count]);
+        count = read_digest_chunk(&mut file, &mut buffer, path, description)?;
+    }
+    Ok(())
+}
+
+fn read_digest_chunk(
+    file: &mut File,
+    buffer: &mut [u8],
+    path: &Path,
+    description: &str,
+) -> Result<usize> {
+    file.read(buffer)
+        .with_context(|| format!("read {description} {}", path.display()))
 }
 
 fn collect_tree_files(directory: &Path) -> Result<Vec<PathBuf>> {
@@ -613,22 +622,32 @@ fn collect_tree_files(directory: &Path) -> Result<Vec<PathBuf>> {
                 "file inventory under {} exceeds {FILE_COUNT_MAX} entries",
                 directory.display()
             );
-            let file_type = entry
-                .file_type()
-                .with_context(|| format!("inspect {}", entry.path().display()))?;
-            if file_type.is_dir() {
-                directories.push(entry.path());
-            } else if file_type.is_file() {
-                files.push(entry.path());
-            } else {
-                bail!(
-                    "unsupported staged or source entry: {}",
-                    entry.path().display()
-                );
-            }
+            collect_tree_entry(&entry, &mut directories, &mut files)?;
         }
     }
     Ok(files)
+}
+
+fn collect_tree_entry(
+    entry: &fs::DirEntry,
+    directories: &mut Vec<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let path = entry.path();
+    let file_type = entry
+        .file_type()
+        .with_context(|| format!("inspect {}", path.display()))?;
+    if file_type.is_dir() {
+        directories.push(path);
+        return Ok(());
+    }
+    ensure!(
+        file_type.is_file(),
+        "unsupported staged or source entry: {}",
+        path.display()
+    );
+    files.push(path);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -638,21 +657,19 @@ mod tests {
     fn fixture(root: &Path) {
         for relative in SOURCE_FILES {
             let path = root.join(relative);
-            fs::create_dir_all(path.parent().expect("fixture file parent"))
-                .expect("fixture file parent is writable");
-            fs::write(path, relative).expect("fixture source is writable");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, relative).unwrap();
         }
         for directory in SOURCE_DIRECTORIES {
             let path = root.join(directory).join("fixture.txt");
-            fs::create_dir_all(path.parent().expect("fixture directory"))
-                .expect("fixture directory is writable");
-            fs::write(path, directory).expect("fixture directory source is writable");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, directory).unwrap();
         }
     }
 
     fn stage_fresh_bundle(root: &Path) {
         let public = root.join(PUBLIC_DIRECTORY);
-        fs::create_dir_all(&public).expect("public bundle directory is writable");
+        fs::create_dir_all(&public).unwrap();
         for (name, contents) in [
             ("index.html", "<html></html>"),
             ("assets/app-icon-dxhone.ico", "icon"),
@@ -662,41 +679,34 @@ mod tests {
             ("assets/tailwind-dxhone.css", "body{}"),
         ] {
             let path = public.join(name);
-            fs::create_dir_all(path.parent().expect("bundle asset parent"))
-                .expect("bundle asset parent is writable");
-            fs::write(path, contents).expect("bundle asset is writable");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, contents).unwrap();
         }
-        let fingerprint = source_fingerprint(root).expect("fixture fingerprint");
-        let bundle = bundle_fingerprint(root).expect("fixture bundle fingerprint");
-        write_fingerprint(root, SOURCE_FINGERPRINT_PATH, &fingerprint)
-            .expect("fixture source marker is writable");
-        write_fingerprint(root, BUNDLE_FINGERPRINT_PATH, &bundle)
-            .expect("fixture bundle marker is writable");
+        let fingerprint = source_fingerprint(root).unwrap();
+        let bundle = bundle_fingerprint(root).unwrap();
+        write_fingerprint(root, SOURCE_FINGERPRINT_PATH, &fingerprint).unwrap();
+        write_fingerprint(root, BUNDLE_FINGERPRINT_PATH, &bundle).unwrap();
     }
 
     #[test]
     fn staged_bundle_requires_every_runtime_asset_kind() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         fixture(root.path());
         let public = root.path().join(PUBLIC_DIRECTORY);
-        fs::create_dir_all(&public).expect("public bundle directory is writable");
-        fs::write(public.join("index.html"), "<html></html>").expect("bundle index is writable");
+        fs::create_dir_all(&public).unwrap();
+        fs::write(public.join("index.html"), "<html></html>").unwrap();
 
-        let error = verify_bundle_files(root.path())
-            .expect_err("bundle without runtime assets must fail")
-            .to_string();
+        let error = verify_bundle_files(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("has no non-empty .css asset"), "{error}");
     }
 
     #[test]
     fn staged_bundle_rejects_a_missing_distribution() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         fixture(root.path());
 
-        let error = verify_staged_bundle(root.path())
-            .expect_err("missing distribution must fail")
-            .to_string();
+        let error = verify_staged_bundle(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("missing a non-empty"), "{error}");
         assert!(error.contains("dist/public/index.html"), "{error}");
@@ -704,43 +714,39 @@ mod tests {
 
     #[test]
     fn staged_bundle_rejects_source_drift() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         fixture(root.path());
         stage_fresh_bundle(root.path());
         fs::write(
             root.path().join("crates/gtl-web/src/fixture.txt"),
             "changed",
         )
-        .expect("fixture source changes");
+        .unwrap();
 
-        let error = verify_staged_bundle(root.path())
-            .expect_err("changed sources must stale the bundle")
-            .to_string();
+        let error = verify_staged_bundle(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("bundle is stale"), "{error}");
     }
 
     #[test]
     fn staged_bundle_rejects_local_contract_drift() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         fixture(root.path());
         stage_fresh_bundle(root.path());
         fs::write(
             root.path().join("crates/gtl-wire/src/fixture.txt"),
             "changed",
         )
-        .expect("fixture contract changes");
+        .unwrap();
 
-        let error = verify_staged_bundle(root.path())
-            .expect_err("changed local dependency must stale the bundle")
-            .to_string();
+        let error = verify_staged_bundle(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("bundle is stale"), "{error}");
     }
 
     #[test]
     fn staged_bundle_rejects_a_stale_hashed_asset() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         fixture(root.path());
         stage_fresh_bundle(root.path());
         fs::write(
@@ -749,30 +755,28 @@ mod tests {
                 .join("assets/gtl-web-dxhold.js"),
             "stale",
         )
-        .expect("stale bundle asset is writable");
+        .unwrap();
 
-        let error = verify_bundle_files(root.path())
-            .expect_err("stale hashed asset must fail")
-            .to_string();
+        let error = verify_bundle_files(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("unexpected or stale assets"), "{error}");
     }
 
     #[test]
     fn staged_bundle_rejects_oversized_files_and_aggregate_output() {
-        let root = tempfile::tempdir().expect("temporary directory");
+        let root = tempfile::tempdir().unwrap();
         let first = root.path().join("first.js");
         let second = root.path().join("second.wasm");
-        fs::write(&first, "12345").expect("first asset is writable");
-        fs::write(&second, "12345").expect("second asset is writable");
+        fs::write(&first, "12345").unwrap();
+        fs::write(&second, "12345").unwrap();
 
         let file_error = verify_bounded_bundle_files(std::slice::from_ref(&first), 4, 10)
-            .expect_err("oversized staged asset must fail")
+            .unwrap_err()
             .to_string();
         assert!(file_error.contains("exceeds 4 bytes"), "{file_error}");
 
         let total_error = verify_bounded_bundle_files(&[first, second], 5, 9)
-            .expect_err("oversized staged aggregate must fail")
+            .unwrap_err()
             .to_string();
         assert!(
             total_error.contains("bundle exceeds 9 bytes"),
@@ -782,7 +786,7 @@ mod tests {
 
     #[test]
     fn release_output_cleanup_is_bounded_to_the_desktop_dioxus_application() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         let target = root.path().join("target");
         let staged = root.path().join(PUBLIC_DIRECTORY).join("old.js");
         let desktop_internal = target
@@ -790,12 +794,11 @@ mod tests {
             .join("public/assets/old.js");
         let neighbor = target.join("dx/other-package/keep");
         for path in [&staged, &desktop_internal, &neighbor] {
-            fs::create_dir_all(path.parent().expect("old asset parent"))
-                .expect("old asset parent is writable");
-            fs::write(path, "old").expect("old asset is writable");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "old").unwrap();
         }
 
-        clean_desktop_release_outputs(root.path(), &target).expect("desktop outputs clean");
+        clean_desktop_release_outputs(root.path(), &target).unwrap();
 
         assert!(!root.path().join(DIST_DIRECTORY).exists());
         assert!(!target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY).exists());
@@ -840,7 +843,7 @@ mod tests {
 
     #[test]
     fn development_serve_owns_the_incremental_compile_environment() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         let forwarded = ["--port".to_owned(), "8081".to_owned()];
 
         let step = development_serve_step(root.path(), &forwarded);
@@ -860,21 +863,18 @@ mod tests {
 
     #[test]
     fn development_source_inventory_exposes_only_new_rust_sources() {
-        let root = tempfile::tempdir().expect("temporary repository");
+        let root = tempfile::tempdir().unwrap();
         for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
-            fs::create_dir_all(root.path().join(directory))
-                .expect("development source directory is writable");
+            fs::create_dir_all(root.path().join(directory)).unwrap();
         }
-        let before = development_rust_sources(root.path()).expect("initial source inventory");
+        let before = development_rust_sources(root.path()).unwrap();
         let rust_source = root
             .path()
             .join("crates/gtl-web/src/shared/ui/code_text.rs");
-        fs::create_dir_all(rust_source.parent().expect("Rust source parent"))
-            .expect("Rust source parent is writable");
-        fs::write(&rust_source, "pub fn code_text() {}").expect("Rust source fixture is writable");
-        fs::write(root.path().join("crates/gtl-web/src/notes.txt"), "not Rust")
-            .expect("non-Rust fixture is writable");
-        let after = development_rust_sources(root.path()).expect("updated source inventory");
+        fs::create_dir_all(rust_source.parent().unwrap()).unwrap();
+        fs::write(&rust_source, "pub fn code_text() {}").unwrap();
+        fs::write(root.path().join("crates/gtl-web/src/notes.txt"), "not Rust").unwrap();
+        let after = development_rust_sources(root.path()).unwrap();
 
         assert_eq!(new_development_rust_sources(&before, &after), [rust_source]);
     }

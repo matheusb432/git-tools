@@ -2,6 +2,7 @@ use std::{
     error::Error,
     fmt,
     future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -9,8 +10,9 @@ use std::{
 use anyhow::{Context as _, Result, bail};
 use playwright_rs::{
     LaunchOptions, Playwright,
-    protocol::{Browser, BrowserContext, CDPSession, GotoOptions, Page},
+    protocol::{Browser, BrowserContext, CDPSession, GotoOptions, Page, Route},
 };
+use serde_json::Value;
 
 pub const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -34,6 +36,8 @@ struct ArtifactAudit {
     requests: Arc<Mutex<RequestAuditState>>,
     scripts: Arc<Mutex<ScriptAuditState>>,
 }
+
+type PlaywrightHandlerFuture = Pin<Box<dyn Future<Output = playwright_rs::Result<()>> + Send>>;
 
 #[derive(Clone, Debug)]
 struct BoundedObservations<T> {
@@ -205,12 +209,7 @@ impl fmt::Display for ArtifactAuditError {
                 webassembly_scripts,
             } => {
                 write!(formatter, "offline artifact audit failed")?;
-                if let Some(url) = expected_document {
-                    write!(
-                        formatter,
-                        "; requested top-level document was not loaded exactly once: {url}"
-                    )?;
-                }
+                write_expected_document_violation(formatter, expected_document.as_deref())?;
                 write_observations(formatter, "unexpected request", unexpected_requests)?;
                 write_observations(
                     formatter,
@@ -220,6 +219,19 @@ impl fmt::Display for ArtifactAuditError {
             }
         }
     }
+}
+
+fn write_expected_document_violation(
+    formatter: &mut fmt::Formatter<'_>,
+    expected_document: Option<&str>,
+) -> fmt::Result {
+    if let Some(url) = expected_document {
+        write!(
+            formatter,
+            "; requested top-level document was not loaded exactly once: {url}"
+        )?;
+    }
+    Ok(())
 }
 
 impl Error for ArtifactAuditError {}
@@ -396,35 +408,10 @@ impl Session {
 impl ArtifactAudit {
     async fn install(context: &BrowserContext, page: &Page) -> Result<Self> {
         let requests = Arc::new(Mutex::new(RequestAuditState::default()));
+        let route_requests = Arc::clone(&requests);
         operation("install exact artifact request audit", async {
             context
-                .route("**/*", {
-                    let requests = Arc::clone(&requests);
-                    move |route| {
-                        let requests = Arc::clone(&requests);
-                        async move {
-                            let request = route.request();
-                            let is_top_level = request
-                                .frame()
-                                .is_some_and(|frame| frame.parent_frame().is_none());
-                            let permit = requests
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .observe(
-                                    request.url(),
-                                    request.method(),
-                                    request.resource_type(),
-                                    request.is_navigation_request(),
-                                    is_top_level,
-                                );
-                            if permit {
-                                route.continue_(None).await
-                            } else {
-                                route.abort(None).await
-                            }
-                        }
-                    }
-                })
+                .route("**/*", artifact_route_handler(route_requests))
                 .await
                 .context("install exact artifact request audit")
         })
@@ -438,39 +425,10 @@ impl ArtifactAudit {
         })
         .await?;
         let scripts = Arc::new(Mutex::new(ScriptAuditState::default()));
-        debugger.on("Debugger.scriptParsed", {
-            let scripts = Arc::clone(&scripts);
-            move |event| {
-                let scripts = Arc::clone(&scripts);
-                async move {
-                    let mut scripts = scripts
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    scripts.parsed_events = scripts.parsed_events.saturating_add(1);
-                    if event.get("scriptLanguage").and_then(|value| value.as_str())
-                        == Some("WebAssembly")
-                    {
-                        scripts
-                            .webassembly_scripts
-                            .record(WebAssemblyScriptObservation {
-                                script_id: bounded_text(
-                                    event
-                                        .get("scriptId")
-                                        .and_then(|value| value.as_str())
-                                        .unwrap_or("<unknown>"),
-                                ),
-                                url: bounded_text(
-                                    event
-                                        .get("url")
-                                        .and_then(|value| value.as_str())
-                                        .unwrap_or_default(),
-                                ),
-                            });
-                    }
-                    Ok(())
-                }
-            }
-        });
+        debugger.on(
+            "Debugger.scriptParsed",
+            script_event_handler(Arc::clone(&scripts)),
+        );
         operation("enable Chromium Debugger audit", async {
             debugger
                 .send("Debugger.enable", None)
@@ -532,22 +490,33 @@ impl ArtifactAudit {
         let deadline = Instant::now() + DEBUGGER_EVENT_DRAIN_TIMEOUT;
         let mut previous_count = self.parsed_event_count();
         let mut stable_intervals = 0;
-        loop {
-            tokio::time::sleep(DEBUGGER_EVENT_QUIET_PERIOD).await;
-            let observed_events = self.parsed_event_count();
-            if observed_events == previous_count {
-                stable_intervals += 1;
-                if stable_intervals == DEBUGGER_EVENT_STABLE_INTERVALS {
-                    return Ok(());
-                }
-            } else {
-                previous_count = observed_events;
-                stable_intervals = 0;
-            }
-            if Instant::now() >= deadline {
-                return Err(ArtifactAuditError::DebuggerEventsDidNotSettle { observed_events });
-            }
+        while !self
+            .observe_debugger_interval(deadline, &mut previous_count, &mut stable_intervals)
+            .await?
+        {}
+        Ok(())
+    }
+
+    async fn observe_debugger_interval(
+        &self,
+        deadline: Instant,
+        previous_count: &mut usize,
+        stable_intervals: &mut usize,
+    ) -> std::result::Result<bool, ArtifactAuditError> {
+        tokio::time::sleep(DEBUGGER_EVENT_QUIET_PERIOD).await;
+        let observed_events = self.parsed_event_count();
+        if observed_events == *previous_count {
+            *stable_intervals += 1;
+        } else {
+            *previous_count = observed_events;
+            *stable_intervals = 0;
         }
+        if *stable_intervals == DEBUGGER_EVENT_STABLE_INTERVALS {
+            return Ok(true);
+        }
+        (Instant::now() < deadline)
+            .then_some(false)
+            .ok_or(ArtifactAuditError::DebuggerEventsDidNotSettle { observed_events })
     }
 
     fn parsed_event_count(&self) -> usize {
@@ -583,6 +552,69 @@ impl ArtifactAudit {
             unexpected_requests: requests.unexpected_requests,
             webassembly_scripts: scripts.webassembly_scripts,
         })
+    }
+}
+
+async fn handle_artifact_route(
+    requests: Arc<Mutex<RequestAuditState>>,
+    route: Route,
+) -> playwright_rs::Result<()> {
+    let request = route.request();
+    let is_top_level = request
+        .frame()
+        .is_some_and(|frame| frame.parent_frame().is_none());
+    let permit = requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .observe(
+            request.url(),
+            request.method(),
+            request.resource_type(),
+            request.is_navigation_request(),
+            is_top_level,
+        );
+    if permit {
+        route.continue_(None).await
+    } else {
+        route.abort(None).await
+    }
+}
+
+fn artifact_route_handler(
+    requests: Arc<Mutex<RequestAuditState>>,
+) -> impl Fn(Route) -> PlaywrightHandlerFuture + Send + Sync + 'static {
+    move |route| Box::pin(handle_artifact_route(Arc::clone(&requests), route))
+}
+
+fn script_event_handler(
+    scripts: Arc<Mutex<ScriptAuditState>>,
+) -> impl Fn(Value) -> PlaywrightHandlerFuture + Send + Sync + 'static {
+    move |event| {
+        let scripts = Arc::clone(&scripts);
+        Box::pin(async move {
+            record_script_event(&scripts, &event);
+            Ok(())
+        })
+    }
+}
+
+fn record_script_event(scripts: &Mutex<ScriptAuditState>, event: &Value) {
+    let mut scripts = scripts
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    scripts.parsed_events = scripts.parsed_events.saturating_add(1);
+    if event.get("scriptLanguage").and_then(Value::as_str) == Some("WebAssembly") {
+        scripts
+            .webassembly_scripts
+            .record(WebAssemblyScriptObservation {
+                script_id: bounded_text(
+                    event
+                        .get("scriptId")
+                        .and_then(Value::as_str)
+                        .unwrap_or("<unknown>"),
+                ),
+                url: bounded_text(event.get("url").and_then(Value::as_str).unwrap_or_default()),
+            });
     }
 }
 
@@ -667,9 +699,7 @@ mod tests {
     fn request_audit_permits_only_one_exact_top_level_file_document() {
         let artifact_url = "file:///tmp/raw-artifact.html";
         let mut audit = RequestAuditState::default();
-        audit
-            .configure(artifact_url)
-            .expect("configure exact artifact URL");
+        audit.configure(artifact_url).unwrap();
 
         assert!(audit.observe(artifact_url, "GET", "document", true, true));
         for (url, method, resource_type, is_navigation, is_top_level) in [
@@ -702,9 +732,7 @@ mod tests {
             audit.configure("https://example.invalid/artifact.html"),
             Err(ArtifactAuditError::ArtifactUrlIsNotFile { .. })
         ));
-        audit
-            .configure("file:///tmp/raw-artifact.html")
-            .expect("configure file artifact URL");
+        audit.configure("file:///tmp/raw-artifact.html").unwrap();
         assert!(matches!(
             audit.configure("file:///tmp/other-artifact.html"),
             Err(ArtifactAuditError::ArtifactUrlAlreadyConfigured { .. })

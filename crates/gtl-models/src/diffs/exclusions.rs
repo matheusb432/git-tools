@@ -1,42 +1,13 @@
-//! Per-project diff exclusions by file extension.
-//!
-//! Configured centrally through the user config's default `diff.exclude` list
-//! and named `[[projects]]` overrides, so a project never needs a config file
-//! in its own working tree. The view carries an [`AppliedExclusions`] summary
-//! whenever files were hidden, so every surface can show the filter instead
-//! of silently dropping files.
-
 use std::{collections::BTreeMap, path::Path};
 
 use crate::paths::{ProjectName, RepositoryRelativePath};
 
-/// The normalized extension set excluded for one project.
-///
-/// Extensions are stored lowercase without a leading dot; matching compares a
-/// path's final extension case-insensitively, so `md`, `.MD`, and `Md` all
-/// configure (and match) the same files. Files without an extension (e.g.
-/// `Makefile`, `.gitignore`) never match.
-///
-/// # Examples
-///
-/// ```
-/// use gtl_models::{diffs::ExcludedExtensions, paths::RepositoryRelativePath};
-///
-/// let excluded = ExcludedExtensions::new(["md", ".LOCK"]);
-/// let plan = RepositoryRelativePath::try_new("docs/planning/plan.MD".into()).unwrap();
-/// let lock = RepositoryRelativePath::try_new("Cargo.lock".into()).unwrap();
-/// let source = RepositoryRelativePath::try_new("src/main.rs".into()).unwrap();
-/// assert!(excluded.matches(&plan));
-/// assert!(excluded.matches(&lock));
-/// assert!(!excluded.matches(&source));
-/// ```
+/// Lowercase, dotless, sorted, unique extensions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct ExcludedExtensions(Vec<String>);
 
 impl ExcludedExtensions {
-    /// Normalizes `raw` into a sorted, deduplicated extension set: trimmed,
-    /// lowercased, leading dots stripped, empties dropped.
     pub fn new<I, S>(raw: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -52,12 +23,12 @@ impl ExcludedExtensions {
         Self(extensions)
     }
 
-    /// Whether no extension is excluded.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// Whether `path`'s final extension is excluded (case-insensitive).
+    #[must_use]
     pub fn matches(&self, path: &RepositoryRelativePath) -> bool {
         if self.0.is_empty() {
             return false;
@@ -71,46 +42,19 @@ impl ExcludedExtensions {
             })
     }
 
-    /// The normalized extensions, sorted, for display.
+    #[must_use]
     pub fn extensions(&self) -> &[String] {
         &self.0
     }
 }
 
-/// Every project's excluded extensions, keyed by repo directory name (the last
-/// component of the repo's git top-level path).
-///
-/// # Examples
-///
-/// ```
-/// use gtl_models::{
-///     diffs::DiffExclusions,
-///     paths::{ProjectName, RepositoryRelativePath},
-/// };
-///
-/// let project = ProjectName::try_new("git-tools".to_owned()).unwrap();
-/// let other = ProjectName::try_new("other".to_owned()).unwrap();
-/// let exclusions = DiffExclusions::new([(project.clone(), vec!["md".to_string()])], None);
-/// assert!(
-///     exclusions
-///         .for_project_or_default(&project)
-///         .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap())
-/// );
-/// assert!(
-///     !exclusions
-///         .for_project_or_default(&other)
-///         .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap())
-/// );
-/// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffExclusions {
     projects: BTreeMap<ProjectName, ExcludedExtensions>,
-    // TODO: use builder pattern
     default_exclusions: ExcludedExtensions,
 }
 
 impl DiffExclusions {
-    /// Builds project overrides and a default extension set from raw values.
     pub fn new<I, S>(project_exclusions: I, default_exclusions: Option<Vec<S>>) -> Self
     where
         I: IntoIterator<Item = (ProjectName, Vec<S>)>,
@@ -127,49 +71,44 @@ impl DiffExclusions {
         }
     }
 
-    /// The excluded extensions for `project`
+    #[must_use]
     pub fn for_project(&self, project: &ProjectName) -> Option<&ExcludedExtensions> {
         self.projects.get(project)
     }
 
-    /// The excluded extensions for `project` or the default exclusions
+    #[must_use]
     pub fn for_project_or_default(&self, project: &ProjectName) -> &ExcludedExtensions {
         self.for_project(project)
             .unwrap_or(&self.default_exclusions)
     }
 
-    /// Returns the exclusions configured for the default project fallback.
+    #[must_use]
     pub const fn default_exclusions(&self) -> &ExcludedExtensions {
         &self.default_exclusions
     }
 
-    /// Iterates project-specific exclusions in project-name order.
+    /// Iterates overrides in project-name order.
+    #[must_use]
     pub fn project_exclusions(
         &self,
     ) -> impl ExactSizeIterator<Item = (&ProjectName, &ExcludedExtensions)> {
         self.projects.iter()
     }
 
-    /// Whether neither the default nor any project override excludes an extension.
     pub fn is_empty(&self) -> bool {
         self.default_exclusions.is_empty()
             && self.projects.values().all(ExcludedExtensions::is_empty)
     }
 }
 
-/// The exclusion outcome a computed view carries so every surface (artifact
-/// chip, CLI note) can state what was hidden and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedExclusions {
-    /// The configured extensions that were in force (normalized, sorted).
     pub extensions: ExcludedExtensions,
-    /// The paths hidden from the view, in diff order.
     pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
 impl AppliedExclusions {
-    /// `Some` summary only when the filter actually hid files — a configured
-    /// but idle filter stays invisible.
+    #[must_use]
     pub fn from_hidden(
         excluded: &ExcludedExtensions,
         hidden_paths: Vec<RepositoryRelativePath>,
@@ -183,7 +122,7 @@ impl AppliedExclusions {
         })
     }
 
-    /// The extensions joined for display: `"md, lock"`.
+    #[must_use]
     pub fn extensions_label(&self) -> String {
         self.extensions.extensions().join(", ")
     }
@@ -194,11 +133,11 @@ mod tests {
     use super::*;
 
     fn project(name: &str) -> ProjectName {
-        ProjectName::try_new(name.to_owned()).expect("project name")
+        ProjectName::try_new(name.to_owned()).unwrap()
     }
 
     fn path(value: &str) -> RepositoryRelativePath {
-        RepositoryRelativePath::try_new(value.into()).expect("repository-relative path")
+        RepositoryRelativePath::try_new(value.into()).unwrap()
     }
 
     #[test]
@@ -326,8 +265,7 @@ mod tests {
         let excluded = ExcludedExtensions::new(["md"]);
         assert_eq!(AppliedExclusions::from_hidden(&excluded, Vec::new()), None);
 
-        let applied = AppliedExclusions::from_hidden(&excluded, vec![path("README.md")])
-            .expect("hidden path yields a summary");
+        let applied = AppliedExclusions::from_hidden(&excluded, vec![path("README.md")]).unwrap();
         assert_eq!(applied.extensions.extensions(), ["md"]);
         assert_eq!(applied.hidden_paths, [path("README.md")]);
         assert_eq!(applied.extensions_label(), "md");

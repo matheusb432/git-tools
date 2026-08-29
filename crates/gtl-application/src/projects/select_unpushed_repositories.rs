@@ -141,7 +141,7 @@ mod tests {
             ],
             &git,
         )
-        .expect("Git transport remains available");
+        .unwrap();
 
         assert_eq!(
             selected,
@@ -158,16 +158,18 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = select_unpushed_repositories::execute(vec![repo("api")], &git)
-            .expect_err("transport failure must remain an error");
+        let error = select_unpushed_repositories::execute(vec![repo("api")], &git).unwrap_err();
 
         assert_eq!(
             error.source().map(ToString::to_string),
             Some("git transport unavailable".into())
         );
-        let SelectUnpushedRepositoriesError::Upstream { repo, source } = error else {
-            panic!("the upstream transport stage must remain identifiable");
-        };
+        let (repo, source) = match error {
+            SelectUnpushedRepositoriesError::Upstream { repo, source } => Some((repo, source)),
+            SelectUnpushedRepositoriesError::Count { .. }
+            | SelectUnpushedRepositoriesError::TopLevel { .. } => None,
+        }
+        .unwrap();
         assert_eq!(repo.as_str(), "api");
         assert_eq!(source.to_string(), "git transport unavailable");
     }

@@ -47,26 +47,27 @@ pub(crate) fn render_batch(
     let mut skipped = 0usize;
     for repo in repos {
         let built = diff_computation::build(source, &repo.top, target, settings.diff_exclusions());
-        if skip_empty {
-            match built {
-                Ok(mut response) if response.view.has_diff_content() => {
-                    notes.append(&mut response.notes);
-                    let mut view = response.view;
-                    view.repo_name.clone_from(&repo.label);
-                    views.push(view);
-                }
-                Ok(mut response) => {
-                    notes.append(&mut response.notes);
-                    skipped += 1;
-                }
-                Err(_) => skipped += 1,
-            }
-        } else {
+        if !skip_empty {
             let mut response = built?;
             notes.append(&mut response.notes);
             let mut view = response.view;
             view.repo_name.clone_from(&repo.label);
             views.push(view);
+            continue;
+        }
+
+        match built {
+            Ok(mut response) if response.view.has_diff_content() => {
+                notes.append(&mut response.notes);
+                let mut view = response.view;
+                view.repo_name.clone_from(&repo.label);
+                views.push(view);
+            }
+            Ok(mut response) => {
+                notes.append(&mut response.notes);
+                skipped += 1;
+            }
+            Err(_) => skipped += 1,
         }
     }
     Ok(BatchBuild { views, skipped })
@@ -117,8 +118,8 @@ mod tests {
 
     #[test]
     fn dated_title_prefixes_label_with_yyyy_mm_dd() {
-        let timestamp = gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z")
-            .expect("fixture clock timestamp is valid");
+        let timestamp =
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z").unwrap();
 
         let title = dated_title(&timestamp, "diff-artifact subrepos");
 
@@ -151,7 +152,7 @@ mod tests {
             true,
             &mut notes,
         )
-        .expect("batch succeeds");
+        .unwrap();
 
         assert_eq!(batch.views.len(), 1);
         assert_eq!(batch.skipped, 1);
@@ -179,7 +180,7 @@ mod tests {
             true,
             &mut notes,
         )
-        .expect("a build error is swallowed as a skip, not propagated");
+        .unwrap();
 
         assert_eq!(batch.views.len(), 0);
         assert_eq!(batch.skipped, 1);
@@ -202,7 +203,7 @@ mod tests {
             false,
             &mut notes,
         )
-        .expect("batch succeeds");
+        .unwrap();
 
         assert_eq!(batch.views.len(), repos.len());
         assert_eq!(batch.skipped, 0);
@@ -252,7 +253,7 @@ diff --git a/notes.md b/notes.md\n\
             true,
             &mut notes,
         )
-        .expect("batch succeeds");
+        .unwrap();
 
         assert_eq!(batch.views.len(), 2);
         assert_eq!(batch.views[0].files.len(), 1, "repo-a hides notes.md");

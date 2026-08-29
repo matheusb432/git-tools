@@ -13,6 +13,7 @@ pub enum RepositoryTraversalScope {
 
 impl RepositoryTraversalScope {
     /// Returns whether linked worktrees belong to this traversal result.
+    #[must_use]
     pub const fn includes_linked_worktrees(self) -> bool {
         matches!(self, Self::IncludeLinkedWorktrees)
     }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::{
     BENCHMARK_NAME, HighlightWorkload, REPORT_FORMAT_VERSION, ServerHighlightingReport,
-    StreamMeasurement, StreamTemperature,
+    StreamEvidence, StreamMeasurement, StreamTemperature,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -231,33 +231,61 @@ fn validate_semantics(
     report: &ServerHighlightingReport,
 ) -> Result<(), ComparisonError> {
     let mut expected = BTreeMap::new();
-    for launch in &report.launches {
-        for sample in &launch.samples {
-            let evidence = &sample.measurement.evidence;
-            if evidence.message_count == 0
-                || evidence.row_count == 0
-                || evidence.encoded_bytes == 0
-                || evidence.semantic_sha256.len() != 64
-            {
-                return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
-            }
-            match expected.get(&launch.workload) {
-                Some(previous) if *previous != evidence => {
-                    return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
-                }
-                Some(_) => {}
-                None => {
-                    expected.insert(launch.workload, evidence);
-                }
-            }
-        }
+    let independent_evidence = report.launches.iter().flat_map(|launch| {
+        launch
+            .samples
+            .iter()
+            .map(move |sample| (launch.workload, &sample.measurement.evidence))
+    });
+    for (workload, evidence) in independent_evidence {
+        record_semantic_evidence(role, workload, evidence, &mut expected)?;
     }
-    for launch in &report.residency_launches {
-        for sample in &launch.samples {
-            if expected.get(&sample.workload) != Some(&&sample.measurement.evidence) {
-                return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
-            }
-        }
+
+    let residency_evidence = report
+        .residency_launches
+        .iter()
+        .flat_map(|launch| &launch.samples);
+    for sample in residency_evidence {
+        ensure_semantic_evidence_matches(
+            role,
+            sample.workload,
+            &sample.measurement.evidence,
+            &expected,
+        )?;
+    }
+    Ok(())
+}
+
+fn record_semantic_evidence<'report>(
+    role: ReportRole,
+    workload: HighlightWorkload,
+    evidence: &'report StreamEvidence,
+    expected: &mut BTreeMap<HighlightWorkload, &'report StreamEvidence>,
+) -> Result<(), ComparisonError> {
+    if evidence.message_count == 0
+        || evidence.row_count == 0
+        || evidence.encoded_bytes == 0
+        || evidence.semantic_sha256.len() != 64
+    {
+        return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
+    }
+    if expected
+        .insert(workload, evidence)
+        .is_some_and(|previous| previous != evidence)
+    {
+        return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
+    }
+    Ok(())
+}
+
+fn ensure_semantic_evidence_matches(
+    role: ReportRole,
+    workload: HighlightWorkload,
+    evidence: &StreamEvidence,
+    expected: &BTreeMap<HighlightWorkload, &StreamEvidence>,
+) -> Result<(), ComparisonError> {
+    if expected.get(&workload) != Some(&evidence) {
+        return Err(ComparisonError::InconsistentSemanticEvidence { report: role });
     }
     Ok(())
 }
@@ -461,11 +489,11 @@ mod tests {
                         .into_iter()
                         .map(|temperature| HighlightSample {
                             temperature,
-                            measurement: measurement(if workload == HighlightWorkload::Rust {
-                                rust_peak_rss[launch - 1]
-                            } else {
-                                50
-                            }),
+                            measurement: measurement(fixture_peak_rss(
+                                workload,
+                                launch,
+                                &rust_peak_rss,
+                            )),
                         })
                         .collect(),
                 })
@@ -481,11 +509,11 @@ mod tests {
                     .copied()
                     .map(|workload| ResidencySample {
                         workload,
-                        measurement: measurement(if workload == HighlightWorkload::Rust {
-                            rust_peak_rss[launch - 1]
-                        } else {
-                            50
-                        }),
+                        measurement: measurement(fixture_peak_rss(
+                            workload,
+                            launch,
+                            &rust_peak_rss,
+                        )),
                     })
                     .collect(),
             })
@@ -522,6 +550,18 @@ mod tests {
             },
             launches,
             residency_launches,
+        }
+    }
+
+    fn fixture_peak_rss(
+        workload: HighlightWorkload,
+        launch: usize,
+        rust_peak_rss: &[u64; 3],
+    ) -> u64 {
+        if workload == HighlightWorkload::Rust {
+            rust_peak_rss[launch - 1]
+        } else {
+            50
         }
     }
 

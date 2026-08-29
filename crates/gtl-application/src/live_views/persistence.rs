@@ -20,7 +20,7 @@ pub(super) fn delete_live_view(connection: &Connection, source: &LiveSource) -> 
 
 #[cfg(test)]
 pub(super) fn store_test() -> Connection {
-    let connection = Connection::open_in_memory().expect("live-view test connection");
+    let connection = Connection::open_in_memory().unwrap();
     connection
         .execute_batch(
             "CREATE TABLE live_views (
@@ -33,6 +33,6 @@ pub(super) fn store_test() -> Connection {
           UNIQUE (source_kind, source_value)
         ) STRICT;",
         )
-        .expect("live-view test schema");
+        .unwrap();
     connection
 }

@@ -50,13 +50,11 @@ mod tests {
     #[test]
     fn copied_json_keeps_the_established_explicit_shape() {
         let record = RecentRenderRecord {
-            id: gtl_models::viewer::RenderHistoryId::try_new(31).expect("positive render ID"),
+            id: gtl_models::viewer::RenderHistoryId::try_new(31).unwrap(),
             title: "Release diff".to_owned(),
             repo_name: crate::utils::project_name("git-tools"),
             range_label: "main...release".to_owned(),
-            rendered_at: "2026-08-09T10:00:00Z"
-                .try_into()
-                .expect("valid fixture timestamp"),
+            rendered_at: "2026-08-09T10:00:00Z".try_into().unwrap(),
             recipe: Recipe {
                 source: RecipeSource::LocalRepo(crate::utils::repository_root("/repos/git-tools")),
                 op: RecipeOp::MergeDiff {
@@ -67,8 +65,8 @@ mod tests {
             },
         };
 
-        let copied = format(&record).expect("history copy formats");
-        let json: serde_json::Value = serde_json::from_str(&copied).expect("copy is JSON");
+        let copied = format(&record).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&copied).unwrap();
 
         assert_eq!(json["id"], 31);
         assert_eq!(json["repo_name"], "git-tools");

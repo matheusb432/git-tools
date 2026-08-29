@@ -103,7 +103,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(
@@ -126,7 +126,7 @@ mod tests {
                 },
                 &git,
             )
-            .expect("a Git rejection is a closed action failure"),
+            .unwrap(),
             TagActionOutcome::failed("git tag label failed for stable: fatal: invalid target")
         );
     }

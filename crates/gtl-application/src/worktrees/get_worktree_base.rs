@@ -76,8 +76,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute("/repo/nested".into(), &git)
-                .expect("porcelain output should produce a base path"),
+            get_worktree_base::execute("/repo/nested".into(), &git).unwrap(),
             GetWorktreeBaseOk::Found {
                 path: crate::utils::repository_root("/repo"),
             }
@@ -92,8 +91,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute("/repo".into(), &git)
-                .expect("a Git rejection is a closed base failure"),
+            get_worktree_base::execute("/repo".into(), &git).unwrap(),
             GetWorktreeBaseOk::Failed {
                 detail: "fatal: not a repo".into(),
             }
@@ -108,8 +106,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute("/repo".into(), &git)
-                .expect("empty Git output is a closed base failure"),
+            get_worktree_base::execute("/repo".into(), &git).unwrap(),
             GetWorktreeBaseOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
@@ -123,8 +120,7 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = get_worktree_base::execute("/repo".into(), &git)
-            .expect_err("transport failure must remain an error");
+        let error = get_worktree_base::execute("/repo".into(), &git).unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(

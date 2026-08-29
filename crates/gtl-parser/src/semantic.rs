@@ -22,11 +22,13 @@ pub struct SemanticTextSpan {
 
 impl SemanticTextSpan {
     /// Returns the byte offset at which this span starts.
+    #[must_use]
     pub const fn byte_start(self) -> usize {
         self.byte_start
     }
 
     /// Returns the byte offset at which this span ends.
+    #[must_use]
     pub const fn byte_end(self) -> usize {
         self.byte_end
     }
@@ -36,16 +38,19 @@ impl SemanticTextSpan {
     /// # Panics
     ///
     /// Panics when `text` is not the source body that produced this span.
+    #[must_use]
     pub fn text<'text>(&self, text: &'text str) -> &'text str {
         &text[self.byte_start..self.byte_end]
     }
 
     /// Returns the syntax class active across the span.
+    #[must_use]
     pub const fn syntax_class(self) -> Option<SyntaxTokenClass> {
         self.syntax_class
     }
 
     /// Returns the span's intraline-change state.
+    #[must_use]
     pub const fn change(self) -> SemanticTextChange {
         self.change
     }
@@ -133,9 +138,12 @@ mod tests {
                 "-let value = 1;".to_owned(),
                 "+let value = 2;".to_owned(),
             ]);
-        let SplitDiffRow::Pair { old: Some(old), .. } = &parsed.split_rows()[1] else {
-            panic!("expected a paired changed row");
-        };
+        let split_rows = parsed.split_rows();
+        let old = match &split_rows[1] {
+            SplitDiffRow::Pair { old: Some(old), .. } => Some(old),
+            _ => None,
+        }
+        .unwrap();
         let body = old.body();
         let spans = old.semantic_spans();
 
@@ -168,9 +176,12 @@ mod tests {
             "-ação = 1".to_owned(),
             "+ação = 2".to_owned(),
         ]);
-        let SplitDiffRow::Pair { old: Some(old), .. } = &parsed.split_rows()[1] else {
-            panic!("expected a paired changed row");
-        };
+        let split_rows = parsed.split_rows();
+        let old = match &split_rows[1] {
+            SplitDiffRow::Pair { old: Some(old), .. } => Some(old),
+            _ => None,
+        }
+        .unwrap();
 
         assert_eq!(
             old.semantic_spans()

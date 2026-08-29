@@ -64,17 +64,22 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
         .context("cross-build the Windows Dioxus viewer")?;
 
     if !smoke {
-        let target =
-            cargo_target_directory(&root).context("resolve Windows release artifact directory")?;
-        for exe in ["git-tools.exe", "gtl-server.exe", "gtl-viewer.exe"] {
-            let path = release_artifact_path(&target, exe);
-            let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
-            if bytes == 0 {
-                bail!("ship verify: {} is missing or empty", path.display());
-            }
-        }
+        verify_release_artifacts(&root)?;
     }
 
+    Ok(())
+}
+
+fn verify_release_artifacts(root: &Path) -> Result<()> {
+    let target =
+        cargo_target_directory(root).context("resolve Windows release artifact directory")?;
+    for executable in ["git-tools.exe", "gtl-server.exe", "gtl-viewer.exe"] {
+        let path = release_artifact_path(&target, executable);
+        let bytes = std::fs::metadata(&path).map_or(0, |metadata| metadata.len());
+        if bytes == 0 {
+            bail!("ship verify: {} is missing or empty", path.display());
+        }
+    }
     Ok(())
 }
 

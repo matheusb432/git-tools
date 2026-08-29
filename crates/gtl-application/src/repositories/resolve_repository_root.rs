@@ -60,8 +60,7 @@ mod tests {
     fn resolves_a_nested_path_to_its_repository_top() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("/repos/api\n")]);
 
-        let top =
-            resolve_repository_root::execute("/repos/api/src".into(), &git).expect("top resolves");
+        let top = resolve_repository_root::execute("/repos/api/src".into(), &git).unwrap();
 
         assert_eq!(top.as_ref(), std::path::Path::new("/repos/api"));
     }
@@ -70,8 +69,7 @@ mod tests {
     fn transport_failure_remains_the_error_source() {
         let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!("git unavailable"))]);
 
-        let error = resolve_repository_root::execute("/repos/api".into(), &git)
-            .expect_err("transport fails");
+        let error = resolve_repository_root::execute("/repos/api".into(), &git).unwrap_err();
 
         assert_eq!(
             error.source().map(ToString::to_string),
@@ -87,8 +85,7 @@ mod tests {
     fn silent_git_rejection_reports_the_semantic_failure() {
         let git = ScriptedGitClient::new(vec![crate::utils::GitResponse::Rejected(String::new())]);
 
-        let error = resolve_repository_root::execute("/repos/api".into(), &git)
-            .expect_err("silent rejection fails");
+        let error = resolve_repository_root::execute("/repos/api".into(), &git).unwrap_err();
 
         assert_eq!(error.to_string(), "not a git repo: /repos/api");
     }

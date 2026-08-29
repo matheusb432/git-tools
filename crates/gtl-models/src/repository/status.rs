@@ -41,6 +41,7 @@ pub enum StatusChanges {
 }
 
 impl StatusChanges {
+    #[must_use]
     pub fn from_counts(tracked: PathCount, untracked: PathCount) -> Self {
         if tracked.is_zero() && untracked.is_zero() {
             Self::Clean
@@ -49,6 +50,7 @@ impl StatusChanges {
         }
     }
 
+    #[must_use]
     pub const fn counts(self) -> (PathCount, PathCount) {
         match self {
             Self::Changed { tracked, untracked } => (tracked, untracked),
@@ -56,6 +58,7 @@ impl StatusChanges {
         }
     }
 
+    #[must_use]
     pub const fn is_dirty(self) -> bool {
         matches!(self, Self::Changed { .. })
     }
@@ -81,6 +84,7 @@ pub enum StatusClass {
 }
 
 impl StatusClass {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Absent => "absent",
@@ -99,6 +103,7 @@ pub struct StatusResult {
 }
 
 impl StatusResult {
+    #[must_use]
     pub fn absent(name: ProjectName) -> Self {
         Self {
             name,
@@ -106,6 +111,7 @@ impl StatusResult {
         }
     }
 
+    #[must_use]
     pub fn present(name: ProjectName, head: StatusHead, changes: StatusChanges) -> Self {
         Self {
             name,
@@ -113,18 +119,22 @@ impl StatusResult {
         }
     }
 
+    #[must_use]
     pub fn name(&self) -> &ProjectName {
         &self.name
     }
 
+    #[must_use]
     pub const fn repository(&self) -> &RepositoryStatus {
         &self.repository
     }
 
+    #[must_use]
     pub const fn is_present(&self) -> bool {
         matches!(self.repository, RepositoryStatus::Present { .. })
     }
 
+    #[must_use]
     pub fn branch_label(&self) -> Option<&str> {
         match &self.repository {
             RepositoryStatus::Present {
@@ -143,6 +153,7 @@ impl StatusResult {
         }
     }
 
+    #[must_use]
     pub fn class(&self) -> StatusClass {
         let RepositoryStatus::Present { head, changes } = &self.repository else {
             return StatusClass::Absent;
@@ -167,6 +178,7 @@ impl StatusResult {
         }
     }
 
+    #[must_use]
     pub fn detail(&self) -> String {
         let RepositoryStatus::Present { head, changes } = &self.repository else {
             return "not present".into();
@@ -185,19 +197,8 @@ impl StatusResult {
             } if *ahead != CommitCount::default() => parts.push(format!("⇡{ahead}")),
             StatusHead::Branch { .. } => {}
         }
-        match changes {
-            StatusChanges::Changed { tracked, untracked } => {
-                let mut symbols = String::new();
-                if !tracked.is_zero() {
-                    symbols.push('!');
-                }
-                if !untracked.is_zero() {
-                    symbols.push('?');
-                }
-                parts.push(symbols);
-            }
-            StatusChanges::Unavailable => parts.push("status-unavailable".into()),
-            StatusChanges::Clean => {}
+        if let Some(detail) = changes_detail(changes) {
+            parts.push(detail);
         }
         if parts.is_empty() {
             "✓".into()
@@ -205,6 +206,25 @@ impl StatusResult {
             parts.join(" ")
         }
     }
+}
+
+fn changes_detail(changes: &StatusChanges) -> Option<String> {
+    match changes {
+        StatusChanges::Changed { tracked, untracked } => Some(change_symbols(*tracked, *untracked)),
+        StatusChanges::Unavailable => Some("status-unavailable".into()),
+        StatusChanges::Clean => None,
+    }
+}
+
+fn change_symbols(tracked: PathCount, untracked: PathCount) -> String {
+    let mut symbols = String::new();
+    if !tracked.is_zero() {
+        symbols.push('!');
+    }
+    if !untracked.is_zero() {
+        symbols.push('?');
+    }
+    symbols
 }
 
 impl Serialize for StatusResult {

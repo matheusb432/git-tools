@@ -9,6 +9,7 @@ use crate::{
     server_client::ServerClient,
 };
 
+#[must_use]
 pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: bool) -> ExitCode {
     let (client, preview) = match prepare_bump(level, message, push) {
         Ok(prepared) => prepared,

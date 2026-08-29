@@ -494,26 +494,23 @@ mod tests {
 
     #[test]
     fn baseline_replacement_is_atomic_and_exact() {
-        let directory = tempfile::tempdir().expect("temporary report directory");
+        let directory = tempfile::tempdir().unwrap();
         let source = directory.path().join("current.json");
         let destination = directory.path().join("baseline.json");
-        fs::write(&source, b"current report\n").expect("write current report");
-        fs::write(&destination, b"old report\n").expect("write old baseline");
+        fs::write(&source, b"current report\n").unwrap();
+        fs::write(&destination, b"old report\n").unwrap();
 
-        replace_report_atomically(&source, &destination).expect("replace baseline");
+        replace_report_atomically(&source, &destination).unwrap();
 
-        assert_eq!(
-            fs::read(&destination).expect("read replaced baseline"),
-            b"current report\n"
-        );
+        assert_eq!(fs::read(&destination).unwrap(), b"current report\n");
     }
 
     #[test]
     fn comparison_requires_an_existing_baseline_before_measurement() {
-        let directory = tempfile::tempdir().expect("temporary report directory");
+        let directory = tempfile::tempdir().unwrap();
         let baseline = directory.path().join("baseline.json");
 
-        let error = load_baseline(&baseline, false).expect_err("comparison needs a baseline");
+        let error = load_baseline(&baseline, false).unwrap_err();
 
         assert!(
             error

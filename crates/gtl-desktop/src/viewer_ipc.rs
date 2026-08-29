@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 
 use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersionStream};
 use gtl_wire::viewer::{
@@ -12,6 +12,8 @@ use tauri::State;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 const MAX_ACTIVE_STREAMS: usize = 10;
+const STREAM_BATCH_ITEMS_MAX: usize = 4;
+const STREAM_BATCH_LINGER: Duration = Duration::from_millis(1);
 const STREAM_REQUEST_BUFFER: usize = 1;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -76,15 +78,7 @@ impl ViewerIpcState {
         }
         let removed = {
             let mut current = self.client.lock().await;
-            if current
-                .as_ref()
-                .is_some_and(|current| current.server_instance_id() == instance_id)
-            {
-                current.take();
-                true
-            } else {
-                false
-            }
+            take_matching_client(&mut current, instance_id)
         };
         if removed {
             self.cancel_all_streams().await;
@@ -94,6 +88,18 @@ impl ViewerIpcState {
     async fn cancel_all_streams(&self) {
         self.row_streams.cancel_all().await;
         self.version_streams.cancel_all().await;
+    }
+}
+
+fn take_matching_client(current: &mut Option<ViewerClient>, instance_id: &str) -> bool {
+    if current
+        .as_ref()
+        .is_some_and(|current| current.server_instance_id() == instance_id)
+    {
+        current.take();
+        true
+    } else {
+        false
     }
 }
 
@@ -128,12 +134,20 @@ macro_rules! viewer_request_command {
     };
 }
 
-#[tauri::command]
-pub(crate) async fn viewer_connect(
-    state: State<'_, ViewerIpcState>,
-) -> Result<ViewerConnectionPayload, ViewerClientError> {
-    state.connect().await
+// Tauri's command macro expands to an unreachable fallback arm.
+#[allow(clippy::unreachable)]
+mod connect_command {
+    use super::{State, ViewerClientError, ViewerConnectionPayload, ViewerIpcState};
+
+    #[tauri::command]
+    pub(crate) async fn viewer_connect(
+        state: State<'_, ViewerIpcState>,
+    ) -> Result<ViewerConnectionPayload, ViewerClientError> {
+        state.connect().await
+    }
 }
+
+pub(crate) use connect_command::viewer_connect;
 
 viewer_query_command!(viewer_get_shell, ViewerShell, get_shell);
 viewer_request_command!(
@@ -205,63 +219,77 @@ viewer_request_command!(
     open_diff_file
 );
 
-#[tauri::command]
-pub(crate) async fn viewer_stream_rows_start(
-    state: State<'_, ViewerIpcState>,
-    request: StreamViewerRows,
-) -> Result<u32, ViewerClientError> {
-    let mut client = state.client().await?;
-    let instance_id = client.server_instance_id().to_owned();
-    let result = state
-        .row_streams
-        .start_with(client.stream_rows(request))
-        .await;
-    state.observe_result(&instance_id, &result).await;
-    result
+// Tauri's command macro expands to an unreachable fallback arm.
+#[allow(clippy::unreachable)]
+mod stream_commands {
+    use super::{
+        State, StreamViewerRows, ViewerClientError, ViewerIpcState, ViewerRowStreamItem,
+        ViewerStateChanged,
+    };
+
+    #[tauri::command]
+    pub(crate) async fn viewer_stream_rows_start(
+        state: State<'_, ViewerIpcState>,
+        request: StreamViewerRows,
+    ) -> Result<u32, ViewerClientError> {
+        let mut client = state.client().await?;
+        let instance_id = client.server_instance_id().to_owned();
+        let result = state
+            .row_streams
+            .start_with(client.stream_rows(request))
+            .await;
+        state.observe_result(&instance_id, &result).await;
+        result
+    }
+
+    #[tauri::command]
+    pub(crate) async fn viewer_stream_rows_next_batch(
+        state: State<'_, ViewerIpcState>,
+        stream_id: u32,
+    ) -> Result<Vec<ViewerRowStreamItem>, ViewerClientError> {
+        state.row_streams.next_batch(stream_id).await
+    }
+
+    #[tauri::command]
+    pub(crate) async fn viewer_stream_rows_cancel(
+        state: State<'_, ViewerIpcState>,
+        stream_id: u32,
+    ) -> Result<(), ViewerClientError> {
+        state.row_streams.cancel(stream_id).await
+    }
+
+    #[tauri::command]
+    pub(crate) async fn viewer_watch_start(
+        state: State<'_, ViewerIpcState>,
+    ) -> Result<u32, ViewerClientError> {
+        let mut client = state.client().await?;
+        let instance_id = client.server_instance_id().to_owned();
+        let result = state.version_streams.start_with(client.watch()).await;
+        state.observe_result(&instance_id, &result).await;
+        result
+    }
+
+    #[tauri::command]
+    pub(crate) async fn viewer_watch_next_batch(
+        state: State<'_, ViewerIpcState>,
+        stream_id: u32,
+    ) -> Result<Vec<ViewerStateChanged>, ViewerClientError> {
+        state.version_streams.next_batch(stream_id).await
+    }
+
+    #[tauri::command]
+    pub(crate) async fn viewer_watch_cancel(
+        state: State<'_, ViewerIpcState>,
+        stream_id: u32,
+    ) -> Result<(), ViewerClientError> {
+        state.version_streams.cancel(stream_id).await
+    }
 }
 
-#[tauri::command]
-pub(crate) async fn viewer_stream_rows_next(
-    state: State<'_, ViewerIpcState>,
-    stream_id: u32,
-) -> Result<Option<ViewerRowStreamItem>, ViewerClientError> {
-    state.row_streams.next(stream_id).await
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_stream_rows_cancel(
-    state: State<'_, ViewerIpcState>,
-    stream_id: u32,
-) -> Result<(), ViewerClientError> {
-    state.row_streams.cancel(stream_id).await
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_watch_start(
-    state: State<'_, ViewerIpcState>,
-) -> Result<u32, ViewerClientError> {
-    let mut client = state.client().await?;
-    let instance_id = client.server_instance_id().to_owned();
-    let result = state.version_streams.start_with(client.watch()).await;
-    state.observe_result(&instance_id, &result).await;
-    result
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_watch_next(
-    state: State<'_, ViewerIpcState>,
-    stream_id: u32,
-) -> Result<Option<ViewerStateChanged>, ViewerClientError> {
-    state.version_streams.next(stream_id).await
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_watch_cancel(
-    state: State<'_, ViewerIpcState>,
-    stream_id: u32,
-) -> Result<(), ViewerClientError> {
-    state.version_streams.cancel(stream_id).await
-}
+pub(crate) use stream_commands::{
+    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
+    viewer_watch_cancel, viewer_watch_next_batch, viewer_watch_start,
+};
 
 trait PullStream: Send + 'static {
     type Item: Send + 'static;
@@ -291,8 +319,9 @@ impl PullStream for ViewerVersionStream {
     }
 }
 
-type NextResult<Item> = Result<Option<Item>, ViewerClientError>;
-type NextRequest<Item> = oneshot::Sender<NextResult<Item>>;
+type StreamItemResult<Item> = Result<Option<Item>, ViewerClientError>;
+type NextBatchResult<Item> = Result<Vec<Item>, ViewerClientError>;
+type NextRequest<Item> = oneshot::Sender<NextBatchResult<Item>>;
 
 struct StreamEntry<Item> {
     requests: mpsc::Sender<NextRequest<Item>>,
@@ -360,7 +389,7 @@ where
         self.start_with(std::future::ready(Ok(stream))).await
     }
 
-    async fn next(&self, stream_id: u32) -> NextResult<Item> {
+    async fn next_batch(&self, stream_id: u32) -> NextBatchResult<Item> {
         let requests = self
             .state
             .lock()
@@ -378,7 +407,7 @@ where
             self.remove(stream_id).await;
             return Err(ViewerClientError::NotFound);
         };
-        if !matches!(&result, Ok(Some(_))) {
+        if !matches!(&result, Ok(items) if !items.is_empty()) {
             self.remove(stream_id).await;
         }
         result
@@ -429,15 +458,58 @@ async fn run_stream<Stream>(
 ) where
     Stream: PullStream,
 {
+    let mut pending_terminal = None;
     while let Some(reply) = requests.recv().await {
-        let result = stream.message().await;
-        let finished = !matches!(&result, Ok(Some(_)));
+        let mut items = Vec::with_capacity(STREAM_BATCH_ITEMS_MAX);
+        let first = match pending_terminal.take() {
+            Some(terminal) => terminal,
+            None => stream.message().await,
+        };
+        let (result, finished) =
+            collect_ready_batch(&mut stream, first, &mut items, &mut pending_terminal).await;
         let _ = reply.send(result);
         if finished {
             break;
         }
     }
     registry.lock().await.entries.remove(&stream_id);
+}
+
+async fn collect_ready_batch<Stream>(
+    stream: &mut Stream,
+    mut next: StreamItemResult<Stream::Item>,
+    items: &mut Vec<Stream::Item>,
+    pending_terminal: &mut Option<StreamItemResult<Stream::Item>>,
+) -> (NextBatchResult<Stream::Item>, bool)
+where
+    Stream: PullStream,
+{
+    loop {
+        match next {
+            Ok(Some(item)) => items.push(item),
+            Ok(None) if items.is_empty() => return (Ok(Vec::new()), true),
+            Ok(None) => {
+                pending_terminal.replace(Ok(None));
+                return (Ok(std::mem::take(items)), false);
+            }
+            Err(error) if items.is_empty() => return (Err(error), true),
+            Err(error) => {
+                pending_terminal.replace(Err(error));
+                return (Ok(std::mem::take(items)), false);
+            }
+        }
+
+        if items.len() == STREAM_BATCH_ITEMS_MAX {
+            return (Ok(std::mem::take(items)), false);
+        }
+        let Some(ready) = tokio::time::timeout(STREAM_BATCH_LINGER, stream.message())
+            .await
+            .ok()
+        else {
+            return (Ok(std::mem::take(items)), false);
+        };
+        next = ready;
+    }
 }
 
 #[cfg(test)]
@@ -451,13 +523,13 @@ mod tests {
     use super::*;
 
     struct FiniteStream {
-        items: VecDeque<NextResult<u32>>,
+        items: VecDeque<StreamItemResult<u32>>,
     }
 
     impl PullStream for FiniteStream {
         type Item = u32;
 
-        fn message(&mut self) -> impl Future<Output = NextResult<Self::Item>> + Send {
+        fn message(&mut self) -> impl Future<Output = StreamItemResult<Self::Item>> + Send {
             std::future::ready(self.items.pop_front().unwrap_or(Ok(None)))
         }
     }
@@ -467,23 +539,51 @@ mod tests {
     impl PullStream for PendingStream {
         type Item = u32;
 
-        async fn message(&mut self) -> NextResult<Self::Item> {
+        async fn message(&mut self) -> StreamItemResult<Self::Item> {
             pending().await
         }
+    }
+
+    struct OneThenPendingStream {
+        item: Option<u32>,
+    }
+
+    impl PullStream for OneThenPendingStream {
+        type Item = u32;
+
+        async fn message(&mut self) -> StreamItemResult<Self::Item> {
+            match self.item.take() {
+                Some(item) => Ok(Some(item)),
+                None => pending().await,
+            }
+        }
+    }
+
+    async fn fill_stream_registry(registry: &PullStreamRegistry<u32>) {
+        for expected_id in 1..=10 {
+            assert_eq!(registry.start(PendingStream).await, Ok(expected_id));
+        }
+    }
+
+    fn start_pending_transport(
+        started: Arc<AtomicBool>,
+    ) -> impl Future<Output = Result<PendingStream, ViewerClientError>> {
+        std::future::poll_fn(move |_| {
+            started.store(true, Ordering::Release);
+            std::task::Poll::Ready(Ok(PendingStream))
+        })
     }
 
     #[tokio::test]
     async fn stream_registry_enforces_its_independent_limit() {
         let registry = PullStreamRegistry::new(10);
-        for expected_id in 1..=10 {
-            assert_eq!(registry.start(PendingStream).await, Ok(expected_id));
-        }
+        fill_stream_registry(&registry).await;
 
         assert_eq!(
             registry.start(PendingStream).await,
             Err(ViewerClientError::ResourceExhausted)
         );
-        registry.cancel(1).await.expect("cancel first stream");
+        registry.cancel(1).await.unwrap();
         assert!(registry.start(PendingStream).await.is_ok());
         registry.cancel_all().await;
     }
@@ -491,18 +591,12 @@ mod tests {
     #[tokio::test]
     async fn full_registry_rejects_before_starting_the_transport_stream() {
         let registry = PullStreamRegistry::new(1);
-        registry
-            .start(PendingStream)
-            .await
-            .expect("fill stream registry");
+        registry.start(PendingStream).await.unwrap();
         let started = Arc::new(AtomicBool::new(false));
         let transport_started = Arc::clone(&started);
 
         let result = registry
-            .start_with(async move {
-                transport_started.store(true, Ordering::Release);
-                Ok(PendingStream)
-            })
+            .start_with(start_pending_transport(transport_started))
             .await;
 
         assert_eq!(result, Err(ViewerClientError::ResourceExhausted));
@@ -518,12 +612,12 @@ mod tests {
                 items: VecDeque::from([Ok(Some(7)), Ok(None)]),
             })
             .await
-            .expect("start finite stream");
+            .unwrap();
 
-        assert_eq!(registry.next(stream_id).await, Ok(Some(7)));
-        assert_eq!(registry.next(stream_id).await, Ok(None));
+        assert_eq!(registry.next_batch(stream_id).await, Ok(vec![7]));
+        assert_eq!(registry.next_batch(stream_id).await, Ok(Vec::new()));
         assert_eq!(
-            registry.next(stream_id).await,
+            registry.next_batch(stream_id).await,
             Err(ViewerClientError::NotFound)
         );
         assert!(
@@ -540,20 +634,63 @@ mod tests {
     #[tokio::test]
     async fn cancelling_a_stream_invalidates_its_id() {
         let registry = PullStreamRegistry::new(1);
-        let stream_id = registry
-            .start(PendingStream)
-            .await
-            .expect("start pending stream");
+        let stream_id = registry.start(PendingStream).await.unwrap();
 
-        registry.cancel(stream_id).await.expect("cancel stream");
+        registry.cancel(stream_id).await.unwrap();
 
         assert_eq!(
-            registry.next(stream_id).await,
+            registry.next_batch(stream_id).await,
             Err(ViewerClientError::NotFound)
         );
         assert_eq!(
             registry.cancel(stream_id).await,
             Err(ViewerClientError::NotFound)
         );
+    }
+
+    #[tokio::test]
+    async fn stream_batch_is_bounded_and_preserves_terminal_order() {
+        let registry = PullStreamRegistry::new(1);
+        let stream_id = registry
+            .start(FiniteStream {
+                items: VecDeque::from([
+                    Ok(Some(1)),
+                    Ok(Some(2)),
+                    Ok(Some(3)),
+                    Ok(Some(4)),
+                    Ok(Some(5)),
+                    Err(ViewerClientError::Unavailable),
+                ]),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(registry.next_batch(stream_id).await, Ok(vec![1, 2, 3, 4]));
+        assert_eq!(registry.next_batch(stream_id).await, Ok(vec![5]));
+        assert_eq!(
+            registry.next_batch(stream_id).await,
+            Err(ViewerClientError::Unavailable)
+        );
+        assert_eq!(
+            registry.next_batch(stream_id).await,
+            Err(ViewerClientError::NotFound)
+        );
+    }
+
+    #[tokio::test]
+    async fn sparse_stream_batch_returns_without_waiting_for_another_item() {
+        let registry = PullStreamRegistry::new(1);
+        let stream_id = registry
+            .start(OneThenPendingStream { item: Some(7) })
+            .await
+            .unwrap();
+
+        let batch =
+            tokio::time::timeout(Duration::from_millis(100), registry.next_batch(stream_id))
+                .await
+                .unwrap();
+
+        assert_eq!(batch, Ok(vec![7]));
+        registry.cancel_all().await;
     }
 }

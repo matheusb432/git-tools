@@ -125,7 +125,7 @@ mod tests {
                 ..Default::default()
             },
         )
-        .expect("broken source is a published decision");
+        .unwrap();
 
         assert!(matches!(response, PrepareRecipeOk::Broken { .. }));
     }
@@ -142,7 +142,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source(),
         )
-        .expect("ready recipe computes");
+        .unwrap();
 
         assert!(matches!(response, PrepareRecipeOk::Publish { .. }));
     }

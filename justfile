@@ -132,7 +132,7 @@ lint:
     cargo check --locked -p gtl-application --all-targets --all-features
     cargo check --locked -p gtl-parser --no-default-features --target wasm32-unknown-unknown
     cargo run --quiet -p xtask -- check-parser-wasm
-    cargo clippy --workspace --all-targets
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 # Complete read-only quality gate: formatting, lint, and configured ast-grep rules.
 [group('quality')]
@@ -142,7 +142,7 @@ check: fmt-check lint
 # Apply Clippy fixes first, then normalize every formatter; extra args go to Clippy.
 [group('quality')]
 fix *args:
-    cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged {{ args }}
+    cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged {{ args }}
     just fmt
 
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.

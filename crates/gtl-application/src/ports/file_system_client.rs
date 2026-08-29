@@ -27,6 +27,7 @@ impl FileSystemClientError {
         }
     }
 
+    #[must_use]
     pub const fn kind(&self) -> FileSystemClientErrorKind {
         self.kind
     }

@@ -9,6 +9,7 @@ pub struct RecipeBatchId(Uuid);
 
 impl RecipeBatchId {
     /// Generates an opaque ID for a newly opened recipe batch.
+    #[must_use]
     pub fn generate() -> Self {
         Self(Uuid::new_v4())
     }
@@ -36,11 +37,11 @@ mod tests {
 
     #[test]
     fn parsing_and_serde_reject_non_uuid_batch_ids() {
-        let parsed: RecipeBatchId = BATCH_ID.parse().expect("fixture UUID is valid");
+        let parsed: RecipeBatchId = BATCH_ID.parse().unwrap();
 
         assert_eq!(parsed.to_string(), BATCH_ID);
         assert_eq!(
-            serde_json::to_string(&parsed).expect("batch ID serializes"),
+            serde_json::to_string(&parsed).unwrap(),
             format!("\"{BATCH_ID}\"")
         );
         assert!("batch-1".parse::<RecipeBatchId>().is_err());

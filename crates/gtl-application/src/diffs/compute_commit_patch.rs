@@ -120,7 +120,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("commit patch computes");
+        .unwrap();
 
         assert_eq!(view.title, "commit 1111111111");
         assert_eq!(view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -148,7 +148,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("root patch computes");
+        .unwrap();
 
         assert_eq!(view.upstream.as_ref(), "4b825dc642");
         assert_eq!(view.cmd.range, "4b825dc642..1111111111");

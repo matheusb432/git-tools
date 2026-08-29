@@ -88,7 +88,7 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             Some(Theme::Graphite),
         )
-        .expect("project artifact payload");
+        .unwrap();
         let projected = &payload.views[0];
 
         assert_eq!(payload.theme, ViewerTheme::Graphite);
@@ -118,8 +118,7 @@ mod tests {
         view.files[0].lines.clone_from(&lines);
         view.files[0].full_lines = Some(lines.clone());
 
-        let payload = project_payload(&[view], RenderOptions::DEFAULT, None)
-            .expect("project multi-page artifact source");
+        let payload = project_payload(&[view], RenderOptions::DEFAULT, None).unwrap();
 
         assert!(matches!(
             &payload.views[0].rows[0].rows.rows,

@@ -89,36 +89,36 @@ mod tests {
 
     #[test]
     fn clone_observes_connection_local_state_from_original() {
-        let directory = tempfile::tempdir().expect("temporary data root");
-        let state = SqliteAppState::open(directory.path()).expect("open app state");
+        let directory = tempfile::tempdir().unwrap();
+        let state = SqliteAppState::open(directory.path()).unwrap();
         let state_clone = state.clone();
         state
             .connection_lock()
-            .expect("connection lock")
+            .unwrap()
             .execute_batch(
                 "CREATE TEMP TABLE connection_local (value TEXT NOT NULL); \
                  INSERT INTO connection_local (value) VALUES ('shared');",
             )
-            .expect("create connection-local state");
+            .unwrap();
 
         let count: i64 = state_clone
             .connection_lock()
-            .expect("clone connection lock")
+            .unwrap()
             .query_row("SELECT COUNT(*) FROM connection_local", [], |row| {
                 row.get(0)
             })
-            .expect("read connection-local state");
+            .unwrap();
 
         assert_eq!(count, 1);
     }
 
     #[test]
     fn open_error_identifies_app_state_data_root() {
-        let directory = tempfile::tempdir().expect("temporary parent directory");
+        let directory = tempfile::tempdir().unwrap();
         let data_root = directory.path().join("not-a-directory");
-        std::fs::write(&data_root, "blocks directory creation").expect("write data-root blocker");
+        std::fs::write(&data_root, "blocks directory creation").unwrap();
 
-        let error = SqliteAppState::open(&data_root).expect_err("app-state initialization fails");
+        let error = SqliteAppState::open(&data_root).unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -135,13 +135,13 @@ mod tests {
 
     #[test]
     fn connection_lock_timeout_is_bounded_and_contextual() {
-        let directory = tempfile::tempdir().expect("temporary data root");
-        let state = SqliteAppState::open(directory.path()).expect("open app state");
-        let _guard = state.connection_lock().expect("connection lock");
+        let directory = tempfile::tempdir().unwrap();
+        let state = SqliteAppState::open(directory.path()).unwrap();
+        let _guard = state.connection_lock().unwrap();
 
         let error = state
             .connection_lock_timeout(Duration::from_millis(10))
-            .expect_err("second lock times out");
+            .unwrap_err();
 
         assert!(
             error

@@ -69,35 +69,35 @@ mod tests {
     #[test]
     fn missing_dir_reports_broken_with_dir_not_found() {
         let git = git(GitRepositoryState::NotFound);
-        let response = probe_source::execute(request("/gone"), &git).expect("probe succeeds");
+        let response = probe_source::execute(request("/gone"), &git).unwrap();
 
-        match response {
-            ProbeOutcome::Broken { rejection } => {
-                assert_eq!(rejection.code(), "DirNotFound");
-                assert_eq!(
-                    rejection.to_string(),
-                    "The git repo's directory at `/gone` was not found."
-                );
-            }
-            ProbeOutcome::Ok => panic!("expected Broken, got Ok"),
+        let rejection = match response {
+            ProbeOutcome::Broken { rejection } => Some(rejection),
+            ProbeOutcome::Ok => None,
         }
+        .unwrap();
+        assert_eq!(rejection.code(), "DirNotFound");
+        assert_eq!(
+            rejection.to_string(),
+            "The git repo's directory at `/gone` was not found."
+        );
     }
 
     #[test]
     fn non_repo_dir_reports_broken_with_dir_not_git_repo() {
         let git = git(GitRepositoryState::NotARepository);
-        let response = probe_source::execute(request("/plain"), &git).expect("probe succeeds");
+        let response = probe_source::execute(request("/plain"), &git).unwrap();
 
-        match response {
-            ProbeOutcome::Broken { rejection } => {
-                assert_eq!(rejection.code(), "DirNotGitRepo");
-                assert_eq!(
-                    rejection.to_string(),
-                    "The directory `/plain` is not a git repository."
-                );
-            }
-            ProbeOutcome::Ok => panic!("expected Broken, got Ok"),
+        let rejection = match response {
+            ProbeOutcome::Broken { rejection } => Some(rejection),
+            ProbeOutcome::Ok => None,
         }
+        .unwrap();
+        assert_eq!(rejection.code(), "DirNotGitRepo");
+        assert_eq!(
+            rejection.to_string(),
+            "The directory `/plain` is not a git repository."
+        );
     }
 
     #[test]
@@ -105,7 +105,7 @@ mod tests {
         let git = git(GitRepositoryState::Repository {
             top_level: crate::utils::repository_root("/repos/gt"),
         });
-        let response = probe_source::execute(request("/repos/gt"), &git).expect("probe succeeds");
+        let response = probe_source::execute(request("/repos/gt"), &git).unwrap();
 
         assert_eq!(response, ProbeOutcome::Ok);
     }

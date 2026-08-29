@@ -15,6 +15,7 @@ pub enum HighlightWorkload {
 impl HighlightWorkload {
     pub const ALL: [Self; 4] = [Self::Plain, Self::Rust, Self::Mixed, Self::Full];
 
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Plain => "plain",

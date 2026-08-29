@@ -24,14 +24,16 @@ impl FileSystemClient for LocalFileSystemClient {
 
     fn entry_kind(&self, path: &Path) -> Result<FileSystemEntryKind, FileSystemClientError> {
         std::fs::metadata(path)
-            .map(|metadata| {
-                if metadata.is_file() {
-                    FileSystemEntryKind::File
-                } else {
-                    FileSystemEntryKind::Other
-                }
-            })
+            .map(|metadata| entry_kind_from_metadata(&metadata))
             .map_err(|error| map_error(path, &error))
+    }
+}
+
+fn entry_kind_from_metadata(metadata: &std::fs::Metadata) -> FileSystemEntryKind {
+    if metadata.is_file() {
+        FileSystemEntryKind::File
+    } else {
+        FileSystemEntryKind::Other
     }
 }
 
@@ -58,47 +60,38 @@ mod tests {
 
     #[test]
     fn canonicalize_returns_the_real_path() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let file = temporary.path().join("nested.txt");
-        std::fs::write(&file, "content").expect("fixture file");
+        std::fs::write(&file, "content").unwrap();
 
         assert_eq!(
-            LocalFileSystemClient
-                .canonicalize(&file)
-                .expect("path canonicalizes"),
-            std::fs::canonicalize(file).expect("expected canonical path"),
+            LocalFileSystemClient.canonicalize(&file).unwrap(),
+            std::fs::canonicalize(file).unwrap(),
         );
     }
 
     #[test]
     fn canonical_working_directory_returns_the_client_directory() {
-        let expected = std::fs::canonicalize(std::env::current_dir().expect("working directory"))
-            .expect("canonical working directory");
+        let expected = std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap();
 
         assert_eq!(
-            LocalFileSystemClient
-                .canonical_working_directory()
-                .expect("working directory resolves"),
+            LocalFileSystemClient.canonical_working_directory().unwrap(),
             expected,
         );
     }
 
     #[test]
     fn entry_kind_distinguishes_files_from_other_entries() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let file = temporary.path().join("file.txt");
-        std::fs::write(&file, "content").expect("fixture file");
+        std::fs::write(&file, "content").unwrap();
 
         assert_eq!(
-            LocalFileSystemClient
-                .entry_kind(&file)
-                .expect("file metadata"),
+            LocalFileSystemClient.entry_kind(&file).unwrap(),
             FileSystemEntryKind::File,
         );
         assert_eq!(
-            LocalFileSystemClient
-                .entry_kind(temporary.path())
-                .expect("directory metadata"),
+            LocalFileSystemClient.entry_kind(temporary.path()).unwrap(),
             FileSystemEntryKind::Other,
         );
     }
@@ -107,7 +100,7 @@ mod tests {
     fn missing_paths_preserve_the_not_found_kind() {
         let error = LocalFileSystemClient
             .canonicalize(Path::new("/definitely/not/here"))
-            .expect_err("missing path fails");
+            .unwrap_err();
 
         assert_eq!(error.kind(), FileSystemClientErrorKind::NotFound);
     }

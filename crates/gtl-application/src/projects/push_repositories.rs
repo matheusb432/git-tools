@@ -51,17 +51,7 @@ pub async fn execute(
         settings.push_all_exclusions(),
     );
     let tasks = stream::iter(selection.selected.into_iter().enumerate())
-        .map(|(index, repo)| {
-            let git = git.clone();
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    let outcome = push_one(&git, &repo, mode);
-                    (index, repo.name, outcome)
-                })
-                .await
-                .map_err(anyhow::Error::from)
-            }
-        })
+        .map(|(index, repo)| push_repository(index, repo, mode, git.clone()))
         .buffer_unordered(MAX_CONCURRENT_GIT_OPERATIONS)
         .collect::<Vec<_>>()
         .await;
@@ -82,6 +72,20 @@ pub async fn execute(
         exit,
         ledger,
     })
+}
+
+async fn push_repository(
+    index: usize,
+    repo: ProjectRepository,
+    mode: GitEffectMode,
+    git: impl GitClient,
+) -> anyhow::Result<(usize, ProjectName, PushOneOutcome)> {
+    tokio::task::spawn_blocking(move || {
+        let outcome = push_one(&git, &repo, mode);
+        (index, repo.name, outcome)
+    })
+    .await
+    .map_err(anyhow::Error::from)
 }
 
 struct PushOneOutcome {
@@ -276,7 +280,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected.len(), 1);
         assert_eq!(response.selected[0].status, SyncStatus::UpToDate);
@@ -290,7 +294,7 @@ mod tests {
                 checked_at: gtl_models::timestamps::MachineTimestamp::try_from(
                     "2026-07-03T00:00:00Z",
                 )
-                .expect("fixture ledger timestamp is valid"),
+                .unwrap(),
             }]
         );
     }
@@ -314,7 +318,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected[0].status, SyncStatus::Pushed);
         assert_eq!(response.selected[0].detail, "abc..def  main -> main");
@@ -327,7 +331,7 @@ mod tests {
                 checked_at: gtl_models::timestamps::MachineTimestamp::try_from(
                     "2026-07-03T00:00:00Z",
                 )
-                .expect("fixture ledger timestamp is valid"),
+                .unwrap(),
             }]
         );
     }
@@ -349,7 +353,7 @@ mod tests {
 
         let response = execute_with(remote, vec![repo("a")], request)
             .await
-            .expect("push succeeds");
+            .unwrap();
 
         assert_eq!(response.selected[0].status, SyncStatus::WouldPush);
     }
@@ -373,7 +377,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -395,7 +399,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected[0].status, SyncStatus::Warn);
         assert_eq!(
@@ -416,7 +420,7 @@ mod tests {
             req(),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected.len(), 3);
         assert!(response.excluded.is_empty());
@@ -451,7 +455,7 @@ mod tests {
             settings_excluding(&["excluded"]),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(
             response
@@ -484,7 +488,7 @@ mod tests {
             settings_excluding(&["Selected", "not-active"]),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert_eq!(response.selected.len(), 1);
         assert!(response.excluded.is_empty());
@@ -499,7 +503,7 @@ mod tests {
             settings_excluding(&["a", "b"]),
         )
         .await
-        .expect("push succeeds");
+        .unwrap();
 
         assert!(response.selected.is_empty());
         assert_eq!(
@@ -524,7 +528,7 @@ mod tests {
             &SequenceUserSettingsStore::new([]),
         )
         .await
-        .expect_err("settings failure propagates");
+        .unwrap_err();
 
         assert!(matches!(
             error,
@@ -545,13 +549,14 @@ mod tests {
             &FixedUserSettingsStore::default(),
         )
         .await
-        .expect_err("project client error propagates");
-        let PushRepositoriesError::ProjectClient(ProjectClientError::Unavailable(
-            ProjectCatalogueUnavailableError::Dependency(source),
-        )) = error
-        else {
-            anyhow::bail!("project client failure changed shape");
-        };
+        .unwrap_err();
+        let source = match error {
+            PushRepositoriesError::ProjectClient(ProjectClientError::Unavailable(
+                ProjectCatalogueUnavailableError::Dependency(source),
+            )) => Some(source),
+            _ => None,
+        }
+        .unwrap();
         assert_eq!(source.root_cause().to_string(), "boom");
         Ok(())
     }

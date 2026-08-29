@@ -94,8 +94,8 @@ mod tests {
     #[test]
     fn starting_a_row_stream_replaces_the_previous_stream() {
         let streams = ViewerRowStreams::default();
-        let first = streams.start_stream().expect("start first row stream");
-        let second = streams.start_stream().expect("start second row stream");
+        let first = streams.start_stream().unwrap();
+        let second = streams.start_stream().unwrap();
 
         assert!(!streams.is_current(first));
         assert!(streams.is_current(second));
@@ -104,11 +104,9 @@ mod tests {
     #[test]
     fn settings_change_cancels_the_current_row_stream() {
         let streams = ViewerRowStreams::default();
-        let stream = streams.start_stream().expect("start row stream");
+        let stream = streams.start_stream().unwrap();
 
-        streams
-            .cancel_current_stream()
-            .expect("cancel current row stream");
+        streams.cancel_current_stream().unwrap();
 
         assert!(!streams.is_current(stream));
     }

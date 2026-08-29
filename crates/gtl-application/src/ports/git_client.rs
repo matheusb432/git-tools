@@ -49,6 +49,7 @@ pub enum GitPushReceipt {
 }
 
 impl GitPushReceipt {
+    #[must_use]
     pub fn detail(&self) -> &str {
         match self {
             Self::UpToDate { detail } | Self::Updated { detail } => detail,
@@ -74,6 +75,7 @@ pub enum GitWorkingTreeSummary {
 
 impl GitWorkingTreeSummary {
     /// Collapses a completed working-tree snapshot to clean or dirty.
+    #[must_use]
     pub fn from_working_tree(working_tree: &GitWorkingTree) -> Self {
         if working_tree.files.is_empty() {
             Self::Clean
@@ -83,6 +85,7 @@ impl GitWorkingTreeSummary {
     }
 
     /// Returns whether the snapshot contained any working-tree changes.
+    #[must_use]
     pub const fn is_dirty(self) -> bool {
         matches!(self, Self::Dirty)
     }

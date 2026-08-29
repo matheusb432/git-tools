@@ -37,17 +37,12 @@ const CONCURRENT_SAVE_BUSY_RETRY_DELAY: Duration = Duration::from_millis(1);
 static CONCURRENT_SAVE_BUSY_SIGNAL_SENDER: Mutex<Option<mpsc::SyncSender<()>>> = Mutex::new(None);
 
 fn concurrent_save_busy_signal_sender_set(sender: Option<mpsc::SyncSender<()>>) {
-    *CONCURRENT_SAVE_BUSY_SIGNAL_SENDER
-        .lock()
-        .expect("lock concurrent-save busy-signal sender") = sender;
+    *CONCURRENT_SAVE_BUSY_SIGNAL_SENDER.lock().unwrap() = sender;
 }
 
 fn concurrent_save_busy_handler(retry_count: i32) -> bool {
     if retry_count == 0
-        && let Some(sender) = CONCURRENT_SAVE_BUSY_SIGNAL_SENDER
-            .lock()
-            .expect("lock concurrent-save busy-signal sender")
-            .as_ref()
+        && let Some(sender) = CONCURRENT_SAVE_BUSY_SIGNAL_SENDER.lock().unwrap().as_ref()
     {
         let _ = sender.try_send(());
     }
@@ -60,13 +55,12 @@ struct ClockTest;
 
 impl Clock for ClockTest {
     fn now(&self) -> Result<MachineTimestamp, gtl_models::timestamps::TimestampError> {
-        Ok(MachineTimestamp::try_from("2026-07-19T00:00:00Z")
-            .expect("fixture clock timestamp is valid"))
+        Ok(MachineTimestamp::try_from("2026-07-19T00:00:00Z").unwrap())
     }
 }
 
 fn repository_root(path: &Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
 fn git(top_level: &Path) -> FakeGitClient {
@@ -89,7 +83,7 @@ fn unpushed_diff_recipe() -> Recipe {
 }
 
 fn save_live_view(state: &SqliteAppState, top_level: &Path) {
-    let mut connection = state.connection_lock().expect("lock state connection");
+    let mut connection = state.connection_lock().unwrap();
     let response = save_live_view::execute(
         SaveLiveView {
             path: top_level.to_path_buf(),
@@ -98,7 +92,7 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
         &mut connection,
         &ClockTest,
     )
-    .expect("save live view");
+    .unwrap();
     assert!(matches!(
         response.outcome,
         SaveLiveViewOutcome::Created { .. }
@@ -106,14 +100,14 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
 }
 
 fn list_live_views(state: &SqliteAppState) -> Vec<gtl_application::live_views::LiveViewRecord> {
-    let connection = state.connection_lock().expect("lock state connection");
-    list_live_views::execute(ListLiveViews, &connection).expect("list live views")
+    let connection = state.connection_lock().unwrap();
+    list_live_views::execute(ListLiveViews, &connection).unwrap()
 }
 
 #[test]
 fn public_operations_use_the_migrated_schema() {
-    let directory = tempfile::tempdir().expect("temporary data root");
-    let state = SqliteAppState::open(directory.path()).expect("open app state");
+    let directory = tempfile::tempdir().unwrap();
+    let state = SqliteAppState::open(directory.path()).unwrap();
     let top_level = Path::new("/repos/alpha");
 
     save_live_view(&state, top_level);
@@ -122,7 +116,7 @@ fn public_operations_use_the_migrated_schema() {
     assert_eq!(live_views[0].display_name.as_str(), "alpha");
 
     {
-        let mut connection = state.connection_lock().expect("lock state connection");
+        let mut connection = state.connection_lock().unwrap();
         record_render::execute(
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
@@ -133,20 +127,19 @@ fn public_operations_use_the_migrated_schema() {
             &mut connection,
             &ClockTest,
         )
-        .expect("record render");
+        .unwrap();
     }
     let history = {
-        let connection = state.connection_lock().expect("lock state connection");
-        list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
-            .expect("list recent renders")
+        let connection = state.connection_lock().unwrap();
+        list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap()
     };
     assert_eq!(history.entries.len(), 1);
     let id = history.entries[0].id;
     let found = {
-        let connection = state.connection_lock().expect("lock state connection");
-        get_recent_render::execute(&GetRecentRender { id }, &connection).expect("get recent render")
+        let connection = state.connection_lock().unwrap();
+        get_recent_render::execute(&GetRecentRender { id }, &connection).unwrap()
     };
-    assert_eq!(found.expect("recent render").title, "alpha · unpushed");
+    assert_eq!(found.unwrap().title, "alpha · unpushed");
 
     let viewer = ViewerState::new();
     let tab_id = work::reserve_open(
@@ -155,13 +148,12 @@ fn public_operations_use_the_migrated_schema() {
         RecipeBatchId::generate(),
         ViewerTabKind::Live,
     )
-    .expect("open live viewer tab")
+    .unwrap()
     .ticket()
     .tab_id;
     let refresh = {
-        let connection = state.connection_lock().expect("lock state connection");
-        delete_live_viewer_tab::execute(tab_id, &connection, &viewer)
-            .expect("delete live viewer tab")
+        let connection = state.connection_lock().unwrap();
+        delete_live_viewer_tab::execute(tab_id, &connection, &viewer).unwrap()
     };
     assert!(refresh.is_none());
     assert!(list_live_views(&state).is_empty());
@@ -169,11 +161,11 @@ fn public_operations_use_the_migrated_schema() {
 
 #[test]
 fn second_process_style_connection_observes_committed_rows() {
-    let directory = tempfile::tempdir().expect("temporary data root");
-    let state_first = SqliteAppState::open(directory.path()).expect("open first app state");
+    let directory = tempfile::tempdir().unwrap();
+    let state_first = SqliteAppState::open(directory.path()).unwrap();
     save_live_view(&state_first, Path::new("/repos/reopened"));
 
-    let state_second = SqliteAppState::open(directory.path()).expect("open second app state");
+    let state_second = SqliteAppState::open(directory.path()).unwrap();
 
     assert_eq!(list_live_views(&state_second).len(), 1);
 }
@@ -181,21 +173,18 @@ fn second_process_style_connection_observes_committed_rows() {
 #[test]
 fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
     concurrent_save_busy_signal_sender_set(None);
-    let directory = tempfile::tempdir().expect("temporary data root");
-    let state_first = SqliteAppState::open(directory.path()).expect("open first app state");
-    let state_second = SqliteAppState::open(directory.path()).expect("open second app state");
-    let reservation =
-        Connection::open(directory.path().join("gtl.db")).expect("open reservation connection");
-    reservation
-        .execute_batch("BEGIN IMMEDIATE")
-        .expect("hold writer reservation");
+    let directory = tempfile::tempdir().unwrap();
+    let state_first = SqliteAppState::open(directory.path()).unwrap();
+    let state_second = SqliteAppState::open(directory.path()).unwrap();
+    let reservation = Connection::open(directory.path().join("gtl.db")).unwrap();
+    reservation.execute_batch("BEGIN IMMEDIATE").unwrap();
 
     for state in [&state_first, &state_second] {
         state
             .connection_lock()
-            .expect("lock state connection")
+            .unwrap()
             .busy_handler(Some(concurrent_save_busy_handler))
-            .expect("install busy handler");
+            .unwrap();
     }
 
     let (busy_signal_sender, busy_signal_receiver) = mpsc::sync_channel(2);
@@ -209,7 +198,7 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
             let completion_sender = completion_sender.clone();
             thread::spawn(move || {
                 barrier.wait();
-                let mut connection = state.connection_lock().expect("lock state connection");
+                let mut connection = state.connection_lock().unwrap();
                 let result = save_live_view::execute(
                     SaveLiveView {
                         path: "/repos/concurrent".into(),
@@ -270,7 +259,7 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
         matches!(completion_pending, Err(mpsc::RecvTimeoutError::Timeout)),
         "both saves must remain pending while the reservation is held"
     );
-    reservation_release_result.expect("release writer reservation");
+    reservation_release_result.unwrap();
     assert_eq!(completion_receive_error, None);
     assert!(
         join_results.iter().all(Result::is_ok),
@@ -279,7 +268,7 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
 
     let mut refresh_flags: Vec<_> = completion_results
         .into_iter()
-        .map(|result| result.expect("save succeeds"))
+        .map(|result| result.unwrap())
         .collect();
     refresh_flags.sort_unstable();
     assert_eq!(refresh_flags, vec![false, true]);
@@ -287,11 +276,11 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
 
 #[test]
 fn prune_failure_rolls_back_the_render_insertion() {
-    let directory = tempfile::tempdir().expect("temporary data root");
-    let state = SqliteAppState::open(directory.path()).expect("open app state");
+    let directory = tempfile::tempdir().unwrap();
+    let state = SqliteAppState::open(directory.path()).unwrap();
     state
         .connection_lock()
-        .expect("lock fixture connection")
+        .unwrap()
         .execute_batch(
             "INSERT INTO project_sources (id, kind, value, created_at)
              VALUES (1, 'directory', '/repos/fixture', '2026-07-18T00:00:00Z');
@@ -312,10 +301,10 @@ fn prune_failure_rolls_back_the_render_insertion() {
                SELECT RAISE(ABORT, 'pruning blocked by test');
              END;",
         )
-        .expect("seed capped history and install prune trigger");
+        .unwrap();
 
     let result = {
-        let mut connection = state.connection_lock().expect("lock record connection");
+        let mut connection = state.connection_lock().unwrap();
         record_render::execute(
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
@@ -329,17 +318,17 @@ fn prune_failure_rolls_back_the_render_insertion() {
     };
 
     assert!(matches!(result, Err(RecordRenderError::Unexpected(_))));
-    let connection = state.connection_lock().expect("lock assertion connection");
+    let connection = state.connection_lock().unwrap();
     let render_count: i64 = connection
         .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
-        .expect("count recent renders");
+        .unwrap();
     let failed_insertion_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM recent_renders WHERE title = 'failed insertion'",
             [],
             |row| row.get(0),
         )
-        .expect("count failed insertion");
+        .unwrap();
 
     assert_eq!(render_count, 500);
     assert_eq!(failed_insertion_count, 0);

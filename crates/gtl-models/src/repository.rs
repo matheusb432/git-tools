@@ -14,18 +14,22 @@ use crate::git::CommitCount;
 pub struct PathCount(u64);
 
 impl PathCount {
+    #[must_use]
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
+    #[must_use]
     pub fn from_len(value: usize) -> Self {
         Self(path_count_from_usize(value))
     }
 
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }
 
+    #[must_use]
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }

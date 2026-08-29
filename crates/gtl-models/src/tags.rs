@@ -34,6 +34,7 @@ pub struct Tag {
 
 impl Tag {
     /// Creates an annotated tag that resolves its tag object to `commit`.
+    #[must_use]
     pub fn annotated(
         name: TagName,
         object: GitObjectId,
@@ -52,6 +53,7 @@ impl Tag {
     }
 
     /// Creates a lightweight tag whose ref object is its resolved commit.
+    #[must_use]
     pub fn lightweight(
         name: TagName,
         commit: CommitId,
@@ -68,26 +70,31 @@ impl Tag {
     }
 
     /// Returns the full object identifier stored in the tag ref.
+    #[must_use]
     pub const fn object(&self) -> &GitObjectId {
         &self.object
     }
 
     /// Returns the full commit identifier the tag resolves to.
+    #[must_use]
     pub const fn commit(&self) -> &CommitId {
         &self.commit
     }
 
     /// Returns the local tag name without the `refs/tags/` prefix.
+    #[must_use]
     pub const fn name(&self) -> &TagName {
         &self.name
     }
 
     /// Returns the tag's creation timestamp when Git reports one.
+    #[must_use]
     pub const fn created_at(&self) -> Option<&MachineTimestamp> {
         self.created_at.as_ref()
     }
 
     /// Returns the first line of an annotated tag message.
+    #[must_use]
     pub fn message(&self) -> Option<&str> {
         match &self.kind {
             TagKind::Annotated { message } => message.as_deref(),
@@ -96,11 +103,13 @@ impl Tag {
     }
 
     /// Returns whether the tag has its own annotated tag object.
+    #[must_use]
     pub fn is_annotated(&self) -> bool {
         matches!(self.kind, TagKind::Annotated { .. })
     }
 
     /// Returns the tag's origin state, or `None` when origin was not queried.
+    #[must_use]
     pub fn state(&self) -> Option<TagState> {
         self.state
     }
@@ -119,16 +128,15 @@ mod tests {
     const COMMIT_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     fn commit_id() -> crate::diffs::CommitId {
-        COMMIT_ID.try_into().expect("fixture commit ID is valid")
+        COMMIT_ID.try_into().unwrap()
     }
 
     fn tag_name(raw: &str) -> TagName {
-        TagName::try_new(raw.to_owned()).expect("fixture tag name is non-empty")
+        TagName::try_new(raw.to_owned()).unwrap()
     }
 
     fn created_at(seconds: i64) -> crate::timestamps::MachineTimestamp {
-        crate::timestamps::MachineTimestamp::from_unix_seconds(seconds)
-            .expect("fixture tag timestamp is in range")
+        crate::timestamps::MachineTimestamp::from_unix_seconds(seconds).unwrap()
     }
 
     #[test]
@@ -145,8 +153,7 @@ mod tests {
     fn annotated_tag_keeps_its_distinct_ref_object() {
         let tag = Tag::annotated(
             tag_name("v1.0.0"),
-            GitObjectId::try_new("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-                .expect("fixture object ID is valid"),
+            GitObjectId::try_new("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap(),
             commit_id(),
             Some(created_at(100)),
             Some("release".into()),

@@ -133,17 +133,7 @@ pub(crate) fn use_viewer_commit_pages(
             pages.request().set(ViewerCommitPageRequest::Loading);
         }
 
-        async move {
-            let Some((key, cursor)) = page_request else {
-                return;
-            };
-            let result = viewer_server::list_commits(ListViewerCommits {
-                identity,
-                cursor: Some(cursor),
-            })
-            .await;
-            finish_page_request(pages, key, cursor, result);
-        }
+        request_next_page(pages, identity, page_request)
     });
     let commits: ReadStore<Vec<ViewerCommitSummary>> = use_hook(move || pages.commits().into());
 
@@ -153,6 +143,22 @@ pub(crate) fn use_viewer_commit_pages(
         request,
         request_generation,
     }
+}
+
+async fn request_next_page(
+    pages: Store<ViewerCommitPages>,
+    identity: ViewerViewIdentity,
+    page_request: Option<(ViewerCommitListKey, ViewerCommitCursor)>,
+) {
+    let Some((key, cursor)) = page_request else {
+        return;
+    };
+    let result = viewer_server::list_commits(ListViewerCommits {
+        identity,
+        cursor: Some(cursor),
+    })
+    .await;
+    finish_page_request(pages, key, cursor, result);
 }
 
 fn finish_page_request(

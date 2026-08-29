@@ -26,6 +26,7 @@ impl PushLedger {
         });
     }
 
+    #[must_use]
     pub fn entries(&self) -> &[PushLedgerEntry] {
         &self.entries
     }

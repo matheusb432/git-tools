@@ -35,6 +35,7 @@ pub struct ReservedRecipeWork {
 }
 
 impl ReservedRecipeWork {
+    #[must_use]
     pub const fn ticket(&self) -> ComputeTicket {
         self.ticket
     }
@@ -48,6 +49,7 @@ pub struct ReservedCommitWork {
 }
 
 impl ReservedCommitWork {
+    #[must_use]
     pub const fn ticket(&self) -> CommitPatchTicket {
         self.ticket
     }
@@ -387,8 +389,7 @@ mod tests {
     }
 
     fn reserve_pending(state: &ViewerState, path: &str, kind: ViewerTabKind) -> ReservedRecipeWork {
-        reserve_open(state, recipe_at(path), RecipeBatchId::generate(), kind)
-            .expect("work reserves")
+        reserve_open(state, recipe_at(path), RecipeBatchId::generate(), kind).unwrap()
     }
 
     #[test]
@@ -400,18 +401,18 @@ mod tests {
             RecipeBatchId::generate(),
             ViewerTabKind::Snapshot,
         )
-        .expect("work reserves");
+        .unwrap();
         let work = compute_recipe(
             work,
             &FixedUserSettingsStore::default(),
             &crate::utils::FakeGitClient::default(),
         );
 
-        let publication = publish_recipe(&state, work).expect("failure publishes");
+        let publication = publish_recipe(&state, work).unwrap();
 
         assert!(matches!(publication, RecipePublication::Failed { .. }));
         assert_eq!(
-            state.version().expect("version reads"),
+            state.version().unwrap(),
             gtl_models::viewer::ViewerVersion::new(3)
         );
     }
@@ -422,8 +423,8 @@ mod tests {
         let initial = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
 
         let refresh = activate_tab(&state, initial.ticket().tab_id)
-            .expect("tab activates")
-            .expect("pending tab refreshes");
+            .unwrap()
+            .unwrap();
 
         assert_eq!(refresh.ticket().tab_id, initial.ticket().tab_id);
         assert_ne!(refresh.ticket().generation, initial.ticket().generation);
@@ -435,9 +436,7 @@ mod tests {
         let first = reserve_pending(&state, "/repo/first", ViewerTabKind::Snapshot);
         let second = reserve_pending(&state, "/repo/second", ViewerTabKind::Snapshot);
 
-        let refresh = close_tab(&state, second.ticket().tab_id)
-            .expect("tab closes")
-            .expect("new active tab refreshes");
+        let refresh = close_tab(&state, second.ticket().tab_id).unwrap().unwrap();
 
         assert_eq!(refresh.ticket().tab_id, first.ticket().tab_id);
     }
@@ -448,7 +447,7 @@ mod tests {
         let first = reserve_pending(&state, "/repo/first", ViewerTabKind::Snapshot);
         reserve_pending(&state, "/repo/second", ViewerTabKind::Snapshot);
 
-        let refresh = close_tab(&state, first.ticket().tab_id).expect("tab closes");
+        let refresh = close_tab(&state, first.ticket().tab_id).unwrap();
 
         assert!(refresh.is_none());
     }

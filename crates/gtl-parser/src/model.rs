@@ -23,6 +23,7 @@ impl ParseOptions {
     ///
     /// The leading diff marker is excluded from the count. Lines longer than
     /// this limit remain in the output but skip syntax and intraline parsing.
+    #[must_use]
     pub const fn new(max_line_characters: CharacterCount) -> Self {
         Self {
             max_line_characters,
@@ -31,6 +32,7 @@ impl ParseOptions {
     }
 
     /// Returns the source-line character limit.
+    #[must_use]
     pub const fn max_line_characters(self) -> CharacterCount {
         self.max_line_characters
     }
@@ -46,6 +48,7 @@ impl ParseOptions {
     }
 
     /// Returns the source-byte limit for each side of a syntax-highlighted hunk.
+    #[must_use]
     pub const fn max_syntax_hunk_bytes(self) -> SyntaxHunkByteLimit {
         self.max_syntax_hunk_bytes
     }
@@ -87,41 +90,49 @@ impl DiffRow {
     }
 
     /// Returns the row's semantic role.
+    #[must_use]
     pub const fn kind(&self) -> DiffRowKind {
         self.kind
     }
 
     /// Returns the old-side line number when the row exists on that side.
+    #[must_use]
     pub const fn old_line_number(&self) -> Option<SourceLineNumber> {
         self.old_line_number
     }
 
     /// Returns the new-side line number when the row exists on that side.
+    #[must_use]
     pub const fn new_line_number(&self) -> Option<SourceLineNumber> {
         self.new_line_number
     }
 
     /// Returns the raw diff line, including its leading marker.
+    #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
     /// Returns the source line with its leading diff marker removed.
+    #[must_use]
     pub fn body(&self) -> &str {
         diff_line_body(&self.text)
     }
 
     /// Returns semantic syntax tokens indexed over [`Self::body`].
+    #[must_use]
     pub fn syntax_tokens(&self) -> &[SyntaxToken] {
         &self.syntax_tokens
     }
 
     /// Returns flat syntax spans over [`Self::body`].
+    #[must_use]
     pub fn semantic_spans(&self) -> &[SemanticTextSpan] {
         &self.semantic_spans
     }
 
     /// Returns the source character count when this row exceeds the parser limit.
+    #[must_use]
     pub const fn long_line_character_count(&self) -> Option<CharacterCount> {
         self.long_line_character_count
     }
@@ -152,11 +163,13 @@ impl SyntaxDiagnostic {
     }
 
     /// Returns the affected side of the diff.
+    #[must_use]
     pub const fn side(&self) -> DiffSide {
         self.side
     }
 
     /// Returns the underlying parser message.
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -173,31 +186,37 @@ pub struct ParsedDiff {
 
 impl ParsedDiff {
     /// Returns parsed rows in source order.
+    #[must_use]
     pub fn rows(&self) -> &[DiffRow] {
         &self.rows
     }
 
     /// Consumes the result and returns its parsed rows.
+    #[must_use]
     pub fn into_rows(self) -> Vec<DiffRow> {
         self.rows
     }
 
     /// Returns the number of decimal digits needed by the largest gutter value.
+    #[must_use]
     pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
         self.line_number_digits
     }
 
     /// Returns the options used to produce this result.
+    #[must_use]
     pub const fn options(&self) -> ParseOptions {
         self.options
     }
 
     /// Returns recoverable syntax-tokenization failures.
+    #[must_use]
     pub fn syntax_diagnostics(&self) -> &[SyntaxDiagnostic] {
         &self.syntax_diagnostics
     }
 
     /// Derives owned rows for a side-by-side diff presentation.
+    #[must_use]
     pub fn split_rows(&self) -> Vec<crate::SplitDiffRow> {
         crate::split::split_rows(&self.rows)
     }
@@ -213,26 +232,31 @@ pub struct ParsedDiffBatch {
 
 impl ParsedDiffBatch {
     /// Returns the rows produced by this batch.
+    #[must_use]
     pub fn rows(&self) -> &[DiffRow] {
         &self.rows
     }
 
     /// Consumes the batch and returns its rows.
+    #[must_use]
     pub fn into_rows(self) -> Vec<DiffRow> {
         self.rows
     }
 
     /// Consumes the batch and returns its rows and diagnostics.
+    #[must_use]
     pub fn into_parts(self) -> (Vec<DiffRow>, Vec<SyntaxDiagnostic>) {
         (self.rows, self.syntax_diagnostics)
     }
 
     /// Returns the cumulative gutter width after this batch.
+    #[must_use]
     pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
         self.line_number_digits
     }
 
     /// Returns recoverable failures produced by this batch.
+    #[must_use]
     pub fn syntax_diagnostics(&self) -> &[SyntaxDiagnostic] {
         &self.syntax_diagnostics
     }
@@ -248,11 +272,13 @@ pub struct DiffParser {
 
 impl DiffParser {
     /// Creates a parser with the default line limit and no syntax grammar.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Creates a parser with explicit parsing options.
+    #[must_use]
     pub const fn with_options(options: ParseOptions) -> Self {
         Self {
             options,
@@ -270,6 +296,7 @@ impl DiffParser {
     }
 
     /// Starts an incremental parser with this configuration.
+    #[must_use]
     pub fn stream(&self) -> DiffParserStream {
         DiffParserStream {
             options: self.options,
@@ -284,6 +311,7 @@ impl DiffParser {
     }
 
     /// Parses the raw unified-diff lines for one file.
+    #[must_use]
     pub fn parse(&self, lines: &[String]) -> ParsedDiff {
         let mut stream = self.stream();
         let batch = stream.push(lines);
@@ -342,16 +370,19 @@ impl DiffParserStream {
     }
 
     /// Returns the cumulative gutter width after all accepted batches.
+    #[must_use]
     pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
         LineNumberDigitWidth::from_source_line_number_max(self.line_number_max)
     }
 
     /// Returns the options used by this stream.
+    #[must_use]
     pub const fn options(&self) -> ParseOptions {
         self.options
     }
 
     /// Consumes the stream and emits its final buffered syntax hunk.
+    #[must_use]
     pub fn finish(self) -> ParsedDiffBatch {
         let line_number_digits = self.line_number_digits();
         #[cfg(feature = "syntax")]
@@ -467,6 +498,7 @@ fn line_number_max(rows: &[DiffRow]) -> SourceLineNumber {
 }
 
 /// Returns a diff source line with its leading marker removed.
+#[must_use]
 pub fn diff_line_body(raw: &str) -> &str {
     raw.get(1..).unwrap_or("")
 }
@@ -664,34 +696,44 @@ mod tests {
         let expected_split = expected.split_rows();
 
         for boundary in 0..=source.len() {
-            let mut stream = parser.stream();
-            let mut split = crate::SplitDiffStream::new();
-            let mut rows = Vec::new();
-            let mut split_rows = Vec::new();
-            let mut diagnostics = Vec::new();
-
-            for page in [&source[..boundary], &source[boundary..]] {
-                let batch = stream.push(page);
-                let (batch_rows, batch_diagnostics) = batch.into_parts();
-                rows.extend(batch_rows.iter().cloned());
-                split_rows.extend(split.push(batch_rows));
-                diagnostics.extend(batch_diagnostics);
-            }
-            split_rows.extend(split.finish());
-
-            assert_eq!(rows, expected.rows(), "row boundary {boundary}");
-            assert_eq!(split_rows, expected_split, "split boundary {boundary}");
-            assert_eq!(
-                diagnostics,
-                expected.syntax_diagnostics(),
-                "diagnostic boundary {boundary}"
-            );
-            assert_eq!(
-                stream.line_number_digits(),
-                expected.line_number_digits(),
-                "gutter boundary {boundary}"
-            );
-            assert_eq!(stream.options(), expected.options());
+            assert_streaming_boundary(&parser, &source, &expected, &expected_split, boundary);
         }
+    }
+
+    fn assert_streaming_boundary(
+        parser: &DiffParser,
+        source: &[String],
+        expected: &ParsedDiff,
+        expected_split: &[crate::SplitDiffRow],
+        boundary: usize,
+    ) {
+        let mut stream = parser.stream();
+        let mut split = crate::SplitDiffStream::new();
+        let mut rows = Vec::new();
+        let mut split_rows = Vec::new();
+        let mut diagnostics = Vec::new();
+
+        for page in [&source[..boundary], &source[boundary..]] {
+            let batch = stream.push(page);
+            let (batch_rows, batch_diagnostics) = batch.into_parts();
+            rows.extend(batch_rows.iter().cloned());
+            split_rows.extend(split.push(batch_rows));
+            diagnostics.extend(batch_diagnostics);
+        }
+        split_rows.extend(split.finish());
+
+        assert_eq!(rows, expected.rows(), "row boundary {boundary}");
+        assert_eq!(split_rows, expected_split, "split boundary {boundary}");
+        assert_eq!(
+            diagnostics,
+            expected.syntax_diagnostics(),
+            "diagnostic boundary {boundary}"
+        );
+        assert_eq!(
+            stream.line_number_digits(),
+            expected.line_number_digits(),
+            "gutter boundary {boundary}"
+        );
+        assert_eq!(stream.options(), expected.options());
     }
 }

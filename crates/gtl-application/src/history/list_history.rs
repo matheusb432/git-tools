@@ -46,18 +46,14 @@ mod tests {
 
     fn record(repo_id: &str, committed: &str, generated: &str) -> HistoryRecord {
         HistoryRecord {
-            repo_id: RepositoryStoreId::try_new(repo_id.to_owned())
-                .expect("fixture repository store ID is valid"),
+            repo_id: RepositoryStoreId::try_new(repo_id.to_owned()).unwrap(),
             repo_name: crate::utils::project_name("n"),
             title: "t".into(),
             range_label: "x".into(),
-            head_committed_at: (!committed.is_empty()).then(|| {
-                MachineTimestamp::try_from(committed).expect("fixture commit timestamp is valid")
-            }),
-            generated_at: MachineTimestamp::try_from(generated)
-                .expect("fixture generation timestamp is valid"),
-            content_hash: ArtifactContentHash::try_new("dddddddddddddddd".to_owned())
-                .expect("fixture content hash is valid"),
+            head_committed_at: (!committed.is_empty())
+                .then(|| MachineTimestamp::try_from(committed).unwrap()),
+            generated_at: MachineTimestamp::try_from(generated).unwrap(),
+            content_hash: ArtifactContentHash::try_new("dddddddddddddddd".to_owned()).unwrap(),
             kind: gtl_models::diffs::DiffKind::TwoDot,
             byte_size: ArtifactByteSize::default(),
         }
@@ -89,7 +85,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = list_history::execute(&req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).unwrap();
 
         assert_eq!(response[0].repo_id.as_ref(), "cccccccccccccccc");
         assert_eq!(response[2].repo_id.as_ref(), "aaaaaaaaaaaaaaaa");
@@ -111,7 +107,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = list_history::execute(&req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).unwrap();
 
         assert_eq!(response[0].repo_id.as_ref(), "ffffffffffffffff");
         assert_eq!(response[1].repo_id.as_ref(), "1111111111111111");
@@ -135,7 +131,7 @@ mod tests {
             ..Default::default()
         };
 
-        let response = list_history::execute(&req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).unwrap();
 
         assert_eq!(response[0].repo_id.as_ref(), "2222222222222222");
     }
@@ -143,7 +139,7 @@ mod tests {
     #[test]
     fn empty_store_returns_an_empty_list() {
         let store = InMemoryArtifactStore::default();
-        let response = list_history::execute(&req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).unwrap();
 
         assert!(response.is_empty());
     }

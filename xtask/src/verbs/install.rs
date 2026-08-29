@@ -77,11 +77,7 @@ fn file_name(path: &Path) -> &str {
         .unwrap_or_default()
 }
 
-/// Replace `dst` with `src` atomically: stage a copy in `dst`'s directory, then rename over the
-/// target. `rename` onto a busy executable swaps the inode instead of writing in place, so an
-/// in-place update of a running binary (the keep-warm gtl-viewer tray app) never fails with
-/// "Text file busy". `fs::copy` carries the source's mode bits on Unix, so the staged exe stays
-/// executable without an OS-specific chmod.
+// Do not truncate an executable that may still be running.
 fn atomic_replace(src: &Path, dst: &Path) -> io::Result<()> {
     let dir = dst.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir)?;
@@ -138,9 +134,6 @@ fn uninstall_cli_binary(bindir: &Path) -> io::Result<Removal> {
     })
 }
 
-/// Delete config file `path`, guarded. Proceeds when `force`, or when `confirm()` returns true;
-/// otherwise keeps the file. The interactivity is injected as a closure so the decision is
-/// host-testable without a real TTY.
 fn remove_cli_config(
     path: &Path,
     force: bool,
@@ -156,8 +149,6 @@ fn remove_cli_config(
     Ok(ConfigRemoval::Removed)
 }
 
-/// Target bindir: `GIT_TOOLS_BINDIR` override, else `$HOME/.local/bin`. Shared with `setup`
-/// (which ensures this dir is on PATH).
 pub(crate) fn bindir() -> Result<PathBuf> {
     if let Some(dir) = env::var_os("GIT_TOOLS_BINDIR") {
         return Ok(PathBuf::from(dir));
@@ -166,8 +157,7 @@ pub(crate) fn bindir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".local").join("bin"))
 }
 
-/// Place the requested artifact(s). Repo root is the current dir (the install recipes set
-/// `working-directory := '..'`, so CWD is the repo root).
+/// Uses the current directory as the repository root.
 pub fn run_install(target: InstallTarget) -> Result<()> {
     let repo_path = env::current_dir()?;
     let bindir = bindir()?;
@@ -188,7 +178,7 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
         .join(cli_bin_name());
     if !src.is_file() {
         bail!(
-            "git-tools not built at {} — run `just cli build` first",
+            "git-tools not built at {}, run `just cli build` first",
             src.display()
         );
     }
@@ -205,7 +195,7 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
         .join(server_bin_name());
     if !server_src.is_file() {
         bail!(
-            "gtl-server not built at {} — run `just cli build` first",
+            "gtl-server not built at {}, run `just cli build` first",
             server_src.display()
         );
     }
@@ -238,7 +228,6 @@ fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Remove the installed binaries; optionally delete the repo-local config files.
 pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
     let bindir = bindir()?;
     if let Some(path) = linux_server::uninstall()? {
@@ -274,7 +263,6 @@ pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Real interactive guard: refuse non-interactively (with a fix hint), else prompt y/N.
 fn confirm_config_delete(path: &Path) -> bool {
     use io::IsTerminal;
     if !io::stdin().is_terminal() {

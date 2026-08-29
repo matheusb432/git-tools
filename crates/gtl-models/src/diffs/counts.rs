@@ -18,11 +18,13 @@ use std::fmt;
 pub struct DiffLineCount(u64);
 
 impl DiffLineCount {
+    #[must_use]
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
     /// Returns the numeric count for final presentation or algorithm boundaries.
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }

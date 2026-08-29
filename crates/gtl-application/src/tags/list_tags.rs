@@ -151,10 +151,7 @@ mod tests {
             crate::utils::tag_name(name),
             crate::utils::git_object_id(object),
             crate::utils::commit_id_fixture(commit),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at).unwrap()),
             Some(message.into()),
         )
     }
@@ -163,10 +160,7 @@ mod tests {
         Tag::lightweight(
             crate::utils::tag_name(name),
             crate::utils::commit_id_fixture(commit),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at).unwrap()),
         )
     }
 
@@ -176,8 +170,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = list_tags::execute(list_with_state(), &git)
-            .expect_err("transport failure must remain an error");
+        let error = list_tags::execute(list_with_state(), &git).unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(
@@ -192,8 +185,7 @@ mod tests {
             ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
-            list_tags::execute(list_with_state(), &git)
-                .expect("a Git rejection is a closed list failure"),
+            list_tags::execute(list_with_state(), &git).unwrap(),
             ListTagsOk::Failed {
                 detail: "git for-each-ref failed: fatal: refs unavailable".into(),
             }
@@ -211,7 +203,7 @@ mod tests {
             },
             &git,
         )
-        .expect("scripted git succeeds");
+        .unwrap();
     }
 
     #[test]
@@ -222,8 +214,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            list_tags::execute(list_with_state(), &git)
-                .expect("a Git rejection is a closed list failure"),
+            list_tags::execute(list_with_state(), &git).unwrap(),
             ListTagsOk::Failed {
                 detail:
                     "git ls-remote failed: fatal: 'origin' does not appear to be a git repository"
@@ -274,10 +265,7 @@ mod tests {
             crate::utils::tag_name("v1.0.0"),
             crate::utils::git_object_id("tag-object"),
             crate::utils::commit_id_fixture("commit-a"),
-            Some(
-                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(100)
-                    .expect("fixture tag timestamp is in range"),
-            ),
+            Some(gtl_models::timestamps::MachineTimestamp::from_unix_seconds(100).unwrap()),
             None,
         );
         let label = lightweight_tag("stable", "commit-a", 110);

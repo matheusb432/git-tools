@@ -130,15 +130,7 @@ impl Sandbox {
             fs::create_dir_all(path)
                 .with_context(|| format!("create sandbox directory {}", path.display()))?;
         }
-        if std::env::consts::OS == "linux" {
-            let status = Command::new("chmod")
-                .args(["700", sandbox.runtime.to_string_lossy().as_ref()])
-                .status()
-                .context("set XDG_RUNTIME_DIR permissions")?;
-            if !status.success() {
-                bail!("chmod 700 for XDG_RUNTIME_DIR failed");
-            }
-        }
+        set_runtime_directory_permissions(&sandbox.runtime)?;
         let runtime_runner = sandbox
             .root
             .join(format!("xtask-e2e-runner{}", env::consts::EXE_SUFFIX));
@@ -181,11 +173,14 @@ impl Sandbox {
         .into_iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
         .collect::<Vec<_>>();
-        for name in HOST_ENVIRONMENT_VARIABLE_NAMES {
-            if let Some(value) = std::env::var_os(name) {
-                pairs.push((OsString::from(name), value));
-            }
-        }
+        pairs.extend(
+            HOST_ENVIRONMENT_VARIABLE_NAMES
+                .iter()
+                .copied()
+                .filter_map(|name| {
+                    std::env::var_os(name).map(|value| (OsString::from(name), value))
+                }),
+        );
         if self.success_evidence_requested {
             pairs.push((
                 OsString::from(EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE),
@@ -194,6 +189,20 @@ impl Sandbox {
         }
         IsolatedEnv { pairs }
     }
+}
+
+fn set_runtime_directory_permissions(runtime: &Path) -> Result<()> {
+    if env::consts::OS != "linux" {
+        return Ok(());
+    }
+
+    let status = Command::new("chmod")
+        .arg("700")
+        .arg(runtime)
+        .status()
+        .context("set XDG_RUNTIME_DIR permissions")?;
+    ensure!(status.success(), "chmod 700 for XDG_RUNTIME_DIR failed");
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -968,16 +977,15 @@ mod tests {
 
     #[test]
     fn plain_run_clears_failures_and_preserves_success_evidence() {
-        let evidence_root = tempfile::tempdir().expect("temporary evidence root");
+        let evidence_root = tempfile::tempdir().unwrap();
         let success = evidence_root.path().join("success/thirtyfour/viewer.png");
         let failure = evidence_root.path().join("fail/thirtyfour/viewer.png");
         for screenshot in [&success, &failure] {
-            fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
-                .expect("create stale evidence parent");
-            fs::write(screenshot, b"stale").expect("write stale evidence");
+            fs::create_dir_all(screenshot.parent().unwrap()).unwrap();
+            fs::write(screenshot, b"stale").unwrap();
         }
 
-        clear_evidence_outcomes(evidence_root.path(), false).expect("clear failure evidence");
+        clear_evidence_outcomes(evidence_root.path(), false).unwrap();
 
         assert!(success.is_file());
         assert!(!failure.exists());
@@ -985,15 +993,14 @@ mod tests {
 
     #[test]
     fn enabled_evidence_root_removes_stale_outcomes() {
-        let evidence_root = tempfile::tempdir().expect("temporary evidence root");
+        let evidence_root = tempfile::tempdir().unwrap();
         for outcome in ["success", "fail"] {
             let screenshot = evidence_root.path().join(outcome).join("stale.png");
-            fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
-                .expect("create stale evidence parent");
-            fs::write(screenshot, b"stale").expect("write stale evidence");
+            fs::create_dir_all(screenshot.parent().unwrap()).unwrap();
+            fs::write(screenshot, b"stale").unwrap();
         }
 
-        clear_evidence_outcomes(evidence_root.path(), true).expect("clear stale evidence");
+        clear_evidence_outcomes(evidence_root.path(), true).unwrap();
 
         assert!(!evidence_root.path().join("success").exists());
         assert!(!evidence_root.path().join("fail").exists());
@@ -1001,13 +1008,13 @@ mod tests {
 
     #[test]
     fn isolated_environment_rejects_host_git_overrides() {
-        let repository = tempfile::tempdir().expect("temporary repository");
+        let repository = tempfile::tempdir().unwrap();
         assert!(
             Command::new("git")
                 .args(["init", "-q"])
                 .current_dir(repository.path())
                 .status()
-                .expect("initialize repository")
+                .unwrap()
                 .success()
         );
         assert!(
@@ -1015,7 +1022,7 @@ mod tests {
                 .args(["config", "core.editor", "repository-editor"])
                 .current_dir(repository.path())
                 .status()
-                .expect("configure repository editor")
+                .unwrap()
                 .success()
         );
         let pairs = super::HOST_ENVIRONMENT_VARIABLE_NAMES
@@ -1031,9 +1038,9 @@ mod tests {
             },
             "HOME",
         )
-        .expect("derive host build environment");
+        .unwrap();
         let hostile_git_directory = repository.path().join("host-git-dir");
-        fs::create_dir(&hostile_git_directory).expect("create hostile Git directory");
+        fs::create_dir(&hostile_git_directory).unwrap();
         let mut command = Command::new("git");
         command
             .args(["var", "GIT_EDITOR"])
@@ -1048,13 +1055,11 @@ mod tests {
             .env("GIT_CONFIG_VALUE_0", "injected-editor");
         environment.apply_cargo(&mut command, &host_environment);
 
-        let output = command.output().expect("query configured editor");
+        let output = command.output().unwrap();
 
         assert!(output.status.success());
         assert_eq!(
-            String::from_utf8(output.stdout)
-                .expect("UTF-8 editor")
-                .trim(),
+            String::from_utf8(output.stdout).unwrap().trim(),
             "repository-editor"
         );
     }
@@ -1069,7 +1074,7 @@ mod tests {
             },
             "HOME",
         )
-        .expect("derive host build environment");
+        .unwrap();
         let environment = IsolatedEnv {
             pairs: vec![
                 (OsString::from("HOME"), OsString::from("/sandbox/home")),
@@ -1114,7 +1119,7 @@ mod tests {
             "RUSTUP_HOME" => Some(OsString::from("/host/rustup")),
             _ => None,
         })
-        .expect("capture explicit host build environment");
+        .unwrap();
         let environment = IsolatedEnv { pairs: Vec::new() };
         let mut command = Command::new("cargo");
 
@@ -1142,7 +1147,7 @@ mod tests {
             },
             "USERPROFILE",
         )
-        .expect("derive Windows host build environment");
+        .unwrap();
         let environment = IsolatedEnv { pairs: Vec::new() };
         let mut command = Command::new("cargo");
 

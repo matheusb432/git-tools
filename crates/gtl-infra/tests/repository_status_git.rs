@@ -14,17 +14,16 @@ use gtl_models::{
 };
 
 fn repository_root(path: &Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
 fn status_snapshot(root: &RepositoryRoot, expectation: &str) -> GitStatusSnapshot {
-    let result = HybridGitClient
-        .status_snapshot(root)
-        .unwrap_or_else(|error| panic!("{expectation}: {error}"));
-    let GitEffect::Applied(snapshot) = result else {
-        panic!("{expectation}: Git rejected the status snapshot");
-    };
-    snapshot
+    let result = HybridGitClient.status_snapshot(root).unwrap();
+    match result {
+        GitEffect::Applied(snapshot) => Ok(snapshot),
+        GitEffect::Rejected(detail) => Err(format!("{expectation}: {detail}")),
+    }
+    .unwrap()
 }
 
 #[test]
@@ -53,10 +52,12 @@ fn status_snapshot_reads_real_branch_upstream_and_changes() {
 
     let result = HybridGitClient
         .status_snapshot(&repository_root(&repository))
-        .expect("Git status snapshot succeeds");
-    let GitEffect::Applied(snapshot) = result else {
-        panic!("Git rejected the status snapshot");
-    };
+        .unwrap();
+    let snapshot = match result {
+        GitEffect::Applied(snapshot) => Some(snapshot),
+        GitEffect::Rejected(_) => None,
+    }
+    .unwrap();
 
     assert_eq!(
         snapshot.head,
@@ -94,7 +95,7 @@ fn git(repository: &Path, arguments: &[&str]) {
         .arg(repository)
         .args(arguments)
         .output()
-        .expect("git starts");
+        .unwrap();
     assert!(
         output.status.success(),
         "git {arguments:?} failed in {}: {}",
@@ -173,7 +174,7 @@ fn status_queries_read_nested_submodule_repositories() {
         },
         &HybridGitClient,
     )
-    .expect("recursive status can reuse nested repository snapshots");
+    .unwrap();
     assert_eq!(recursive.len(), 3);
     assert!(
         recursive
@@ -181,9 +182,7 @@ fn status_queries_read_nested_submodule_repositories() {
             .all(|status| status.detail() != "status-unavailable")
     );
 
-    let working_tree = HybridGitClient
-        .working_tree(&root)
-        .expect("working-tree-only status can inspect nested submodules");
+    let working_tree = HybridGitClient.working_tree(&root).unwrap();
 
     assert_eq!(working_tree, GitEffect::Applied(GitWorkingTree::default()));
 

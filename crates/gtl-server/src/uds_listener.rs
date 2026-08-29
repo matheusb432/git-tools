@@ -222,12 +222,12 @@ mod tests {
 
     #[tokio::test]
     async fn binds_private_socket_and_removes_it_on_drop() {
-        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("native-grpc.sock");
-        let listener = BoundUdsListener::bind(&path).expect("bind UDS");
+        let listener = BoundUdsListener::bind(&path).unwrap();
 
         assert_eq!(
-            fs::symlink_metadata(&path).expect("socket metadata").mode() & 0o777,
+            fs::symlink_metadata(&path).unwrap().mode() & 0o777,
             SOCKET_MODE
         );
         assert!(matches!(
@@ -241,14 +241,13 @@ mod tests {
 
     #[tokio::test]
     async fn replaces_a_stale_socket() {
-        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("native-grpc.sock");
-        let stale = std::os::unix::net::UnixListener::bind(&path).expect("bind stale socket");
-        fs::set_permissions(&path, fs::Permissions::from_mode(SOCKET_MODE))
-            .expect("set stale socket permissions");
+        let stale = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(SOCKET_MODE)).unwrap();
         drop(stale);
 
-        let listener = BoundUdsListener::bind(&path).expect("replace stale UDS");
+        let listener = BoundUdsListener::bind(&path).unwrap();
 
         drop(listener);
         assert!(!path.exists());
@@ -256,9 +255,9 @@ mod tests {
 
     #[test]
     fn refuses_a_non_socket_path() {
-        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("native-grpc.sock");
-        fs::write(&path, b"not a socket").expect("write conflicting file");
+        fs::write(&path, b"not a socket").unwrap();
 
         assert!(matches!(
             BoundUdsListener::bind(&path),
@@ -268,12 +267,11 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_does_not_remove_a_replacement_socket() {
-        let directory = tempfile::tempdir().expect("temporary socket directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("native-grpc.sock");
-        let listener = BoundUdsListener::bind(&path).expect("bind original UDS");
-        fs::remove_file(&path).expect("unlink original UDS");
-        let replacement =
-            std::os::unix::net::UnixListener::bind(&path).expect("bind replacement UDS");
+        let listener = BoundUdsListener::bind(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        let replacement = std::os::unix::net::UnixListener::bind(&path).unwrap();
 
         drop(listener);
 

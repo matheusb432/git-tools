@@ -1,6 +1,9 @@
 use anyhow::{Context as _, ensure};
 use gtl_web_contracts::test_ids;
-use playwright_rs::{expect, protocol::Page};
+use playwright_rs::{
+    expect,
+    protocol::{Locator, Page},
+};
 
 use crate::support;
 
@@ -13,124 +16,11 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
         spec.session.navigate_to_artifact(&artifact_url).await?;
 
         let page = &spec.session.page;
-        expect(page.get_by_text("alpha-marker", false))
-            .to_be_visible()
-            .await
-            .context("show the generated offline diff")?;
-        let diff_files = page.locator("[data-gtl-diff-file]");
-        expect(diff_files.clone())
-            .to_have_count(3)
-            .await
-            .context("render every raw diff file")?;
-        let alpha = page.locator("[data-gtl-diff-file][data-path='src/alpha.rs']");
-        let beta = page.locator("[data-gtl-diff-file][data-path='src/beta.rs']");
-        let large = page.locator("[data-gtl-diff-file][data-path='large.txt']");
-        let alpha_open = page.locator("[data-gtl-diff-file][data-path='src/alpha.rs'][open]");
-        let beta_open = page.locator("[data-gtl-diff-file][data-path='src/beta.rs'][open]");
-        let large_open = page.locator("[data-gtl-diff-file][data-path='large.txt'][open]");
-        expect(alpha.clone())
-            .to_have_count(1)
-            .await
-            .context("render the first raw diff file")?;
-        expect(beta.clone())
-            .to_have_count(1)
-            .await
-            .context("render the second raw diff file")?;
-        expect(large.clone())
-            .to_have_count(1)
-            .await
-            .context("render the giant-line raw diff file")?;
-        expect(alpha_open.clone())
-            .to_have_count(1)
-            .await
-            .context("expand the first raw diff file initially")?;
-        expect(beta_open.clone())
-            .to_have_count(1)
-            .await
-            .context("expand the second raw diff file initially")?;
-        expect(alpha.locator("[aria-label='split full diff rows']"))
-            .to_have_count(1)
-            .await
-            .context("retain the requested split full presentation")?;
-        assert_selection_copy_context(page).await?;
-        assert_path_copy_popover(page).await?;
-        support::click(
-            &page
-                .locator(test_ids::CHANGED_FILES_PANEL.selector())
-                .get_by_text("large.txt", true),
-            "navigate to the giant-line raw artifact file",
-        )
-        .await?;
-        expect(large_open)
-            .to_have_count(1)
-            .await
-            .context("open the giant-line raw artifact file")?;
-        let long_line_control = large.locator("[data-gtl-action='toggle-long-line']");
-        expect(long_line_control.clone())
-            .to_have_count(1)
-            .await
-            .context("bound the giant source line behind a static control")?;
-        expect(long_line_control.clone())
-            .to_have_attribute("aria-expanded", "false")
-            .await
-            .context("collapse the giant source line initially")?;
-        support::click(&long_line_control, "expand the giant raw artifact line").await?;
-        expect(long_line_control)
-            .to_have_attribute("aria-expanded", "true")
-            .await
-            .context("expand the giant source line with local glue")?;
-        support::click(
-            &support::get_button(page, "Collapse all"),
-            "collapse raw diff files",
-        )
-        .await?;
-        expect(alpha_open.clone())
-            .to_have_count(0)
-            .await
-            .context("collapse the first raw diff file")?;
-        expect(beta_open.clone())
-            .to_have_count(0)
-            .await
-            .context("collapse the second raw diff file")?;
-        expect(support::get_button(page, "Expand all"))
-            .to_be_visible()
-            .await
-            .context("show the expand-all action after collapsing files")?;
-        support::click(
-            &page
-                .locator(test_ids::CHANGED_FILES_PANEL.selector())
-                .get_by_text("beta.rs", true),
-            "navigate to the second raw artifact file",
-        )
-        .await?;
-        expect(page.get_by_text("beta-marker", false))
-            .to_be_visible()
-            .await
-            .context("show the selected raw diff file")?;
-        expect(alpha_open)
-            .to_have_count(0)
-            .await
-            .context("keep the unselected raw diff file collapsed")?;
-        expect(beta_open.clone())
-            .to_have_count(1)
-            .await
-            .context("expand the selected raw diff file")?;
-
-        support::set_mobile_viewport(page).await?;
-        support::click(
-            &support::get_button(page, "Changed files"),
-            "open raw mobile changed files",
-        )
-        .await?;
-        support::click(
-            &page.locator("dialog[open] [data-gtl-action='navigate-file'][title='src/beta.rs']"),
-            "navigate from raw mobile changed files",
-        )
-        .await?;
-        expect(beta_open)
-            .to_have_count(1)
-            .await
-            .context("open the mobile-selected raw file")?;
+        let files = RawArtifactFiles::new(page);
+        assert_initial_artifact(page, &files).await?;
+        assert_large_line_interaction(page, &files).await?;
+        assert_collapsed_file_navigation(page, &files).await?;
+        assert_mobile_file_navigation(page, &files).await?;
         ensure!(
             page.url() == artifact_url,
             "raw artifact interaction left the production file URL"
@@ -139,6 +29,159 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
     }
     .await;
     spec.finish(outcome).await
+}
+
+struct RawArtifactFiles {
+    alpha: Locator,
+    beta: Locator,
+    large: Locator,
+    alpha_open: Locator,
+    beta_open: Locator,
+    large_open: Locator,
+}
+
+impl RawArtifactFiles {
+    fn new(page: &Page) -> Self {
+        Self {
+            alpha: page.locator("[data-gtl-diff-file][data-path='src/alpha.rs']"),
+            beta: page.locator("[data-gtl-diff-file][data-path='src/beta.rs']"),
+            large: page.locator("[data-gtl-diff-file][data-path='large.txt']"),
+            alpha_open: page.locator("[data-gtl-diff-file][data-path='src/alpha.rs'][open]"),
+            beta_open: page.locator("[data-gtl-diff-file][data-path='src/beta.rs'][open]"),
+            large_open: page.locator("[data-gtl-diff-file][data-path='large.txt'][open]"),
+        }
+    }
+}
+
+async fn assert_initial_artifact(page: &Page, files: &RawArtifactFiles) -> anyhow::Result<()> {
+    expect(page.get_by_text("alpha-marker", false))
+        .to_be_visible()
+        .await
+        .context("show the generated offline diff")?;
+    expect(page.locator("[data-gtl-diff-file]"))
+        .to_have_count(3)
+        .await
+        .context("render every raw diff file")?;
+    expect(files.alpha.clone())
+        .to_have_count(1)
+        .await
+        .context("render the first raw diff file")?;
+    expect(files.beta.clone())
+        .to_have_count(1)
+        .await
+        .context("render the second raw diff file")?;
+    expect(files.large.clone())
+        .to_have_count(1)
+        .await
+        .context("render the giant-line raw diff file")?;
+    expect(files.alpha_open.clone())
+        .to_have_count(1)
+        .await
+        .context("expand the first raw diff file initially")?;
+    expect(files.beta_open.clone())
+        .to_have_count(1)
+        .await
+        .context("expand the second raw diff file initially")?;
+    expect(files.alpha.locator("[aria-label='split full diff rows']"))
+        .to_have_count(1)
+        .await
+        .context("retain the requested split full presentation")?;
+    assert_selection_copy_context(page).await?;
+    assert_path_copy_popover(page).await
+}
+
+async fn assert_large_line_interaction(
+    page: &Page,
+    files: &RawArtifactFiles,
+) -> anyhow::Result<()> {
+    support::click(
+        &page
+            .locator(test_ids::CHANGED_FILES_PANEL.selector())
+            .get_by_text("large.txt", true),
+        "navigate to the giant-line raw artifact file",
+    )
+    .await?;
+    expect(files.large_open.clone())
+        .to_have_count(1)
+        .await
+        .context("open the giant-line raw artifact file")?;
+    let long_line_control = files.large.locator("[data-gtl-action='toggle-long-line']");
+    expect(long_line_control.clone())
+        .to_have_count(1)
+        .await
+        .context("bound the giant source line behind a static control")?;
+    expect(long_line_control.clone())
+        .to_have_attribute("aria-expanded", "false")
+        .await
+        .context("collapse the giant source line initially")?;
+    support::click(&long_line_control, "expand the giant raw artifact line").await?;
+    expect(long_line_control)
+        .to_have_attribute("aria-expanded", "true")
+        .await
+        .context("expand the giant source line with local glue")
+}
+
+async fn assert_collapsed_file_navigation(
+    page: &Page,
+    files: &RawArtifactFiles,
+) -> anyhow::Result<()> {
+    support::click(
+        &support::get_button(page, "Collapse all"),
+        "collapse raw diff files",
+    )
+    .await?;
+    expect(files.alpha_open.clone())
+        .to_have_count(0)
+        .await
+        .context("collapse the first raw diff file")?;
+    expect(files.beta_open.clone())
+        .to_have_count(0)
+        .await
+        .context("collapse the second raw diff file")?;
+    expect(support::get_button(page, "Expand all"))
+        .to_be_visible()
+        .await
+        .context("show the expand-all action after collapsing files")?;
+    support::click(
+        &page
+            .locator(test_ids::CHANGED_FILES_PANEL.selector())
+            .get_by_text("beta.rs", true),
+        "navigate to the second raw artifact file",
+    )
+    .await?;
+    expect(page.get_by_text("beta-marker", false))
+        .to_be_visible()
+        .await
+        .context("show the selected raw diff file")?;
+    expect(files.alpha_open.clone())
+        .to_have_count(0)
+        .await
+        .context("keep the unselected raw diff file collapsed")?;
+    expect(files.beta_open.clone())
+        .to_have_count(1)
+        .await
+        .context("expand the selected raw diff file")
+}
+
+async fn assert_mobile_file_navigation(
+    page: &Page,
+    files: &RawArtifactFiles,
+) -> anyhow::Result<()> {
+    support::set_mobile_viewport(page).await?;
+    support::click(
+        &support::get_button(page, "Changed files"),
+        "open raw mobile changed files",
+    )
+    .await?;
+    support::click(
+        &page.locator("dialog[open] [data-gtl-action='navigate-file'][title='src/beta.rs']"),
+        "navigate from raw mobile changed files",
+    )
+    .await?;
+    expect(files.beta_open.clone())
+        .to_have_count(1)
+        .await
+        .context("open the mobile-selected raw file")
 }
 
 async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {

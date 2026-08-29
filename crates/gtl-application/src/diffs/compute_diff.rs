@@ -1,8 +1,3 @@
-//! The `compute_diff` vertical slice: resolve a [`DiffTarget`] into the
-//! structured [`View`] the native viewer renders — no HTML, no artifact store.
-//! The server viewer runtime dispatches this for recipe tabs; raw artifact
-//! requests keep using `render_diff`.
-
 use gtl_models::paths::RepositoryRoot;
 
 use crate::{
@@ -11,15 +6,12 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Compute the structured diff view for `target` in a resolved repository.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeDiff {
     pub repo_root: RepositoryRoot,
     pub target: DiffTarget,
 }
 
-/// The computed view plus the human summary and every surfaced message.
-/// A view without diff content is a legitimate outcome; tab policy is the caller's concern.
 #[derive(Debug, Clone)]
 pub struct ComputeDiffOk {
     pub view: View,
@@ -27,7 +19,6 @@ pub struct ComputeDiffOk {
     pub notes: Vec<Note>,
 }
 
-/// Everything that can go wrong computing a diff view.
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeDiffError {
     #[error(transparent)]
@@ -36,7 +27,6 @@ pub enum ComputeDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Computes a diff by driving the diff engine through its source port.
 #[cqrsy::query]
 pub fn execute(
     req: ComputeDiff,
@@ -103,8 +93,7 @@ mod tests {
         };
 
         let response =
-            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
-                .expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source).unwrap();
 
         assert_eq!(response.view.repo_name.as_str(), "repo");
         assert_eq!(response.view.branch.to_string(), "feature");
@@ -125,8 +114,7 @@ mod tests {
         };
 
         let response =
-            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
-                .expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source).unwrap();
 
         assert!(!response.view.has_diff_content());
     }
@@ -144,8 +132,7 @@ mod tests {
         };
 
         let response =
-            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
-                .expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source).unwrap();
 
         assert_eq!(
             response.notes,
@@ -160,7 +147,7 @@ mod tests {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            upstream: None, // would warn-and-fallback (or error) symbolically
+            upstream: None,
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -172,7 +159,7 @@ mod tests {
             }),
             &source,
         )
-        .expect("pinned compute succeeds");
+        .unwrap();
 
         assert!(
             response.notes.is_empty(),
@@ -190,7 +177,7 @@ mod tests {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            known_revs: vec![], // symbolic verify_commit("main") would error
+            known_revs: vec![],
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -203,7 +190,7 @@ mod tests {
             }),
             &source,
         )
-        .expect("pinned merge computes");
+        .unwrap();
 
         assert_eq!(response.view.title, "merge-diff");
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -215,7 +202,7 @@ mod tests {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            known_revs: vec![], // symbolic verify_exact_range would error
+            known_revs: vec![],
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -228,7 +215,7 @@ mod tests {
             }),
             &source,
         )
-        .expect("pinned range computes");
+        .unwrap();
 
         assert!(response.notes.is_empty());
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -248,11 +235,13 @@ mod tests {
             req(DiffTarget::Base(crate::utils::git_revision("nope"))),
             &source,
         )
-        .expect_err("unknown base errors");
+        .unwrap_err();
 
-        let ComputeDiffError::Unexpected(err) = error else {
-            panic!("expected Git computation error");
-        };
+        let err = match error {
+            ComputeDiffError::Unexpected(error) => Some(error),
+            ComputeDiffError::Settings(_) => None,
+        }
+        .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 
@@ -304,8 +293,7 @@ index 333..444 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
-        let response =
-            compute_diff::execute(request, &app_settings, &source).expect("compute succeeds");
+        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
 
         let paths: Vec<String> = response
             .view
@@ -314,10 +302,7 @@ index 333..444 100644\n\
             .map(|file| file.path.to_string_lossy().into_owned())
             .collect();
         assert_eq!(paths, ["f.txt"], "the .md file is hidden");
-        let applied = response
-            .view
-            .exclusions
-            .expect("hidden files carry a summary");
+        let applied = response.view.exclusions.unwrap();
         assert_eq!(applied.extensions.extensions(), ["md"]);
         assert_eq!(
             applied
@@ -349,8 +334,7 @@ index 333..444 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("other-repo", &["md"])));
 
-        let response =
-            compute_diff::execute(request, &app_settings, &source).expect("compute succeeds");
+        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
 
         assert_eq!(response.view.files.len(), 2);
         assert_eq!(response.view.exclusions, None);
@@ -370,8 +354,7 @@ index 333..444 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
-        let response =
-            compute_diff::execute(request, &app_settings, &source).expect("compute succeeds");
+        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
 
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.exclusions, None);

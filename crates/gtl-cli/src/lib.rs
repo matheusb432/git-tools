@@ -1,5 +1,3 @@
-//! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
-
 use gtl_wire::v1;
 
 use crate::{
@@ -26,8 +24,7 @@ mod server_client;
 mod testing;
 mod viewer;
 
-/// Process exit codes. Stable contract every caller (and justfile shim) depends on.
-/// Extend with command-specific codes as the tool grows (keep 0/1/2 stable).
+/// Exit codes 0, 1, and 2 are stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum ExitCode {
@@ -36,7 +33,7 @@ pub enum ExitCode {
     Usage = 2,
 }
 
-/// Route argv (already stripped of argv[0]) to an [`ExitCode`].
+#[must_use]
 pub fn run(args: &[String]) -> ExitCode {
     let args = preprocess::normalize(args.to_vec());
     match Cli::parse_args(&args) {
@@ -45,8 +42,6 @@ pub fn run(args: &[String]) -> ExitCode {
     }
 }
 
-/// Prints a clap parse outcome and maps it to an exit code: help/version are successes,
-/// everything else is a usage error.
 fn render_clap_error(error: &clap::Error) -> ExitCode {
     use clap::error::ErrorKind;
 
@@ -122,14 +117,7 @@ fn run_diff(args: DiffArgs) -> ExitCode {
                 return run_set_theme(theme);
             }
             if args.target.scope.recursive {
-                return diff_exit(commands::canonical_working_directory().and_then(|root| {
-                    commands::diff_subrepos::run_scan(
-                        root,
-                        args.target.last,
-                        args.target.scope.worktrees,
-                        raw,
-                    )
-                }));
+                return run_recursive_diff(&args.target, raw);
             }
             match diff_invocation(args.target) {
                 Ok(DiffInvocation::Single { target, name }) => {
@@ -146,6 +134,12 @@ fn run_diff(args: DiffArgs) -> ExitCode {
             }
         }
     }
+}
+
+fn run_recursive_diff(target: &DiffTargetArgs, raw: bool) -> ExitCode {
+    diff_exit(commands::canonical_working_directory().and_then(|root| {
+        commands::diff_subrepos::run_scan(root, target.last, target.scope.worktrees, raw)
+    }))
 }
 
 fn run_commit(args: CommitArgs) -> ExitCode {
@@ -188,7 +182,6 @@ fn run_server_ctl(command: &ServerCommand) -> ExitCode {
     }
 }
 
-/// Persist the diff-artifact theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
     let value_new = gtl_models::viewer::Theme::from(theme).to_string();
     let theme = match theme {
@@ -220,8 +213,6 @@ fn run_set_theme(theme: Theme) -> ExitCode {
 }
 
 fn run_worktree(command: &WorktreeCommand) -> ExitCode {
-    use crate::commands::worktree;
-
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
@@ -260,44 +251,52 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                 }
             }
         }
-        WorktreeCommand::Ls => {
-            match client.list_worktrees(v1::ListWorktreesRequest { repository_path }) {
-                Ok(response) => match response.outcome {
-                    Some(v1::list_worktrees_response::Outcome::Listed(listed)) => {
-                        let worktrees = match listed
-                            .worktrees
-                            .into_iter()
-                            .map(worktree::from_grpc)
-                            .collect::<anyhow::Result<Vec<_>>>()
-                        {
-                            Ok(worktrees) => worktrees,
-                            Err(error) => {
-                                eprintln!("worktree: {}", error_text(&error));
-                                return ExitCode::Internal;
-                            }
-                        };
-                        let detail = worktree::render_list(&worktrees);
-                        if !detail.is_empty() {
-                            println!("{detail}");
-                        }
-                        ExitCode::Ok
-                    }
-                    Some(v1::list_worktrees_response::Outcome::Failed(failed)) => {
-                        eprintln!("worktree: {}", failed.detail);
-                        ExitCode::Internal
-                    }
-                    None => {
-                        eprintln!("worktree: gtl-server returned no worktree-list outcome");
-                        ExitCode::Internal
-                    }
-                },
-                Err(error) => {
-                    eprintln!("worktree: {}", error_text(&error));
-                    ExitCode::Internal
-                }
-            }
+        WorktreeCommand::Ls => run_worktree_list(&client, repository_path),
+    }
+}
+
+fn run_worktree_list(client: &ServerClient, repository_path: String) -> ExitCode {
+    let response = match client.list_worktrees(v1::ListWorktreesRequest { repository_path }) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("worktree: {}", error_text(&error));
+            return ExitCode::Internal;
+        }
+    };
+
+    match response.outcome {
+        Some(v1::list_worktrees_response::Outcome::Listed(listed)) => render_worktree_list(listed),
+        Some(v1::list_worktrees_response::Outcome::Failed(failed)) => {
+            eprintln!("worktree: {}", failed.detail);
+            ExitCode::Internal
+        }
+        None => {
+            eprintln!("worktree: gtl-server returned no worktree-list outcome");
+            ExitCode::Internal
         }
     }
+}
+
+fn render_worktree_list(listed: v1::WorktreeList) -> ExitCode {
+    use crate::commands::worktree;
+
+    let worktrees = match listed
+        .worktrees
+        .into_iter()
+        .map(worktree::from_grpc)
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(worktrees) => worktrees,
+        Err(error) => {
+            eprintln!("worktree: {}", error_text(&error));
+            return ExitCode::Internal;
+        }
+    };
+    let detail = worktree::render_list(&worktrees);
+    if !detail.is_empty() {
+        println!("{detail}");
+    }
+    ExitCode::Ok
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,7 +321,6 @@ fn diff_invocation(args: DiffTargetArgs) -> Result<DiffInvocation, DiffTargetPar
 }
 
 fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError> {
-    // ? `-l N` wins via clap conflict guard; `target` is None whenever `last` is Some.
     if args.unpushed {
         Ok(DiffTarget::Unpushed { pinned: None })
     } else if let Some(base) = args.merge {
@@ -382,8 +380,6 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
     }))
 }
 
-/// Orchestrates `push "<message>"`: plan read-only, show the confirmation block, gate on
-/// `--yes`/TTY, then stage, commit, and push.
 fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     use crate::commands::sync;
 
@@ -408,11 +404,11 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
             return ExitCode::Usage;
         }
         Confirmation::Declined => {
-            eprintln!("push: aborted — nothing committed or pushed");
+            eprintln!("push: aborted, nothing committed or pushed");
             return ExitCode::Ok;
         }
         Confirmation::Invalid(err) => {
-            eprintln!("push: {err} — nothing committed or pushed");
+            eprintln!("push: {err}, nothing committed or pushed");
             return ExitCode::Usage;
         }
         Confirmation::Proceed => {}
@@ -432,7 +428,6 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     finish_push_response(&result)
 }
 
-/// Orchestrates current-repo `push` for existing commits only.
 fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     use crate::commands::sync;
 
@@ -459,11 +454,11 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
             return ExitCode::Usage;
         }
         Confirmation::Declined => {
-            eprintln!("push: aborted — nothing pushed");
+            eprintln!("push: aborted, nothing pushed");
             return ExitCode::Ok;
         }
         Confirmation::Invalid(err) => {
-            eprintln!("push: {err} — nothing pushed");
+            eprintln!("push: {err}, nothing pushed");
             return ExitCode::Usage;
         }
         Confirmation::Proceed => {}
@@ -521,8 +516,6 @@ fn finish_push_response(response: &v1::ExecuteRepositoryPushResponse) -> ExitCod
     }
 }
 
-/// Orchestrates current-repo `commit`: review, gate, then stage all changes and create one commit
-/// without pushing.
 fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     use crate::commands::sync;
 
@@ -582,11 +575,11 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
             return ExitCode::Usage;
         }
         Confirmation::Declined => {
-            eprintln!("commit: aborted — nothing committed");
+            eprintln!("commit: aborted, nothing committed");
             return ExitCode::Usage;
         }
         Confirmation::Invalid(err) => {
-            eprintln!("commit: {err} — nothing committed");
+            eprintln!("commit: {err}, nothing committed");
             return ExitCode::Usage;
         }
         Confirmation::Proceed => {}
@@ -618,12 +611,6 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     }
 }
 
-/// Orchestrates recursive `push -r`: discover every repo under the current directory, show the
-/// confirmation listing each repo's push destination, gate on `--yes`/TTY like
-/// `push "<message>"`, then
-/// push. Discovery and the resolved destinations are read-only and local — no fetch. The
-/// interactive prompt is the only side effect kept out of the
-/// repository operations.
 fn run_push_subrepos(yes: bool) -> ExitCode {
     use crate::commands::push_subrepos::{
         confirmation, result_from_grpc, targets_from_grpc, targets_to_grpc,
@@ -681,11 +668,11 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
             return ExitCode::Usage;
         }
         Confirmation::Declined => {
-            println!("push -r: aborted — nothing pushed");
+            println!("push -r: aborted, nothing pushed");
             return ExitCode::Ok;
         }
         Confirmation::Invalid(err) => {
-            eprintln!("push -r: {err} — nothing pushed");
+            eprintln!("push -r: {err}, nothing pushed");
             return ExitCode::Usage;
         }
         Confirmation::Proceed => {}
@@ -744,16 +731,14 @@ fn format_push_subrepos_result(
         let line = match &report.outcome {
             RepoOutcome::Pushed => format!("\n  {}: pushed", report.label),
             RepoOutcome::UpToDate => format!("\n  {}: already up to date", report.label),
-            RepoOutcome::Skipped(reason) => format!("\n  {}: skipped — {reason}", report.label),
-            RepoOutcome::Failed(reason) => format!("\n  {}: failed — {reason}", report.label),
+            RepoOutcome::Skipped(reason) => format!("\n  {}: skipped: {reason}", report.label),
+            RepoOutcome::Failed(reason) => format!("\n  {}: failed: {reason}", report.label),
         };
         detail.push_str(&line);
     }
     detail
 }
 
-/// Dispatches `status` by scope: `--all` uses sample_project's active projects, `-r` recursively scans
-/// the current directory, default ⇒ the current repo alone.
 fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
     let options = managed_read_options(args.read);
     if args.all {
@@ -782,7 +767,6 @@ fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::Sta
     }
 }
 
-/// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.
 fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
     let color = match args.color {
         ColorChoice::Auto => stdout_is_terminal(),
@@ -798,7 +782,6 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
     }
 }
 
-/// Builds the [`ManagedOptions`] for a fan-out command from its parsed flags.
 fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
     ManagedOptions {
         dry: args.dry,
@@ -841,10 +824,6 @@ pub(crate) fn error_text(error: &anyhow::Error) -> String {
     format!("{error:#}")
 }
 
-/// Map a [`commands::diff::DiffOutcome`] result to an [`ExitCode`]: either `Ok` variant
-/// (an artifact was rendered, or a clean empty-range no-op) is a success. Shared by every
-/// render path that produces a `DiffOutcome` — `diff`, `diff -r`, `diff --all`,
-/// and `diff merge`.
 fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
@@ -855,9 +834,6 @@ fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     }
 }
 
-/// Map a `diff live` result to an [`ExitCode`]: success (a save, or a clean
-/// no-managed-repos-unpushed no-op) is `Ok`; a validation rejection or transport
-/// failure prints the server's own message and exits `Internal`.
 fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,
@@ -892,7 +868,7 @@ mod tests {
     fn diff_target_maps_absent_and_blank_positionals_to_unpushed() {
         for target in [None, Some(""), Some("   ")] {
             assert_eq!(
-                diff_target(target_args(target)).expect("target is valid"),
+                diff_target(target_args(target)).unwrap(),
                 DiffTarget::Unpushed { pinned: None }
             );
         }
@@ -901,19 +877,15 @@ mod tests {
     #[test]
     fn diff_target_distinguishes_exact_ranges_from_base_revisions() {
         assert_eq!(
-            diff_target(target_args(Some("abc123..def456"))).expect("range is valid"),
+            diff_target(target_args(Some("abc123..def456"))).unwrap(),
             DiffTarget::Range {
-                range: gtl_models::git::GitRange::try_new("abc123..def456")
-                    .expect("fixture range is non-empty"),
+                range: gtl_models::git::GitRange::try_new("abc123..def456").unwrap(),
                 pinned: None,
             }
         );
         assert_eq!(
-            diff_target(target_args(Some("abc123"))).expect("revision is valid"),
-            DiffTarget::Base(
-                gtl_models::git::GitRevision::try_new("abc123")
-                    .expect("fixture revision is non-empty")
-            )
+            diff_target(target_args(Some("abc123"))).unwrap(),
+            DiffTarget::Base(gtl_models::git::GitRevision::try_new("abc123").unwrap())
         );
     }
 

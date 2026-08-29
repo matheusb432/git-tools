@@ -269,9 +269,11 @@ mod tests {
             ViewerDiffLayout::Unified,
         );
 
-        let ViewerRows::Unified(rows) = parsed.file.rows else {
-            panic!("unified layout must project unified rows");
-        };
+        let rows = match parsed.file.rows {
+            ViewerRows::Unified(rows) => Some(rows),
+            ViewerRows::Split(_) => None,
+        }
+        .unwrap();
         assert!(parsed.file.line_number_digits >= 1);
         assert!(rows.iter().any(|row| {
             match row {
@@ -295,9 +297,11 @@ mod tests {
             ViewerDiffLayout::Split,
         );
 
-        let ViewerRows::Split(rows) = parsed.file.rows else {
-            panic!("split layout must project split rows");
-        };
+        let rows = match parsed.file.rows {
+            ViewerRows::Split(rows) => Some(rows),
+            ViewerRows::Unified(_) => None,
+        }
+        .unwrap();
         assert!(matches!(
             rows.last(),
             Some(ViewerSplitRow::Pair {

@@ -217,19 +217,24 @@ fn read_unique_values(root: &str, suffix: &str) -> Result<Vec<String>> {
             continue;
         }
         let path = entry.path().join(suffix);
-        match fs::read_to_string(&path) {
-            Ok(value) => {
-                let value = value.trim();
-                if !value.is_empty() {
-                    values.insert(value.to_owned());
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
-            Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
-        }
+        values.extend(read_optional_value(&path)?);
     }
     Ok(values.into_iter().collect())
+}
+
+fn read_optional_value(path: &Path) -> Result<Option<String>> {
+    match fs::read_to_string(path) {
+        Ok(value) => Ok((!value.trim().is_empty()).then(|| value.trim().to_owned())),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error).with_context(|| format!("read {}", path.display())),
+    }
 }
 
 fn external_power_online() -> Result<Option<bool>> {

@@ -1,5 +1,3 @@
-//! Plans the current repository's push without changing Git state.
-
 use std::path::Path;
 
 use gtl_models::{
@@ -10,7 +8,6 @@ use gtl_models::{
 
 use crate::ports::{GitClient, GitEffect};
 
-/// Describes the current repository and upstream selected for a push.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushTarget {
     pub name: ProjectName,
@@ -21,18 +18,15 @@ pub struct PushTarget {
     pub pending: PendingChanges,
 }
 
-/// Represents either a refused push or a target ready for confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanPushOk {
     Refused(String),
     Ready(PushTarget),
 }
 
-/// Reports an unexpected Git transport failure while planning a push.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlanPushError {
-    /// Git could not be started or its output could not be collected.
     #[error("{command}: {source}")]
     Transport {
         command: String,
@@ -41,11 +35,6 @@ pub enum PlanPushError {
     },
 }
 
-/// Builds a read-only push plan from the repository's local Git state.
-///
-/// # Errors
-///
-/// Returns [`PlanPushError`] when Git transport fails.
 #[cqrsy::query]
 pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
     let Some(top) = git
@@ -62,7 +51,7 @@ pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanPushOk, Pla
         GitHead::Branch(branch) => branch,
         GitHead::Detached => {
             return Ok(PlanPushOk::Refused(
-                "detached HEAD — checkout a branch first".into(),
+                "detached HEAD, checkout a branch first".into(),
             ));
         }
     };
@@ -130,12 +119,11 @@ mod tests {
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
-        let plan = plan_push::execute(Path::new("."), &git)
-            .expect("a detached head is an expected refusal");
+        let plan = plan_push::execute(Path::new("."), &git).unwrap();
 
         assert_eq!(
             plan,
-            PlanPushOk::Refused("detached HEAD — checkout a branch first".into())
+            PlanPushOk::Refused("detached HEAD, checkout a branch first".into())
         );
     }
 
@@ -147,8 +135,7 @@ mod tests {
             ScriptedGitClient::rejected("no upstream"),
         ]);
 
-        let plan = plan_push::execute(Path::new("."), &git)
-            .expect("a missing upstream is an expected refusal");
+        let plan = plan_push::execute(Path::new("."), &git).unwrap();
 
         assert_eq!(
             plan,
@@ -169,7 +156,7 @@ mod tests {
             ScriptedGitClient::applied("2\n"),
         ]);
 
-        let plan = plan_push::execute(Path::new("."), &git).expect("push plan is built");
+        let plan = plan_push::execute(Path::new("."), &git).unwrap();
 
         assert_eq!(
             plan,
@@ -195,8 +182,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_push::execute(Path::new("."), &git)
-            .expect_err("transport failure must remain an error");
+        let error = plan_push::execute(Path::new("."), &git).unwrap_err();
 
         assert_eq!(
             error.to_string(),

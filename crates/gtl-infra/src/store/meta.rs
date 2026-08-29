@@ -251,10 +251,7 @@ mod tests {
     #[test]
     fn compatibility_sidecar_projects_once_into_validated_metadata() {
         let sidecar = valid_sidecar();
-        let metadata = sidecar
-            .clone()
-            .try_into_metadata()
-            .expect("valid sidecar metadata");
+        let metadata = sidecar.clone().try_into_metadata().unwrap();
 
         assert_eq!(metadata.repo_id.as_ref(), "deadbeef00000000");
         assert!(metadata.identity.commits().is_some());
@@ -275,10 +272,7 @@ mod tests {
         let mut sidecar = valid_sidecar();
         sidecar.head_committed_at.clear();
 
-        let metadata = sidecar
-            .clone()
-            .try_into_metadata()
-            .expect("legacy empty head timestamp remains supported");
+        let metadata = sidecar.clone().try_into_metadata().unwrap();
 
         assert!(metadata.head_committed_at.is_none());
         let encoded = Sidecar::from_metadata(&metadata);
@@ -293,7 +287,7 @@ mod tests {
         assert!(
             invalid_head
                 .try_into_metadata()
-                .expect_err("timezone-less head timestamp must reject")
+                .unwrap_err()
                 .to_string()
                 .contains("head commit timestamp")
         );
@@ -303,7 +297,7 @@ mod tests {
         assert!(
             invalid_generation
                 .try_into_metadata()
-                .expect_err("malformed generation timestamp must reject")
+                .unwrap_err()
                 .to_string()
                 .contains("generation timestamp")
         );
@@ -314,9 +308,7 @@ mod tests {
         let mut sidecar = valid_sidecar();
         sidecar.repo_id = "every-repository".into();
 
-        let error = sidecar
-            .try_into_metadata()
-            .expect_err("invalid store ID must be rejected");
+        let error = sidecar.try_into_metadata().unwrap_err();
 
         assert!(error.to_string().contains("repository store ID"));
     }
@@ -328,7 +320,7 @@ mod tests {
         assert!(
             unnamed
                 .try_into_metadata()
-                .expect_err("empty project name must be rejected")
+                .unwrap_err()
                 .to_string()
                 .contains("project name")
         );
@@ -338,7 +330,7 @@ mod tests {
         assert!(
             relative
                 .try_into_metadata()
-                .expect_err("relative repository root must be rejected")
+                .unwrap_err()
                 .to_string()
                 .contains("repository root")
         );

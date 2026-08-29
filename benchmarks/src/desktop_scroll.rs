@@ -147,6 +147,7 @@ pub enum DesktopScrollFixtureError {
     Invalid { reason: String },
 }
 
+#[must_use]
 pub fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/desktop-scroll")
 }

@@ -230,22 +230,14 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     // ! propagates; a genuine failure keeps failing every attempt.
     let mut last_err = None;
     for attempt in 1..=INIT_RETRY_ATTEMPTS {
-        let outcome: anyhow::Result<()> = (|| {
-            conn.pragma_update(None, "journal_mode", "WAL")?;
-            conn.pragma_update(None, "foreign_keys", true)?;
-            MIGRATIONS.to_latest(&mut conn)?;
-            Ok(())
-        })();
-        match outcome {
+        match initialize_app_db(&mut conn) {
             Ok(()) => {
                 last_err = None;
                 break;
             }
             Err(err) => {
                 last_err = Some(err);
-                if attempt < INIT_RETRY_ATTEMPTS {
-                    std::thread::sleep(INIT_RETRY_BACKOFF * attempt);
-                }
+                wait_before_init_retry(attempt);
             }
         }
     }
@@ -255,21 +247,44 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     Ok(conn)
 }
 
+fn initialize_app_db(conn: &mut Connection) -> anyhow::Result<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    MIGRATIONS.to_latest(conn)?;
+    Ok(())
+}
+
+fn wait_before_init_retry(attempt: u32) {
+    if attempt < INIT_RETRY_ATTEMPTS {
+        std::thread::sleep(INIT_RETRY_BACKOFF * attempt);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn spawn_database_open(
+        root: std::path::PathBuf,
+        barrier: std::sync::Arc<std::sync::Barrier>,
+    ) -> std::thread::JoinHandle<anyhow::Result<()>> {
+        std::thread::spawn(move || {
+            barrier.wait();
+            open_app_db(&root).map(|_| ())
+        })
+    }
+
     #[test]
     fn connection_pragmas_are_applied() {
-        let directory = tempfile::tempdir().expect("temporary data root");
-        let connection = open_app_db(directory.path()).expect("open app database");
+        let directory = tempfile::tempdir().unwrap();
+        let connection = open_app_db(directory.path()).unwrap();
 
         let journal_mode: String = connection
             .pragma_query_value(None, "journal_mode", |row| row.get(0))
-            .expect("journal mode");
+            .unwrap();
         let foreign_keys: i64 = connection
             .pragma_query_value(None, "foreign_keys", |row| row.get(0))
-            .expect("foreign keys");
+            .unwrap();
 
         assert_eq!(journal_mode, "wal");
         assert_eq!(foreign_keys, 1);
@@ -277,9 +292,8 @@ mod tests {
 
     #[test]
     fn corrupt_database_open_returns_an_error() {
-        let directory = tempfile::tempdir().expect("temporary data root");
-        std::fs::write(directory.path().join("gtl.db"), "not a database")
-            .expect("write corrupt database");
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("gtl.db"), "not a database").unwrap();
 
         let result = open_app_db(directory.path());
 
@@ -288,49 +302,49 @@ mod tests {
 
     #[test]
     fn migration_v2_drops_settings_and_preserves_runtime_state() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("gtl.db");
-        let mut connection = Connection::open(&path).expect("open v1 database");
+        let mut connection = Connection::open(&path).unwrap();
         Migrations::from_slice(&[M::up(SCHEMA_V1)])
             .to_latest(&mut connection)
-            .expect("apply v1");
+            .unwrap();
         connection
             .execute(
                 "INSERT INTO settings (key, value) VALUES ('theme', 'light')",
                 [],
             )
-            .expect("seed settings");
+            .unwrap();
         connection
             .execute(
                 "INSERT INTO live_views (source_kind, source_value, display_name, created_at) VALUES ('local', '/repo', 'Repo', '2026-01-01T00:00:00Z')",
                 [],
             )
-            .expect("seed live view");
+            .unwrap();
         connection
             .execute(
                 "INSERT INTO recent_renders (recipe_json, title, repo_name, kind, range_label, rendered_at) VALUES ('{\"source\":{\"kind\":\"local_repo\",\"value\":\"/repo\"},\"op\":{\"op\":\"diff\",\"target\":{\"target\":\"unpushed\"}}}', 'Render', 'repo', 'diff', 'main..HEAD', '2026-01-01T00:00:00Z')",
                 [],
             )
-            .expect("seed render");
+            .unwrap();
         drop(connection);
 
-        let connection = open_app_db(directory.path()).expect("migrate database");
+        let connection = open_app_db(directory.path()).unwrap();
         let user_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
-            .expect("user version");
+            .unwrap();
         let settings_table_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
                 [],
                 |row| row.get(0),
             )
-            .expect("settings table count");
+            .unwrap();
         let live_view_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM live_views", [], |row| row.get(0))
-            .expect("live view count");
+            .unwrap();
         let recent_render_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
-            .expect("recent render count");
+            .unwrap();
 
         assert_eq!(user_version, 5);
         assert_eq!(settings_table_count, 0);
@@ -342,10 +356,10 @@ mod tests {
     /// shape, plus one malformed), and returns a v3-migrated connection.
     fn migrated_from_legacy_rows(directory: &Path) -> Connection {
         let path = directory.join("gtl.db");
-        let mut connection = Connection::open(&path).expect("open v2 database");
+        let mut connection = Connection::open(&path).unwrap();
         Migrations::from_slice(&[M::up(SCHEMA_V1), M::up(SCHEMA_V2)])
             .to_latest(&mut connection)
-            .expect("apply v2");
+            .unwrap();
         let legacy_rows = [
             (
                 r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaa","head":"bbb"}}}}"#,
@@ -368,29 +382,29 @@ mod tests {
                      VALUES (?1, 't', 'r', 'k', 'l', ?2)",
                     rusqlite::params![recipe_json, rendered_at],
                 )
-                .expect("seed legacy render");
+                .unwrap();
         }
         drop(connection);
-        open_app_db(directory).expect("migrate database")
+        open_app_db(directory).unwrap()
     }
 
     /// Pins the v3 source seeding: sources dedupe by (kind, value) with
     /// first/last-seen timestamps, and malformed rows contribute nothing.
     #[test]
     fn migration_v3_seeds_deduped_project_sources_from_legacy_recipe_json() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let connection = migrated_from_legacy_rows(directory.path());
         let sources: Vec<(String, String, String, Option<String>)> = connection
             .prepare(
                 "SELECT kind, value, created_at, updated_at FROM project_sources ORDER BY value",
             )
-            .expect("prepare sources")
+            .unwrap()
             .query_map([], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
             })
-            .expect("query sources")
+            .unwrap()
             .collect::<Result<_, _>>()
-            .expect("decode sources");
+            .unwrap();
         assert_eq!(
             sources,
             vec![
@@ -425,7 +439,7 @@ mod tests {
     /// aborting the migration.
     #[test]
     fn migration_v3_seeds_relational_renders_from_legacy_recipe_json() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let connection = migrated_from_legacy_rows(directory.path());
         let renders: Vec<SeededRender> = connection
             .prepare(
@@ -436,7 +450,7 @@ mod tests {
                  LEFT JOIN render_targets t ON t.id = r.target_id
                  ORDER BY r.id",
             )
-            .expect("prepare renders")
+            .unwrap()
             .query_map([], |row| {
                 Ok((
                     row.get(0)?,
@@ -448,9 +462,9 @@ mod tests {
                     row.get(6)?,
                 ))
             })
-            .expect("query renders")
+            .unwrap()
             .collect::<Result<_, _>>()
-            .expect("decode renders");
+            .unwrap();
         assert_eq!(
             renders,
             vec![
@@ -487,12 +501,12 @@ mod tests {
 
     #[test]
     fn migration_v4_deduplicates_fingerprints_and_adds_indexes() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("gtl.db");
-        let mut connection = Connection::open(path).expect("open v3 database");
+        let mut connection = Connection::open(path).unwrap();
         Migrations::from_slice(&MIGRATIONS_SLICE[..3])
             .to_latest(&mut connection)
-            .expect("apply v3");
+            .unwrap();
         connection
             .execute_batch(
                 "INSERT INTO project_sources (id, kind, value, created_at) VALUES
@@ -519,24 +533,24 @@ mod tests {
                    (7, 1, 1, 1, 'base', 'other-head', 'head', 'gt', 'base..head',
                     '2026-07-02T00:00:00Z');",
             )
-            .expect("seed v3 fingerprints");
+            .unwrap();
         drop(connection);
 
-        let connection = open_app_db(directory.path()).expect("apply v4");
+        let connection = open_app_db(directory.path()).unwrap();
         let render_ids = connection
             .prepare("SELECT id FROM recent_renders ORDER BY id")
-            .expect("prepare render ids")
+            .unwrap()
             .query_map([], |row| row.get::<_, i64>(0))
-            .expect("query render ids")
+            .unwrap()
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode render ids");
+            .unwrap();
         let source_ids = connection
             .prepare("SELECT id FROM project_sources ORDER BY id")
-            .expect("prepare source ids")
+            .unwrap()
             .query_map([], |row| row.get::<_, i64>(0))
-            .expect("query source ids")
+            .unwrap()
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode source ids");
+            .unwrap();
         let index_names = connection
             .prepare(
                 "SELECT name FROM sqlite_master
@@ -548,14 +562,14 @@ mod tests {
                    )
                  ORDER BY name",
             )
-            .expect("prepare index names")
+            .unwrap()
             .query_map([], |row| row.get::<_, String>(0))
-            .expect("query index names")
+            .unwrap()
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode index names");
+            .unwrap();
         let user_version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
-            .expect("user version");
+            .unwrap();
 
         assert_eq!(render_ids, vec![2, 3, 4, 5, 6, 7]);
         assert_eq!(source_ids, vec![1, 2, 3]);
@@ -579,20 +593,10 @@ mod tests {
         let root = tmp.path().to_path_buf();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let handles: Vec<_> = (0..2)
-            .map(|_| {
-                let root = root.clone();
-                let barrier = std::sync::Arc::clone(&barrier);
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    open_app_db(&root).map(|_| ())
-                })
-            })
+            .map(|_| spawn_database_open(root.clone(), std::sync::Arc::clone(&barrier)))
             .collect();
         for handle in handles {
-            handle
-                .join()
-                .expect("no panic")
-                .expect("open must survive the fresh-file race");
+            handle.join().unwrap().unwrap();
         }
     }
 }

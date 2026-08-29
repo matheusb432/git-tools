@@ -208,16 +208,19 @@ impl RenderOptions {
     pub const DEFAULT: Self = Self::new(DiffLayout::Unified, DiffDensity::Compact);
 
     /// Creates rendering options from validated closed-set values.
+    #[must_use]
     pub const fn new(layout: DiffLayout, density: DiffDensity) -> Self {
         Self { layout, density }
     }
 
     /// Returns the selected diff layout.
+    #[must_use]
     pub const fn layout(self) -> DiffLayout {
         self.layout
     }
 
     /// Returns the selected diff density.
+    #[must_use]
     pub const fn density(self) -> DiffDensity {
         self.density
     }
@@ -289,9 +292,7 @@ mod tests {
 
     #[test]
     fn layout_parsing_returns_the_rejected_value() {
-        let error = "wide"
-            .parse::<DiffLayout>()
-            .expect_err("unknown layout rejects");
+        let error = "wide".parse::<DiffLayout>().unwrap_err();
 
         assert_eq!(
             error.to_string(),
@@ -301,7 +302,7 @@ mod tests {
 
     #[test]
     fn render_options_are_built_only_from_valid_values() {
-        let options = RenderOptions::try_from(("split", "full")).expect("known tokens parse");
+        let options = RenderOptions::try_from(("split", "full")).unwrap();
 
         assert_eq!(options.layout(), DiffLayout::Split);
         assert_eq!(options.density(), DiffDensity::Full);
@@ -329,9 +330,7 @@ mod tests {
 
     #[test]
     fn theme_rejection_names_every_known_token() {
-        let error = "sunset"
-            .parse::<Theme>()
-            .expect_err("unknown theme rejects");
+        let error = "sunset".parse::<Theme>().unwrap_err();
         let message = error.to_string();
 
         for theme in Theme::VARIANTS {

@@ -21,10 +21,12 @@ impl PushAllExclusions {
         Self(projects.into_iter().collect())
     }
 
+    #[must_use]
     pub fn contains(&self, project: &ProjectName) -> bool {
         self.0.contains(project)
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -44,6 +46,7 @@ impl UserSettings {
     pub const PUSH_CONFIRMATION_REQUIRED_DEFAULT: bool = true;
 
     /// Constructs a complete settings snapshot from validated values.
+    #[must_use]
     pub fn new(
         theme: Option<Theme>,
         viewer_render_options: RenderOptions,
@@ -61,26 +64,31 @@ impl UserSettings {
     }
 
     /// Returns the selected theme, when one is configured.
+    #[must_use]
     pub const fn theme(&self) -> Option<Theme> {
         self.theme
     }
 
     /// Returns the validated viewer layout and density.
+    #[must_use]
     pub const fn viewer_render_options(&self) -> RenderOptions {
         self.viewer_render_options
     }
 
     /// Returns whether a plain current-repository push requires confirmation.
+    #[must_use]
     pub const fn push_confirmation_required(&self) -> bool {
         self.push_confirmation_required
     }
 
     /// Returns the complete validated project and default exclusion map.
+    #[must_use]
     pub const fn diff_exclusions(&self) -> &DiffExclusions {
         &self.diff_exclusions
     }
 
     /// Returns the configured project names omitted from managed push fan-out.
+    #[must_use]
     pub const fn push_all_exclusions(&self) -> &PushAllExclusions {
         &self.push_all_exclusions
     }
@@ -96,11 +104,11 @@ mod tests {
     };
 
     fn project(value: &str) -> ProjectName {
-        ProjectName::try_new(value.to_owned()).expect("project name")
+        ProjectName::try_new(value.to_owned()).unwrap()
     }
 
     fn path(value: &str) -> RepositoryRelativePath {
-        RepositoryRelativePath::try_new(value.into()).expect("repository-relative path")
+        RepositoryRelativePath::try_new(value.into()).unwrap()
     }
 
     #[test]

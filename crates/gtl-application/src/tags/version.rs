@@ -27,16 +27,15 @@ pub(super) enum TagVersionRejection {
 impl std::fmt::Display for TagVersionRejection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoCanonicalTag { noncanonical_tag } => {
-                write!(
-                    formatter,
-                    "cannot bump tags: no canonical vN.N.N tag exists"
-                )?;
-                if let Some(tag) = noncanonical_tag {
-                    write!(formatter, "; found noncanonical tag {tag}")?;
-                }
-                Ok(())
-            }
+            Self::NoCanonicalTag {
+                noncanonical_tag: None,
+            } => formatter.write_str("cannot bump tags: no canonical vN.N.N tag exists"),
+            Self::NoCanonicalTag {
+                noncanonical_tag: Some(tag),
+            } => write!(
+                formatter,
+                "cannot bump tags: no canonical vN.N.N tag exists; found noncanonical tag {tag}"
+            ),
             Self::NewerNoncanonicalTag { base, tag } => write!(
                 formatter,
                 "cannot bump from v{base}: newer noncanonical version tag {tag} is ambiguous"
@@ -60,16 +59,9 @@ pub(super) fn decide_tag_version<'tag>(
 
     for name in tag_names {
         if let Some(version) = canonical_version(name) {
-            if canonical.as_ref().is_none_or(|current| version > *current) {
-                canonical = Some(version);
-            }
+            canonical = canonical.max(Some(version));
         } else if let Some(version) = version_like(name) {
-            let replace = noncanonical.as_ref().is_none_or(|(current, current_name)| {
-                version > *current || (version == *current && name > current_name.as_str())
-            });
-            if replace {
-                noncanonical = Some((version, name.to_string()));
-            }
+            noncanonical = noncanonical.max(Some((version, name.to_string())));
         }
     }
 

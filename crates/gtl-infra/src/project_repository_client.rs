@@ -207,16 +207,13 @@ mod tests {
 
     fn project(git_remote: Option<&str>) -> Project {
         Project {
-            id: ProjectId::try_new("GTL").expect("fixture project ID is valid"),
-            title: ProjectName::try_new("git-tools").expect("fixture project name is valid"),
+            id: ProjectId::try_new("GTL").unwrap(),
+            title: ProjectName::try_new("git-tools").unwrap(),
             source: ProjectDirectorySource::try_from_home_relative_path("tools/git-tools")
-                .expect("fixture project source is valid")
+                .unwrap()
                 .into(),
-            git_remote: git_remote.map(|remote| {
-                ProjectGitRemote::try_new(remote).expect("fixture Git remote is valid")
-            }),
-            mux_session_name: ProjectMuxSessionName::try_new("git-tools")
-                .expect("fixture mux session name is valid"),
+            git_remote: git_remote.map(|remote| ProjectGitRemote::try_new(remote).unwrap()),
+            mux_session_name: ProjectMuxSessionName::try_new("git-tools").unwrap(),
             status: ProjectStatus::Active,
             affiliation: ProjectAffiliation::Personal,
             color: None,

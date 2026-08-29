@@ -77,6 +77,7 @@ pub struct Recipe {
 
 impl Recipe {
     /// The repo directory the compute slices resolve from.
+    #[must_use]
     pub fn cwd(&self) -> RepositoryRoot {
         match &self.source {
             RecipeSource::LocalRepo(path) => path.clone(),
@@ -84,6 +85,7 @@ impl Recipe {
     }
 
     /// The stable kind tag recorded in app history.
+    #[must_use]
     pub fn kind_tag(&self) -> &'static str {
         match self.op {
             RecipeOp::Diff { .. } => "diff",
@@ -138,19 +140,19 @@ mod tests {
     use crate::utils::pinned_range;
 
     fn root(path: &str) -> RepositoryRoot {
-        RepositoryRoot::try_new(path.into()).expect("fixture repository root is absolute")
+        RepositoryRoot::try_new(path.into()).unwrap()
     }
 
     fn project_name(name: &str) -> ProjectName {
-        ProjectName::try_new(name.to_owned()).expect("fixture project name is non-empty")
+        ProjectName::try_new(name.to_owned()).unwrap()
     }
 
     fn revision(raw: &str) -> GitRevision {
-        GitRevision::try_new(raw.to_owned()).expect("fixture Git revision is non-empty")
+        GitRevision::try_new(raw.to_owned()).unwrap()
     }
 
     fn range(raw: &str) -> GitRange {
-        GitRange::try_new(raw.to_owned()).expect("fixture Git range is non-empty")
+        GitRange::try_new(raw.to_owned()).unwrap()
     }
 
     fn diff_recipe() -> Recipe {
@@ -183,7 +185,7 @@ mod tests {
             name: None,
         };
 
-        let json = serde_json::to_value(recipe).expect("recipe serializes");
+        let json = serde_json::to_value(recipe).unwrap();
 
         assert_eq!(json["op"]["op"], "merge_diff");
     }

@@ -219,16 +219,17 @@ fn benchmark_get_viewer_shell(
     report_output_size(GET_VIEWER_SHELL_BENCHMARK_NAME, response.encoded_len());
 
     criterion.bench_function(GET_VIEWER_SHELL_BENCHMARK_NAME, |bencher| {
-        bencher.to_async(runtime).iter(|| {
-            let mut client = client.clone();
-            async move {
-                black_box(require(
-                    client.get_viewer_shell(GetViewerShellRequest {}).await,
-                    "executing the get-viewer-shell request",
-                ));
-            }
-        });
+        bencher
+            .to_async(runtime)
+            .iter(|| measure_get_viewer_shell(client.clone()));
     });
+}
+
+async fn measure_get_viewer_shell(mut client: BenchmarkViewerClient) {
+    black_box(require(
+        client.get_viewer_shell(GetViewerShellRequest {}).await,
+        "executing the get-viewer-shell request",
+    ));
 }
 
 fn benchmark_stream_viewer_rows(

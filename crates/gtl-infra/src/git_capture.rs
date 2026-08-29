@@ -144,7 +144,7 @@ mod tests {
             "2222222222222222222222222222222222222222\x1ffix parser\x1f\x1f2026-06-09T09:10:00-03:00\x1f\x1e",
         );
 
-        let commits = parse_commit_log(raw).expect("valid commit log");
+        let commits = parse_commit_log(raw).unwrap();
 
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].id.to_string(), COMMIT_ID_ONE);
@@ -166,7 +166,7 @@ mod tests {
             " \n\x1e",
             "3333333333333333333333333333333333333333\x1fsubject only\x1e"
         ))
-        .expect_err("incomplete Git output must fail at the decode boundary");
+        .unwrap_err();
 
         assert!(error.to_string().contains("missing a body"));
     }
@@ -179,7 +179,7 @@ mod tests {
             "2222222222222222222222222222222222222222\x1ffeat: x\x1f\x1f2026-06-09T09:10:00-03:00\x1f3333333333333333333333333333333333333333\x1e",
         );
 
-        let commits = parse_commit_log(raw).expect("valid commit log");
+        let commits = parse_commit_log(raw).unwrap();
 
         assert_eq!(
             commits[0]
@@ -198,7 +198,7 @@ mod tests {
     fn parse_commit_log_rejects_invalid_git_output_identity() {
         let error =
             parse_commit_log("not-a-commit-id\x1fsubject\x1f\x1f2026-06-08T13:45:00-03:00\x1f\x1e")
-                .expect_err("invalid commit identity must fail at the decode boundary");
+                .unwrap_err();
 
         assert!(error.to_string().contains("invalid commit ID"));
     }
@@ -208,7 +208,7 @@ mod tests {
         let error = parse_commit_log(
             "1111111111111111111111111111111111111111\x1fsubject\x1f\x1f2026-06-08T13:45:00\x1f\x1e",
         )
-        .expect_err("timezone-less Git timestamp must fail at the decode boundary");
+        .unwrap_err();
 
         assert!(error.to_string().contains("invalid author timestamp"));
     }

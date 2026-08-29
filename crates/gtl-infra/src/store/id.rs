@@ -18,6 +18,7 @@ fn short_sha256(input: &str) -> [u8; 8] {
 /// A stable id for a repo. Prefers the root commit (stable across
 /// clone/move/rename); falls back to hashing the canonical path for a repo with
 /// no commits. Always 16 hex chars.
+#[must_use]
 pub fn repo_id(root_commit: Option<&CommitId>, canonical_path: &Path) -> RepositoryStoreId {
     let prefix = match root_commit {
         Some(id) => short_sha256(id.as_ref()),
@@ -27,6 +28,7 @@ pub fn repo_id(root_commit: Option<&CommitId>, canonical_path: &Path) -> Reposit
 }
 
 /// Content address of a rendered artifact: 16 hex chars over the exact HTML.
+#[must_use]
 pub fn content_hash(html: &str) -> ArtifactContentHash {
     ArtifactContentHash::from_digest_prefix(short_sha256(html))
 }

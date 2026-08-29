@@ -35,6 +35,7 @@ pub enum ViewerTheme {
 
 impl ViewerTheme {
     /// Returns the stable theme token used by serialized state and document roots.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Dark => "dark",
@@ -57,6 +58,7 @@ pub enum ViewerDiffLayout {
 
 impl ViewerDiffLayout {
     /// Returns the stable layout token used by serialized state and document roots.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unified => "unified",
@@ -74,6 +76,7 @@ pub enum ViewerDiffDensity {
 
 impl ViewerDiffDensity {
     /// Returns the stable density token used by serialized state and document roots.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Compact => "compact",
@@ -152,11 +155,13 @@ impl AsRef<str> for ViewerDiffFileId {
 
 impl ViewerDiffFileId {
     /// Creates the stable ID for a file's source-order position.
+    #[must_use]
     pub fn for_index(index: usize) -> Self {
         Self(format!("file-{index}"))
     }
 
     /// Returns the opaque wire value.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         self.as_ref()
     }
@@ -319,6 +324,7 @@ pub enum ViewerFailureCode {
 }
 
 impl ViewerFailureCode {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RepositoryDirectoryNotFound => "RepositoryDirectoryNotFound",
@@ -359,6 +365,7 @@ pub struct ViewerActiveView {
 // TODO: move this logic to a client context once a context to manage ViewerActiveView state is
 // created
 /// Makes decision to handle commit selection in UI
+#[must_use]
 pub fn make_commit_selection_action(
     commit_selection: &ViewerCommitSelection,
     tab_id: ViewerTabId,
@@ -559,6 +566,7 @@ pub struct ViewerCodeSpan {
 
 impl ViewerCodeSpan {
     /// Returns this span's text when its byte range is valid for `line`.
+    #[must_use]
     pub fn text<'line>(&self, line: &'line str) -> Option<&'line str> {
         line.get(self.byte_start..self.byte_end)
     }

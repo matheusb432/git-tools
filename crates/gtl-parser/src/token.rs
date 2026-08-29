@@ -34,16 +34,19 @@ impl SyntaxToken {
     }
 
     /// Returns the first character index covered by the token.
+    #[must_use]
     pub const fn start(&self) -> CharacterOffset {
         self.start
     }
 
     /// Returns the exclusive character index after the token.
+    #[must_use]
     pub const fn end(&self) -> CharacterOffset {
         self.end
     }
 
     /// Returns the token's semantic class.
+    #[must_use]
     pub const fn class(&self) -> SyntaxTokenClass {
         self.class
     }

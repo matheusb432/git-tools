@@ -109,17 +109,17 @@ mod tests {
 
     #[test]
     fn web_asset_lock_serializes_release_transactions() {
-        let target = tempfile::tempdir().expect("temporary target directory");
-        let guard = WebAssetLock::acquire_at(target.path()).expect("first lock is acquired");
+        let target = tempfile::tempdir().unwrap();
+        let guard = WebAssetLock::acquire_at(target.path()).unwrap();
         let contender = OpenOptions::new()
             .read(true)
             .write(true)
             .open(target.path().join("xtask/web-assets.lock"))
-            .expect("lock contender opens");
+            .unwrap();
 
         assert!(contender.try_lock().is_err());
         drop(guard);
-        contender.lock().expect("contender acquires after release");
-        contender.unlock().expect("contender releases");
+        contender.lock().unwrap();
+        contender.unlock().unwrap();
     }
 }

@@ -185,16 +185,16 @@ mod tests {
     }
 
     fn page_number(value: u32) -> HistoryPageNumber {
-        HistoryPageNumber::try_new(value).expect("fixture page number is positive")
+        HistoryPageNumber::try_new(value).unwrap()
     }
 
     fn page_position(number: u32, count: u32) -> HistoryPagePosition {
         HistoryPagePosition::Page(
             HistoryPage::new(
                 page_number(number),
-                HistoryPageCount::try_new(count).expect("fixture page count is positive"),
+                HistoryPageCount::try_new(count).unwrap(),
             )
-            .expect("fixture page is within the page count"),
+            .unwrap(),
         )
     }
 
@@ -203,8 +203,8 @@ mod tests {
         let connection = store_test();
         seed_history(&connection, 65);
 
-        let first = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
-            .expect("first page");
+        let first =
+            list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap();
         assert_eq!(ids(&first), (36..=65).rev().collect::<Vec<_>>());
         assert_eq!(first.position, page_position(1, 3));
         assert_eq!(first.total_count, HistoryRenderCount::new(65));
@@ -214,13 +214,13 @@ mod tests {
         let second = list_recent_render_page::execute(
             ListRecentRenderPage {
                 cursor: RecentRenderPageCursor::OlderThan {
-                    render: first.entries.last().expect("first page row").id,
+                    render: first.entries.last().unwrap().id,
                     page: page_number(2),
                 },
             },
             &connection,
         )
-        .expect("second page");
+        .unwrap();
         assert_eq!(ids(&second), (6..=35).rev().collect::<Vec<_>>());
         assert!(second.has_newer);
         assert!(second.has_older);
@@ -231,7 +231,7 @@ mod tests {
             },
             &connection,
         )
-        .expect("last page");
+        .unwrap();
         assert_eq!(ids(&last), (1..=5).rev().collect::<Vec<_>>());
         assert_eq!(last.position, page_position(3, 3));
         assert!(last.has_newer);
@@ -240,13 +240,13 @@ mod tests {
         let previous = list_recent_render_page::execute(
             ListRecentRenderPage {
                 cursor: RecentRenderPageCursor::NewerThan {
-                    render: last.entries.first().expect("last page row").id,
+                    render: last.entries.first().unwrap().id,
                     page: page_number(2),
                 },
             },
             &connection,
         )
-        .expect("previous page");
+        .unwrap();
         assert_eq!(ids(&previous), ids(&second));
     }
 
@@ -254,8 +254,8 @@ mod tests {
     fn empty_history_has_no_pages_or_navigation() {
         let connection = store_test();
 
-        let page = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
-            .expect("empty page");
+        let page =
+            list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap();
 
         assert!(page.entries.is_empty());
         assert_eq!(page.total_count, HistoryRenderCount::default());
@@ -273,11 +273,11 @@ mod tests {
                 "EXPLAIN QUERY PLAN SELECT id FROM recent_renders \
                  WHERE id < ?1 ORDER BY id DESC LIMIT ?2",
             )
-            .expect("prepare query plan")
+            .unwrap()
             .query_map([2_i64, 30_i64], |row| row.get::<_, String>(3))
-            .expect("inspect query plan")
+            .unwrap()
             .collect::<Result<Vec<_>, _>>()
-            .expect("decode query plan");
+            .unwrap();
 
         assert!(
             details
@@ -294,7 +294,7 @@ mod tests {
         seed_recent_render(&connection, 0, "invalid");
 
         let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
-            .expect_err("corrupt row identity rejects");
+            .unwrap_err();
 
         assert!(matches!(
             error,
@@ -311,10 +311,10 @@ mod tests {
                 "UPDATE recent_renders SET rendered_at = '2026-07-11T00:00:00' WHERE id = 7",
                 [],
             )
-            .expect("corrupt persisted timestamp");
+            .unwrap();
 
         let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
-            .expect_err("timezone-less timestamp must reject");
+            .unwrap_err();
 
         assert!(matches!(
             error,

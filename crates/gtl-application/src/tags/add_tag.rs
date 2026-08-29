@@ -129,7 +129,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(
@@ -153,7 +153,7 @@ mod tests {
                 },
                 &git,
             )
-            .expect("a Git rejection is a closed action failure"),
+            .unwrap(),
             TagActionOutcome::failed("git tag add failed for v1.0.0: fatal: tag already exists")
         );
     }
@@ -170,7 +170,7 @@ mod tests {
             },
             &git,
         )
-        .expect("tag creation succeeds");
+        .unwrap();
 
         assert_eq!(outcome.status(), TagActionStatus::Created);
         assert_eq!(

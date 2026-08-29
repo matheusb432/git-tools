@@ -79,10 +79,12 @@ fn action_wire(action: CommitAction) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
     run_commit_all_with_scope(options, false)
 }
 
+#[must_use]
 pub fn run_commit_for_push_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
     run_commit_all_with_scope(options, true)
 }

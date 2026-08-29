@@ -31,6 +31,7 @@ pub struct ViewerTab {
 
 impl ViewerTab {
     /// Creates a tab-strip entry from validated identity and closed state values.
+    #[must_use]
     pub fn new(id: ViewerTabId, label: String, kind: ViewerTabKind, state: ViewerTabState) -> Self {
         Self {
             id,
@@ -41,21 +42,25 @@ impl ViewerTab {
     }
 
     /// Returns the validated tab identity.
+    #[must_use]
     pub const fn id(&self) -> ViewerTabId {
         self.id
     }
 
     /// Returns the tab-strip label.
+    #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
     /// Returns whether the tab is a snapshot or live view.
+    #[must_use]
     pub const fn kind(&self) -> ViewerTabKind {
         self.kind
     }
 
     /// Returns the tab's authoritative rendering state.
+    #[must_use]
     pub const fn state(&self) -> &ViewerTabState {
         &self.state
     }

@@ -15,6 +15,7 @@ pub struct CommitFile {
 
 impl CommitFile {
     /// Returns whether Git classified the path as untracked.
+    #[must_use]
     pub fn is_untracked(&self) -> bool {
         self.status == "??"
     }
@@ -46,6 +47,7 @@ impl DirtyState {
         ChangedFiles::try_new(files).map_or(Self::Clean, Self::Dirty)
     }
 
+    #[must_use]
     pub fn files(&self) -> &[CommitFile] {
         match self {
             Self::Dirty(files) => files,
@@ -63,8 +65,7 @@ mod tests {
     fn changed_file(status: &str) -> CommitFile {
         CommitFile {
             status: status.into(),
-            path: RepositoryRelativePath::try_new("src/lib.rs".into())
-                .expect("repository-relative path"),
+            path: RepositoryRelativePath::try_new("src/lib.rs".into()).unwrap(),
         }
     }
 
@@ -76,21 +77,14 @@ mod tests {
         let file = changed_file("M");
         assert_eq!(
             DirtyState::from_files(vec![file.clone()]),
-            DirtyState::Dirty(
-                ChangedFiles::try_new(vec![file])
-                    .expect("non-empty files must form a changed-files collection"),
-            )
+            DirtyState::Dirty(ChangedFiles::try_new(vec![file]).unwrap(),)
         );
     }
 
     #[test]
     fn changed_files_serialize_as_their_file_sequence() {
-        let files = ChangedFiles::try_new(vec![changed_file("M")])
-            .expect("non-empty files must form a changed-files collection");
-        let serialized = match serde_json::to_value(files) {
-            Ok(serialized) => serialized,
-            Err(error) => panic!("changed files did not serialize: {error}"),
-        };
+        let files = ChangedFiles::try_new(vec![changed_file("M")]).unwrap();
+        let serialized = serde_json::to_value(files).unwrap();
 
         assert_eq!(
             serialized,

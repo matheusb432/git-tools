@@ -216,14 +216,8 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
     for launch in 1..=inputs.launches {
         let conditions_before_launch = runner_environment::capture_conditions()?;
         let suite_name = format!("desktop-scroll-launch-{launch}");
-        let launch_report = support::run_test_with_result(&suite_name, |session| {
-            Box::pin(async move {
-                measure_launch(session, launch, conditions_before_launch)
-                    .await
-                    .with_context(|| format!("measure independent desktop launch {launch}"))
-            })
-        })
-        .await?;
+        let launch_report =
+            run_independent_launch(&suite_name, launch, conditions_before_launch).await?;
         launches.push(launch_report);
     }
 
@@ -256,6 +250,31 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
     write_report(&report_path, &report)?;
     println!("desktop scroll benchmark report: {}", report_path.display());
     Ok(())
+}
+
+async fn run_independent_launch(
+    suite_name: &str,
+    launch: usize,
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollLaunch> {
+    support::run_test_with_result(suite_name, |session| {
+        Box::pin(measure_launch_with_context(
+            session,
+            launch,
+            conditions_before_launch,
+        ))
+    })
+    .await
+}
+
+async fn measure_launch_with_context(
+    session: &mut support::session::TestSession,
+    launch: usize,
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollLaunch> {
+    measure_launch(session, launch, conditions_before_launch)
+        .await
+        .with_context(|| format!("measure independent desktop launch {launch}"))
 }
 
 impl BenchmarkInputs {

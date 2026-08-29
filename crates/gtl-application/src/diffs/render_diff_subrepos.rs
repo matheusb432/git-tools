@@ -176,7 +176,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.outcome,
@@ -193,7 +193,7 @@ mod tests {
         );
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.title, "2026-07-02 diff-artifact subrepos");
         assert_eq!(
             artifact.meta.repo_name,
@@ -223,7 +223,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(response.outcome, RenderDiffSubreposOutcome::Empty);
         assert_eq!(
@@ -278,11 +278,11 @@ diff --git a/notes.md b/notes.md\n\
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert!(artifact.html.contains("repo-a:noir:unified:compact:1"));
     }
 }

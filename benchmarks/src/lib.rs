@@ -1,7 +1,6 @@
 //! Shared support for repository benchmarks.
 
 pub mod desktop_scroll;
-pub mod grpc_transport;
 pub mod release_server;
 pub mod server_highlighting;
 

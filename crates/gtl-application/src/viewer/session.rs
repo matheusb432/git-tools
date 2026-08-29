@@ -46,14 +46,17 @@ pub struct ActiveContentIdentity {
 }
 
 impl ActiveContentIdentity {
+    #[must_use]
     pub const fn tab_id(self) -> ViewerTabId {
         self.tab_id
     }
 
+    #[must_use]
     pub const fn range_generation(self) -> ViewerRangeGeneration {
         self.range_generation
     }
 
+    #[must_use]
     pub const fn selection_generation(self) -> ViewerSelectionGeneration {
         self.selection_generation
     }
@@ -66,14 +69,17 @@ pub struct ActiveContentSnapshot {
 }
 
 impl ActiveContentSnapshot {
+    #[must_use]
     pub const fn identity(&self) -> ActiveContentIdentity {
         self.identity
     }
 
+    #[must_use]
     pub fn view(&self) -> &View {
         &self.view
     }
 
+    #[must_use]
     pub fn shared_view(&self) -> Arc<View> {
         Arc::clone(&self.view)
     }
@@ -93,6 +99,16 @@ enum CommitSelection {
         commit: Commit,
         reason: String,
     },
+}
+
+fn selected_view(
+    cache: &mut WeightedViewCache,
+    id: ViewerTabId,
+    transient: Option<&Arc<View>>,
+) -> Option<Arc<View>> {
+    transient
+        .cloned()
+        .or_else(|| cache.get(id).and_then(|cached| cached.selected.clone()))
 }
 
 #[derive(Debug, Clone)]
@@ -149,6 +165,7 @@ pub struct ViewerSession {
 }
 
 impl ViewerSession {
+    #[must_use]
     pub fn new(max_cache_weight: ViewCacheWeight) -> Self {
         Self {
             tabs: Vec::new(),
@@ -441,11 +458,7 @@ impl ViewerSession {
                 reason: reason.clone(),
             },
             CommitSelection::Ready { commit, transient } => {
-                let view = transient.clone().or_else(|| {
-                    self.cache
-                        .get(id)
-                        .and_then(|cached| cached.selected.clone())
-                });
+                let view = selected_view(&mut self.cache, id, transient.as_ref());
                 view.map_or_else(
                     || CommitSelectionSnapshot::Pending {
                         id: commit.id.clone(),
@@ -496,6 +509,7 @@ impl ViewerSession {
         Some(outcome)
     }
 
+    #[must_use]
     pub fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
         let tab = self.tab(id)?;
         if tab.tab.kind() != ViewerTabKind::Live {
@@ -507,22 +521,23 @@ impl ViewerSession {
     }
 
     pub fn activate(&mut self, id: ViewerTabId) -> bool {
-        if self.tabs.iter().any(|tab| tab.tab.id() == id) {
-            if self.active != Some(id) {
-                self.clear_every_commit_selection();
-            }
-            self.active = Some(id);
-            self.bump_version();
-            true
-        } else {
-            false
+        if !self.tabs.iter().any(|tab| tab.tab.id() == id) {
+            return false;
         }
+        if self.active != Some(id) {
+            self.clear_every_commit_selection();
+        }
+        self.active = Some(id);
+        self.bump_version();
+        true
     }
 
+    #[must_use]
     pub const fn active(&self) -> Option<ViewerTabId> {
         self.active
     }
 
+    #[must_use]
     pub fn active_content_identity(&self) -> Option<ActiveContentIdentity> {
         let identity = self.active_displayed_content_identity()?;
         let tab = self.tab(identity.tab_id())?;
@@ -533,6 +548,7 @@ impl ViewerSession {
         Some(identity)
     }
 
+    #[must_use]
     pub fn active_displayed_content_identity(&self) -> Option<ActiveContentIdentity> {
         let tab = self.active.and_then(|id| self.tab(id))?;
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
@@ -563,6 +579,7 @@ impl ViewerSession {
         Some(ActiveContentSnapshot { identity, view })
     }
 
+    #[must_use]
     pub const fn version(&self) -> ViewerVersion {
         self.version
     }
@@ -587,10 +604,12 @@ impl ViewerSession {
         }
     }
 
+    #[must_use]
     pub fn tabs(&self) -> impl ExactSizeIterator<Item = &SessionTab> {
         self.tabs.iter()
     }
 
+    #[must_use]
     pub fn tab(&self, id: ViewerTabId) -> Option<&SessionTab> {
         self.tabs.iter().find(|tab| tab.tab.id() == id)
     }
@@ -604,6 +623,7 @@ impl ViewerSession {
         self.cache.get(id).cloned()
     }
 
+    #[must_use]
     pub fn current_ticket(&self, id: ViewerTabId) -> Option<ComputeTicket> {
         self.tabs
             .iter()
@@ -634,7 +654,7 @@ mod tests {
     fn batch_id(sequence: u64) -> RecipeBatchId {
         format!("00000000-0000-0000-0000-{sequence:012x}")
             .parse()
-            .expect("fixture batch ID is valid")
+            .unwrap()
     }
 
     fn recipe() -> Recipe {
@@ -672,8 +692,8 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
-        let ticket = session.begin_compute(id).expect("tab exists");
+            .unwrap();
+        let ticket = session.begin_compute(id).unwrap();
         assert_eq!(
             session.publish_labeled_if_current(
                 ticket,
@@ -689,8 +709,8 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let id = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
-        let ticket = session.begin_compute(id).expect("tab exists");
+            .unwrap();
+        let ticket = session.begin_compute(id).unwrap();
         let ids = vec![
             crate::utils::commit_id_fixture("a"),
             crate::utils::commit_id_fixture("b"),
@@ -714,8 +734,8 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
-        let ticket = session.begin_compute(id).expect("tab exists");
+            .unwrap();
+        let ticket = session.begin_compute(id).unwrap();
         let view = view("shared");
         assert_eq!(
             session.publish_labeled_if_current(
@@ -726,7 +746,7 @@ mod tests {
             PublishOutcome::Published
         );
 
-        let snapshot = session.active_content_snapshot().expect("active snapshot");
+        let snapshot = session.active_content_snapshot().unwrap();
 
         assert!(Arc::ptr_eq(&view, &snapshot.shared_view()));
     }
@@ -734,9 +754,7 @@ mod tests {
     #[test]
     fn selected_patch_replaces_only_the_displayed_view_until_cleared() {
         let (mut session, id, ids) = ready_session_with_commits();
-        let (ticket, repo_root, commit) = session
-            .begin_commit_selection(id, &ids[0])
-            .expect("cached commit can be selected");
+        let (ticket, repo_root, commit) = session.begin_commit_selection(id, &ids[0]).unwrap();
 
         assert_eq!(repo_root, repository_root("/repo"));
         assert_eq!(commit.id, ids[0]);
@@ -753,35 +771,20 @@ mod tests {
             CommitSelectionSnapshot::Ready { id: selected_id, view }
                 if selected_id == ids[0] && view.title == "patch"
         ));
-        assert_eq!(
-            session
-                .cached_view(id)
-                .expect("range remains cached")
-                .view
-                .title,
-            "range"
-        );
+        assert_eq!(session.cached_view(id).unwrap().view.title, "range");
 
         assert!(session.clear_commit_selection(id));
         assert!(matches!(
             session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::None
         ));
-        assert!(
-            session
-                .cached_view(id)
-                .expect("range remains cached")
-                .selected
-                .is_none()
-        );
+        assert!(session.cached_view(id).unwrap().selected.is_none());
     }
 
     #[test]
     fn a_pending_commit_selection_rejects_another_reservation_until_cleared() {
         let (mut session, id, ids) = ready_session_with_commits();
-        let (first, _, _) = session
-            .begin_commit_selection(id, &ids[0])
-            .expect("first selection");
+        let (first, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
 
         assert_eq!(
             session.begin_commit_selection(id, &ids[1]),
@@ -814,14 +817,10 @@ mod tests {
     #[test]
     fn content_identities_track_selection_and_refresh_transitions() {
         let (mut session, id, ids) = ready_session_with_commits();
-        let range = session
-            .active_content_identity()
-            .expect("range content is ready");
+        let range = session.active_content_identity().unwrap();
         assert_eq!(session.active_displayed_content_identity(), Some(range));
 
-        let (first_selection, _, _) = session
-            .begin_commit_selection(id, &ids[0])
-            .expect("commit can be selected");
+        let (first_selection, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
 
         assert!(session.active_content_identity().is_none());
         assert_eq!(session.active_displayed_content_identity(), Some(range));
@@ -829,9 +828,7 @@ mod tests {
             session.publish_commit_patch_if_current(first_selection, view("selected")),
             PublishOutcome::Published
         );
-        let selected = session
-            .active_content_identity()
-            .expect("selected commit content is ready");
+        let selected = session.active_content_identity().unwrap();
         assert_eq!(selected.tab_id(), range.tab_id());
         assert_eq!(selected.range_generation(), range.range_generation());
         assert_ne!(
@@ -840,18 +837,14 @@ mod tests {
         );
         assert_eq!(session.active_displayed_content_identity(), Some(selected));
 
-        let (second_selection, _, _) = session
-            .begin_commit_selection(id, &ids[1])
-            .expect("another commit can be selected");
+        let (second_selection, _, _) = session.begin_commit_selection(id, &ids[1]).unwrap();
         assert!(session.active_content_identity().is_none());
         assert_eq!(session.active_displayed_content_identity(), Some(selected));
         assert_eq!(
             session.set_commit_patch_error_if_current(second_selection, "failed".into()),
             PublishOutcome::Published
         );
-        let selection_error = session
-            .active_content_identity()
-            .expect("selection error displays range content");
+        let selection_error = session.active_content_identity().unwrap();
         assert_eq!(selection_error.tab_id(), range.tab_id());
         assert_eq!(selection_error.range_generation(), range.range_generation());
         assert_ne!(
@@ -863,7 +856,7 @@ mod tests {
             Some(selection_error)
         );
 
-        let refresh = session.begin_compute(id).expect("tab exists");
+        let refresh = session.begin_compute(id).unwrap();
         assert!(session.active_content_identity().is_none());
         assert!(session.active_displayed_content_identity().is_none());
         assert_eq!(
@@ -874,9 +867,7 @@ mod tests {
             ),
             PublishOutcome::Published
         );
-        let refreshed = session
-            .active_content_identity()
-            .expect("refreshed content is ready");
+        let refreshed = session.active_content_identity().unwrap();
         assert_eq!(refreshed.tab_id(), range.tab_id());
         assert_ne!(refreshed.range_generation(), range.range_generation());
     }
@@ -886,13 +877,13 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(128 * 1024 * 1024));
         let first = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
         let second = session
             .open(recipe(), batch_id(2), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
 
         assert_eq!(first, second);
-        assert_eq!(session.tab(first).expect("tab").batch_id, batch_id(2));
+        assert_eq!(session.tab(first).unwrap().batch_id, batch_id(2));
     }
 
     #[test]
@@ -900,14 +891,14 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
             .open(recipe(), batch_id(3), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
 
         let reopened = session
             .open(recipe(), batch_id(4), ViewerTabKind::Live)
-            .expect("tab id should be available");
+            .unwrap();
 
         assert_eq!(reopened, id);
-        let tab = session.tab(id).expect("tab");
+        let tab = session.tab(id).unwrap();
         assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
         assert_eq!(tab.batch_id, batch_id(4));
     }
@@ -915,8 +906,8 @@ mod tests {
     #[test]
     fn stale_compute_cannot_overwrite_a_newer_refresh() {
         let (mut session, id) = ready_session();
-        let stale = session.begin_compute(id).expect("tab exists");
-        let current = session.begin_compute(id).expect("tab exists");
+        let stale = session.begin_compute(id).unwrap();
+        let current = session.begin_compute(id).unwrap();
 
         assert_eq!(
             session.publish_labeled_if_current(
@@ -934,17 +925,14 @@ mod tests {
             ),
             PublishOutcome::Stale
         );
-        assert_eq!(
-            session.cached_view(id).expect("current view").view.title,
-            "newer"
-        );
+        assert_eq!(session.cached_view(id).unwrap().view.title, "newer");
     }
 
     #[test]
     fn close_if_current_rejects_a_stale_compute() {
         let (mut session, id) = ready_session();
-        let stale = session.begin_compute(id).expect("stale ticket");
-        let current = session.begin_compute(id).expect("current ticket");
+        let stale = session.begin_compute(id).unwrap();
+        let current = session.begin_compute(id).unwrap();
 
         assert_eq!(session.close_if_current(stale), PublishOutcome::Stale);
         assert!(session.tab(id).is_some());
@@ -955,9 +943,9 @@ mod tests {
     #[test]
     fn refresh_invalidates_cached_content_and_older_tickets() {
         let (mut session, id) = ready_session();
-        let stale = session.begin_compute(id).expect("tab exists");
+        let stale = session.begin_compute(id).unwrap();
 
-        let refresh = session.refresh(id).expect("tab exists");
+        let refresh = session.refresh(id).unwrap();
 
         assert!(session.cached_view(id).is_none());
         assert_eq!(
@@ -983,10 +971,10 @@ mod tests {
         let (mut session, id) = ready_session();
         assert!(session.cached_view(id).is_some());
 
-        let ticket = session.begin_compute(id).expect("reopen ticket");
+        let ticket = session.begin_compute(id).unwrap();
         assert!(session.cached_view(id).is_none());
         assert_eq!(
-            session.tab(id).expect("tab").tab.state(),
+            session.tab(id).unwrap().tab.state(),
             &ViewerTabState::Error {
                 reason: RENDER_PENDING_REASON.into(),
             }
@@ -1000,7 +988,7 @@ mod tests {
 
         assert!(session.cached_view(id).is_none());
         assert_eq!(
-            session.tab(id).expect("tab").tab.state(),
+            session.tab(id).unwrap().tab.state(),
             &ViewerTabState::Error {
                 reason: "new failure".into()
             }
@@ -1013,12 +1001,12 @@ mod tests {
         let start = session.version();
         let id = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
         assert!(session.version() > start);
         let opened = session.version();
         assert!(session.activate(id));
         assert!(session.version() > opened);
-        let ticket = session.begin_compute(id).expect("ticket");
+        let ticket = session.begin_compute(id).unwrap();
         let pending = session.version();
         session.set_state_if_current(
             ticket,
@@ -1035,7 +1023,7 @@ mod tests {
     #[test]
     fn close_invalidates_an_outstanding_compute() {
         let (mut session, id) = ready_session();
-        let ticket = session.begin_compute(id).expect("tab exists");
+        let ticket = session.begin_compute(id).unwrap();
 
         assert_eq!(session.close(id), Some(CloseOutcome::ActiveChanged));
         assert_eq!(
@@ -1054,12 +1042,12 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let first = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
         let mut other = recipe();
         other.source = RecipeSource::LocalRepo(repository_root("/other"));
         let second = session
             .open(other, batch_id(1), ViewerTabKind::Live)
-            .expect("tab id should be available");
+            .unwrap();
 
         assert!(session.activate(first));
         assert_eq!(session.active(), Some(first));
@@ -1094,17 +1082,17 @@ mod tests {
                 batch_id(1),
                 ViewerTabKind::Snapshot,
             )
-            .expect("tab id should be available");
+            .unwrap();
         let second = session
             .open(
                 pinned_unpushed_recipe("c"),
                 batch_id(2),
                 ViewerTabKind::Snapshot,
             )
-            .expect("tab id should be available");
+            .unwrap();
 
         assert_eq!(first, second, "same repo+op must reuse the tab across pins");
-        let tab = session.tab(second).expect("tab exists");
+        let tab = session.tab(second).unwrap();
         assert_eq!(
             tab.recipe,
             pinned_unpushed_recipe("c"),
@@ -1119,8 +1107,7 @@ mod tests {
             source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Range {
-                    range: gtl_models::git::GitRange::try_new(range.to_owned())
-                        .expect("fixture range is non-empty"),
+                    range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
                     pinned: None,
                 },
             },
@@ -1128,10 +1115,10 @@ mod tests {
         };
         let a = session
             .open(range_recipe("a..b"), batch_id(1), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
         let b = session
             .open(range_recipe("c..d"), batch_id(2), ViewerTabKind::Snapshot)
-            .expect("tab id should be available");
+            .unwrap();
         assert_ne!(a, b);
     }
 }

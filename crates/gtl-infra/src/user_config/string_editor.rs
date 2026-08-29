@@ -60,30 +60,33 @@ impl SettingsEditLease {
             .with_context(|| format!("open user-settings lock {}", path.display()))?;
         let deadline = Instant::now() + USER_SETTINGS_LOCK_WAIT_MAX;
 
-        loop {
-            if Instant::now() >= deadline {
-                return Err(UserSettingsEditError::LockTimeout {
-                    path,
-                    wait_seconds: USER_SETTINGS_LOCK_WAIT_MAX.as_secs(),
-                });
-            }
-
-            match lock.try_lock() {
-                Ok(()) => return Ok(Self { _lock_file: lock }),
-                Err(TryLockError::WouldBlock) => {}
-                Err(TryLockError::Error(error)) => {
-                    return Err(UserSettingsEditError::Unexpected(
-                        anyhow::Error::new(error)
-                            .context(format!("lock user settings {}", path.display())),
-                    ));
-                }
-            }
-
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if !remaining.is_zero() {
-                std::thread::sleep(remaining.min(USER_SETTINGS_LOCK_POLL_INTERVAL));
-            }
+        let mut remaining = lock_wait_remaining(deadline, &path)?;
+        while !try_lock(&lock, &path)? {
+            std::thread::sleep(remaining.min(USER_SETTINGS_LOCK_POLL_INTERVAL));
+            remaining = lock_wait_remaining(deadline, &path)?;
         }
+        Ok(Self { _lock_file: lock })
+    }
+}
+
+fn lock_wait_remaining(deadline: Instant, path: &Path) -> Result<Duration, UserSettingsEditError> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(UserSettingsEditError::LockTimeout {
+            path: path.to_path_buf(),
+            wait_seconds: USER_SETTINGS_LOCK_WAIT_MAX.as_secs(),
+        });
+    }
+    Ok(remaining)
+}
+
+fn try_lock(lock: &File, path: &Path) -> Result<bool, UserSettingsEditError> {
+    match lock.try_lock() {
+        Ok(()) => Ok(true),
+        Err(TryLockError::WouldBlock) => Ok(false),
+        Err(TryLockError::Error(error)) => Err(UserSettingsEditError::Unexpected(
+            anyhow::Error::new(error).context(format!("lock user settings {}", path.display())),
+        )),
     }
 }
 
@@ -147,14 +150,7 @@ fn replacement_path(path: &Path) -> anyhow::Result<PathBuf> {
         let metadata = match std::fs::symlink_metadata(&replacement) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(replacement),
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "inspect user-settings replacement target {}",
-                        replacement.display()
-                    )
-                });
-            }
+            Err(error) => return Err(replacement_metadata_error(&replacement, error)),
         };
         if !metadata.file_type().is_symlink() {
             return Ok(replacement);
@@ -178,6 +174,13 @@ fn replacement_path(path: &Path) -> anyhow::Result<PathBuf> {
         "user-settings path {} exceeds {USER_SETTINGS_SYMBOLIC_LINK_DEPTH_MAX} symbolic links",
         path.display()
     )
+}
+
+fn replacement_metadata_error(path: &Path, error: std::io::Error) -> anyhow::Error {
+    anyhow::Error::new(error).context(format!(
+        "inspect user-settings replacement target {}",
+        path.display()
+    ))
 }
 
 fn value_old(document: &DocumentMut, key: &str) -> Result<Option<String>, UserSettingsEditError> {
@@ -314,7 +317,7 @@ fn wait_before_persist_for_test(path: &Path) {
         let mut slot = BEFORE_PERSIST_HOOK
             .get_or_init(|| std::sync::Mutex::new(None))
             .lock()
-            .expect("lock pre-persist test hook");
+            .unwrap();
         if slot.as_ref().is_some_and(|hook| hook.path == path) {
             slot.take()
         } else {
@@ -322,12 +325,8 @@ fn wait_before_persist_for_test(path: &Path) {
         }
     };
     if let Some(hook) = hook {
-        hook.ready_sender
-            .send(())
-            .expect("signal pre-persist test hook");
-        hook.continue_receiver
-            .recv()
-            .expect("release pre-persist test hook");
+        hook.ready_sender.send(()).unwrap();
+        hook.continue_receiver.recv().unwrap();
     }
 }
 
@@ -373,31 +372,31 @@ mod tests {
     }
 
     fn hold_settings_lock(path: &Path) -> File {
-        let replacement_path = replacement_path(path).expect("resolve replacement path");
-        let identity_path = lock_identity_path(&replacement_path).expect("resolve lock identity");
+        let replacement_path = replacement_path(path).unwrap();
+        let identity_path = lock_identity_path(&replacement_path).unwrap();
         let lock = OpenOptions::new()
             .create(true)
             .read(true)
             .truncate(false)
             .write(true)
             .open(lock_path(&identity_path))
-            .expect("open lock");
-        lock.lock().expect("hold lock");
+            .unwrap();
+        lock.lock().unwrap();
         lock
     }
 
     #[test]
     fn set_returns_the_previous_string_and_preserves_unrelated_content() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         std::fs::write(
             &path,
             "# viewer\ntheme = \"dark\"\n[push]\nconfirm = false\n",
         )
-        .expect("seed config");
+        .unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).expect("set string");
-        let raw = std::fs::read_to_string(path).expect("updated config");
+        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
+        let raw = std::fs::read_to_string(path).unwrap();
 
         assert_eq!(outcome.value_old.as_deref(), Some("dark"));
         assert!(outcome.document_changed);
@@ -408,83 +407,79 @@ mod tests {
 
     #[test]
     fn set_through_relative_symlink_preserves_link_and_updates_target() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let config_directory = directory.path().join("config");
         let managed_directory = directory.path().join("managed");
-        std::fs::create_dir_all(&config_directory).expect("create config directory");
-        std::fs::create_dir_all(&managed_directory).expect("create managed directory");
+        std::fs::create_dir_all(&config_directory).unwrap();
+        std::fs::create_dir_all(&managed_directory).unwrap();
         let target = managed_directory.join("settings.toml");
         let path = config_directory.join("config.toml");
-        std::fs::write(&target, "theme = \"dark\"\n").expect("seed managed config");
-        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path)
-            .expect("link managed config");
+        std::fs::write(&target, "theme = \"dark\"\n").unwrap();
+        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).expect("set theme");
+        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
 
         assert_eq!(outcome.value_old.as_deref(), Some("dark"));
         assert!(outcome.document_changed);
         assert!(
             std::fs::symlink_metadata(&path)
-                .expect("config link metadata")
+                .unwrap()
                 .file_type()
                 .is_symlink()
         );
         assert_eq!(
-            std::fs::read_to_string(&target).expect("managed config"),
+            std::fs::read_to_string(&target).unwrap(),
             "theme = \"light\"\n"
         );
     }
 
     #[test]
     fn set_through_dangling_relative_symlink_creates_target() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let config_directory = directory.path().join("config");
         let managed_directory = directory.path().join("managed");
-        std::fs::create_dir_all(&config_directory).expect("create config directory");
-        std::fs::create_dir_all(&managed_directory).expect("create managed directory");
+        std::fs::create_dir_all(&config_directory).unwrap();
+        std::fs::create_dir_all(&managed_directory).unwrap();
         let target = managed_directory.join("settings.toml");
         let path = config_directory.join("config.toml");
-        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path)
-            .expect("link managed config");
+        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).expect("set theme");
+        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
 
         assert_eq!(outcome.value_old, None);
         assert!(outcome.document_changed);
         assert!(
             std::fs::symlink_metadata(&path)
-                .expect("config link metadata")
+                .unwrap()
                 .file_type()
                 .is_symlink()
         );
         assert_eq!(
-            std::fs::read_to_string(&target).expect("managed config"),
+            std::fs::read_to_string(&target).unwrap(),
             "theme = \"light\"\n"
         );
     }
 
     #[test]
     fn symbolic_link_cycle_is_bounded_and_untouched() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let path_other = directory.path().join("config-other.toml");
-        create_file_symbolic_link(Path::new("config-other.toml"), &path).expect("link config");
-        create_file_symbolic_link(Path::new("config.toml"), &path_other)
-            .expect("link other config");
+        create_file_symbolic_link(Path::new("config-other.toml"), &path).unwrap();
+        create_file_symbolic_link(Path::new("config.toml"), &path_other).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light"))
-            .expect_err("symbolic-link cycle must fail");
+        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
 
         assert!(format!("{error:#}").contains("exceeds 40 symbolic links"));
         assert!(
             std::fs::symlink_metadata(&path)
-                .expect("config link metadata")
+                .unwrap()
                 .file_type()
                 .is_symlink()
         );
         assert!(
             std::fs::symlink_metadata(&path_other)
-                .expect("other config link metadata")
+                .unwrap()
                 .file_type()
                 .is_symlink()
         );
@@ -492,13 +487,13 @@ mod tests {
 
     #[test]
     fn equal_set_and_absent_remove_do_not_rewrite_config() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = \"dark\"\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
 
-        let equal = edit(&path, "theme", StringEdit::Set("dark")).expect("equal set");
-        let absent = edit(&path, "layout", StringEdit::Remove).expect("absent remove");
+        let equal = edit(&path, "theme", StringEdit::Set("dark")).unwrap();
+        let absent = edit(&path, "layout", StringEdit::Remove).unwrap();
 
         assert_eq!(equal.value_old.as_deref(), Some("dark"));
         assert!(!equal.document_changed);
@@ -509,13 +504,12 @@ mod tests {
 
     #[test]
     fn non_string_document_returns_the_typed_shape_error_without_writing() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = 7\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light"))
-            .expect_err("non-string setting must fail");
+        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
 
         assert!(matches!(error, UserSettingsEditError::InvalidValueShape));
         assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
@@ -523,13 +517,12 @@ mod tests {
 
     #[test]
     fn malformed_document_returns_a_typed_configuration_error_without_writing() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = {{{\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light"))
-            .expect_err("malformed settings must fail");
+        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
 
         assert!(matches!(
             error,
@@ -541,13 +534,13 @@ mod tests {
 
     #[test]
     fn symlink_aliases_share_the_lock_and_timeout_without_writing() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("managed").join("config.toml");
         let path = directory.path().join("config.toml");
-        std::fs::create_dir_all(target.parent().expect("target parent")).expect("create target");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         let raw = "theme = \"dark\"\n";
-        std::fs::write(&target, raw).expect("seed config");
-        create_file_symbolic_link(Path::new("managed/config.toml"), &path).expect("link config");
+        std::fs::write(&target, raw).unwrap();
+        create_file_symbolic_link(Path::new("managed/config.toml"), &path).unwrap();
         let _lock = hold_settings_lock(&target);
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
         let path_worker = path.clone();
@@ -555,14 +548,12 @@ mod tests {
         let started_at = Instant::now();
         let worker = std::thread::spawn(move || {
             let result = edit(&path_worker, "theme", StringEdit::Set("light"));
-            result_sender.send(result).expect("send edit result");
+            result_sender.send(result).unwrap();
         });
-        let result = result_receiver
-            .recv_timeout(RESULT_WAIT_TEST_MAX)
-            .expect("edit returns within the test timeout");
+        let result = result_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
         let elapsed = started_at.elapsed();
         drop(worker);
-        let error = result.expect_err("held lock times out");
+        let error = result.unwrap_err();
 
         assert!(matches!(
             error,
@@ -581,17 +572,17 @@ mod tests {
 
     #[test]
     fn concurrent_external_change_aborts_and_preserves_the_change() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = \"dark\"\nlayout = \"split\"\n";
         let changed_raw = "theme = \"hearth\"\nlayout = \"split\"\n";
-        std::fs::write(&path, raw).expect("seed config");
+        std::fs::write(&path, raw).unwrap();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let (continue_sender, continue_receiver) = mpsc::sync_channel(1);
         BEFORE_PERSIST_HOOK
             .get_or_init(|| std::sync::Mutex::new(None))
             .lock()
-            .expect("lock pre-persist test hook")
+            .unwrap()
             .replace(BeforePersistHook {
                 path: path.clone(),
                 ready_sender,
@@ -601,15 +592,10 @@ mod tests {
         let worker =
             std::thread::spawn(move || edit(&path_worker, "theme", StringEdit::Set("light")));
 
-        ready_receiver
-            .recv_timeout(RESULT_WAIT_TEST_MAX)
-            .expect("edit reaches pre-persist check");
-        std::fs::write(&path, changed_raw).expect("external edit");
-        continue_sender.send(()).expect("release edit");
-        let error = worker
-            .join()
-            .expect("join edit")
-            .expect_err("external edit must abort the replacement");
+        ready_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
+        std::fs::write(&path, changed_raw).unwrap();
+        continue_sender.send(()).unwrap();
+        let error = worker.join().unwrap().unwrap_err();
         assert!(matches!(
             error,
             UserSettingsEditError::ConcurrentModification { path: error_path }
@@ -624,7 +610,7 @@ mod tests {
 
         use crate::user_config::TomlSettingsStore;
 
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let store = TomlSettingsStore::new(Some(path.clone()));
         let lock = hold_settings_lock(&path);
@@ -635,40 +621,32 @@ mod tests {
         let attempt_sender_theme = attempt_sender.clone();
         let result_sender_theme = result_sender.clone();
         let theme_worker = std::thread::spawn(move || {
-            attempt_sender_theme
-                .send("theme")
-                .expect("send theme attempt");
+            attempt_sender_theme.send("theme").unwrap();
             let result = store_theme.set_value(gtl_models::settings::SettingKeyValue::Theme(
                 gtl_models::viewer::Theme::Light,
             ));
-            result_sender_theme
-                .send(("theme", result))
-                .expect("send theme result");
+            result_sender_theme.send(("theme", result)).unwrap();
         });
 
         let mut store_layout = store.clone();
         let attempt_sender_layout = attempt_sender.clone();
         let result_sender_layout = result_sender.clone();
         let layout_worker = std::thread::spawn(move || {
-            attempt_sender_layout
-                .send("layout")
-                .expect("send layout attempt");
+            attempt_sender_layout.send("layout").unwrap();
             let result = store_layout.set_value(gtl_models::settings::SettingKeyValue::Layout(
                 gtl_models::viewer::DiffLayout::Split,
             ));
-            result_sender_layout
-                .send(("layout", result))
-                .expect("send layout result");
+            result_sender_layout.send(("layout", result)).unwrap();
         });
         drop(attempt_sender);
         drop(result_sender);
 
         let attempt_first = attempt_receiver
             .recv_timeout(LOCK_ATTEMPT_WAIT_TEST_MAX)
-            .expect("first editor begins within the test timeout");
+            .unwrap();
         let attempt_second = attempt_receiver
             .recv_timeout(LOCK_ATTEMPT_WAIT_TEST_MAX)
-            .expect("second editor begins within the test timeout");
+            .unwrap();
         assert_ne!(attempt_first, attempt_second);
 
         let result_while_locked = result_receiver.recv_timeout(LOCK_HELD_OBSERVATION_WAIT);
@@ -676,21 +654,17 @@ mod tests {
             matches!(result_while_locked, Err(RecvTimeoutError::Timeout)),
             "an editor completed while the sibling lock was held: {result_while_locked:?}"
         );
-        lock.unlock().expect("release lock");
+        lock.unlock().unwrap();
 
-        let result_first = result_receiver
-            .recv_timeout(RESULT_WAIT_TEST_MAX)
-            .expect("first editor finishes within the test timeout");
-        let result_second = result_receiver
-            .recv_timeout(RESULT_WAIT_TEST_MAX)
-            .expect("second editor finishes within the test timeout");
+        let result_first = result_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
+        let result_second = result_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
         drop(theme_worker);
         drop(layout_worker);
 
         let mut tags = Vec::with_capacity(2);
         for (tag, result) in [result_first, result_second] {
             assert_eq!(
-                result.expect("set string"),
+                result.unwrap(),
                 gtl_application::ports::UserSettingsEditOutcome::Changed,
                 "{tag} document change"
             );
@@ -699,19 +673,19 @@ mod tests {
         tags.sort_unstable();
         assert_eq!(tags, ["layout", "theme"]);
 
-        let raw = std::fs::read_to_string(path).expect("updated config");
-        let document = toml::from_str::<toml::Value>(&raw).expect("valid TOML");
+        let raw = std::fs::read_to_string(path).unwrap();
+        let document = toml::from_str::<toml::Value>(&raw).unwrap();
         assert_eq!(document["theme"].as_str(), Some("light"));
         assert_eq!(document["layout"].as_str(), Some("split"));
     }
 
     #[test]
     fn remove_returns_the_previous_string() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "density = \"full\"\n").expect("seed config");
+        std::fs::write(&path, "density = \"full\"\n").unwrap();
 
-        let outcome = edit(&path, "density", StringEdit::Remove).expect("remove density");
+        let outcome = edit(&path, "density", StringEdit::Remove).unwrap();
 
         assert_eq!(outcome.value_old.as_deref(), Some("full"));
         assert!(outcome.document_changed);
@@ -720,10 +694,10 @@ mod tests {
 
     #[test]
     fn absent_remove_does_not_create_the_config_target() {
-        let directory = tempfile::tempdir().expect("temp directory");
+        let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("nested").join("config.toml");
 
-        let outcome = edit(&path, "density", StringEdit::Remove).expect("remove absent key");
+        let outcome = edit(&path, "density", StringEdit::Remove).unwrap();
 
         assert_eq!(outcome.value_old, None);
         assert!(!outcome.document_changed);

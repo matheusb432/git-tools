@@ -48,8 +48,7 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = get_repository_status::execute("/repos/api/src".into(), &git)
-            .expect("repository status resolves");
+        let result = get_repository_status::execute("/repos/api/src".into(), &git).unwrap();
 
         assert_eq!(result.name().as_ref(), "api");
         assert_eq!(
@@ -65,8 +64,7 @@ mod tests {
     fn preserves_a_non_repository_as_a_typed_resolution_failure() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("not a repository")]);
 
-        let error = get_repository_status::execute("/tmp/plain".into(), &git)
-            .expect_err("plain directory is rejected");
+        let error = get_repository_status::execute("/tmp/plain".into(), &git).unwrap_err();
 
         assert!(matches!(
             error,

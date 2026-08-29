@@ -4,7 +4,7 @@ use std::{fs, path::Path, process::Command};
 
 #[test]
 fn check_structure_rejects_application_dependency_on_infrastructure() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -17,7 +17,7 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -32,7 +32,7 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
 
 #[test]
 fn check_structure_rejects_parser_dependency_on_a_workspace_package() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -45,7 +45,7 @@ fn check_structure_rejects_parser_dependency_on_a_workspace_package() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -60,7 +60,7 @@ fn check_structure_rejects_parser_dependency_on_a_workspace_package() {
 
 #[test]
 fn check_structure_allows_build_dependencies() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -74,7 +74,7 @@ fn check_structure_allows_build_dependencies() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert!(
         output.status.success(),
@@ -85,7 +85,7 @@ fn check_structure_allows_build_dependencies() {
 
 #[test]
 fn check_structure_rejects_generated_grpc_in_application() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -102,7 +102,7 @@ fn check_structure_rejects_generated_grpc_in_application() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -115,7 +115,7 @@ fn check_structure_rejects_generated_grpc_in_application() {
 
 #[test]
 fn check_structure_rejects_direct_grpc_in_web() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -128,7 +128,7 @@ fn check_structure_rejects_direct_grpc_in_web() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -141,7 +141,7 @@ fn check_structure_rejects_direct_grpc_in_web() {
 
 #[test]
 fn check_structure_rejects_direct_parser_use_in_server() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -154,7 +154,7 @@ fn check_structure_rejects_direct_parser_use_in_server() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -167,7 +167,7 @@ fn check_structure_rejects_direct_parser_use_in_server() {
 
 #[test]
 fn check_structure_rejects_application_behavior_in_desktop() {
-    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    let workspace = tempfile::tempdir().unwrap();
     write_workspace(
         workspace.path(),
         &[
@@ -180,7 +180,7 @@ fn check_structure_rejects_application_behavior_in_desktop() {
         ],
     );
 
-    let output = xtask(workspace.path()).output().expect("run xtask");
+    let output = xtask(workspace.path()).output().unwrap();
 
     assert_eq!(output.status.code(), Some(3));
     assert!(
@@ -210,11 +210,11 @@ fn write_workspace(root: &Path, packages: &[(&str, &str, &str)]) {
         root.join("Cargo.toml"),
         format!("[workspace]\nresolver = \"3\"\nmembers = [{members}]\n"),
     )
-    .expect("write workspace manifest");
+    .unwrap();
 
     for (directory, name, dependencies) in packages {
         let package = root.join(directory);
-        fs::create_dir_all(package.join("src")).expect("create package source directory");
+        fs::create_dir_all(package.join("src")).unwrap();
         fs::write(
             package.join("Cargo.toml"),
             format!(
@@ -222,7 +222,7 @@ fn write_workspace(root: &Path, packages: &[(&str, &str, &str)]) {
                  {dependencies}"
             ),
         )
-        .expect("write package manifest");
-        fs::write(package.join("src/lib.rs"), "").expect("write package source");
+        .unwrap();
+        fs::write(package.join("src/lib.rs"), "").unwrap();
     }
 }

@@ -109,7 +109,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .unwrap_err();
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(

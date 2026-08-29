@@ -240,9 +240,7 @@ fn commit_response(
                     failed_result,
                     ..
                 } => {
-                    if let Some(failed_result) = failed_result {
-                        completed_results.push(*failed_result);
-                    }
+                    completed_results.extend(failed_result.map(|result| *result));
                     completed_results
                 }
                 _ => Vec::new(),

@@ -149,9 +149,7 @@ impl SampleServerHarness {
         let (shutdown, shutdown_receiver) = oneshot::channel();
         let (failure_sender, failure_receiver) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
-            if let Err(error) = serve_project_catalogue(shutdown_receiver) {
-                drop(failure_sender.send(error.to_string()));
-            }
+            report_project_catalogue_failure(shutdown_receiver, &failure_sender);
         });
         let server = Self {
             data_root,
@@ -175,27 +173,12 @@ impl SampleServerHarness {
         let mut last_error = None;
 
         while Instant::now() < deadline {
-            match failure.try_recv() {
-                Ok(error) => bail!("sample_project project catalogue server failed: {error}"),
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    bail!("sample_project project catalogue server exited before readiness");
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
-            match runtime.block_on(SampleGrpcClient::connect_local()) {
-                Ok(client) => match runtime.block_on(client.list_projects()) {
-                    Ok(projects)
-                        if projects
-                            .iter()
-                            .any(|project| project.title.to_string() == "repo") =>
-                    {
-                        return Ok(());
-                    }
-                    Ok(_) => last_error = Some("fixture project was not returned".to_owned()),
-                    Err(error) => last_error = Some(error.to_string()),
-                },
-                Err(error) => last_error = Some(error.to_string()),
-            }
+            check_project_catalogue_failure(failure)?;
+            let error = match check_project_catalogue_readiness(&runtime) {
+                Ok(()) => return Ok(()),
+                Err(error) => error,
+            };
+            last_error = Some(error.to_string());
             std::thread::sleep(Duration::from_millis(20));
         }
 
@@ -204,6 +187,37 @@ impl SampleServerHarness {
             last_error.as_deref().unwrap_or("no response")
         )
     }
+}
+
+fn report_project_catalogue_failure(
+    shutdown: oneshot::Receiver<()>,
+    failure: &mpsc::SyncSender<String>,
+) {
+    if let Err(error) = serve_project_catalogue(shutdown) {
+        drop(failure.send(error.to_string()));
+    }
+}
+
+fn check_project_catalogue_failure(failure: &mpsc::Receiver<String>) -> Result<()> {
+    match failure.try_recv() {
+        Ok(error) => bail!("sample_project project catalogue server failed: {error}"),
+        Err(mpsc::TryRecvError::Disconnected) => {
+            bail!("sample_project project catalogue server exited before readiness");
+        }
+        Err(mpsc::TryRecvError::Empty) => Ok(()),
+    }
+}
+
+fn check_project_catalogue_readiness(runtime: &tokio::runtime::Runtime) -> Result<()> {
+    let client = runtime.block_on(SampleGrpcClient::connect_local())?;
+    let projects = runtime.block_on(client.list_projects())?;
+    ensure!(
+        projects
+            .iter()
+            .any(|project| project.title.to_string() == "repo"),
+        "fixture project was not returned"
+    );
+    Ok(())
 }
 
 impl Drop for SampleServerHarness {

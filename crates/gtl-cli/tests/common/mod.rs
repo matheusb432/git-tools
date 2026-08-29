@@ -27,40 +27,55 @@ impl ServerHarness {
             }
         }
         let (failure_tx, failure_rx) = std::sync::mpsc::sync_channel(1);
-        std::thread::spawn(move || {
-            let result = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .context("build gtl-server test runtime")
-                .and_then(|runtime| {
-                    runtime
-                        .block_on(gtl_server::run())
-                        .context("run gtl-server for CLI integration test")
-                });
-            if let Err(error) = result {
-                drop(failure_tx.send(error.to_string()));
-            }
-        });
+        std::thread::spawn(move || report_server_failure(&failure_tx));
 
-        let endpoint = data_root.path().join("server").join("endpoint.json");
-        for _ in 0..100 {
-            match failure_rx.try_recv() {
-                Ok(error) => bail!(error),
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    bail!("gtl-server test thread exited before publishing its endpoint");
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            }
-            if endpoint.is_file() {
-                return Ok(Self {
-                    _data_root: data_root,
-                });
-            }
-            std::thread::sleep(Duration::from_millis(20));
+        wait_for_server_endpoint(data_root.path(), &failure_rx)?;
+        Ok(Self {
+            _data_root: data_root,
+        })
+    }
+}
+
+fn report_server_failure(failure: &std::sync::mpsc::SyncSender<String>) {
+    if let Err(error) = run_server() {
+        drop(failure.send(error.to_string()));
+    }
+}
+
+fn run_server() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("build gtl-server test runtime")?;
+    runtime
+        .block_on(gtl_server::run())
+        .context("run gtl-server for CLI integration test")
+}
+
+fn wait_for_server_endpoint(
+    data_root: &Path,
+    failure: &std::sync::mpsc::Receiver<String>,
+) -> Result<()> {
+    let endpoint = data_root.join("server").join("endpoint.json");
+    for _ in 0..100 {
+        check_server_failure(failure)?;
+        if endpoint.is_file() {
+            return Ok(());
         }
-        bail!(
-            "gtl-server did not publish its endpoint at {}",
-            endpoint.display()
-        )
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    bail!(
+        "gtl-server did not publish its endpoint at {}",
+        endpoint.display()
+    )
+}
+
+fn check_server_failure(failure: &std::sync::mpsc::Receiver<String>) -> Result<()> {
+    match failure.try_recv() {
+        Ok(error) => bail!(error),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            bail!("gtl-server test thread exited before publishing its endpoint");
+        }
+        Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
     }
 }

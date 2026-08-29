@@ -475,17 +475,25 @@ mod tests {
         gate_next_write: bool,
     }
 
+    fn wait_for_write_gate(writer: &mut GateWriter) -> io::Result<()> {
+        if !writer.gate_next_write {
+            return Ok(());
+        }
+        writer.gate_next_write = false;
+        writer
+            .write_started_sender
+            .send(())
+            .map_err(|_| io::Error::other("write-start receiver closed"))?;
+        writer
+            .write_release_receiver
+            .recv()
+            .map_err(|_| io::Error::other("write-release sender closed"))?;
+        Ok(())
+    }
+
     impl io::Write for GateWriter {
         fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-            if self.gate_next_write {
-                self.gate_next_write = false;
-                self.write_started_sender
-                    .send(())
-                    .map_err(|_| io::Error::other("write-start receiver closed"))?;
-                self.write_release_receiver
-                    .recv()
-                    .map_err(|_| io::Error::other("write-release sender closed"))?;
-            }
+            wait_for_write_gate(self)?;
             Ok(buffer.len())
         }
 

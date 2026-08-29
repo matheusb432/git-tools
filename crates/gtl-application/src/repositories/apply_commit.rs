@@ -156,7 +156,7 @@ mod tests {
             },
             &git,
         )
-        .expect("a clean tree is an expected no-op");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -182,7 +182,7 @@ mod tests {
             },
             &git,
         )
-        .expect("a rejected add is a closed failure");
+        .unwrap();
 
         assert_eq!(
             result,
@@ -209,7 +209,7 @@ mod tests {
             },
             &git,
         )
-        .expect("a rejected commit is a closed failure");
+        .unwrap();
 
         assert_eq!(result.status, CommitStatus::Failed);
         assert_eq!(result.detail, "git commit failed");
@@ -231,7 +231,7 @@ mod tests {
             },
             &git,
         )
-        .expect("commit succeeds");
+        .unwrap();
 
         assert_eq!(
             result.progress,
@@ -256,7 +256,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("commit transport fails");
+        .unwrap_err();
 
         let ApplyCommitError::Transport {
             progress, source, ..
@@ -278,7 +278,7 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .unwrap_err();
 
         assert_eq!(
             error.to_string(),

@@ -18,6 +18,7 @@ pub struct PinnedRange {
 
 impl PinnedRange {
     /// Returns the exact two-dot range Git computes over as a validated value.
+    #[must_use]
     pub fn to_git_range(&self) -> GitRange {
         GitRange::two_dot(
             &GitRevision::from(&self.base),
@@ -26,11 +27,13 @@ impl PinnedRange {
     }
 
     /// Returns the exact two-dot range Git computes over.
+    #[must_use]
     pub fn git_range(&self) -> String {
         self.to_git_range().to_string()
     }
 
     /// Returns the stable presentation range as a validated value.
+    #[must_use]
     pub fn to_display_range(&self) -> GitRange {
         GitRange::two_dot(
             &self.to_display_base(),
@@ -39,16 +42,19 @@ impl PinnedRange {
     }
 
     /// Returns the stable ten-character presentation of both range endpoints.
+    #[must_use]
     pub fn display_range(&self) -> String {
         self.to_display_range().to_string()
     }
 
     /// Returns the stable presentation of the range base as a validated revision.
+    #[must_use]
     pub fn to_display_base(&self) -> GitRevision {
         GitRevision::abbreviated_commit(&self.base, CommitIdAbbreviation::TenCharacters)
     }
 
     /// Returns the stable ten-character presentation of the range base.
+    #[must_use]
     pub fn display_base(&self) -> String {
         self.to_display_base().to_string()
     }
@@ -66,6 +72,7 @@ pub struct Commit {
 
 impl Commit {
     /// A commit with two or more parents is a merge.
+    #[must_use]
     pub fn is_merge(&self) -> bool {
         self.parents.len() >= 2
     }
@@ -76,11 +83,7 @@ mod tests {
     use super::*;
 
     fn commit_id(digit: char) -> CommitId {
-        digit
-            .to_string()
-            .repeat(40)
-            .try_into()
-            .expect("fixture commit ID should be valid")
+        digit.to_string().repeat(40).try_into().unwrap()
     }
 
     fn commit() -> Commit {
@@ -88,8 +91,7 @@ mod tests {
             id: commit_id('0'),
             subject: String::new(),
             body: String::new(),
-            committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z")
-                .expect("fixture commit timestamp is valid"),
+            committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z").unwrap(),
             parents: Vec::new(),
         }
     }

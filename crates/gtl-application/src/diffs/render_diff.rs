@@ -1,7 +1,3 @@
-//! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
-//! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
-//! message out as [`Note`]s. The server calls [`execute`] for raw requests.
-
 use std::path::PathBuf;
 
 use gtl_models::{
@@ -23,7 +19,6 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a diff artifact for `target`, resolving the repository from `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
@@ -32,23 +27,18 @@ pub struct RenderDiff {
     pub name: Option<String>,
 }
 
-/// The outcome plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiffOk {
     pub outcome: RenderDiffOutcome,
     pub notes: Vec<Note>,
 }
 
-/// What a single render produced: a stored artifact, or a deliberately-skipped empty range.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderDiffOutcome {
-    /// An artifact was created or reused by the store.
     Rendered(PlacedArtifact),
-    /// The range was empty (no commits or changes); nothing was rendered.
     Empty,
 }
 
-/// Everything that can go wrong rendering a diff.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffError {
     #[error(transparent)]
@@ -59,8 +49,6 @@ pub enum RenderDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-// ! Returns the kind and immutable IDs only for pure commit ranges; None for
-// ! worktree (Hash) mode. It follows compute target resolution without assembling a view.
 fn resolved_range(
     source: &impl GitClient,
     top: &RepositoryRoot,
@@ -110,8 +98,7 @@ fn resolved_range(
             (DiffKind::ThreeDot, DiffRanges::merge(base).diff)
         }
         DiffTarget::Unpushed { pinned: None } => {
-            // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
-            // eligible, and the fallback warning is emitted there (once), not here.
+            // The compute path owns the no-upstream fallback and warning.
             let crate::ports::GitEffect::Applied(upstream) = source.upstream(top).ok()? else {
                 return None;
             };
@@ -128,7 +115,6 @@ fn resolved_range(
     })
 }
 
-/// Renders a diff through the diff ports.
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiff,
@@ -150,9 +136,6 @@ pub fn execute(
         .diff_exclusions()
         .for_project_or_default(&top.project_name());
 
-    // ! Fast-path: pure commit ranges are fully determined by resolved commit IDs plus
-    // ! the active rendering settings, so a prior identical artifact can be
-    // ! reused without the expensive assemble — never across a config change.
     if name.is_none()
         && let Some(range) = resolved_range(source, &top, &target)
         && let Some(hit) = store.lookup_by_range(
@@ -186,7 +169,7 @@ pub fn execute(
     }
     if !view.has_diff_content() {
         notes.push(Note::warn(format!(
-            "diff-artifact: {summary} — nothing to show (no commits or changes); skipping"
+            "diff-artifact: {summary}, nothing to show (no commits or changes); skipping"
         )));
         return Ok(RenderDiffOk {
             outcome: RenderDiffOutcome::Empty,
@@ -225,7 +208,6 @@ pub fn execute(
     })
 }
 
-// ! base = text before `..`/`...`; for worktree mode (no `..`) the whole string is the base.
 fn range_base(spec: &GitDiffSpec) -> Option<GitRevision> {
     let base = spec
         .as_arg()
@@ -306,8 +288,7 @@ mod tests {
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             committed_at: Some(
-                gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z")
-                    .expect("fixture commit timestamp is valid"),
+                gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z").unwrap(),
             ),
             ..Default::default()
         };
@@ -321,7 +302,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.outcome,
@@ -331,7 +312,7 @@ mod tests {
         );
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.title, "diff");
         assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
         assert_eq!(
@@ -374,11 +355,11 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
         assert!(artifact.html.contains("noir"));
     }
@@ -403,13 +384,13 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(response.outcome, RenderDiffOutcome::Empty);
         assert_eq!(
             response.notes,
             vec![Note::warn(
-                "diff-artifact: 0 unpushed commit(s) — nothing to show (no commits or changes); skipping"
+                "diff-artifact: 0 unpushed commit(s), nothing to show (no commits or changes); skipping"
             )]
         );
     }
@@ -445,7 +426,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.outcome,
@@ -476,11 +457,8 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        // A hit exists for this range rendered WITHOUT exclusions…
         store.range_hit_insert(range_key("id-a", "id-b"), "/store/unfiltered.html");
 
-        // …but this render runs with an md filter for the repo, so it must
-        // recompute instead of serving the stale unfiltered artifact.
         let request = req(
             "/repo",
             &DiffTarget::Range {
@@ -503,7 +481,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert!(matches!(
             response.outcome,
@@ -511,7 +489,7 @@ mod tests {
         ));
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(
             artifact.meta.excluded_extensions.extensions(),
             ["md"],
@@ -558,7 +536,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert!(matches!(
             response.outcome,
@@ -611,7 +589,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.outcome,
@@ -638,7 +616,6 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        // A range hit exists, but a named run must ignore the fast-path entirely.
         store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
 
         let mut request = req(
@@ -657,7 +634,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert!(matches!(
             response.outcome,
@@ -665,7 +642,7 @@ mod tests {
         ));
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.title, "custom");
     }
 
@@ -690,7 +667,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert!(matches!(response.outcome, RenderDiffOutcome::Rendered(_)));
         assert_eq!(
@@ -724,11 +701,13 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect_err("unknown base errors");
+        .unwrap_err();
 
-        let RenderDiffError::Unexpected(err) = error else {
-            panic!("an unknown revision is an execution error")
-        };
+        let err = match error {
+            RenderDiffError::Unexpected(error) => Some(error),
+            RenderDiffError::InvalidTarget(_) | RenderDiffError::Settings(_) => None,
+        }
+        .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 }

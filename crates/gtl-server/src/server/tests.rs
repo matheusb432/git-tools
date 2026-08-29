@@ -78,7 +78,7 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
     let error = client
         .render_diff(relative_working_directory_diff_request())
         .await
-        .expect_err("relative working directory must fail");
+        .unwrap_err();
 
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
     server.stop().await?;
@@ -98,7 +98,7 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
     let error = client
         .push_project_repositories(PushProjectRepositoriesRequest { dry_run: true })
         .await
-        .expect_err("unsupported settings shape must fail");
+        .unwrap_err();
 
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
     assert_eq!(error.message(), "user settings are invalid");
@@ -120,13 +120,13 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
             repository_path: root.clone(),
         })
         .await
-        .expect_err("a plain directory is not a repository");
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
     let error = client
         .get_recursive_repository_statuses(GetRecursiveRepositoryStatusesRequest { root })
         .await
-        .expect_err("an empty traversal has no repositories");
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::NotFound);
 
     let mut worktree_client =
@@ -136,7 +136,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
             repository_path: directory.path().to_string_lossy().into_owned(),
         })
         .await
-        .expect_err("worktree lookup requires a repository");
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
     server.stop().await?;
@@ -154,7 +154,7 @@ async fn rejects_requests_without_the_capability() -> TestResult {
             service: String::new(),
         })
         .await
-        .expect_err("unauthenticated request must fail");
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
     server.stop().await?;
@@ -173,7 +173,7 @@ async fn viewer_service_accepts_the_native_capability() -> TestResult {
     let error = ViewerServiceClient::new(server.native_channel())
         .get_viewer_shell(GetViewerShellRequest {})
         .await
-        .expect_err("viewer requests require native authentication");
+        .unwrap_err();
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
     server.stop().await?;
@@ -259,10 +259,7 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
     request
         .metadata_mut()
         .insert("x-gtl-private-test", PRIVATE_METADATA_VALUE.parse()?);
-    let error = diff
-        .render_diff(request)
-        .await
-        .expect_err("relative working directory must fail");
+    let error = diff.render_diff(request).await.unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
 
     HealthClient::with_interceptor(server.native_channel(), server.authorization())

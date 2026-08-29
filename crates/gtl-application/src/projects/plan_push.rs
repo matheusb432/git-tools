@@ -25,6 +25,7 @@ pub enum PlanPushOk {
 
 /// Selects the project push mode without performing external actions.
 #[cqrsy::query]
+#[must_use]
 pub fn execute(query: PlanPush) -> PlanPushOk {
     let PlanPush { message, mode } = query;
     match message {

@@ -164,33 +164,32 @@ mod tests {
             list_recent_render_page::ListRecentRenderPage::default(),
             connection,
         )
-        .expect("list succeeds")
+        .unwrap()
         .entries
     }
 
     fn project_sources(connection: &Connection) -> Vec<(String, Option<String>)> {
         connection
             .prepare("SELECT value, updated_at FROM project_sources ORDER BY value")
-            .expect("prepare sources")
+            .unwrap()
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .expect("query sources")
+            .unwrap()
             .collect::<Result<_, _>>()
-            .expect("decode sources")
+            .unwrap()
     }
 
     #[test]
     fn records_a_render_stamped_by_the_clock() {
         let mut connection = store_test();
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
-        record_render::execute(&command("gt · unpushed"), &mut connection, &clock)
-            .expect("record succeeds");
+        record_render::execute(&command("gt · unpushed"), &mut connection, &clock).unwrap();
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(
             renders[0],
             RecentRenderRecord {
-                id: gtl_models::viewer::RenderHistoryId::try_new(1).expect("positive id"),
+                id: gtl_models::viewer::RenderHistoryId::try_new(1).unwrap(),
                 recipe: recipe("/repos/gt"),
                 title: "gt · unpushed".into(),
                 repo_name: crate::utils::project_name("gt"),
@@ -198,7 +197,7 @@ mod tests {
                 rendered_at: gtl_models::timestamps::MachineTimestamp::try_from(
                     "2026-07-07T00:00:00Z",
                 )
-                .expect("fixture render timestamp is valid"),
+                .unwrap(),
             }
         );
     }
@@ -211,13 +210,13 @@ mod tests {
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
-        .expect("record succeeds");
+        .unwrap();
         record_render::execute(
             &command("second"),
             &mut connection,
             &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
-        .expect("record succeeds");
+        .unwrap();
 
         assert_eq!(
             project_sources(&connection),
@@ -237,13 +236,13 @@ mod tests {
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
-        .expect("first record succeeds");
+        .unwrap();
         record_render::execute(
             &repeated,
             &mut connection,
             &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
-        .expect("repeated fingerprint is a successful no-op");
+        .unwrap();
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
@@ -276,8 +275,7 @@ mod tests {
         ];
 
         for command in commands {
-            record_render::execute(&command, &mut connection, &clock)
-                .expect("distinct record succeeds");
+            record_render::execute(&command, &mut connection, &clock).unwrap();
         }
 
         assert_eq!(list_recent(&connection).len(), 5);
@@ -304,7 +302,7 @@ mod tests {
                 &mut connection,
                 &clock,
             )
-            .expect("record succeeds");
+            .unwrap();
         }
         for index in 5..(RECENT_RENDERS_CAP + 5) {
             record_render::execute(
@@ -320,7 +318,7 @@ mod tests {
                 &mut connection,
                 &clock,
             )
-            .expect("record succeeds");
+            .unwrap();
         }
 
         let (render_count, newest_title, oldest_title): (i64, String, String) = connection
@@ -332,11 +330,8 @@ mod tests {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .expect("read retained render bounds");
-        assert_eq!(
-            render_count,
-            i64::try_from(RECENT_RENDERS_CAP).expect("cap fits SQLite integer")
-        );
+            .unwrap();
+        assert_eq!(render_count, i64::try_from(RECENT_RENDERS_CAP).unwrap());
         assert_eq!(newest_title, "render 504");
         assert_eq!(oldest_title, "render 5");
         assert_eq!(

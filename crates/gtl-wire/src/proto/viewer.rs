@@ -272,6 +272,7 @@ fn encode_viewer_feedback(feedback: ViewerFeedback) -> v1::ViewerFeedback {
     }
 }
 
+#[must_use]
 pub fn encode_select_viewer_commit_request(
     request: SelectViewerCommit,
 ) -> v1::SelectViewerCommitRequest {
@@ -282,6 +283,7 @@ pub fn encode_select_viewer_commit_request(
     }
 }
 
+#[must_use]
 pub fn encode_set_viewer_preference_request(
     request: SetViewerPreference,
 ) -> v1::SetViewerPreferenceRequest {
@@ -469,6 +471,7 @@ pub fn encode_get_viewer_history_copy_request(
     })
 }
 
+#[must_use]
 pub fn decode_get_viewer_history_copy_response(
     response: v1::GetViewerHistoryCopyResponse,
 ) -> ViewerHistoryCopyPayload {
@@ -508,6 +511,7 @@ pub fn decode_get_viewer_settings_response(
 }
 
 /// Encodes the complete viewer settings snapshot for a service response.
+#[must_use]
 pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
@@ -538,6 +542,7 @@ pub fn encode_get_viewer_settings_response(
     }
 }
 
+#[must_use]
 pub fn encode_open_viewer_diff_file_request(
     request: OpenViewerDiffFile,
 ) -> v1::OpenViewerDiffFileRequest {
@@ -548,6 +553,7 @@ pub fn encode_open_viewer_diff_file_request(
     }
 }
 
+#[must_use]
 pub fn encode_stream_viewer_rows_request(request: StreamViewerRows) -> v1::StreamViewerRowsRequest {
     v1::StreamViewerRowsRequest {
         identity: Some(encode_viewer_view_identity(request.identity)),
@@ -565,6 +571,7 @@ pub fn decode_stream_viewer_rows_response(
     })
 }
 
+#[must_use]
 pub fn decode_watch_viewer_response(response: v1::WatchViewerResponse) -> ViewerStateChanged {
     ViewerStateChanged {
         version: ViewerVersion::new(response.version),
@@ -806,6 +813,7 @@ pub fn decode_viewer_view_identity(
     })
 }
 
+#[must_use]
 pub fn encode_viewer_view_identity(identity: ViewerViewIdentity) -> v1::ViewerViewIdentity {
     v1::ViewerViewIdentity {
         tab_id: identity.tab_id.into(),
@@ -840,6 +848,7 @@ pub fn decode_viewer_diff_density(density: i32) -> Result<ViewerDiffDensity, Vie
     }
 }
 
+#[must_use]
 pub fn encode_viewer_render_options(options: ViewerRenderOptions) -> v1::ViewerRenderOptions {
     v1::ViewerRenderOptions {
         layout: encode_viewer_diff_layout(options.layout) as i32,
@@ -874,6 +883,7 @@ pub fn decode_viewer_theme(theme: i32) -> Result<ViewerTheme, ViewerCodecError> 
     }
 }
 
+#[must_use]
 pub const fn encode_viewer_theme(theme: ViewerTheme) -> v1::ViewerTheme {
     match theme {
         ViewerTheme::Dark => v1::ViewerTheme::Dark,

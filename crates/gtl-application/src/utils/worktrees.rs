@@ -45,22 +45,19 @@ pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<Worktree>> {
 
     for line in raw.lines() {
         if line.is_empty() {
-            if let Some(worktree) = current.take() {
-                worktrees.push(worktree.finish()?);
-            }
+            finish_current(&mut current, &mut worktrees)?;
             continue;
         }
 
         if let Some(path) = line.strip_prefix("worktree ") {
-            if let Some(worktree) = current.replace(WorktreeBuilder {
+            finish_current(&mut current, &mut worktrees)?;
+            current = Some(WorktreeBuilder {
                 path: path.to_owned(),
                 id: None,
                 kind: None,
                 locked: None,
                 prunable: None,
-            }) {
-                worktrees.push(worktree.finish()?);
-            }
+            });
             continue;
         }
 
@@ -91,4 +88,14 @@ pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<Worktree>> {
     }
 
     Ok(worktrees)
+}
+
+fn finish_current(
+    current: &mut Option<WorktreeBuilder>,
+    worktrees: &mut Vec<Worktree>,
+) -> anyhow::Result<()> {
+    if let Some(worktree) = current.take() {
+        worktrees.push(worktree.finish()?);
+    }
+    Ok(())
 }

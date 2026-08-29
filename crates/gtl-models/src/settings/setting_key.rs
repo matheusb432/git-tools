@@ -21,6 +21,7 @@ pub enum SettingKey {
 
 impl SettingKey {
     /// Returns the stable root key used in the TOML document.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Theme => "theme",
@@ -67,6 +68,7 @@ impl SettingKeyValue {
     }
 
     /// Returns the key selected by this typed mutation.
+    #[must_use]
     pub const fn key(self) -> SettingKey {
         match self {
             Self::Theme(_) => SettingKey::Theme,
@@ -76,6 +78,7 @@ impl SettingKeyValue {
     }
 
     /// Returns the stable TOML token for this typed mutation.
+    #[must_use]
     pub fn value(self) -> String {
         match self {
             Self::Theme(value) => value.to_string(),

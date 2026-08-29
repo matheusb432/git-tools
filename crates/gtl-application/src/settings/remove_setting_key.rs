@@ -64,9 +64,8 @@ mod tests {
     ) -> (crate::settings::UserSettingChange, ViewerVersion) {
         let mut store = FixedUserSettingsEditStore::new(outcome);
         let viewer = ViewerState::new();
-        let response = remove_setting_key::execute(key, &mut store, &viewer)
-            .expect("setting removal succeeds");
-        let version = viewer.version().expect("viewer version remains available");
+        let response = remove_setting_key::execute(key, &mut store, &viewer).unwrap();
+        let version = viewer.version().unwrap();
         (response, version)
     }
 

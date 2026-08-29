@@ -5,8 +5,7 @@ use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
 
 fn file(path: &str) -> FileDiff {
     FileDiff {
-        path: RepositoryRelativePath::try_new(path.into())
-            .expect("fixture repository-relative path"),
+        path: RepositoryRelativePath::try_new(path.into()).unwrap(),
         added: DiffLineCount::default(),
         removed: DiffLineCount::default(),
         lines: Vec::new(),

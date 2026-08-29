@@ -1,6 +1,3 @@
-//! CLI surface, parsed with clap-derive. clap owns argument parsing, `--help`, and
-//! `--version`. Each variant/field doc comment is the single source of truth for its help text.
-
 use std::num::NonZeroU32;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -26,7 +23,7 @@ fn non_empty_message(value: &str) -> Result<String, String> {
     }
 }
 
-/// git-tools — render Git workflow diff artifacts.
+/// Render Git workflow diff artifacts.
 #[derive(Debug, Parser)]
 #[command(
     name = "git-tools",
@@ -42,19 +39,13 @@ pub struct Cli {
 }
 
 impl Cli {
-    /// Parses argv (already stripped of the program name).
-    ///
-    /// # Errors
-    ///
-    /// Returns the [`clap::Error`] for a usage problem, or the help/version request that
-    /// clap models as an error (the caller maps that to a success exit).
+    /// Parses arguments without `argv[0]`.
     pub fn parse_args(args: &[String]) -> Result<Self, clap::Error> {
         let full_argv = std::iter::once(String::from("git-tools")).chain(args.iter().cloned());
         Self::try_parse_from(full_argv)
     }
 }
 
-/// Top-level subcommands; each maps to one [`crate::commands`] entry point.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Diff the current repo (all managed repos with `--all`, nested subrepos with `-r`),
@@ -83,21 +74,18 @@ pub enum Command {
     Server(ServerArgs),
 }
 
-/// Arguments for `server`.
 #[derive(Debug, Args)]
 pub struct ServerArgs {
     #[command(subcommand)]
     pub command: ServerCommand,
 }
 
-/// Nested commands under `server`.
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
     /// Check the authenticated gRPC health endpoint.
     Status,
 }
 
-/// Arguments for the root `diff` command and its nested subcommands.
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct DiffArgs {
@@ -110,7 +98,6 @@ pub struct DiffArgs {
     pub target: DiffTargetArgs,
 }
 
-/// Nested commands under `diff`.
 #[derive(Debug, Subcommand)]
 pub enum DiffSub {
     /// Render a merge diff artifact (three-dot diff) against a base branch.
@@ -119,7 +106,6 @@ pub enum DiffSub {
     Live(LiveArgs),
 }
 
-/// Arguments for `diff merge`.
 #[derive(Debug, Args)]
 pub struct MergeArgs {
     /// Subrepo working tree to render.
@@ -133,8 +119,6 @@ pub struct MergeArgs {
     pub raw: bool,
 }
 
-/// Arguments for `diff live`. No `--raw`: a live view only ever renders through
-/// the app because it has no store-artifact path.
 #[derive(Debug, Args)]
 pub struct LiveArgs {
     /// Repo to save + open a live view for (default: every managed repo with
@@ -143,7 +127,6 @@ pub struct LiveArgs {
     pub path: Option<String>,
 }
 
-/// Arguments for `push`.
 #[derive(Debug, Args)]
 pub struct PushArgs {
     /// Commit message. When present, changes are staged and committed before pushing.
@@ -163,7 +146,6 @@ pub struct PushArgs {
     pub yes: bool,
 }
 
-/// Arguments for `commit`.
 #[derive(Debug, Args)]
 pub struct CommitArgs {
     /// Commit message.
@@ -179,7 +161,6 @@ pub struct CommitArgs {
     pub yes: bool,
 }
 
-/// Arguments for `pull`.
 #[derive(Debug, Args)]
 pub struct PullArgs {
     /// Pull every active project listed by sample_project.
@@ -189,7 +170,6 @@ pub struct PullArgs {
     pub managed: ManagedArgs,
 }
 
-/// Arguments for `tag`.
 #[derive(Debug, Args)]
 pub struct TagArgs {
     #[command(subcommand)]
@@ -202,7 +182,6 @@ pub struct TagArgs {
     pub state: bool,
 }
 
-/// Nested commands under `tag`.
 #[derive(Debug, Subcommand)]
 pub enum TagCommand {
     /// List local tags and each annotated tag's message (first line).
@@ -246,7 +225,6 @@ pub enum TagCommand {
     },
 }
 
-/// `SemVer` component accepted by `tag bump`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum TagBumpLevel {
@@ -255,14 +233,12 @@ pub enum TagBumpLevel {
     Patch,
 }
 
-/// Arguments for `worktree`.
 #[derive(Debug, Args)]
 pub struct WorktreeArgs {
     #[command(subcommand)]
     pub command: WorktreeCommand,
 }
 
-/// Nested commands under `worktree`.
 #[derive(Debug, Subcommand)]
 pub enum WorktreeCommand {
     /// Print the primary worktree path.
@@ -271,7 +247,6 @@ pub enum WorktreeCommand {
     Ls,
 }
 
-/// Target flags for the root `diff` command.
 #[derive(Debug, Args)]
 pub struct DiffTargetArgs {
     #[command(flatten)]
@@ -303,7 +278,6 @@ pub struct DiffTargetArgs {
     pub set_theme: Option<Theme>,
 }
 
-/// Repository selection flags for the root `diff` command.
 #[derive(Debug, Args)]
 pub struct DiffScopeArgs {
     /// Render one tabbed HTML diff for all managed repos with unpushed commits.
@@ -317,7 +291,6 @@ pub struct DiffScopeArgs {
     pub worktrees: bool,
 }
 
-/// Diff artifact color theme persisted to the user config by `diff --set-theme`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum Theme {
@@ -344,7 +317,6 @@ impl From<Theme> for gtl_models::viewer::Theme {
     }
 }
 
-/// Arguments for `status`. Default scope is the current repo; `--all` and `-r` widen it.
 #[derive(Debug, Args)]
 pub struct StatusArgs {
     /// Report every active project listed by sample_project.
@@ -374,7 +346,6 @@ impl From<LsArgs> for StatusArgs {
     }
 }
 
-/// Flags shared by read-only managed-repo status output.
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedReadArgs {
     /// Emit machine-readable JSON instead of human text.
@@ -385,7 +356,6 @@ pub struct ManagedReadArgs {
     pub color: ColorChoice,
 }
 
-/// ANSI color policy for human output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ColorChoice {
     /// Color only when stdout is a terminal.
@@ -396,7 +366,6 @@ pub enum ColorChoice {
     Never,
 }
 
-/// Flags shared by the managed-repo fan-out commands (`push --all`, `pull --all`, `commit --all`).
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedArgs {
     /// Preview actions without performing them.
@@ -408,7 +377,6 @@ pub struct ManagedArgs {
     pub json: bool,
 }
 
-/// A validated diff selection owned by the CLI presentation boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffTarget {
     Unpushed {
@@ -429,7 +397,6 @@ pub enum DiffTarget {
     },
 }
 
-/// A positional diff target could not form a semantic Git revision or range.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiffTargetParseError {
     #[error("Git revision must not be empty")]
@@ -523,9 +490,7 @@ mod tests {
         use clap::CommandFactory as _;
 
         let mut command = Cli::command();
-        let push = command
-            .find_subcommand_mut("push")
-            .expect("push subcommand exists");
+        let push = command.find_subcommand_mut("push").unwrap();
         let help = push.render_long_help().to_string();
 
         assert!(help.contains("excluded_from_push_all = true"));
@@ -536,10 +501,14 @@ mod tests {
     #[test]
     fn parse_args_managed_flags_require_all() {
         for command in ["push", "commit", "pull"] {
-            for flag in ["--dry", "--json"] {
-                assert!(Cli::parse_args(&[command.into(), flag.into()]).is_err());
-                assert!(Cli::parse_args(&[command.into(), "--all".into(), flag.into()]).is_ok());
-            }
+            assert_managed_flags_require_all(command);
+        }
+    }
+
+    fn assert_managed_flags_require_all(command: &str) {
+        for flag in ["--dry", "--json"] {
+            assert!(Cli::parse_args(&[command.into(), flag.into()]).is_err());
+            assert!(Cli::parse_args(&[command.into(), "--all".into(), flag.into()]).is_ok());
         }
     }
 

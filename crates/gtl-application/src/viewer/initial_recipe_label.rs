@@ -2,6 +2,7 @@ use super::recipe_label;
 use crate::recipes::Recipe;
 
 #[cqrsy::query]
+#[must_use]
 pub fn execute(recipe: &Recipe) -> String {
     recipe_label::initial(recipe)
 }
@@ -54,7 +55,7 @@ mod tests {
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Last {
-                        count: NonZeroU32::new(1).expect("non-zero"),
+                        count: NonZeroU32::new(1).unwrap(),
                         pinned: None,
                     },
                 },

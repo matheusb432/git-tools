@@ -62,6 +62,7 @@ pub struct ScrollProtocol {
 }
 
 impl ScrollProtocol {
+    #[must_use]
     pub const fn fixed() -> Self {
         Self {
             distance_css_pixels: DISTANCE_CSS_PIXELS,

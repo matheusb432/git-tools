@@ -20,7 +20,6 @@ pub struct Foot {
     pub cmd: String,
 }
 
-/// The complete diff view consumed by renderers and viewer projections.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub repo_name: ProjectName,
@@ -33,47 +32,41 @@ pub struct View {
     pub cmd: Cmd,
     pub commits_label: String,
     pub foot: Foot,
-    /// `Some` when the config's `diff.exclude` filter hid files from this
-    /// view — every surface must show it so hidden files never read as missing.
+    /// Renderers must disclose hidden files when this is present.
     pub exclusions: Option<AppliedExclusions>,
 }
 
 impl View {
-    /// Returns whether the view contains at least one commit or changed file.
-    ///
-    /// Snapshot artifacts require diff content. Live views may remain open without it so they can
-    /// be refreshed later.
+    #[must_use]
     pub fn has_diff_content(&self) -> bool {
         !self.commits.is_empty() || !self.files.is_empty()
     }
 }
 
-/// Reorders changed files into directory-tree order: at each directory level,
-/// subdirectories come before files, both sorted alphabetically (depth-first).
-/// This is the single source of truth for file order; the sidebar follows it.
 pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
+    files.sort_by(compare_file_tree_order);
+}
+
+fn compare_file_tree_order(a: &FileDiff, b: &FileDiff) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
-    files.sort_by(|a, b| {
-        let a_components: Vec<_> = a.path.components().collect();
-        let b_components: Vec<_> = b.path.components().collect();
-
-        for i in 0..a_components.len().min(b_components.len()) {
-            if a_components[i] == b_components[i] {
-                continue;
-            }
-            // ? a component that is not the last in its path is a directory name
-            let a_is_dir = i < a_components.len() - 1;
-            let b_is_dir = i < b_components.len() - 1;
-            return match (a_is_dir, b_is_dir) {
-                (true, false) => Ordering::Less,
-                (false, true) => Ordering::Greater,
-                _ => a_components[i].cmp(&b_components[i]),
-            };
-        }
-        // ? one path is a prefix of the other: shorter (shallower) comes first
-        a_components.len().cmp(&b_components.len())
-    });
+    let a_components = a.path.components().collect::<Vec<_>>();
+    let b_components = b.path.components().collect::<Vec<_>>();
+    let Some(index) = a_components
+        .iter()
+        .zip(&b_components)
+        .position(|(a, b)| a != b)
+    else {
+        return a_components.len().cmp(&b_components.len());
+    };
+    match (
+        index < a_components.len() - 1,
+        index < b_components.len() - 1,
+    ) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => a_components[index].cmp(&b_components[index]),
+    }
 }
 
 #[cfg(test)]
@@ -84,7 +77,7 @@ mod tests {
     use crate::utils::diffs::{commit, view};
 
     fn repository_relative_path(path: &str) -> RepositoryRelativePath {
-        RepositoryRelativePath::try_new(path.into()).expect("repository-relative path")
+        RepositoryRelativePath::try_new(path.into()).unwrap()
     }
 
     fn file() -> FileDiff {

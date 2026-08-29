@@ -1,5 +1,3 @@
-//! Shared results and preflight policy for project push and pull operations.
-
 use gtl_models::{
     git::{BranchName, GitHead, RemoteName},
     paths::ProjectName,
@@ -8,7 +6,6 @@ use gtl_models::{
 
 use crate::ports::GitClient;
 
-/// One repository's push or pull outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSyncResult {
     pub name: ProjectName,
@@ -17,32 +14,18 @@ pub struct RepoSyncResult {
     pub detail: String,
 }
 
-/// The outcome classification for one repo's push/pull. Replaces the former
-/// stringly-typed status so [`classify_exit`] and every call site are checked
-/// against the closed set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStatus {
-    /// Repo is not present on this machine; nothing was attempted.
     Skip,
-    /// Already in sync with the remote.
     UpToDate,
-    /// New commits were pushed.
     Pushed,
-    /// Commits that a real run would push (dry-run).
     WouldPush,
-    /// Local was fast-forwarded to match the remote.
     Pulled,
-    /// A fast-forward a real run would perform (dry-run).
     WouldPull,
-    /// A non-fatal problem (detached HEAD, no remote, missing branch).
     Warn,
-    /// The operation failed.
     Fail,
 }
 
-/// The aggregate exit classification across every repo's result. Ported from
-/// `push_pull.rs`'s retired `push_pull_exit_code` (`Usage` is dropped — push/pull
-/// never produced it; both `Fail` and `Usage` mapped to the same CLI exit code).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncExit {
     Clean,
@@ -74,9 +57,6 @@ pub(super) fn classify_exit(results: &[RepoSyncResult]) -> SyncExit {
     SyncExit::Clean
 }
 
-/// The shared present/branch/remote checks both `push_one` and `pull_one` run
-/// before their operation-specific logic. `detached_detail` differs between the
-/// two callers ("nothing to push" vs "nothing to pull onto").
 pub(super) enum Preflight {
     Ready { branch: BranchName },
     Done(RepoSyncResult),
@@ -150,13 +130,13 @@ mod tests {
             ..Default::default()
         };
         let outcome = preflight(&remote.git_client(), &repo(), "detached");
-        match outcome {
-            Preflight::Done(r) => {
-                assert_eq!(r.status, SyncStatus::Skip);
-                assert_eq!(r.detail, "not present on this machine");
-            }
-            Preflight::Ready { .. } => panic!("expected Done"),
+        let result = match outcome {
+            Preflight::Done(result) => Some(result),
+            Preflight::Ready { .. } => None,
         }
+        .unwrap();
+        assert_eq!(result.status, SyncStatus::Skip);
+        assert_eq!(result.detail, "not present on this machine");
     }
 
     #[tokio::test]
@@ -171,13 +151,13 @@ mod tests {
             &repo(),
             "detached HEAD - nothing to push",
         );
-        match outcome {
-            Preflight::Done(r) => {
-                assert_eq!(r.status, SyncStatus::Warn);
-                assert_eq!(r.detail, "detached HEAD - nothing to push");
-            }
-            Preflight::Ready { .. } => panic!("expected Done"),
+        let result = match outcome {
+            Preflight::Done(result) => Some(result),
+            Preflight::Ready { .. } => None,
         }
+        .unwrap();
+        assert_eq!(result.status, SyncStatus::Warn);
+        assert_eq!(result.detail, "detached HEAD - nothing to push");
     }
 
     #[tokio::test]
@@ -189,13 +169,13 @@ mod tests {
             ..Default::default()
         };
         let outcome = preflight(&remote.git_client(), &repo(), "detached");
-        match outcome {
-            Preflight::Done(r) => {
-                assert_eq!(r.status, SyncStatus::Warn);
-                assert_eq!(r.detail, "no 'origin' remote");
-            }
-            Preflight::Ready { .. } => panic!("expected Done"),
+        let result = match outcome {
+            Preflight::Done(result) => Some(result),
+            Preflight::Ready { .. } => None,
         }
+        .unwrap();
+        assert_eq!(result.status, SyncStatus::Warn);
+        assert_eq!(result.detail, "no 'origin' remote");
     }
 
     #[tokio::test]
@@ -207,9 +187,11 @@ mod tests {
             ..Default::default()
         };
         let outcome = preflight(&remote.git_client(), &repo(), "detached");
-        match outcome {
-            Preflight::Ready { branch } => assert_eq!(branch.as_ref(), "main"),
-            Preflight::Done(r) => panic!("expected Ready, got {r:?}"),
+        let branch = match outcome {
+            Preflight::Ready { branch } => Some(branch),
+            Preflight::Done(_) => None,
         }
+        .unwrap();
+        assert_eq!(branch.as_ref(), "main");
     }
 }

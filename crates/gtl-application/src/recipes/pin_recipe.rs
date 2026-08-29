@@ -75,7 +75,7 @@ mod tests {
             },
             &ScriptedGitClient::new(outputs),
         )
-        .expect("recipe is built")
+        .unwrap()
     }
 
     #[test]
@@ -281,7 +281,7 @@ mod tests {
             },
             &git,
         )
-        .expect("pin failure is an optional optimization");
+        .unwrap();
 
         assert_eq!(
             recipe.op,

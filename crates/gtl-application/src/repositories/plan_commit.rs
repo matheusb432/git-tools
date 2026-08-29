@@ -1,5 +1,3 @@
-//! Plans a local-only commit without changing Git state.
-
 use std::path::Path;
 
 use gtl_models::{
@@ -10,7 +8,6 @@ use gtl_models::{
 
 use crate::ports::{GitClient, GitEffect};
 
-/// Describes the current repository selected for a local-only commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitTarget {
     pub name: ProjectName,
@@ -19,18 +16,15 @@ pub struct CommitTarget {
     pub pending: PendingChanges,
 }
 
-/// Represents either a refused commit or a target ready for confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanCommitOk {
     Refused(String),
     Ready(CommitTarget),
 }
 
-/// Reports an unexpected Git transport failure while planning a local commit.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlanCommitError {
-    /// Git could not be started or its output could not be collected.
     #[error("{command}: {source}")]
     Transport {
         command: String,
@@ -39,11 +33,6 @@ pub enum PlanCommitError {
     },
 }
 
-/// Builds a read-only local commit plan from the repository's local Git state.
-///
-/// # Errors
-///
-/// Returns [`PlanCommitError`] when Git transport fails.
 #[cqrsy::query]
 pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
     let Some(top) = git
@@ -60,7 +49,7 @@ pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanCommitOk, P
         GitHead::Branch(branch) => branch,
         GitHead::Detached => {
             return Ok(PlanCommitOk::Refused(
-                "detached HEAD — checkout a branch first".into(),
+                "detached HEAD, checkout a branch first".into(),
             ));
         }
     };
@@ -111,7 +100,7 @@ mod tests {
             ScriptedGitClient::applied(" M src/lib.rs\n"),
         ]);
 
-        let plan = plan_commit::execute(Path::new("."), &git).expect("commit plan is built");
+        let plan = plan_commit::execute(Path::new("."), &git).unwrap();
 
         assert_eq!(
             plan,
@@ -135,8 +124,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_commit::execute(Path::new("."), &git)
-            .expect_err("transport failure must remain an error");
+        let error = plan_commit::execute(Path::new("."), &git).unwrap_err();
 
         assert_eq!(
             error.to_string(),

@@ -43,16 +43,20 @@ fn rust_diff_fixture() -> Vec<String> {
         ));
 
         for source_index in hunk_start..hunk_start + HUNK_SOURCE_LINE_COUNT {
-            if source_index % REPLACEMENT_INTERVAL == 0 {
-                lines.push(format!("-{}", rust_source_line(source_index, false)));
-                lines.push(format!("+{}", rust_source_line(source_index, true)));
-            } else {
-                lines.push(format!(" {}", rust_source_line(source_index, false)));
-            }
+            push_rust_diff_line(&mut lines, source_index);
         }
     }
 
     lines
+}
+
+fn push_rust_diff_line(lines: &mut Vec<String>, source_index: usize) {
+    if source_index.is_multiple_of(REPLACEMENT_INTERVAL) {
+        lines.push(format!("-{}", rust_source_line(source_index, false)));
+        lines.push(format!("+{}", rust_source_line(source_index, true)));
+    } else {
+        lines.push(format!(" {}", rust_source_line(source_index, false)));
+    }
 }
 
 fn rust_source_line(source_index: usize, replacement: bool) -> String {

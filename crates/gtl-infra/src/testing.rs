@@ -6,7 +6,7 @@ pub(crate) fn commit_id(seed: &str) -> CommitId {
         .take(40)
         .collect::<String>()
         .try_into()
-        .expect("fixture commit ID is valid")
+        .unwrap()
 }
 
 pub(crate) fn pinned_range(base: &str, head: &str) -> PinnedRange {

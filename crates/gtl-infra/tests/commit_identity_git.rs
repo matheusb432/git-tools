@@ -18,7 +18,7 @@ use gtl_models::{
 };
 
 fn repository_root(path: &Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
 fn git(repo_path: &Path, args: &[&str]) -> String {
@@ -27,16 +27,13 @@ fn git(repo_path: &Path, args: &[&str]) -> String {
         .arg(repo_path)
         .args(args)
         .output()
-        .expect("git starts");
+        .unwrap();
     assert!(
         output.status.success(),
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout)
-        .expect("git output is UTF-8")
-        .trim()
-        .to_string()
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
 fn init_dirty_repo(repo_path: &Path) {
@@ -74,18 +71,19 @@ fn real_git_apply_commit_ignores_post_commit_stderr() {
             target: CommitTarget {
                 name: ProjectName::try_from("apply").unwrap(),
                 top: repository_root(apply_repo.path()),
-                branch: BranchName::try_new("main").expect("fixture branch is non-empty"),
+                branch: BranchName::try_new("main").unwrap(),
                 pending: PendingChanges::default(),
             },
             message: "apply change".into(),
         },
         &HybridGitClient,
     )
-    .expect("current-repository commit succeeds through real Git");
+    .unwrap();
     let apply_identity = match applied.progress {
-        CommitProgress::Created { id } => id,
-        progress => panic!("expected a created commit, got {progress:?}"),
-    };
+        CommitProgress::Created { id } => Some(id),
+        _ => None,
+    }
+    .unwrap();
     assert_eq!(
         apply_identity.as_ref(),
         git(apply_repo.path(), &["rev-parse", "HEAD"])
@@ -98,11 +96,11 @@ fn real_git_resolves_an_annotated_tag_to_its_commit_id() {
     init_dirty_repo(repo.path());
     git(repo.path(), &["tag", "-am", "release", "v1.0.0"]);
 
-    let revision = GitRevision::try_new("v1.0.0").expect("fixture revision is non-empty");
+    let revision = GitRevision::try_new("v1.0.0").unwrap();
     let repo_root = repository_root(repo.path());
     let id = HybridGitClient
         .resolve_commit_id(&repo_root, &revision)
-        .expect("annotated tag resolves to its commit");
+        .unwrap();
 
     assert_eq!(id.as_ref(), git(repo.path(), &["rev-parse", "HEAD"]));
     assert_ne!(id.as_ref(), git(repo.path(), &["rev-parse", "v1.0.0"]));

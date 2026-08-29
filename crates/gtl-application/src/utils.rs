@@ -1,5 +1,3 @@
-//! Test utilities for application operations and their adapters.
-
 mod tags;
 
 #[cfg(test)]
@@ -20,57 +18,43 @@ use std::{
 
 #[cfg(test)]
 use gtl_models::diffs::PinnedRange;
+#[cfg(test)]
+use gtl_models::paths::ProjectName;
 use gtl_models::{
     diffs::{Commit, CommitId, CommitIdError, DiffExclusions},
     git::{
         AheadBehind, BranchName, CommitCount, GitEffectMode, GitHead, GitObjectId, GitRange,
         GitRefName, GitRevision, RemoteName, RemoteUrl, TagName,
     },
-    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
+    paths::{AbsoluteFilePath, RepositoryRelativePath, RepositoryRoot},
     projects::ProjectRepository,
     settings::{PushAllExclusions, UserSettings},
     timestamps::MachineTimestamp,
     viewer::{RenderOptions, Theme},
 };
 
-#[allow(clippy::expect_used)]
-/// Constructs a repository root for test setup.
-///
-/// # Panics
-///
-/// Panics when `path` is not absolute.
-pub fn repository_root(path: &str) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.into()).expect("fixture repository root is absolute")
+#[cfg(test)]
+#[must_use]
+pub(crate) fn repository_root(path: &str) -> RepositoryRoot {
+    RepositoryRoot::try_new(path.into()).unwrap()
 }
 
-#[allow(clippy::expect_used)]
-/// Constructs a project name for test setup.
-///
-/// # Panics
-///
-/// Panics when `name` is empty.
-pub fn project_name(name: &str) -> ProjectName {
-    ProjectName::try_new(name.to_owned()).expect("fixture project name is non-empty")
+#[cfg(test)]
+#[must_use]
+pub(crate) fn project_name(name: &str) -> ProjectName {
+    ProjectName::try_new(name.to_owned()).unwrap()
 }
 
-#[allow(clippy::expect_used)]
-/// Constructs a repository-relative path for test setup.
-///
-/// # Panics
-///
-/// Panics when `path` is empty, absolute, traversing, or not normalized.
-pub fn repository_relative_path(path: &str) -> RepositoryRelativePath {
-    RepositoryRelativePath::try_new(path.into()).expect("fixture repository-relative path is valid")
+#[cfg(test)]
+#[must_use]
+pub(crate) fn repository_relative_path(path: &str) -> RepositoryRelativePath {
+    RepositoryRelativePath::try_new(path.into()).unwrap()
 }
 
-#[allow(clippy::expect_used)]
-/// Constructs an absolute file path for test setup.
-///
-/// # Panics
-///
-/// Panics when `path` is not absolute.
-pub fn absolute_file_path(path: &str) -> AbsoluteFilePath {
-    AbsoluteFilePath::try_new(path.into()).expect("fixture file path is absolute")
+#[cfg(test)]
+#[must_use]
+pub(crate) fn absolute_file_path(path: &str) -> AbsoluteFilePath {
+    AbsoluteFilePath::try_new(path.into()).unwrap()
 }
 
 use crate::ports::{
@@ -107,14 +91,9 @@ fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
     value.try_into()
 }
 
-#[allow(clippy::expect_used)]
-fn fallback_commit_id() -> CommitId {
-    try_commit_id_fixture("c").expect("fixture commit ID is valid")
-}
-
 #[cfg(test)]
 pub(crate) fn commit_id_fixture(raw: &str) -> CommitId {
-    try_commit_id_fixture(raw).expect("generated fixture commit ID is valid")
+    try_commit_id_fixture(raw).unwrap()
 }
 
 #[cfg(test)]
@@ -127,27 +106,27 @@ pub(crate) fn pinned_range(base: &str, head: &str) -> PinnedRange {
 
 #[cfg(test)]
 pub(crate) fn git_revision(raw: &str) -> GitRevision {
-    GitRevision::try_new(raw.to_owned()).expect("fixture Git revision is non-empty")
+    GitRevision::try_new(raw.to_owned()).unwrap()
 }
 
 #[cfg(test)]
 pub(crate) fn git_range(raw: &str) -> GitRange {
-    GitRange::try_new(raw.to_owned()).expect("fixture Git range is non-empty")
+    GitRange::try_new(raw.to_owned()).unwrap()
 }
 
 #[cfg(test)]
 pub(crate) fn branch_name(raw: &str) -> BranchName {
-    BranchName::try_new(raw.to_owned()).expect("fixture branch name is non-empty")
+    BranchName::try_new(raw.to_owned()).unwrap()
 }
 
 #[cfg(test)]
 pub(crate) fn remote_name(raw: &str) -> RemoteName {
-    RemoteName::try_new(raw.to_owned()).expect("fixture remote name is non-empty")
+    RemoteName::try_new(raw.to_owned()).unwrap()
 }
 
 #[cfg(test)]
 pub(crate) fn tag_name(raw: &str) -> TagName {
-    TagName::try_new(raw.to_owned()).expect("fixture tag name is non-empty")
+    TagName::try_new(raw.to_owned()).unwrap()
 }
 
 #[cfg(test)]
@@ -165,7 +144,7 @@ fn git_head_fixture(raw: &str) -> anyhow::Result<GitHead> {
 
 #[cfg(test)]
 pub(crate) fn git_head(raw: &str) -> GitHead {
-    git_head_fixture(raw).expect("fixture Git head is valid")
+    git_head_fixture(raw).unwrap()
 }
 
 #[cfg(test)]
@@ -174,8 +153,7 @@ pub(crate) fn commit(id: &str, subject: impl Into<String>) -> Commit {
         id: commit_id_fixture(id),
         subject: subject.into(),
         body: String::new(),
-        committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z")
-            .expect("fixture commit timestamp is valid"),
+        committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z").unwrap(),
         parents: Vec::new(),
     }
 }
@@ -224,19 +202,19 @@ impl GitResponse {
     }
 }
 
-/// Fixed effective settings for application operation tests.
 #[derive(Debug, Clone)]
 pub struct FixedUserSettingsStore {
     settings: UserSettings,
 }
 
 impl FixedUserSettingsStore {
-    /// Creates a store that returns `settings` from every load.
+    #[must_use]
     pub const fn new(settings: UserSettings) -> Self {
         Self { settings }
     }
 }
 
+#[must_use]
 pub fn default_user_settings() -> UserSettings {
     UserSettings::new(
         None,
@@ -273,14 +251,12 @@ impl UserSettingsStore for FixedUserSettingsStore {
     }
 }
 
-/// User settings snapshots returned in insertion order.
 #[derive(Debug, Clone)]
 pub struct SequenceUserSettingsStore {
     snapshots: Arc<Mutex<VecDeque<UserSettings>>>,
 }
 
 impl SequenceUserSettingsStore {
-    /// Creates a store that returns each snapshot in insertion order.
     pub fn new(snapshots: impl IntoIterator<Item = UserSettings>) -> Self {
         Self {
             snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
@@ -313,7 +289,6 @@ impl UserSettingsStore for SequenceUserSettingsStore {
     }
 }
 
-/// Scripted `GitClient`: every field is what the corresponding method returns.
 #[derive(Debug, Default, Clone)]
 pub struct FakeGitClient {
     pub top_level: Option<String>,
@@ -327,15 +302,10 @@ pub struct FakeGitClient {
     pub committed_at: Option<MachineTimestamp>,
     pub repository_state: Option<GitRepositoryState>,
     pub repository_probe_error: Option<String>,
-    /// Per-repo overrides for `commits`/`diff_output`, keyed by the `top` path
-    /// `build_view` is called with -- lets one scripted source produce different
-    /// results (e.g. one repo empty, one not) across a single `render_batch` call,
-    /// which otherwise can only script one outcome for every repo.
     pub per_repo: HashMap<String, RepoOverride>,
     pub project: Option<ProjectGitScript>,
 }
 
-/// See [`FakeGitClient::per_repo`].
 #[derive(Debug, Default, Clone)]
 pub struct RepoOverride {
     pub commits: Vec<Commit>,
@@ -343,12 +313,21 @@ pub struct RepoOverride {
 }
 
 impl FakeGitClient {
-    /// The scripted primary diff for `repo_path`: its per-repo override, else the shared one.
     fn scripted_diff(&self, repo_path: &RepositoryRoot) -> String {
         self.per_repo
             .get(&repo_path.to_string_lossy().into_owned())
             .map_or_else(|| self.diff_output.clone(), |o| o.diff_output.clone())
     }
+}
+
+fn diff_paths(raw: &str) -> Vec<String> {
+    raw.lines()
+        .filter_map(|line| {
+            line.strip_prefix("diff --git a/")
+                .and_then(|rest| rest.split_once(" b/"))
+                .map(|(_, path)| path.to_string())
+        })
+        .collect()
 }
 
 impl GitClient for FakeGitClient {
@@ -493,7 +472,7 @@ impl GitClient for FakeGitClient {
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
         Ok(GitEffect::Applied(GitCommitReceipt {
             detail: "committed".into(),
-            id: fallback_commit_id(),
+            id: try_commit_id_fixture("c")?,
         }))
     }
     fn fast_forward(
@@ -583,19 +562,8 @@ impl GitClient for FakeGitClient {
             .map_or_else(|| self.commits.clone(), |o| o.commits.clone()))
     }
     fn diff(&self, repo_path: &RepositoryRoot, request: &GitDiffRequest) -> anyhow::Result<String> {
-        // The exclusion pass asks for paths only; mirror git by listing the
-        // scripted diff's file paths, one per line.
         if request.format == GitDiffFormat::NamesOnly {
-            let paths: Vec<String> = self
-                .scripted_diff(repo_path)
-                .lines()
-                .filter_map(|line| {
-                    line.strip_prefix("diff --git a/")
-                        .and_then(|rest| rest.split_once(" b/"))
-                        .map(|(_, path)| path.to_string())
-                })
-                .collect();
-            return Ok(paths.join("\n"));
+            return Ok(diff_paths(&self.scripted_diff(repo_path)).join("\n"));
         }
         if request.format == GitDiffFormat::FullContext {
             return Ok(self.full_diff_output.clone());
@@ -625,29 +593,23 @@ impl GitClient for FakeGitClient {
     }
 }
 
-/// In-memory artifact store with deterministic paths and scripted range hits.
-/// Scripted range-lookup hits keyed by range, layout, density, theme, and exclusions.
 pub type RangeHits = Arc<Mutex<HashMap<ArtifactRangeKey, AbsoluteFilePath>>>;
 
-/// Artifact content observable through [`InMemoryArtifactStore`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredArtifact {
-    /// Metadata stored alongside the rendered document.
     pub meta: ArtifactMeta,
-    /// Rendered document content.
     pub html: String,
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryArtifactStore {
-    /// Persisted artifacts keyed by their deterministic path.
     pub artifacts: Arc<Mutex<HashMap<PathBuf, StoredArtifact>>>,
     pub range_hits: RangeHits,
     pub history: Vec<HistoryRecord>,
 }
 
 impl InMemoryArtifactStore {
-    /// Returns the persisted artifact at `path`.
+    #[must_use]
     pub fn artifact(&self, path: &Path) -> Option<StoredArtifact> {
         self.artifacts.lock().ok()?.get(path).cloned()
     }
@@ -690,7 +652,6 @@ impl ArtifactStore for InMemoryArtifactStore {
     }
 }
 
-/// Renderer returning a canned document (content-independent).
 #[derive(Debug, Default, Clone)]
 pub struct StubRenderer;
 
@@ -738,19 +699,18 @@ impl HtmlRenderer for StubRenderer {
     }
 }
 
-/// Clock pinned to a fixed instant.
 #[derive(Debug, Clone)]
 pub struct FixedClock(MachineTimestamp);
 
 impl FixedClock {
-    /// Creates a fixed clock from a validated machine timestamp.
+    #[must_use]
     pub const fn new(timestamp: MachineTimestamp) -> Self {
         Self(timestamp)
     }
 
     #[cfg(test)]
     pub(crate) fn from_raw(raw: &str) -> Self {
-        Self(raw.try_into().expect("fixture clock timestamp is valid"))
+        Self(raw.try_into().unwrap())
     }
 }
 
@@ -760,7 +720,6 @@ impl Clock for FixedClock {
     }
 }
 
-/// Scripted process result used to configure project Git client behavior.
 #[derive(Debug, Default, Clone)]
 pub struct SyncOutput {
     pub success: bool,
@@ -785,24 +744,24 @@ impl SyncOutput {
     }
 
     fn push_effect(&self) -> GitEffect<GitPushReceipt> {
-        if self.success {
-            let detail = last_non_empty_line(&self.combined)
-                .unwrap_or("up to date")
-                .to_string();
-            GitEffect::Applied(if self.combined.contains("Everything up-to-date") {
-                GitPushReceipt::UpToDate { detail }
-            } else {
-                GitPushReceipt::Updated { detail }
-            })
-        } else {
-            GitEffect::Rejected(self.combined.trim().to_string())
+        if !self.success {
+            return GitEffect::Rejected(self.combined.trim().to_string());
         }
+        GitEffect::Applied(push_receipt(&self.combined, "up to date"))
     }
 }
 
-/// Managed Git behavior layered onto [`FakeGitClient`].
-/// Single-scripted (no per-repo map) — every existing push/pull test scripts one
-/// repo's worth of git responses, matching `push_pull.rs`'s existing test style.
+fn push_receipt(output: &str, detail_fallback: &str) -> GitPushReceipt {
+    let detail = last_non_empty_line(output)
+        .unwrap_or(detail_fallback)
+        .to_string();
+    if output.contains("Everything up-to-date") {
+        GitPushReceipt::UpToDate { detail }
+    } else {
+        GitPushReceipt::Updated { detail }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct ProjectGitScript {
     pub present: bool,
@@ -818,6 +777,7 @@ pub struct ProjectGitScript {
 }
 
 impl ProjectGitScript {
+    #[must_use]
     pub fn git_client(self) -> FakeGitClient {
         FakeGitClient {
             project: Some(self),
@@ -826,7 +786,6 @@ impl ProjectGitScript {
     }
 }
 
-/// Scripted project client: returns `repos` verbatim or fails with `error`'s text.
 #[derive(Debug, Default, Clone)]
 pub struct FakeProjectClient {
     pub repos: Vec<ProjectRepository>,
@@ -849,17 +808,16 @@ impl ProjectClient for FakeProjectClient {
     }
 }
 
-/// Scripted Git client that returns queued adapter responses or failures.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptedGitClient {
     pub results: Arc<Mutex<VecDeque<GitResponse>>>,
     transport_errors: Arc<Mutex<BTreeMap<usize, anyhow::Error>>>,
     invocations: Arc<AtomicUsize>,
-    /// Repos `repo_present` answers `false` for; everything else is present.
     pub absent_repos: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 impl ScriptedGitClient {
+    #[must_use]
     pub fn new(results: Vec<GitResponse>) -> Self {
         Self {
             results: Arc::new(Mutex::new(results.into())),
@@ -869,17 +827,13 @@ impl ScriptedGitClient {
         }
     }
 
-    /// Scripts successful Git outputs and transport errors in invocation order.
+    /// Scripts outputs and transport failures by invocation order.
+    #[must_use]
     pub fn with_results(results: Vec<anyhow::Result<GitResponse>>) -> Self {
         let mut outputs = Vec::new();
         let mut transport_errors = BTreeMap::new();
         for (index, result) in results.into_iter().enumerate() {
-            match result {
-                Ok(output) => outputs.push(output),
-                Err(error) => {
-                    transport_errors.insert(index, error);
-                }
-            }
+            record_script_result(&mut outputs, &mut transport_errors, index, result);
         }
         Self {
             results: Arc::new(Mutex::new(outputs.into())),
@@ -889,14 +843,28 @@ impl ScriptedGitClient {
         }
     }
 
-    /// An effect accepted by the Git adapter, with optional semantic detail.
+    #[must_use]
     pub fn applied(detail: &str) -> GitResponse {
         GitResponse::Applied(detail.into())
     }
 
-    /// An effect rejected by Git, with its semantic diagnostic.
+    #[must_use]
     pub fn rejected(detail: &str) -> GitResponse {
         GitResponse::Rejected(detail.into())
+    }
+}
+
+fn record_script_result(
+    outputs: &mut Vec<GitResponse>,
+    transport_errors: &mut BTreeMap<usize, anyhow::Error>,
+    index: usize,
+    result: anyhow::Result<GitResponse>,
+) {
+    match result {
+        Ok(output) => outputs.push(output),
+        Err(error) => {
+            transport_errors.insert(index, error);
+        }
     }
 }
 
@@ -1036,34 +1004,7 @@ impl GitClient for ScriptedGitClient {
             self,
             repo_path,
             &["status", "--porcelain"],
-            |output| -> anyhow::Result<GitWorkingTree> {
-                let mut tree = GitWorkingTree::default();
-                for line in output.lines().filter(|line| !line.is_empty()) {
-                    let bytes = line.as_bytes();
-                    if bytes.len() < 2 {
-                        continue;
-                    }
-                    tree.files
-                        .push(gtl_models::repository::working_tree::CommitFile {
-                            status: line.get(0..2).unwrap_or("").trim().to_string(),
-                            path: RepositoryRelativePath::try_new(
-                                line.get(3..).unwrap_or("").into(),
-                            )?,
-                        });
-                    let (index, worktree) = (bytes[0], bytes[1]);
-                    if index == b'?' && worktree == b'?' {
-                        tree.unprepared.increment();
-                    } else {
-                        if index != b' ' {
-                            tree.staged.increment();
-                        }
-                        if worktree != b' ' {
-                            tree.unprepared.increment();
-                        }
-                    }
-                }
-                Ok(tree)
-            },
+            parse_working_tree,
         )? {
             GitEffect::Applied(tree) => Ok(GitEffect::Applied(tree?)),
             GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
@@ -1117,14 +1058,17 @@ impl GitClient for ScriptedGitClient {
         repo_path: &RepositoryRoot,
         message: &str,
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
-        scripted_effect(self, repo_path, &["commit", "-m", message], |output| {
-            GitCommitReceipt {
+        match scripted_effect(self, repo_path, &["commit", "-m", message], |output| {
+            Ok::<_, CommitIdError>(GitCommitReceipt {
                 detail: last_non_empty_line(output)
                     .unwrap_or("committed")
                     .to_string(),
-                id: commit_identity(output).unwrap_or_else(fallback_commit_id),
-            }
-        })
+                id: commit_identity(output).map_or_else(|| try_commit_id_fixture("c"), Ok)?,
+            })
+        })? {
+            GitEffect::Applied(receipt) => Ok(GitEffect::Applied(receipt?)),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn fast_forward(
         &self,
@@ -1150,12 +1094,7 @@ impl GitClient for ScriptedGitClient {
             args.push("--dry-run");
         }
         scripted_effect(self, repo_path, &args, |output| {
-            let detail = last_non_empty_line(output).unwrap_or("pushed").to_string();
-            if output.contains("Everything up-to-date") {
-                GitPushReceipt::UpToDate { detail }
-            } else {
-                GitPushReceipt::Updated { detail }
-            }
+            push_receipt(output, "pushed")
         })
     }
     fn fetch(
@@ -1335,6 +1274,38 @@ fn commit_identity(output: &str) -> Option<CommitId> {
     })
 }
 
+fn parse_working_tree(output: &str) -> anyhow::Result<GitWorkingTree> {
+    let mut tree = GitWorkingTree::default();
+    for line in output.lines().filter(|line| !line.is_empty()) {
+        parse_working_tree_line(&mut tree, line)?;
+    }
+    Ok(tree)
+}
+
+fn parse_working_tree_line(tree: &mut GitWorkingTree, line: &str) -> anyhow::Result<()> {
+    let bytes = line.as_bytes();
+    if bytes.len() < 2 {
+        return Ok(());
+    }
+    tree.files
+        .push(gtl_models::repository::working_tree::CommitFile {
+            status: line.get(0..2).unwrap_or("").trim().to_string(),
+            path: RepositoryRelativePath::try_new(line.get(3..).unwrap_or("").into())?,
+        });
+    let (index, worktree) = (bytes[0], bytes[1]);
+    if index == b'?' && worktree == b'?' {
+        tree.unprepared.increment();
+        return Ok(());
+    }
+    if index != b' ' {
+        tree.staged.increment();
+    }
+    if worktree != b' ' {
+        tree.unprepared.increment();
+    }
+    Ok(())
+}
+
 fn strip_ansi_csi(input: &str) -> String {
     let mut output = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
@@ -1343,11 +1314,9 @@ fn strip_ansi_csi(input: &str) -> String {
             output.push(character);
             continue;
         }
-        for control_character in chars.by_ref() {
-            if ('@'..='~').contains(&control_character) {
-                break;
-            }
-        }
+        let _ = chars
+            .by_ref()
+            .find(|control_character| ('@'..='~').contains(control_character));
     }
     output
 }
@@ -1390,12 +1359,11 @@ fn scripted_effect<T>(
 
 #[cfg(test)]
 pub(crate) fn make_repository(directory: &Path) {
-    std::fs::create_dir_all(directory.join(".git")).expect("create repository fixture");
+    std::fs::create_dir_all(directory.join(".git")).unwrap();
 }
 
 #[cfg(test)]
 pub(crate) fn make_linked_worktree(directory: &Path, git_directory: &str) {
-    std::fs::create_dir_all(directory).expect("create linked worktree fixture");
-    std::fs::write(directory.join(".git"), format!("gitdir: {git_directory}\n"))
-        .expect("write linked worktree fixture");
+    std::fs::create_dir_all(directory).unwrap();
+    std::fs::write(directory.join(".git"), format!("gitdir: {git_directory}\n")).unwrap();
 }

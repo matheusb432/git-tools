@@ -168,7 +168,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.placement.path().as_path(),
@@ -184,7 +184,7 @@ mod tests {
         );
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.repo_name, crate::utils::project_name("all"));
         assert_eq!(artifact.meta.identity, ArtifactDiffIdentity::WorkTree);
     }
@@ -274,10 +274,10 @@ diff --git a/notes.md b/notes.md\n\
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("first render succeeds");
+        .unwrap();
         let first_html = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .expect("first artifact persisted")
+            .unwrap()
             .html;
 
         render_project_diff::execute(
@@ -291,10 +291,10 @@ diff --git a/notes.md b/notes.md\n\
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("second render succeeds");
+        .unwrap();
         let second_html = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .expect("second artifact persisted")
+            .unwrap()
             .html;
 
         assert!(

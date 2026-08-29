@@ -502,7 +502,7 @@ mod tests {
             [140, 150, 145],
         );
 
-        let comparison = compare_reports(&baseline, &current).expect("reports are compatible");
+        let comparison = compare_reports(&baseline, &current).unwrap();
 
         assert_close(
             comparison.readiness_wall_time_milliseconds.baseline,
@@ -559,7 +559,7 @@ mod tests {
             [1, 1, 1],
         );
 
-        let comparison = compare_reports(&baseline, &current).expect("reports are compatible");
+        let comparison = compare_reports(&baseline, &current).unwrap();
 
         assert_eq!(
             comparison
@@ -710,7 +710,7 @@ mod tests {
             fixture_manifest: toml::from_str(include_str!(
                 "../../fixtures/desktop-scroll/manifest.toml"
             ))
-            .expect("fixture manifest decodes"),
+            .unwrap(),
             protocol: DesktopScrollBenchmarkProtocol {
                 independent_launches: 3,
                 outer_window_width_pixels: 1_200,

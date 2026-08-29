@@ -20,7 +20,9 @@ pub async fn capture(driver: &WebDriver, name: &str, passed: bool) -> Result<Opt
         .context("viewer E2E evidence output path is missing")?;
     let outcome = if passed { "success" } else { "fail" };
     let path = evidence_path(&root, outcome, "thirtyfour", name);
-    let directory = path.parent().expect("evidence path has a parent directory");
+    let directory = path
+        .parent()
+        .context("evidence path has no parent directory")?;
     std::fs::create_dir_all(directory)
         .with_context(|| format!("create evidence directory {}", directory.display()))?;
     wait::within(

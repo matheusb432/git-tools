@@ -114,8 +114,7 @@ fn remote_label(target: &PushTarget) -> String {
     )
 }
 
-/// Builds the review block printed before the current-repo stage/commit/push flow runs.
-/// Spells out every side effect so the user confirms an action, not just a repository.
+#[must_use]
 pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String {
     let remote = remote_label(target);
     let dest = format!("{}/{}", target.remote, target.branch);
@@ -127,7 +126,7 @@ pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String
     } = target.pending;
 
     let mut out = format!(
-        "{command} — review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\n{command} will:",
+        "{command}: review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\n{command} will:",
         target.name,
         target.top.display(),
         target.branch,
@@ -159,20 +158,20 @@ pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String
             "\n  • nothing to commit; push {ahead} unpushed commit(s) to {dest}"
         );
     } else {
-        out.push_str("\n  • nothing to commit or push — already up to date");
+        out.push_str("\n  • nothing to commit or push, already up to date");
     }
 
     out
 }
 
-/// Builds the review block printed before a plain current-repo push.
+#[must_use]
 pub fn push_confirmation(target: &PushTarget) -> String {
     let remote = remote_label(target);
     let dest = format!("{}/{}", target.remote, target.branch);
     let PendingChanges { changed, ahead, .. } = target.pending;
 
     let mut out = format!(
-        "push — review before pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n\npush will:",
+        "push: review before pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n\npush will:",
         target.name,
         target.top.display(),
         target.branch,
@@ -188,13 +187,13 @@ pub fn push_confirmation(target: &PushTarget) -> String {
     } else if ahead != CommitCount::default() {
         let _ = write!(out, "\n  • push {ahead} unpushed commit(s) to {dest}");
     } else {
-        out.push_str("\n  • nothing to push — already up to date");
+        out.push_str("\n  • nothing to push, already up to date");
     }
 
     out
 }
 
-/// Builds the review block printed before the current-repo local commit flow runs.
+#[must_use]
 pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
     let PendingChanges {
         changed,
@@ -204,7 +203,7 @@ pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
     } = target.pending;
 
     let mut out = format!(
-        "commit — review before committing:\n  repo:    {} ({})\n  branch:  {}\n  message: {}\n\ncommit will:",
+        "commit: review before committing:\n  repo:    {} ({})\n  branch:  {}\n  message: {}\n\ncommit will:",
         target.name,
         target.top.display(),
         target.branch,
@@ -212,7 +211,7 @@ pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
     );
 
     if changed.is_zero() {
-        out.push_str("\n  • nothing to commit — working tree clean");
+        out.push_str("\n  • nothing to commit, working tree clean");
     } else {
         if !unprepared.is_zero() {
             let _ = write!(
@@ -296,7 +295,7 @@ mod tests {
         let remote_line = text
             .lines()
             .find(|line| line.trim_start().starts_with("remote:"))
-            .expect("has a remote line");
+            .unwrap();
         assert!(
             !remote_line.contains("()"),
             "no empty parens when url is unknown"

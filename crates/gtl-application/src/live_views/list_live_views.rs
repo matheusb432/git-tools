@@ -99,8 +99,8 @@ mod tests {
                  (1, 'LocalRepo', '/repos/a', 'a', '2026-01-01T00:00:00Z')",
                 [],
             )
-            .expect("seed live views");
-        let response = list_live_views::execute(ListLiveViews, &connection).expect("list succeeds");
+            .unwrap();
+        let response = list_live_views::execute(ListLiveViews, &connection).unwrap();
 
         assert_eq!(
             response
@@ -121,10 +121,9 @@ mod tests {
                  ('RemoteRepo', 'owner/repo', 'repo', '2026-01-01T00:00:00Z')",
                 [],
             )
-            .expect("seed unsupported live view");
+            .unwrap();
 
-        let error =
-            list_live_views::execute(ListLiveViews, &connection).expect_err("unknown kind rejects");
+        let error = list_live_views::execute(ListLiveViews, &connection).unwrap_err();
 
         assert!(matches!(
             error,
@@ -143,10 +142,9 @@ mod tests {
                  ('LocalRepo', '/repos/gt', 'gt', '2026-01-01T00:00:00')",
                 [],
             )
-            .expect("seed malformed live view");
+            .unwrap();
 
-        let error = list_live_views::execute(ListLiveViews, &connection)
-            .expect_err("timezone-less timestamp must reject");
+        let error = list_live_views::execute(ListLiveViews, &connection).unwrap_err();
 
         assert!(matches!(
             error,

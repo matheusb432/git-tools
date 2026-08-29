@@ -1,5 +1,3 @@
-//! Terminal presentation for the recursive push review.
-
 use std::{fmt::Write as _, path::Path};
 
 use anyhow::Context as _;
@@ -123,7 +121,7 @@ fn destination_to_grpc(branch: &BranchName, remote: &RemoteName) -> v1::PushDest
 
 pub(crate) fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
     let mut out = format!(
-        "push -r — push {} repo(s) under {}:",
+        "push -r: push {} repo(s) under {}:",
         targets.len(),
         root.display()
     );
@@ -140,7 +138,7 @@ pub(crate) fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
                 );
             }
             Dest::Skip { reason } => {
-                let _ = write!(out, "\n  {}  (skip — {reason})", target.label);
+                let _ = write!(out, "\n  {}  (skip: {reason})", target.label);
             }
         }
     }
@@ -175,7 +173,7 @@ mod tests {
         assert!(text.contains("push 2 repo(s) under /repos"), "{text}");
         assert!(text.contains("api  (main → origin)"), "{text}");
         assert!(
-            text.contains("web  (skip — no upstream tracking branch)"),
+            text.contains("web  (skip: no upstream tracking branch)"),
             "{text}"
         );
     }

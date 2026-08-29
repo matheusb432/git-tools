@@ -45,13 +45,13 @@ mod tests {
 
     #[test]
     fn reads_the_repository_local_text_editor_command() {
-        let temporary = tempfile::tempdir().expect("temporary repository");
+        let temporary = tempfile::tempdir().unwrap();
         assert!(
             Command::new("git")
                 .args(["init", "-q"])
                 .current_dir(temporary.path())
                 .status()
-                .expect("git starts")
+                .unwrap()
                 .success()
         );
         assert!(
@@ -63,18 +63,18 @@ mod tests {
                 ])
                 .current_dir(temporary.path())
                 .status()
-                .expect("git starts")
+                .unwrap()
                 .success()
         );
 
-        let output = Command::new(std::env::current_exe().expect("current test executable"))
+        let output = Command::new(std::env::current_exe().unwrap())
             .args([EDITOR_TEST_HELPER, "--exact", "--ignored", "--nocapture"])
             .env(EDITOR_TEST_REPOSITORY, temporary.path())
             .env_remove("GIT_EDITOR")
             .env_remove("VISUAL")
             .env_remove("EDITOR")
             .output()
-            .expect("editor test helper starts");
+            .unwrap();
         assert!(
             output.status.success(),
             "editor test helper failed:\nstdout:\n{}\nstderr:\n{}",
@@ -93,10 +93,9 @@ mod tests {
         assert_eq!(
             GitTextEditorClient
                 .read_command(
-                    &gtl_models::paths::RepositoryRoot::try_new(repository.into())
-                        .expect("temporary directory path is absolute"),
+                    &gtl_models::paths::RepositoryRoot::try_new(repository.into()).unwrap(),
                 )
-                .expect("configured editor"),
+                .unwrap(),
             r#"code --wait --profile "Work Tree""#,
         );
     }

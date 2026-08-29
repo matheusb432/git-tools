@@ -115,9 +115,6 @@ mod tests {
             )),
         });
 
-        assert_eq!(
-            result.expect_err("save is rejected").to_string(),
-            "repository is unavailable"
-        );
+        assert_eq!(result.unwrap_err().to_string(), "repository is unavailable");
     }
 }

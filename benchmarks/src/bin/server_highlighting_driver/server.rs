@@ -74,28 +74,35 @@ impl ServerProcess {
     pub async fn connect(&mut self) -> Result<ServerClients> {
         let auth = LocalAuth::from_data_root(self.process.data_root())
             .context("open isolated server authentication")?;
-        let started = Instant::now();
-        loop {
-            self.process.ensure_running()?;
-            if let Ok(application) = GtlClient::connect(&auth).await
-                && let Ok(viewer) = connect_viewer_client(&auth).await
-            {
-                return Ok(ServerClients {
-                    application,
-                    viewer,
-                });
-            }
-            ensure!(
-                started.elapsed() < READY_TIMEOUT,
-                "release server did not publish a healthy endpoint within {} seconds",
-                READY_TIMEOUT.as_secs()
-            );
-            tokio::time::sleep(READY_RETRY_DELAY).await;
-        }
+        wait_for_server_clients(&mut self.process, &auth).await
     }
 
     pub fn stop(self) -> Result<()> {
         self.process.stop()
+    }
+}
+
+async fn wait_for_server_clients(
+    process: &mut ReleaseServerProcess,
+    auth: &LocalAuth,
+) -> Result<ServerClients> {
+    let started = Instant::now();
+    loop {
+        process.ensure_running()?;
+        if let Ok(application) = GtlClient::connect(auth).await
+            && let Ok(viewer) = connect_viewer_client(auth).await
+        {
+            return Ok(ServerClients {
+                application,
+                viewer,
+            });
+        }
+        ensure!(
+            started.elapsed() < READY_TIMEOUT,
+            "release server did not publish a healthy endpoint within {} seconds",
+            READY_TIMEOUT.as_secs()
+        );
+        tokio::time::sleep(READY_RETRY_DELAY).await;
     }
 }
 

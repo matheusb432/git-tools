@@ -103,6 +103,7 @@ fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
     }
 }
 
+#[must_use]
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     let client = match ServerClient::connect() {
         Ok(client) => client,
@@ -117,6 +118,7 @@ pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     }
 }
 
+#[must_use]
 pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     let client = match ServerClient::connect() {
         Ok(client) => client,
@@ -347,13 +349,13 @@ mod tests {
     use super::*;
 
     fn project(name: &str) -> ProjectName {
-        ProjectName::try_new(name).expect("project name")
+        ProjectName::try_new(name).unwrap()
     }
 
     fn selected(status: RepoSyncStatus) -> PushPullResult {
         PushPullResult {
             name: project("git-tools"),
-            branch: Some(BranchName::try_new("main").expect("branch name")),
+            branch: Some(BranchName::try_new("main").unwrap()),
             status,
             detail: "ahead by 1".into(),
         }
@@ -369,7 +371,7 @@ mod tests {
             &[project("sample_project")],
             ManagedExit::Clean,
         )
-        .expect("push output formats");
+        .unwrap();
 
         assert!(output.contains("dry push -> git-tools"));
         assert!(output.contains("exclude -> sample_project"));
@@ -387,10 +389,10 @@ mod tests {
             &[project("sample_project")],
             ManagedExit::Clean,
         )
-        .expect("push output formats");
+        .unwrap();
 
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&output).expect("valid JSON"),
+            serde_json::from_str::<serde_json::Value>(&output).unwrap(),
             json!({
                 "Selected": [{
                     "Name": "git-tools",
@@ -413,11 +415,11 @@ mod tests {
             &[],
             ManagedExit::Clean,
         )
-        .expect("pull output formats");
+        .unwrap();
 
         assert!(
             serde_json::from_str::<serde_json::Value>(&output)
-                .expect("valid JSON")
+                .unwrap()
                 .is_array()
         );
     }

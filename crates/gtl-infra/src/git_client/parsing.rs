@@ -19,6 +19,16 @@ struct WorktreeBuilder {
 }
 
 impl WorktreeBuilder {
+    fn new(path: &str) -> anyhow::Result<Self> {
+        Ok(Self {
+            path: RepositoryRoot::try_new(path.into())?,
+            id: None,
+            kind: None,
+            locked: None,
+            prunable: None,
+        })
+    }
+
     fn finish(self) -> anyhow::Result<Worktree> {
         Ok(Worktree::new(
             self.path,
@@ -38,49 +48,73 @@ impl WorktreeBuilder {
         }
         Ok(())
     }
+
+    fn apply_line(&mut self, line: &str) -> anyhow::Result<()> {
+        if let Some(head) = line.strip_prefix("HEAD ") {
+            self.id = Some(head.try_into()?);
+            return Ok(());
+        }
+        if let Some(branch) = line.strip_prefix("branch ") {
+            let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+            return self.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Branch(
+                BranchName::try_new(branch.to_owned())?,
+            )));
+        }
+        if line == "detached" {
+            return self.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Detached));
+        }
+        if line == "bare" {
+            return self.set_kind(WorktreeKind::Bare);
+        }
+        if let Some(reason) = line.strip_prefix("locked") {
+            self.locked = Some(reason.trim_start().to_string());
+            return Ok(());
+        }
+        if let Some(reason) = line.strip_prefix("prunable") {
+            self.prunable = Some(reason.trim_start().to_string());
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn parse_worktrees(raw: &str) -> anyhow::Result<Vec<Worktree>> {
     let mut worktrees = Vec::new();
     let mut current: Option<WorktreeBuilder> = None;
     for line in raw.lines() {
-        if line.is_empty() {
-            if let Some(worktree) = current.take() {
-                worktrees.push(worktree.finish()?);
-            }
-        } else if let Some(path) = line.strip_prefix("worktree ") {
-            if let Some(worktree) = current.replace(WorktreeBuilder {
-                path: RepositoryRoot::try_new(path.into())?,
-                id: None,
-                kind: None,
-                locked: None,
-                prunable: None,
-            }) {
-                worktrees.push(worktree.finish()?);
-            }
-        } else if let Some(worktree) = current.as_mut() {
-            if let Some(head) = line.strip_prefix("HEAD ") {
-                worktree.id = Some(head.try_into()?);
-            } else if let Some(branch) = line.strip_prefix("branch ") {
-                let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
-                worktree.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Branch(
-                    BranchName::try_new(branch.to_owned())?,
-                )))?;
-            } else if line == "detached" {
-                worktree.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Detached))?;
-            } else if line == "bare" {
-                worktree.set_kind(WorktreeKind::Bare)?;
-            } else if let Some(reason) = line.strip_prefix("locked") {
-                worktree.locked = Some(reason.trim_start().to_string());
-            } else if let Some(reason) = line.strip_prefix("prunable") {
-                worktree.prunable = Some(reason.trim_start().to_string());
-            }
-        }
+        parse_worktree_line(line, &mut current, &mut worktrees)?;
     }
-    if let Some(worktree) = current {
-        worktrees.push(worktree.finish()?);
-    }
+    finish_current_worktree(&mut current, &mut worktrees)?;
     Ok(worktrees)
+}
+
+fn parse_worktree_line(
+    line: &str,
+    current: &mut Option<WorktreeBuilder>,
+    worktrees: &mut Vec<Worktree>,
+) -> anyhow::Result<()> {
+    if line.is_empty() {
+        return finish_current_worktree(current, worktrees);
+    }
+    if let Some(path) = line.strip_prefix("worktree ") {
+        finish_current_worktree(current, worktrees)?;
+        *current = Some(WorktreeBuilder::new(path)?);
+        return Ok(());
+    }
+    if let Some(worktree) = current.as_mut() {
+        worktree.apply_line(line)?;
+    }
+    Ok(())
+}
+
+fn finish_current_worktree(
+    current: &mut Option<WorktreeBuilder>,
+    worktrees: &mut Vec<Worktree>,
+) -> anyhow::Result<()> {
+    let Some(worktree) = current.take() else {
+        return Ok(());
+    };
+    worktrees.push(worktree.finish()?);
+    Ok(())
 }
 
 pub(super) fn parse_local_tags(output: &str) -> anyhow::Result<BTreeMap<TagName, Tag>> {
@@ -158,7 +192,7 @@ mod tests {
     fn local_tags_reject_a_malformed_creation_epoch() {
         let error =
             parse_local_tags("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\tv1.0.0\t\tnot-an-epoch")
-                .expect_err("malformed Git epoch must fail at the decode boundary");
+                .unwrap_err();
 
         assert!(error.to_string().contains("invalid creation epoch"));
     }

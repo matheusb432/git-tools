@@ -1,5 +1,3 @@
-//! Dispatching and formatting managed, current, and recursive repository status.
-
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -19,15 +17,15 @@ use super::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::server_client::ServerClient;
 mod palette;
 
+#[must_use]
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response =
         ServerClient::connect().and_then(|client| client.get_project_repository_statuses());
     status_response(response, options)
 }
 
-/// Status of the single repo that contains `dir` (resolved via `git rev-parse
-/// --show-toplevel`, so it works from any subdirectory). Fails (exit 2) when `dir`
-/// is not inside a git repo.
+/// Returns exit 2 outside a repository.
+#[must_use]
 pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response = ServerClient::connect().and_then(|client| {
         client.get_repository_status(v1::GetRepositoryStatusRequest {
@@ -37,9 +35,8 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
     status_response(response, options)
 }
 
-/// Status of the repo at `root` plus every nested subrepo beneath it. Linked
-/// worktrees (and their subtrees) are skipped — they mirror a repo already
-/// reported elsewhere. Fails (exit 2) when no git repo is found under `root`.
+/// Returns exit 2 when no repositories are found.
+#[must_use]
 pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response = ServerClient::connect().and_then(|client| {
         client.get_recursive_repository_statuses(v1::GetRecursiveRepositoryStatusesRequest {
@@ -293,7 +290,7 @@ mod tests {
         ];
 
         assert_eq!(
-            format_status(false, false, &results).expect("status should format"),
+            format_status(false, false, &results).unwrap(),
             "repo main [⇡1 !?]\nmissing (absent) [not present]"
         );
     }
@@ -308,7 +305,7 @@ mod tests {
             ),
             branch_status("clean", 0, StatusChanges::Clean),
         ];
-        let rendered = format_status(false, true, &results).expect("status should format");
+        let rendered = format_status(false, true, &results).unwrap();
 
         assert!(rendered.contains("\x1b[1m\x1b[38;2;242;133;0m[\x1b[39m"));
         assert!(rendered.contains("\x1b[38;2;242;133;0m⇡\x1b[39m1"));

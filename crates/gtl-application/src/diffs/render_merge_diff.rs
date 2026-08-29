@@ -174,7 +174,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("compute succeeds");
+        .unwrap();
 
         let response = render_merge_diff::execute(
             req("/repo", None),
@@ -184,7 +184,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.placement.path().as_path(),
@@ -200,7 +200,7 @@ mod tests {
         );
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.title, "merge-diff");
         assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
         assert_eq!(artifact.meta.repo_root, computed.top);
@@ -243,11 +243,11 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
-            .expect("artifact persisted");
+            .unwrap();
         assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
         assert!(artifact.html.contains("noir"));
     }
@@ -272,7 +272,7 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect("render succeeds");
+        .unwrap();
 
         assert_eq!(
             response.notes[0],
@@ -298,14 +298,18 @@ mod tests {
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
-        .expect_err("unknown base errors");
+        .unwrap_err();
 
-        let RenderMergeDiffError::Compute(compute_merge_diff::ComputeMergeDiffError::Unexpected(
-            err,
-        )) = error
-        else {
-            panic!("expected merge computation error");
-        };
+        let err = match error {
+            RenderMergeDiffError::Compute(
+                compute_merge_diff::ComputeMergeDiffError::Unexpected(error),
+            ) => Some(error),
+            RenderMergeDiffError::Compute(compute_merge_diff::ComputeMergeDiffError::Settings(
+                _,
+            ))
+            | RenderMergeDiffError::Unexpected(_) => None,
+        }
+        .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 }

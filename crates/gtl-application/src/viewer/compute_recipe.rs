@@ -108,7 +108,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("recipe computes");
+        .unwrap();
 
         assert_eq!(response.repo_name.as_str(), "project");
         assert_eq!(response.branch.to_string(), "feature");
@@ -146,7 +146,7 @@ mod tests {
             ),
             (
                 RecipeTarget::Last {
-                    count: NonZeroU32::new(1).expect("non-zero"),
+                    count: NonZeroU32::new(1).unwrap(),
                     pinned: None,
                 },
                 "diff",
@@ -162,7 +162,7 @@ mod tests {
                 &FixedUserSettingsStore::default(),
                 &source,
             )
-            .expect("recipe computes");
+            .unwrap();
 
             assert_eq!(response.title, title);
             assert_eq!(response.cmd.range, range);
@@ -188,7 +188,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("pinned recipe computes");
+        .unwrap();
 
         assert_eq!(response.cmd.range, "aaaaaaaaaa..1111111111");
     }
@@ -208,7 +208,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect("recipe computes");
+        .unwrap();
 
         assert_eq!(response.title, "merge-diff");
     }
@@ -230,7 +230,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect_err("unknown diff base fails");
+        .unwrap_err();
         let merge = compute_recipe::execute(
             recipe(RecipeOp::MergeDiff {
                 base: Some(crate::utils::git_revision("unknown")),
@@ -239,7 +239,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &source,
         )
-        .expect_err("unknown merge base fails");
+        .unwrap_err();
         assert!(matches!(diff, ComputeRecipeError::Diff(_)));
         assert!(matches!(merge, ComputeRecipeError::MergeDiff(_)));
     }

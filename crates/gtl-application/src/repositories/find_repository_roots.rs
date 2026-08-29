@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn resolves_each_discovered_repo_to_its_top_level() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path();
         utils::make_repository(&root.join("api"));
         utils::make_repository(&root.join("libs/inner"));
@@ -98,7 +98,7 @@ mod tests {
             },
             &runner,
         )
-        .expect("discovery succeeds");
+        .unwrap();
 
         assert_eq!(
             tops,
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn a_failed_top_level_resolution_keeps_the_legacy_error_shape() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
+        let temporary = tempfile::tempdir().unwrap();
         let repository = temporary.path().join("api");
         utils::make_repository(&repository);
         let runner = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
@@ -129,7 +129,7 @@ mod tests {
             },
             &runner,
         )
-        .expect_err("resolution fails");
+        .unwrap_err();
 
         assert_eq!(
             error.to_string(),
