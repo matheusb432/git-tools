@@ -1,0 +1,12 @@
+[profile.default]
+status-level = "fail"
+final-status-level = "fail"
+failure-output = "immediate"
+success-output = "never"
+
+[test-groups.gtl-cli-process]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'package(gtl-cli) & (binary(diff) | binary(diff_settings) | binary(push) | binary(server_error))'
+test-group = "gtl-cli-process"

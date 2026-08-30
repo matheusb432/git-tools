@@ -28,7 +28,7 @@ pub struct Session {
     browser: Browser,
     pub context: BrowserContext,
     pub page: Page,
-    artifact_audit: ArtifactAudit,
+    artifact_audit: Option<ArtifactAudit>,
 }
 
 struct ArtifactAudit {
@@ -285,6 +285,14 @@ pub async fn operation<T>(label: &str, operation: impl Future<Output = Result<T>
 }
 
 pub async fn open() -> Result<Session> {
+    open_session(true).await
+}
+
+pub async fn open_web() -> Result<Session> {
+    open_session(false).await
+}
+
+async fn open_session(install_artifact_audit: bool) -> Result<Session> {
     let playwright = operation("launch Playwright driver", async {
         Playwright::launch()
             .await
@@ -353,18 +361,22 @@ pub async fn open() -> Result<Session> {
                 .await;
         }
     };
-    let artifact_audit = match ArtifactAudit::install(&context, &page).await {
-        Ok(audit) => audit,
-        Err(error) => {
-            return fail_after_cleanup(
-                error,
-                Some(&page),
-                Some(&context),
-                Some(&browser),
-                &playwright,
-            )
-            .await;
+    let artifact_audit = if install_artifact_audit {
+        match ArtifactAudit::install(&context, &page).await {
+            Ok(audit) => Some(audit),
+            Err(error) => {
+                return fail_after_cleanup(
+                    error,
+                    Some(&page),
+                    Some(&context),
+                    Some(&browser),
+                    &playwright,
+                )
+                .await;
+            }
         }
+    } else {
+        None
     };
     Ok(Session {
         playwright,
@@ -377,7 +389,10 @@ pub async fn open() -> Result<Session> {
 
 impl Session {
     pub async fn navigate_to_artifact(&self, url: &str) -> Result<()> {
-        self.artifact_audit.configure_artifact_url(url)?;
+        let Some(audit) = &self.artifact_audit else {
+            bail!("artifact navigation requires an audited browser session");
+        };
+        audit.configure_artifact_url(url)?;
         operation("navigate to offline artifact", async {
             self.page
                 .goto(url, GotoOptions::new().timeout(OPERATION_TIMEOUT))
@@ -389,11 +404,17 @@ impl Session {
     }
 
     pub async fn verify_artifact_audit(&self) -> Result<()> {
-        self.artifact_audit.verify_current().await
+        match &self.artifact_audit {
+            Some(audit) => audit.verify_current().await,
+            None => Ok(()),
+        }
     }
 
     pub async fn finish(self) -> Result<()> {
-        let audit_result = self.artifact_audit.finish().await;
+        let audit_result = match &self.artifact_audit {
+            Some(audit) => audit.finish().await,
+            None => Ok(()),
+        };
         let cleanup_result = close_resources(
             Some(&self.page),
             Some(&self.context),

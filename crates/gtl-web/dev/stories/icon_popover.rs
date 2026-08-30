@@ -1,42 +1,25 @@
 use dioxus::prelude::*;
+use dx_book::{story, variant};
 use lucide_dioxus::EllipsisVertical;
 
-use super::{StoryContext, StoryVariant};
 use crate::shared::ui::{
     IconPopover, IconPopoverIconMotion, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES,
     MenuActionContent,
 };
 
-pub(super) const VARIANTS: &[StoryVariant] = &[
-    StoryVariant {
-        slug: "trigger-end",
-        title: "Trigger aligned",
-        summary: "Popover aligned to its trigger.",
-        render: trigger_end,
-    },
-    StoryVariant {
-        slug: "viewport-end",
-        title: "Viewport aligned",
-        summary: "Popover aligned to the viewport.",
-        render: viewport_end,
-    },
-];
-
-pub(super) fn preview(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
+#[variant(name = "Catalog preview")]
+fn preview() -> Element {
     rsx! {
-        div { class: "flex min-h-24 items-center justify-center",
+        div { class: "flex min-h-24 items-start justify-end",
             IconPopover {
-                key: "{generation}",
                 id: "story-preview-popover",
                 aria_label: "Example actions",
                 placement: IconPopoverPlacement::TriggerEnd,
-                icon_motion: IconPopoverIconMotion::QuarterTurn,
                 icon: rsx! {
                     EllipsisVertical { size: 18 }
                 },
                 div { class: "grid gap-0.5 p-1.5",
-                    MenuItem { label: "Edit item", description: "Change this item" }
+                    MenuItem { label: "Edit", description: "Change this item" }
                     MenuItem { label: "Delete", description: "Remove this item" }
                 }
             }
@@ -44,12 +27,12 @@ pub(super) fn preview(context: StoryContext) -> Element {
     }
 }
 
-fn trigger_end(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
+/// Popover aligned to its trigger.
+#[variant(name = "Trigger aligned")]
+fn trigger_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
             IconPopover {
-                key: "{generation}",
                 id: "story-trigger-popover",
                 aria_label: "Example actions",
                 placement: IconPopoverPlacement::TriggerEnd,
@@ -72,12 +55,12 @@ fn trigger_end(context: StoryContext) -> Element {
     }
 }
 
-fn viewport_end(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
+/// Popover aligned to the viewport.
+#[variant(name = "Viewport aligned")]
+fn viewport_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
             IconPopover {
-                key: "{generation}",
                 id: "story-viewport-popover",
                 aria_label: "Viewer menu example",
                 placement: IconPopoverPlacement::ViewportEnd,
@@ -113,3 +96,7 @@ fn MenuItem(label: String, description: String) -> Element {
         }
     }
 }
+
+/// Icon-triggered popover component.
+#[story(id = "icon-popover", name = "Icon popover", preview = preview)]
+const ICON_POPOVER_STORY: () = &[trigger_end, viewport_end];

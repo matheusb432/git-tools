@@ -1,36 +1,10 @@
 use dioxus::prelude::*;
+use dx_book::{story, variant};
 
-use super::{StoryContext, StoryVariant};
 use crate::shared::ui::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant};
 
-pub(super) const VARIANTS: &[StoryVariant] = &[
-    StoryVariant {
-        slug: "variants",
-        title: "Variants",
-        summary: "All visual variants.",
-        render: variants,
-    },
-    StoryVariant {
-        slug: "states",
-        title: "States",
-        summary: "Enabled, disabled, and loading.",
-        render: states,
-    },
-    StoryVariant {
-        slug: "sizes",
-        title: "Sizes and layout",
-        summary: "Sizes and layout modes.",
-        render: sizes,
-    },
-    StoryVariant {
-        slug: "interactive",
-        title: "Interactive",
-        summary: "Local click state and reset.",
-        render: interactive,
-    },
-];
-
-pub(super) fn preview(_context: StoryContext) -> Element {
+#[variant(name = "Catalog preview")]
+fn preview() -> Element {
     rsx! {
         div { class: "grid grid-cols-2 gap-3",
             Button { variant: ButtonVariant::Primary, "Primary" }
@@ -41,7 +15,9 @@ pub(super) fn preview(_context: StoryContext) -> Element {
     }
 }
 
-fn variants(_context: StoryContext) -> Element {
+/// All visual variants.
+#[variant]
+fn variants() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
             Button { variant: ButtonVariant::Primary, "Primary" }
@@ -56,7 +32,9 @@ fn variants(_context: StoryContext) -> Element {
     }
 }
 
-fn states(_context: StoryContext) -> Element {
+/// Enabled, disabled, and loading states.
+#[variant]
+fn states() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
             Button { state: ButtonState::Enabled, "Enabled" }
@@ -66,7 +44,9 @@ fn states(_context: StoryContext) -> Element {
     }
 }
 
-fn sizes(_context: StoryContext) -> Element {
+/// Sizes and layout modes.
+#[variant(name = "Sizes and layout")]
+fn sizes() -> Element {
     rsx! {
         div { class: "grid gap-5",
             div { class: "flex flex-wrap items-center gap-3",
@@ -99,15 +79,9 @@ fn sizes(_context: StoryContext) -> Element {
     }
 }
 
-fn interactive(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
-    rsx! {
-        InteractiveButton { key: "{generation}" }
-    }
-}
-
-#[component]
-fn InteractiveButton() -> Element {
+/// Local click state and reset behavior.
+#[variant]
+fn interactive() -> Element {
     let mut clicks = use_signal(|| 0_u32);
     let click_count = clicks();
     let label = if click_count == 1 { "click" } else { "clicks" };
@@ -123,3 +97,7 @@ fn InteractiveButton() -> Element {
         }
     }
 }
+
+/// Button component.
+#[story(id = "button", name = "Button", preview = preview)]
+const BUTTON_STORY: () = &[variants, states, sizes, interactive];

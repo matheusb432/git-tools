@@ -22,8 +22,7 @@ fn run(command: cli::Command) -> Result<()> {
             remove_config,
             force,
         } => verbs::install::run_uninstall(remove_config, force),
-        cli::Command::Test(arguments) => verbs::test::run(&arguments),
-        cli::Command::DesktopE2eWorker { verbose: _ } => verbs::desktop_e2e::run(),
+        cli::Command::DesktopE2eWorker => verbs::desktop_e2e::run(),
         cli::Command::DesktopScrollFixture => verbs::desktop_scroll::refresh_fixture(),
         cli::Command::DesktopScrollBenchmark(arguments) => {
             verbs::desktop_scroll::run_benchmark(&arguments)
@@ -45,10 +44,6 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
-        cli::Command::WebStories { arguments } => {
-            verbs::dioxus_web::serve_component_preview(&arguments)
-        }
-        cli::Command::WebStoryStyles => verbs::dioxus_web::build_component_preview_styles(),
         cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
         cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
         cli::Command::PreCommit => verbs::pre_commit::run(),

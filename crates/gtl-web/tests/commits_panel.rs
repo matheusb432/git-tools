@@ -1,3 +1,5 @@
+#![cfg(any(feature = "artifact", feature = "desktop"))]
+
 mod support;
 
 use dioxus::prelude::{EventHandler, ScopeId, VNode, VirtualDom};

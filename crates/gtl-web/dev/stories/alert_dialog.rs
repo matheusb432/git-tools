@@ -1,38 +1,24 @@
 use dioxus::prelude::*;
+use dx_book::{story, variant};
 
-use super::{StoryContext, StoryVariant};
 use crate::shared::ui::{AlertDialog, Button, ButtonState, ButtonVariant};
 
-pub(super) const VARIANTS: &[StoryVariant] = &[
-    StoryVariant {
-        slug: "interactive",
-        title: "Interactive",
-        summary: "Open, cancel, confirm, and restore focus.",
-        render: interactive,
-    },
-    StoryVariant {
-        slug: "pending",
-        title: "Pending confirmation",
-        summary: "Disabled actions during confirmation.",
-        render: pending,
-    },
-];
-
-pub(super) fn preview(_context: StoryContext) -> Element {
+#[variant(name = "Catalog preview")]
+fn preview() -> Element {
     rsx! {
-        div { class: "grid justify-items-center",
+        div { class: "grid justify-items-start gap-3",
             Button {
-                id: "story-preview-alert-trigger",
+                id: "story-alert-preview-trigger",
                 variant: ButtonVariant::Destructive,
                 "Delete item"
             }
             AlertDialog {
-                id: "story-preview-alert-dialog",
-                trigger_id: "story-preview-alert-trigger",
+                id: "story-alert-preview-dialog",
+                trigger_id: "story-alert-preview-trigger",
                 open: false,
-                title: "Delete item?",
+                title: "Delete item",
                 description: "This action cannot be undone.",
-                confirm_label: "Delete",
+                confirm_label: "Delete item",
                 oncancel: move |()| {},
                 onconfirm: move |()| {},
             }
@@ -40,15 +26,9 @@ pub(super) fn preview(_context: StoryContext) -> Element {
     }
 }
 
-fn interactive(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
-    rsx! {
-        InteractiveAlertDialog { key: "{generation}" }
-    }
-}
-
-#[component]
-fn InteractiveAlertDialog() -> Element {
+/// Open, cancel, confirm, and restore focus.
+#[variant]
+fn interactive() -> Element {
     let mut open = use_signal(|| false);
     let mut outcome = use_signal(|| "No action selected");
 
@@ -81,15 +61,9 @@ fn InteractiveAlertDialog() -> Element {
     }
 }
 
-fn pending(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
-    rsx! {
-        PendingAlertDialog { key: "{generation}" }
-    }
-}
-
-#[component]
-fn PendingAlertDialog() -> Element {
+/// Disabled actions during confirmation.
+#[variant(name = "Pending confirmation")]
+fn pending() -> Element {
     let mut open = use_signal(|| false);
 
     rsx! {
@@ -115,3 +89,7 @@ fn PendingAlertDialog() -> Element {
         }
     }
 }
+
+/// Confirmation dialog component.
+#[story(id = "alert-dialog", name = "Alert dialog", preview = preview)]
+const ALERT_DIALOG_STORY: () = &[interactive, pending];

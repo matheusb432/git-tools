@@ -1,35 +1,29 @@
 use dioxus::prelude::*;
+use dx_book::{story, variant};
 
-use super::{StoryContext, StoryVariant};
 use crate::shared::ui::{Button, ButtonVariant, ToastHost, use_toast};
 
-pub(super) const VARIANTS: &[StoryVariant] = &[StoryVariant {
-    slug: "queue",
-    title: "Interactive queue",
-    summary: "Queue, severity, and dismissal.",
-    render: queue,
-}];
-
-pub(super) fn preview(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
+#[variant(name = "Catalog preview")]
+fn preview() -> Element {
     rsx! {
-        ToastHost { key: "{generation}", ToastPreviewControl {} }
+        ToastHost { PreviewToastControl {} }
     }
 }
 
 #[component]
-fn ToastPreviewControl() -> Element {
+fn PreviewToastControl() -> Element {
     let toast = use_toast();
 
     rsx! {
-        Button { onclick: move |_| toast.ok("Changes saved."), "Show toast" }
+        Button { onclick: move |_| toast.ok("Saved."), "Show toast" }
     }
 }
 
-fn queue(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
+/// Queue, severity, and dismissal behavior.
+#[variant(name = "Interactive queue")]
+fn queue() -> Element {
     rsx! {
-        ToastHost { key: "{generation}", ToastControls {} }
+        ToastHost { ToastControls {} }
     }
 }
 
@@ -58,3 +52,7 @@ fn ToastControls() -> Element {
         }
     }
 }
+
+/// Toast notification component.
+#[story(id = "toast", name = "Toast", preview = preview)]
+const TOAST_STORY: () = &[queue];

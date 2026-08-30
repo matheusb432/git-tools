@@ -41,7 +41,6 @@ pub fn run() -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
     dioxus_web::build_release_unlocked(&root)?;
-    dioxus_web::build_component_preview_styles_unlocked(&root)?;
     check_drift(BUNDLES, &git_clean)
 }
 

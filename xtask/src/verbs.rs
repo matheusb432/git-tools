@@ -22,7 +22,6 @@ pub(crate) mod server_highlighting;
 pub(crate) mod setup;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
-pub(crate) mod test;
 pub(crate) mod wasm_c;
 
 #[derive(Clone, Copy)]
@@ -45,12 +44,9 @@ impl Verb {
     pub(crate) const INSTALL: Self = Self("install");
     pub(crate) const SETUP: Self = Self("setup");
     pub(crate) const SHIP: Self = Self("ship");
-    pub(crate) const TEST: Self = Self("test");
     pub(crate) const UNINSTALL: Self = Self("uninstall");
     pub(crate) const WEB_BUILD: Self = Self("web-build");
     pub(crate) const WEB_SERVE: Self = Self("web-serve");
-    pub(crate) const WEB_STORIES: Self = Self("web-stories");
-    pub(crate) const WEB_STORY_STYLES: Self = Self("web-story-styles");
     pub(crate) const WEB_STYLES: Self = Self("web-styles");
 
     pub(crate) const fn as_str(self) -> &'static str {
@@ -77,7 +73,7 @@ pub(crate) struct WebAssetLock(File);
 
 impl WebAssetLock {
     fn acquire_at(target: &Path) -> Result<Self> {
-        let path = target.join("xtask/web-assets.lock");
+        let path = target.join("web-assets.lock");
         fs::create_dir_all(path.parent().context("web asset lock parent")?)
             .with_context(|| format!("create lock parent for {}", path.display()))?;
         let file = OpenOptions::new()
@@ -116,7 +112,7 @@ mod tests {
         let contender = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(target.path().join("xtask/web-assets.lock"))
+            .open(target.path().join("web-assets.lock"))
             .unwrap();
 
         assert!(contender.try_lock().is_err());

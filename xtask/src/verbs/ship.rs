@@ -37,7 +37,7 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     dioxus_web::build_release().context("ship Dioxus Web release bundle failed")?;
 
     if !force {
-        process::run_step(&Step::new("ship-tests", "just", ["test", "--all"]))?;
+        process::run_step(&Step::new("ship-tests", "just", ["test-all"]))?;
     }
 
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };

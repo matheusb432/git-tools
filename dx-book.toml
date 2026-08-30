@@ -1,0 +1,20 @@
+[book]
+path = "crates/gtl-web"
+package = "gtl-web"
+source-directories = [
+  "../gtl-wire/src",
+  "../gtl-parser/src",
+  "../gtl-web-contracts/src",
+  "dev",
+  "src",
+  "../../shared/dx-book/macros/src",
+  "../../shared/dx-book/src",
+]
+
+[serve]
+port = 8080
+open = false
+
+[tailwind]
+input = "dev/styles/tailwind.css"
+output = "assets/component-preview.css"

@@ -72,17 +72,6 @@ const TAILWIND_ARGUMENTS: &[&str] = &[
     "crates/gtl-web/assets/tailwind.css",
     "--minify",
 ];
-const COMPONENT_PREVIEW_TAILWIND_ARGUMENTS: &[&str] = &[
-    "run",
-    "--frozen",
-    "--allow-all",
-    "@tailwindcss/cli",
-    "--input",
-    "crates/gtl-web/dev/styles/tailwind.css",
-    "--output",
-    "crates/gtl-web/assets/component-preview.css",
-    "--minify",
-];
 const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
     "bundle",
     "--web",
@@ -102,8 +91,7 @@ const SERVE_ARGUMENTS: &[&str] = &[
     "--watch",
     "true",
 ];
-const COMPONENT_PREVIEW_SERVE_ARGUMENTS: &[&str] = &[
-    "serve",
+pub(crate) const COMPONENT_PREVIEW_TARGET_ARGUMENTS: &[&str] = &[
     "--web",
     "--package",
     "gtl-web",
@@ -113,16 +101,11 @@ const COMPONENT_PREVIEW_SERVE_ARGUMENTS: &[&str] = &[
     "--features",
     "component-preview",
     "--locked",
-    "--hot-reload",
-    "true",
-    "--watch",
-    "true",
 ];
 const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-wire/src",
     "crates/gtl-parser/src",
     "crates/gtl-web-contracts/src",
-    "crates/gtl-web/dev",
     "crates/gtl-web/src",
 ];
 const DEVELOPMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -142,39 +125,12 @@ pub(crate) fn serve(arguments: &[String]) -> Result<()> {
     run_development_server(&step, &root)
 }
 
-pub(crate) fn serve_component_preview(arguments: &[String]) -> Result<()> {
-    build_component_preview_styles()?;
-
-    let root = repository_root();
-    let _tailwind_watcher = DevelopmentWatcher::spawn(
-        "dioxus-component-preview-tailwind-watch",
-        "deno",
-        &watch_arguments(COMPONENT_PREVIEW_TAILWIND_ARGUMENTS),
-        &root,
-    )?;
-    let step =
-        super::wasm_c::configure_step(&root, component_preview_serve_step(&root, arguments))?;
-    run_development_server(&step, &root)
-}
-
 fn development_serve_step(root: &Path, arguments: &[String]) -> Step {
     Step::new("dioxus-web-serve", "dx", SERVE_ARGUMENTS.iter().copied())
         .with_arguments(arguments.iter().cloned())
         .with_environment("CARGO_INCREMENTAL", "1")
         .with_environment("RUSTC_WRAPPER", "")
         .with_current_directory(root)
-}
-
-fn component_preview_serve_step(root: &Path, arguments: &[String]) -> Step {
-    Step::new(
-        "dioxus-component-preview-serve",
-        "dx",
-        COMPONENT_PREVIEW_SERVE_ARGUMENTS.iter().copied(),
-    )
-    .with_arguments(arguments.iter().cloned())
-    .with_environment("CARGO_INCREMENTAL", "1")
-    .with_environment("RUSTC_WRAPPER", "")
-    .with_current_directory(root)
 }
 
 fn run_development_server(step: &Step, root: &Path) -> Result<()> {
@@ -414,23 +370,6 @@ pub(crate) fn build_styles() -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
     build_styles_unlocked(&root)
-}
-
-pub(crate) fn build_component_preview_styles() -> Result<()> {
-    let root = repository_root();
-    let _lock = lock_web_assets(&root)?;
-    build_component_preview_styles_unlocked(&root)
-}
-
-pub(crate) fn build_component_preview_styles_unlocked(root: &Path) -> Result<()> {
-    process::run_step(
-        &Step::new(
-            "dioxus-component-preview-tailwind",
-            "deno",
-            COMPONENT_PREVIEW_TAILWIND_ARGUMENTS.iter().copied(),
-        )
-        .with_current_directory(root),
-    )
 }
 
 pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
@@ -895,10 +834,6 @@ mod tests {
         );
         assert_eq!(TAILWIND_ARGUMENTS[3], "@tailwindcss/cli");
         assert!(TAILWIND_ARGUMENTS.contains(&"crates/gtl-web/assets/tailwind.css"));
-        assert!(
-            COMPONENT_PREVIEW_TAILWIND_ARGUMENTS
-                .contains(&"crates/gtl-web/assets/component-preview.css")
-        );
     }
 
     #[test]
@@ -914,10 +849,6 @@ mod tests {
             SERVE_ARGUMENTS
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
-        );
-        assert!(
-            watch_arguments(COMPONENT_PREVIEW_TAILWIND_ARGUMENTS)
-                .ends_with(&["--watch=always", "--poll=100"])
         );
     }
 
@@ -939,26 +870,6 @@ mod tests {
             step.environment()
                 .contains(&("RUSTC_WRAPPER".to_owned(), String::new()))
         );
-
-        let preview_step = component_preview_serve_step(root.path(), &forwarded);
-        assert!(preview_step.arguments().ends_with(&forwarded));
-        assert!(
-            preview_step
-                .arguments()
-                .windows(2)
-                .any(|pair| pair == ["--example", "component-preview"])
-        );
-        assert!(
-            preview_step
-                .arguments()
-                .windows(2)
-                .any(|pair| pair == ["--features", "component-preview"])
-        );
-        assert!(
-            preview_step
-                .arguments()
-                .contains(&"--no-default-features".to_owned())
-        );
     }
 
     #[test]
@@ -968,9 +879,7 @@ mod tests {
             fs::create_dir_all(root.path().join(directory)).unwrap();
         }
         let before = development_rust_sources(root.path()).unwrap();
-        let rust_source = root
-            .path()
-            .join("crates/gtl-web/src/shared/ui/code_text.rs");
+        let rust_source = root.path().join("crates/gtl-web/src/new_view.rs");
         fs::create_dir_all(rust_source.parent().unwrap()).unwrap();
         fs::write(&rust_source, "pub fn code_text() {}").unwrap();
         fs::write(root.path().join("crates/gtl-web/src/notes.txt"), "not Rust").unwrap();

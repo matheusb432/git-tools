@@ -1,17 +1,2 @@
 @import "../../src/app/assets/styles/tailwind.css";
 @source "../**/*.rs";
-
-@theme {
-  --color-storybook-bg: #100e13;
-  --color-storybook-surface: #151219;
-  --color-storybook-surface-raised: #1b171f;
-  --color-storybook-surface-selected: #211c27;
-  --color-storybook-ink: #e8e1ec;
-  --color-storybook-ink-muted: #c9c0cf;
-  --color-storybook-ink-subtle: #94899c;
-  --color-storybook-line: #302a36;
-  --color-storybook-line-strong: #4a4052;
-  --color-storybook-action: #b59ad8;
-  --color-storybook-action-soft: #292134;
-  --color-storybook-danger: #f07b73;
-}

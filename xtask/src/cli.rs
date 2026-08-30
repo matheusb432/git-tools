@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::verbs::{
     Verb, desktop_scroll::DesktopScrollBenchmarkArguments,
     grpc_transport::GrpcTransportBenchmarkArguments,
-    server_highlighting::ServerHighlightingBenchmarkArguments, test::TestArguments,
+    server_highlighting::ServerHighlightingBenchmarkArguments,
 };
 
 #[derive(Parser)]
@@ -48,17 +48,9 @@ pub enum Command {
     /// Check staged whitespace and formatting without scanning unrelated files.
     #[command(name = Verb::PRE_COMMIT.as_str())]
     PreCommit,
-    /// Run the selected test scope, terse by default. The default excludes desktop tests;
-    /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository test suite.
-    #[command(name = Verb::TEST.as_str())]
-    Test(TestArguments),
     /// Run the ordered native desktop E2E workflow for the test supervisor.
     #[command(hide = true)]
-    DesktopE2eWorker {
-        /// Preserve the worker's live diagnostics.
-        #[arg(long)]
-        verbose: bool,
-    },
+    DesktopE2eWorker,
     /// Regenerate and verify the committed deterministic desktop scroll fixture.
     #[command(name = Verb::DESKTOP_SCROLL_FIXTURE.as_str())]
     DesktopScrollFixture,
@@ -109,16 +101,6 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<String>,
     },
-    /// Serve the development-only component story catalog in a browser.
-    #[command(name = Verb::WEB_STORIES.as_str())]
-    WebStories {
-        /// Arguments forwarded to `dx serve`.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        arguments: Vec<String>,
-    },
-    /// Generate the tracked component-preview Tailwind stylesheet.
-    #[command(name = Verb::WEB_STORY_STYLES.as_str())]
-    WebStoryStyles,
     /// Generate the tracked shared Tailwind stylesheet.
     #[command(name = Verb::WEB_STYLES.as_str())]
     WebStyles,
@@ -140,7 +122,7 @@ pub enum Command {
         /// Compile all binaries in debug mode without artifact verification.
         #[arg(long)]
         smoke: bool,
-        /// Skip only the `just test --all` preflight.
+        /// Skip only the `just test-all` preflight.
         #[arg(short = 'f', long)]
         force: bool,
     },

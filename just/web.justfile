@@ -23,4 +23,4 @@ serve *args:
 # Regenerate the tracked component-preview Tailwind stylesheet.
 [group('web')]
 story-styles:
-    cargo run --quiet -p xtask -- web-story-styles
+    cd ../.. && cargo run --quiet -p dx-book-cli -- styles

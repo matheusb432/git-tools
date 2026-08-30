@@ -1,5 +1,6 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set positional-arguments
 
 mod cli 'just/cli.justfile'
 mod desktop 'just/desktop.justfile'
@@ -25,7 +26,7 @@ up:
 # Serve the development-only component story catalog in a browser.
 [group('build')]
 preview-components *args:
-    cargo run --quiet -p xtask -- web-stories {{ args }}
+    cargo run --quiet -p dx-book-cli -- serve {{ args }}
 
 # Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]
@@ -59,7 +60,7 @@ _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
 # Compare Criterion benchmarks against the local baseline. Use --update to replace it.
-[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|view-cache|viewer-render")]
+[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|storybook-registry|view-cache|viewer-render")]
 [arg("case", help="Exact Criterion benchmark case")]
 [arg("update", long="update", value="--save-baseline local", help="Compare and replace the local baseline")]
 [arg("quick", long="quick", value="--quick", help="Stop once Criterion reaches statistical significance")]
@@ -100,10 +101,71 @@ bench-grpc-smoke:
 profile-highlight:
     cargo run --quiet -p xtask -- server-highlighting-profile
 
-# Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
+# Run default-member tests with Nextest. With no arguments, also run the parser and web feature matrix.
 [group('quality')]
 test *args:
-    @cargo run --quiet -p xtask -- test {{ args }}
+    @cargo nextest run "$@"
+    @if [ "$#" -eq 0 ]; then just _test-default-matrix; fi
+
+[private]
+_test-default-matrix:
+    @just test-parser
+    @just test-web-desktop
+    @just test-web-artifact
+    @just test-web-component-preview
+
+# Run the parser test suite with every feature enabled.
+[group('quality')]
+test-parser *args:
+    @cargo nextest run --locked -p gtl-parser --all-features "$@"
+
+# Run the native desktop configuration of the shared web crate.
+[group('quality')]
+test-web-desktop *args:
+    @cargo nextest run --locked -p gtl-web "$@"
+
+# Run the static-artifact configuration of the shared web crate.
+[group('quality')]
+test-web-artifact *args:
+    @cargo nextest run --locked -p gtl-web --no-default-features --features artifact "$@"
+
+# Run the CSR component-preview configuration and its story registry tests.
+[group('quality')]
+test-web-component-preview *args:
+    @cargo nextest run --locked -p gtl-web --no-default-features --features component-preview "$@"
+
+# Run workspace doctests, which Nextest does not execute.
+[group('quality')]
+test-docs:
+    @cargo test --locked --doc --workspace
+
+# Run the release-built desktop and browser journeys with a two-hour process bound.
+[group('quality')]
+test-e2e:
+    @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker
+
+# Run the E2E journeys and retain passing screenshots in addition to failure evidence.
+[group('quality')]
+test-e2e-evidences:
+    @TEST_EVIDENCES_OUTPUT_PATH="{{ justfile_directory() }}/.artifacts/e2e" just test-e2e
+
+# Run every Rust target, feature supplement, doctest, drift check, and viewer journey.
+[group('quality')]
+test-all:
+    @cargo nextest run --workspace
+    @just test-parser
+    @just test-web-artifact
+    @just test-web-component-preview
+    @just test-docs
+    @just drift-check
+    @just test-e2e
+
+# Collect Nextest and doctest coverage, then remove the isolated target directory.
+[group('quality')]
+coverage *args:
+    @cargo llvm-cov nextest "$@"
+    @cargo +nightly llvm-cov --doc --workspace
+    @cargo clean --target-dir target/llvm-cov-target
 
 # Apply rustfmt, Taplo, Dioxus RSX, and rumdl across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
@@ -153,6 +215,7 @@ fix *args:
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
 drift-check:
+    cargo run --quiet -p dx-book-cli -- styles
     cargo run --quiet -p xtask -- drift-check
 
 # Report missing Mise-managed tools without changing the host.
@@ -165,7 +228,7 @@ doctor:
 prepare-tree-sitter:
     cargo build --locked -p gtl-parser --features syntax
 
-# Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
+# Cross-build all three Win11 exes; runs `just test-all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
 # // uncomment to test VM
 # [group('windows')]
 # ship *args:

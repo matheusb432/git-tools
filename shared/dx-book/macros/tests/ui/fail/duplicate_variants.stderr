@@ -1,0 +1,5 @@
+error: duplicate variant `default` in story declaration
+  --> tests/ui/fail/duplicate_variants.rs:10:34
+   |
+10 | const DUPLICATE: () = &[default, default];
+   |                                  ^^^^^^^

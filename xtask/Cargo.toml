@@ -22,7 +22,6 @@ tiny-skia.workspace = true
 command-group.workspace = true
 zbus.workspace = true
 cargo_metadata.workspace = true
-sample_project.workspace = true
 
 [lints]
 workspace = true

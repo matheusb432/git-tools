@@ -27,6 +27,10 @@ harness = false
 name = "grpc_requests"
 harness = false
 
+[[bench]]
+name = "storybook_registry"
+harness = false
+
 [[bin]]
 name = "server-highlighting-driver"
 path = "src/bin/server_highlighting_driver/main.rs"
@@ -55,6 +59,7 @@ tonic = { workspace = true, features = ["transport"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
+dx-book = { workspace = true, features = ["benchmark-support"] }
 gtl-application.workspace = true
 gtl-models.workspace = true
 gtl-server = { workspace = true, features = ["benchmark-support"] }

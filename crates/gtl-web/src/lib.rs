@@ -28,6 +28,6 @@ pub fn launch_desktop() {
 }
 
 #[cfg(feature = "component-preview")]
-pub fn launch_component_preview() {
-    component_preview::launch();
+pub fn launch_component_preview() -> Result<(), dx_book::StoryRegistryError> {
+    component_preview::launch()
 }

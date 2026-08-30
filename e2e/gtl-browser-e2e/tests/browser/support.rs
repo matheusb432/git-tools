@@ -37,6 +37,13 @@ impl Spec {
         Ok(Self { session, recording })
     }
 
+    pub async fn start_web(name: &str) -> Result<Self> {
+        verify_runtime_environment()?;
+        let session = browser::open_web().await?;
+        let recording = Recording::new(&session, name);
+        Ok(Self { session, recording })
+    }
+
     pub async fn finish(self, outcome: Result<()>) -> Result<()> {
         let outcome = attach_secondary_error(
             outcome,

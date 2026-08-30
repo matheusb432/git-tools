@@ -12,3 +12,6 @@ mod support;
 
 #[path = "browser/raw_artifact_lifecycle.rs"]
 mod raw_artifact_lifecycle;
+
+#[path = "browser/component_preview_registry.rs"]
+mod component_preview_registry;

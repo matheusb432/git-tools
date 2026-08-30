@@ -1,50 +1,26 @@
 use dioxus::prelude::*;
+use dx_book::{story, variant};
 
-use super::{StoryContext, StoryVariant};
 use crate::shared::ui::TextInput;
 
-pub(super) const VARIANTS: &[StoryVariant] = &[
-    StoryVariant {
-        slug: "default",
-        title: "Default",
-        summary: "Label, placeholder, and helper text.",
-        render: default_input,
-    },
-    StoryVariant {
-        slug: "validation",
-        title: "Validation",
-        summary: "Invalid state with a text error.",
-        render: validation,
-    },
-    StoryVariant {
-        slug: "disabled",
-        title: "Disabled",
-        summary: "Labeled disabled state.",
-        render: disabled,
-    },
-    StoryVariant {
-        slug: "controlled",
-        title: "Controlled",
-        summary: "Local input state.",
-        render: controlled,
-    },
-];
-
-pub(super) fn preview(_context: StoryContext) -> Element {
+#[variant(name = "Catalog preview")]
+fn preview() -> Element {
     rsx! {
-        div { class: "w-full max-w-md",
+        div { class: "max-w-sm",
             TextInput {
-                label: "Label",
-                placeholder: "Enter text...",
+                label: "Search",
+                placeholder: "Type to filter",
                 supporting_content: rsx! {
-                    span { "Helper text." }
+                    span { "Matches names and identifiers." }
                 },
             }
         }
     }
 }
 
-fn default_input(_context: StoryContext) -> Element {
+/// Label, placeholder, and helper text.
+#[variant]
+fn default() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
@@ -58,7 +34,9 @@ fn default_input(_context: StoryContext) -> Element {
     }
 }
 
-fn validation(_context: StoryContext) -> Element {
+/// Invalid state with a text error.
+#[variant]
+fn validation() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
@@ -74,7 +52,9 @@ fn validation(_context: StoryContext) -> Element {
     }
 }
 
-fn disabled(_context: StoryContext) -> Element {
+/// Labeled disabled state.
+#[variant]
+fn disabled() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
@@ -89,15 +69,9 @@ fn disabled(_context: StoryContext) -> Element {
     }
 }
 
-fn controlled(context: StoryContext) -> Element {
-    let generation = context.reset_generation;
-    rsx! {
-        ControlledInput { key: "{generation}" }
-    }
-}
-
-#[component]
-fn ControlledInput() -> Element {
+/// Local input state.
+#[variant]
+fn controlled() -> Element {
     let mut value = use_signal(String::new);
     let visible_value = value();
 
@@ -119,3 +93,7 @@ fn ControlledInput() -> Element {
         }
     }
 }
+
+/// Text input component.
+#[story(id = "text-input", name = "Text input", preview = preview)]
+const TEXT_INPUT_STORY: () = &[default, validation, disabled, controlled];

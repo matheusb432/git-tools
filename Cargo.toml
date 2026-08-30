@@ -17,6 +17,9 @@ members = [
   "crates/gtl-web-contracts",
   "e2e/gtl-browser-e2e",
   "e2e/gtl-desktop-e2e",
+  "shared/dx-book-cli",
+  "shared/dx-book",
+  "shared/dx-book/macros",
   "xtask",
 ]
 # Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
@@ -31,6 +34,9 @@ default-members = [
   "crates/gtl-infra",
   "crates/gtl-parser",
   "crates/gtl-artifacts",
+  "shared/dx-book-cli",
+  "shared/dx-book",
+  "shared/dx-book/macros",
   "xtask",
 ]
 
@@ -53,6 +59,7 @@ gtl-server = { path = "crates/gtl-server" }
 gtl-infra = { path = "crates/gtl-infra" }
 gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
+dx-book = { path = "shared/dx-book" }
 
 anyhow = "1"
 sample_project-client = { version = "0.2.0", features = ["grpc"] }
@@ -69,6 +76,7 @@ console = { version = "0.16.4", default-features = false, features = ["std"] }
 cqrsy = "0.11.0"
 criterion = "0.8.2"
 directories = "6.0.0"
+dioxus = { version = "0.7.10", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 getrandom = "0.4.3"
 flate2 = { version = "1.1.9", default-features = false, features = [
@@ -158,10 +166,10 @@ unicase = "2.9.0"
 uuid = { version = "1", features = ["v4"] }
 wasm-bindgen = "0.2.125"
 wasm-bindgen-futures = "0.4.75"
+web-sys = "0.3.102"
 walkdir = "2.5.0"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { version = "0.10", features = ["json"] }
 
 [patch.crates-io]
 sample_project-client = { path = "../.sample_project-workspace/crates/sample_project-client" }
