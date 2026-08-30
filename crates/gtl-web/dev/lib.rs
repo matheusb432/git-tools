@@ -1,6 +1,6 @@
 mod preview;
-mod stories;
+mod showcases;
 
-pub(super) fn launch() -> Result<(), dx_book::StoryRegistryError> {
-    dx_book::launch(preview::App)
+pub(super) fn launch() -> Result<(), dx_preview::RegistryError> {
+    dx_preview::launch(preview::App)
 }

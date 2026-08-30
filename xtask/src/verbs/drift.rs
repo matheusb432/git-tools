@@ -11,7 +11,7 @@ const BUNDLES: &[(&str, &str)] = &[
     ("crates/gtl-web/assets/tailwind.css", "just web styles"),
     (
         "crates/gtl-web/assets/component-preview.css",
-        "just web story-styles",
+        "just web preview-styles",
     ),
 ];
 
@@ -71,6 +71,6 @@ mod tests {
             err.contains("assets/component-preview.css is stale"),
             "{err}"
         );
-        assert!(err.contains("just web story-styles"), "{err}");
+        assert!(err.contains("just web preview-styles"), "{err}");
     }
 }

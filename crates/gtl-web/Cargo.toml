@@ -9,7 +9,7 @@ dioxus = { workspace = true, features = ["lib"] }
 dioxus-ssr = { version = "0.7.10", optional = true }
 dioxus-sdk-time = "0.7.0"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
-dx-book = { workspace = true, optional = true }
+dx-preview = { workspace = true, optional = true }
 gtl-client = { workspace = true, optional = true, features = ["viewer-ipc"] }
 gtl-models.workspace = true
 gtl-wire.workspace = true
@@ -58,7 +58,12 @@ workspace = true
 [features]
 default = ["desktop"]
 artifact = ["dep:dioxus-ssr", "dep:thiserror"]
-component-preview = ["dep:dx-book", "dx-book/catalog", "interactive-ui", "web"]
+component-preview = [
+  "dep:dx-preview",
+  "dx-preview/catalog",
+  "interactive-ui",
+  "web",
+]
 desktop = ["interactive-ui", "web", "dioxus/router", "dep:gtl-client"]
 interactive-ui = []
 web = ["dioxus/launch", "dioxus/web"]

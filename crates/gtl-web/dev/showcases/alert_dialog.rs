@@ -1,20 +1,20 @@
 use dioxus::prelude::*;
-use dx_book::{story, variant};
+use dx_preview::{preview, showcase};
 
 use crate::shared::ui::{AlertDialog, Button, ButtonState, ButtonVariant};
 
-#[variant(name = "Catalog preview")]
-fn preview() -> Element {
+#[preview(name = "Catalog thumbnail")]
+fn thumbnail() -> Element {
     rsx! {
         div { class: "grid justify-items-start gap-3",
             Button {
-                id: "story-alert-preview-trigger",
+                id: "preview-alert-preview-trigger",
                 variant: ButtonVariant::Destructive,
                 "Delete item"
             }
             AlertDialog {
-                id: "story-alert-preview-dialog",
-                trigger_id: "story-alert-preview-trigger",
+                id: "preview-alert-preview-dialog",
+                trigger_id: "preview-alert-preview-trigger",
                 open: false,
                 title: "Delete item",
                 description: "This action cannot be undone.",
@@ -27,7 +27,7 @@ fn preview() -> Element {
 }
 
 /// Open, cancel, confirm, and restore focus.
-#[variant]
+#[preview]
 fn interactive() -> Element {
     let mut open = use_signal(|| false);
     let mut outcome = use_signal(|| "No action selected");
@@ -35,15 +35,15 @@ fn interactive() -> Element {
     rsx! {
         div { class: "grid justify-items-start gap-3",
             Button {
-                id: "story-alert-trigger",
+                id: "preview-alert-trigger",
                 variant: ButtonVariant::Destructive,
                 onclick: move |_| open.set(true),
                 "Delete live view"
             }
             output { class: "text-sm text-ink-2", aria_live: "polite", "{outcome}" }
             AlertDialog {
-                id: "story-alert-dialog",
-                trigger_id: "story-alert-trigger",
+                id: "preview-alert-dialog",
+                trigger_id: "preview-alert-trigger",
                 open: open(),
                 title: "Delete live view",
                 description: "This removes the saved live view. Render history remains available.",
@@ -62,21 +62,21 @@ fn interactive() -> Element {
 }
 
 /// Disabled actions during confirmation.
-#[variant(name = "Pending confirmation")]
+#[preview(name = "Pending confirmation")]
 fn pending() -> Element {
     let mut open = use_signal(|| false);
 
     rsx! {
         div { class: "grid justify-items-start gap-3",
             Button {
-                id: "story-pending-alert-trigger",
+                id: "preview-pending-alert-trigger",
                 variant: ButtonVariant::Destructive,
                 onclick: move |_| open.set(true),
                 "Open pending state"
             }
             AlertDialog {
-                id: "story-pending-alert-dialog",
-                trigger_id: "story-pending-alert-trigger",
+                id: "preview-pending-alert-dialog",
+                trigger_id: "preview-pending-alert-trigger",
                 open: open(),
                 title: "Delete live view",
                 description: "The viewer is waiting for confirmation from the local service.",
@@ -91,5 +91,5 @@ fn pending() -> Element {
 }
 
 /// Confirmation dialog component.
-#[story(id = "alert-dialog", name = "Alert dialog", preview = preview)]
-const ALERT_DIALOG_STORY: () = &[interactive, pending];
+#[showcase(id = "alert-dialog", name = "Alert dialog", thumbnail = thumbnail)]
+const ALERT_DIALOG_SHOWCASE: () = &[interactive, pending];

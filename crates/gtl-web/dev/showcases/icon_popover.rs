@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use dx_book::{story, variant};
+use dx_preview::{preview, showcase};
 use lucide_dioxus::EllipsisVertical;
 
 use crate::shared::ui::{
@@ -7,12 +7,12 @@ use crate::shared::ui::{
     MenuActionContent,
 };
 
-#[variant(name = "Catalog preview")]
-fn preview() -> Element {
+#[preview(name = "Catalog thumbnail")]
+fn thumbnail() -> Element {
     rsx! {
         div { class: "flex min-h-24 items-start justify-end",
             IconPopover {
-                id: "story-preview-popover",
+                id: "preview-preview-popover",
                 aria_label: "Example actions",
                 placement: IconPopoverPlacement::TriggerEnd,
                 icon: rsx! {
@@ -28,12 +28,12 @@ fn preview() -> Element {
 }
 
 /// Popover aligned to its trigger.
-#[variant(name = "Trigger aligned")]
+#[preview(name = "Trigger aligned")]
 fn trigger_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
             IconPopover {
-                id: "story-trigger-popover",
+                id: "preview-trigger-popover",
                 aria_label: "Example actions",
                 placement: IconPopoverPlacement::TriggerEnd,
                 icon_motion: IconPopoverIconMotion::QuarterTurn,
@@ -56,12 +56,12 @@ fn trigger_end() -> Element {
 }
 
 /// Popover aligned to the viewport.
-#[variant(name = "Viewport aligned")]
+#[preview(name = "Viewport aligned")]
 fn viewport_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
             IconPopover {
-                id: "story-viewport-popover",
+                id: "preview-viewport-popover",
                 aria_label: "Viewer menu example",
                 placement: IconPopoverPlacement::ViewportEnd,
                 icon: rsx! {
@@ -98,5 +98,5 @@ fn MenuItem(label: String, description: String) -> Element {
 }
 
 /// Icon-triggered popover component.
-#[story(id = "icon-popover", name = "Icon popover", preview = preview)]
-const ICON_POPOVER_STORY: () = &[trigger_end, viewport_end];
+#[showcase(id = "icon-popover", name = "Icon popover", thumbnail = thumbnail)]
+const ICON_POPOVER_SHOWCASE: () = &[trigger_end, viewport_end];

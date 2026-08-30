@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
-use dx_book::{story, variant};
+use dx_preview::{preview, showcase};
 
 use crate::shared::ui::Skeleton;
 
-#[variant(name = "Catalog preview")]
-fn preview() -> Element {
+#[preview(name = "Catalog thumbnail")]
+fn thumbnail() -> Element {
     rsx! {
         div { class: "grid w-full max-w-xs grid-cols-[2.5rem_1fr] items-center gap-3",
             Skeleton { class: "size-10 rounded-full" }
@@ -17,7 +17,7 @@ fn preview() -> Element {
 }
 
 /// Text and control placeholders.
-#[variant(name = "Content stack")]
+#[preview(name = "Content stack")]
 fn content_stack() -> Element {
     rsx! {
         div { class: "grid max-w-xl gap-3 rounded-panel border border-line bg-surface p-5",
@@ -33,5 +33,5 @@ fn content_stack() -> Element {
 }
 
 /// Loading placeholder component.
-#[story(id = "skeleton", name = "Skeleton", preview = preview)]
-const SKELETON_STORY: () = &[content_stack];
+#[showcase(id = "skeleton", name = "Skeleton", thumbnail = thumbnail)]
+const SKELETON_SHOWCASE: () = &[content_stack];

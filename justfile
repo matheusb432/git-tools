@@ -23,10 +23,10 @@ help: _preflight
 up:
     just desktop up
 
-# Serve the development-only component story catalog in a browser.
+# Serve the development-only component showcase catalog in a browser.
 [group('build')]
 preview-components *args:
-    cargo run --quiet -p dx-book-cli -- serve {{ args }}
+    cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-preview-cli -- serve {{ args }}
 
 # Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]
@@ -60,7 +60,7 @@ _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
 # Compare Criterion benchmarks against the local baseline. Use --update to replace it.
-[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|storybook-registry|view-cache|viewer-render")]
+[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|showcase-registry|view-cache|viewer-render")]
 [arg("case", help="Exact Criterion benchmark case")]
 [arg("update", long="update", value="--save-baseline local", help="Compare and replace the local baseline")]
 [arg("quick", long="quick", value="--quick", help="Stop once Criterion reaches statistical significance")]
@@ -129,7 +129,7 @@ test-web-desktop *args:
 test-web-artifact *args:
     @cargo nextest run --locked -p gtl-web --no-default-features --features artifact "$@"
 
-# Run the CSR component-preview configuration and its story registry tests.
+# Run the CSR component-preview configuration and its showcase registry tests.
 [group('quality')]
 test-web-component-preview *args:
     @cargo nextest run --locked -p gtl-web --no-default-features --features component-preview "$@"
@@ -215,7 +215,7 @@ fix *args:
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
 drift-check:
-    cargo run --quiet -p dx-book-cli -- styles
+    cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-preview-cli -- styles
     cargo run --quiet -p xtask -- drift-check
 
 # Report missing Mise-managed tools without changing the host.

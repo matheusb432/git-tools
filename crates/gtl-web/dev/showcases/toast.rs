@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
-use dx_book::{story, variant};
+use dx_preview::{preview, showcase};
 
 use crate::shared::ui::{Button, ButtonVariant, ToastHost, use_toast};
 
-#[variant(name = "Catalog preview")]
-fn preview() -> Element {
+#[preview(name = "Catalog thumbnail")]
+fn thumbnail() -> Element {
     rsx! {
         ToastHost { PreviewToastControl {} }
     }
@@ -20,7 +20,7 @@ fn PreviewToastControl() -> Element {
 }
 
 /// Queue, severity, and dismissal behavior.
-#[variant(name = "Interactive queue")]
+#[preview(name = "Interactive queue")]
 fn queue() -> Element {
     rsx! {
         ToastHost { ToastControls {} }
@@ -54,5 +54,5 @@ fn ToastControls() -> Element {
 }
 
 /// Toast notification component.
-#[story(id = "toast", name = "Toast", preview = preview)]
-const TOAST_STORY: () = &[queue];
+#[showcase(id = "toast", name = "Toast", thumbnail = thumbnail)]
+const TOAST_SHOWCASE: () = &[queue];

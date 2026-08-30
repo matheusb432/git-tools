@@ -1,15 +1,15 @@
 use std::num::NonZeroUsize;
 
 use dioxus::prelude::*;
-use dx_book::catalog::{CatalogConfig, Storybook};
+use dx_preview::catalog::{Catalog, CatalogConfig};
 use gtl_wire::viewer::ViewerTheme;
 
 use crate::shared::{browser, ui::ViewerThemePicker};
 
 const FAVICON: Asset = asset!("/src/app/assets/app-icon.ico");
 const PREVIEW_CSS: Asset = asset!("/assets/component-preview.css");
-const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component storybook")
-    .with_stories_per_page(match NonZeroUsize::new(15) {
+const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component catalog")
+    .with_showcases_per_page(match NonZeroUsize::new(15) {
         Some(value) => value,
         None => NonZeroUsize::MIN,
     })
@@ -28,7 +28,7 @@ pub(super) fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: PREVIEW_CSS, blocking: "render" }
-        Storybook { config: CATALOG_CONFIG }
+        Catalog { config: CATALOG_CONFIG }
     }
 }
 

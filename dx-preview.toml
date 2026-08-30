@@ -1,4 +1,4 @@
-[book]
+[preview]
 path = "crates/gtl-web"
 package = "gtl-web"
 source-directories = [
@@ -7,8 +7,8 @@ source-directories = [
   "../gtl-web-contracts/src",
   "dev",
   "src",
-  "../../shared/dx-book/macros/src",
-  "../../shared/dx-book/src",
+  "../../../../shared-libs/dx-preview/crates/dx-preview-macros/src",
+  "../../../../shared-libs/dx-preview/crates/dx-preview/src",
 ]
 
 [serve]

@@ -1,15 +1,15 @@
 use dioxus::prelude::*;
-use dx_book::{story, variant};
+use dx_preview::{preview, showcase};
 
 use crate::shared::ui::{Badge, BadgeVariant};
 
-#[variant(name = "Catalog preview")]
-fn preview() -> Element {
+#[preview(name = "Catalog thumbnail")]
+fn thumbnail() -> Element {
     variants()
 }
 
 /// All badge variants.
-#[variant]
+#[preview]
 fn variants() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
@@ -22,5 +22,5 @@ fn variants() -> Element {
 }
 
 /// Badge component.
-#[story(id = "badge", name = "Badge", preview = preview)]
-const BADGE_STORY: () = &[variants];
+#[showcase(id = "badge", name = "Badge", thumbnail = thumbnail)]
+const BADGE_SHOWCASE: () = &[variants];
