@@ -11,6 +11,7 @@ mod empty_notice;
 #[cfg(feature = "artifact")]
 mod floating_notice;
 mod icon_popover;
+mod loading_spinner;
 mod menu_action;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod popover;
@@ -38,6 +39,7 @@ pub(crate) use floating_notice::FloatingNotice;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use icon_popover::IconPopoverIconMotion;
 pub(crate) use icon_popover::{IconPopover, IconPopoverPlacement};
+pub(crate) use loading_spinner::LoadingSpinner;
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use popover::Popover;

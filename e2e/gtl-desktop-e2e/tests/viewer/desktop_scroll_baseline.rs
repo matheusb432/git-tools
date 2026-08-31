@@ -2,7 +2,7 @@
 
 use std::{
     fs,
-    io::Write as _,
+    io::{BufWriter, Write as _},
     path::{Path, PathBuf},
     process::Command,
     time::{Duration, Instant},
@@ -11,8 +11,9 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use gtl_benchmarks::desktop_scroll::{
     self, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch, DesktopScrollReport,
-    DesktopScrollResourceBounds, DesktopScrollSource, DesktopScrollSystemConditions,
-    DesktopScrollWindow, ScrollProtocol, ScrollSample,
+    DesktopScrollResourceBounds, DesktopScrollSingleFileLaunch, DesktopScrollSingleFileWorkload,
+    DesktopScrollSource, DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
+    ScrollSample,
 };
 use gtl_web_contracts::test_ids;
 use serde::{Deserialize, Serialize};
@@ -30,11 +31,14 @@ mod runner_environment;
 use metrics::BrowserScrollSample;
 
 const ASSERTION_TIMEOUT: Duration = Duration::from_secs(120);
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(120);
 const WINDOW_WIDTH: u32 = 1_200;
 const WINDOW_HEIGHT: u32 = 700;
 const DIAGNOSTIC_BYTES_MAX: usize = 64 * 1024;
 const VIEW_NAME: &str = "desktop-scroll-baseline";
+const SINGLE_FILE_VIEW_NAME: &str = "desktop-scroll-single-file";
+const DIFF_DOCUMENT_SELECTOR: &str = "[data-gtl-diff-document]";
+const MANY_FILE_DIFF_ROW_COUNT: usize = 4_247;
 
 const READINESS_SCRIPT: &str = r#"
 const isVisible = (element) => {
@@ -80,6 +84,43 @@ const element = [...document.querySelectorAll(arguments[0])].find((candidate) =>
         rectangle.width > 0 && rectangle.height > 0;
 });
 return element ?? null;
+";
+
+const DIFF_ROW_COUNT_SCRIPT: &str = r"
+const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].find((candidate) => {
+    const style = getComputedStyle(candidate);
+    const rectangle = candidate.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+        rectangle.width > 0 && rectangle.height > 0;
+});
+return diffDocument?.querySelectorAll('[data-gtl-diff-row]').length ?? 0;
+";
+
+const EXPAND_DIFF_FILES_SCRIPT: &str = r"
+const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].find((candidate) => {
+    const style = getComputedStyle(candidate);
+    const rectangle = candidate.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+        rectangle.width > 0 && rectangle.height > 0;
+});
+const files = [...(diffDocument?.querySelectorAll('[data-gtl-diff-file]') ?? [])];
+for (const file of files) {
+    if (!file.open) file.firstElementChild?.click();
+}
+return files.length;
+";
+
+const DIFF_DOCUMENT_SCROLL_READY_SCRIPT: &str = r"
+const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].find((candidate) => {
+    const style = getComputedStyle(candidate);
+    const rectangle = candidate.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+        rectangle.width > 0 && rectangle.height > 0;
+});
+if (diffDocument === undefined) return false;
+const files = [...diffDocument.querySelectorAll('[data-gtl-diff-file]')];
+return files.length === arguments[0] && files.every((file) => file.open) &&
+    diffDocument.scrollHeight - diffDocument.clientHeight >= arguments[1];
 ";
 
 const SCROLL_SCRIPT: &str = r"
@@ -171,10 +212,18 @@ struct ReadinessSnapshot {
     commit_count: usize,
 }
 
+#[derive(Clone, Copy)]
+struct ReadyViewExpectation {
+    name: &'static str,
+    file_count: usize,
+    commit_count: usize,
+    diff_row_count: usize,
+}
+
 impl ReadinessSnapshot {
-    fn is_ready(&self) -> bool {
+    fn is_ready(&self, expectation: ReadyViewExpectation) -> bool {
         self.active_tab_count == 1
-            && self.active_tab_title.as_deref() == Some(VIEW_NAME)
+            && self.active_tab_title.as_deref() == Some(expectation.name)
             && self.visible_active_tab_count == 1
             && self.document_count == 1
             && self.visible_document_count == 1
@@ -183,21 +232,21 @@ impl ReadinessSnapshot {
             && self.document_chunks_complete.as_deref() == Some("true")
             && self.document_layout.as_deref() == Some("unified")
             && self.document_density.as_deref() == Some("compact")
-            && self.diff_file_count == desktop_scroll::DISTINCT_FILE_COUNT
+            && self.diff_file_count == expectation.file_count
             && self.visible_changed_files_count == 1
             && self
                 .changed_files_text
                 .as_deref()
-                .is_some_and(changed_files_summary_is_ready)
+                .is_some_and(|text| changed_files_summary_is_ready(text, expectation))
             && self.commit_panel_count >= 1
             && self.visible_commit_panel_count == 1
-            && self.commit_count == desktop_scroll::COMMIT_COUNT
+            && self.commit_count == expectation.commit_count
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "run through `just bench-scroll` under the bounded release supervisor"]
-async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
+async fn production_viewer_scrolls_large_diff_workloads() -> Result<()> {
     let inputs = BenchmarkInputs::from_environment()?;
     let fixture_evidence = desktop_scroll::verify_fixture(&desktop_scroll::fixture_root())
         .context("verify committed desktop scroll fixture before measurement")?;
@@ -210,8 +259,14 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
             == desktop_scroll::DISTINCT_FILE_COUNT,
         "fixture file count drifted before desktop measurement"
     );
+    ensure!(
+        fixture_evidence.manifest.workload.compact_diff_rows
+            == MANY_FILE_DIFF_ROW_COUNT + desktop_scroll::DISTINCT_FILE_COUNT,
+        "fixture compact row count drifted before desktop measurement"
+    );
     let runner = runner_environment::describe()?;
     let mut launches = Vec::with_capacity(inputs.launches);
+    let mut single_file_launches = Vec::with_capacity(inputs.launches);
 
     for launch in 1..=inputs.launches {
         let conditions_before_launch = runner_environment::capture_conditions()?;
@@ -219,6 +274,13 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
         let launch_report =
             run_independent_launch(&suite_name, launch, conditions_before_launch).await?;
         launches.push(launch_report);
+    }
+    for launch in 1..=inputs.launches {
+        let conditions_before_launch = runner_environment::capture_conditions()?;
+        let suite_name = format!("desktop-scroll-single-file-launch-{launch}");
+        let launch_report =
+            run_single_file_launch(&suite_name, launch, conditions_before_launch).await?;
+        single_file_launches.push(launch_report);
     }
 
     let report_path = inputs.output.clone();
@@ -237,19 +299,51 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
             outer_window_height_pixels: WINDOW_HEIGHT,
             expected_layout: "unified".to_owned(),
             expected_density: "compact".to_owned(),
-            readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete".to_owned(),
+            readiness: "complete production DOM for the committed many-file fixture and deterministic 20,005-row single-file fixture".to_owned(),
             memory_attribution: process_memory::ATTRIBUTION.to_owned(),
             process_cpu_clock_ticks_per_second: process_memory::clock_ticks_per_second()?,
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
-            scroll: ScrollProtocol::fixed(),
+            side_panel_scroll: ScrollProtocol::side_panel(),
+            diff_document_scroll: ScrollProtocol::diff_document(),
+            single_file: DesktopScrollSingleFileWorkload {
+                file_count: 1,
+                source_line_count: desktop_scroll::SINGLE_FILE_SOURCE_LINE_COUNT,
+                expected_diff_row_count: desktop_scroll::SINGLE_FILE_DIFF_ROW_COUNT,
+            },
         },
         resource_bounds: inputs.bounds,
         runner,
         launches,
+        single_file_launches,
     };
     write_report(&report_path, &report)?;
     println!("desktop scroll benchmark report: {}", report_path.display());
     Ok(())
+}
+
+async fn run_single_file_launch(
+    suite_name: &str,
+    launch: usize,
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollSingleFileLaunch> {
+    support::run_test_with_result(suite_name, |session| {
+        Box::pin(measure_single_file_launch_with_context(
+            session,
+            launch,
+            conditions_before_launch,
+        ))
+    })
+    .await
+}
+
+async fn measure_single_file_launch_with_context(
+    session: &mut support::session::TestSession,
+    launch: usize,
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollSingleFileLaunch> {
+    measure_single_file_launch(session, launch, conditions_before_launch)
+        .await
+        .with_context(|| format!("measure independent single-file desktop launch {launch}"))
 }
 
 async fn run_independent_launch(
@@ -331,8 +425,15 @@ async fn measure_launch(
     .await?;
     let readiness_started_at = Instant::now();
     forward_fixture(&repository, session.data_root())?;
-    wait_for_ready_view(driver, &mut readiness_process_sampler).await?;
+    let expectation = ReadyViewExpectation {
+        name: VIEW_NAME,
+        file_count: desktop_scroll::DISTINCT_FILE_COUNT,
+        commit_count: desktop_scroll::COMMIT_COUNT,
+        diff_row_count: MANY_FILE_DIFF_ROW_COUNT,
+    };
+    wait_for_ready_view(driver, &mut readiness_process_sampler, expectation).await?;
     let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
+    verify_diff_row_count(driver, expectation).await?;
     driver
         .set_script_timeout(SCRIPT_TIMEOUT)
         .await
@@ -342,13 +443,34 @@ async fn measure_launch(
         .get_window_rect()
         .await
         .context("read fixed desktop benchmark window")?;
+    expand_diff_files_for_scroll(driver, expectation).await?;
+    let diff_document_element = visible_element(
+        driver,
+        DIFF_DOCUMENT_SELECTOR,
+        "diff-document scroll region",
+    )
+    .await?;
+    let diff_document = scroll_element(
+        driver,
+        &diff_document_element,
+        "diff-document",
+        ScrollProtocol::diff_document(),
+    )
+    .await?;
+    let memory_after_diff_document = process_memory::snapshot(session.data_root())?;
     let changed_files_element = visible_element(
         driver,
         test_ids::CHANGED_FILES_PANEL.selector(),
         "changed-files scroll panel",
     )
     .await?;
-    let changed_files = scroll_panel(driver, &changed_files_element, "changed-files").await?;
+    let changed_files = scroll_element(
+        driver,
+        &changed_files_element,
+        "changed-files",
+        ScrollProtocol::side_panel(),
+    )
+    .await?;
     let memory_after_changed_files = process_memory::snapshot(session.data_root())?;
     let commits_element = visible_element(
         driver,
@@ -356,7 +478,13 @@ async fn measure_launch(
         "commits scroll panel",
     )
     .await?;
-    let commits = scroll_panel(driver, &commits_element, "commits").await?;
+    let commits = scroll_element(
+        driver,
+        &commits_element,
+        "commits",
+        ScrollProtocol::side_panel(),
+    )
+    .await?;
     let memory_after_commits = process_memory::snapshot(session.data_root())?;
 
     ensure!(
@@ -375,10 +503,80 @@ async fn measure_launch(
             height: window.height,
         },
         readiness,
+        diff_document,
+        memory_after_diff_document,
         changed_files,
         memory_after_changed_files,
         commits,
         memory_after_commits,
+    })
+}
+
+async fn measure_single_file_launch(
+    session: &mut support::session::TestSession,
+    launch: usize,
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollSingleFileLaunch> {
+    let repository = create_single_file_repository(launch)?;
+    let driver = session.driver();
+    driver
+        .set_window_rect(20, 20, WINDOW_WIDTH, WINDOW_HEIGHT)
+        .await
+        .context("set fixed single-file benchmark window")?;
+    let mut readiness_process_sampler = wait::until(
+        "one stable top-level viewer and server process tree",
+        ASSERTION_TIMEOUT,
+        || async { process_memory::ReadinessProcessSampler::try_start(session.data_root()) },
+    )
+    .await?;
+    let readiness_started_at = Instant::now();
+    forward_single_file_fixture(&repository, session.data_root())?;
+    let expectation = ReadyViewExpectation {
+        name: SINGLE_FILE_VIEW_NAME,
+        file_count: 1,
+        commit_count: 1,
+        diff_row_count: desktop_scroll::SINGLE_FILE_DIFF_ROW_COUNT,
+    };
+    wait_for_ready_view(driver, &mut readiness_process_sampler, expectation).await?;
+    let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
+    verify_diff_row_count(driver, expectation).await?;
+    driver
+        .set_script_timeout(SCRIPT_TIMEOUT)
+        .await
+        .context("set single-file benchmark animation-script timeout")?;
+
+    let window = driver
+        .get_window_rect()
+        .await
+        .context("read fixed single-file benchmark window")?;
+    expand_diff_files_for_scroll(driver, expectation).await?;
+    let diff_document_element = visible_element(
+        driver,
+        DIFF_DOCUMENT_SELECTOR,
+        "diff-document scroll region",
+    )
+    .await?;
+    let diff_document = scroll_element(
+        driver,
+        &diff_document_element,
+        "diff-document",
+        ScrollProtocol::diff_document(),
+    )
+    .await?;
+    let memory_after_diff_document = process_memory::snapshot(session.data_root())?;
+
+    Ok(DesktopScrollSingleFileLaunch {
+        launch,
+        conditions_before_launch,
+        outer_window: DesktopScrollWindow {
+            x: window.x,
+            y: window.y,
+            width: window.width,
+            height: window.height,
+        },
+        readiness,
+        diff_document,
+        memory_after_diff_document,
     })
 }
 
@@ -393,10 +591,93 @@ fn hydrate_repository(launch: usize) -> Result<PathBuf> {
     Ok(repository)
 }
 
+fn create_single_file_repository(launch: usize) -> Result<PathBuf> {
+    let fixture_root = runner_environment::required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
+    let repository = fixture_root
+        .join("desktop-scroll-single-file-repositories")
+        .join(format!("launch-{launch}"));
+    ensure!(
+        !repository.exists(),
+        "single-file fixture already exists: {}",
+        repository.display()
+    );
+    fs::create_dir_all(&repository)
+        .with_context(|| format!("create single-file fixture at {}", repository.display()))?;
+    fixture_git(&repository, &["init", "-q", "-b", "main"])?;
+    fixture_git(
+        &repository,
+        &["config", "user.name", "Desktop Scroll Fixture"],
+    )?;
+    fixture_git(
+        &repository,
+        &["config", "user.email", "desktop-scroll@example.invalid"],
+    )?;
+    fs::write(
+        repository.join("README.md"),
+        "single-file desktop benchmark\n",
+    )
+    .context("write single-file fixture base")?;
+    fixture_git(&repository, &["add", "README.md"])?;
+    fixture_git(&repository, &["commit", "-q", "-m", "fixture: add base"])?;
+    fixture_git(&repository, &["switch", "-q", "-c", "feature"])?;
+    let source_path = repository.join("src/large.rs");
+    fs::create_dir_all(
+        source_path
+            .parent()
+            .context("single-file fixture source has no parent")?,
+    )
+    .context("create single-file fixture source directory")?;
+    let mut source = BufWriter::new(
+        fs::File::create(&source_path).context("create single-file fixture source")?,
+    );
+    for line_number in 1..=desktop_scroll::SINGLE_FILE_SOURCE_LINE_COUNT {
+        writeln!(
+            source,
+            "pub const ROW_{line_number:05}: &str = \"single-file-benchmark-{line_number:05}\";"
+        )
+        .context("write single-file fixture source")?;
+    }
+    source.flush().context("flush single-file fixture source")?;
+    fixture_git(&repository, &["add", "src/large.rs"])?;
+    fixture_git(
+        &repository,
+        &["commit", "-q", "-m", "fixture: add large source file"],
+    )?;
+    Ok(repository)
+}
+
+fn fixture_git(repository: &Path, arguments: &[&str]) -> Result<()> {
+    let output = Command::new("git")
+        .args(arguments)
+        .current_dir(repository)
+        .env("GIT_AUTHOR_DATE", "2026-01-01T12:00:00+00:00")
+        .env("GIT_COMMITTER_DATE", "2026-01-01T12:00:00+00:00")
+        .output()
+        .with_context(|| format!("run fixture Git {}", arguments.join(" ")))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    bail!(
+        "fixture Git {} failed (exit {}): {}{}",
+        arguments.join(" "),
+        output.status.code().unwrap_or(-1),
+        bounded_diagnostic(&output.stdout),
+        bounded_diagnostic(&output.stderr)
+    )
+}
+
 fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
+    forward_diff(repository, data_root, VIEW_NAME, "10")
+}
+
+fn forward_single_file_fixture(repository: &Path, data_root: &Path) -> Result<()> {
+    forward_diff(repository, data_root, SINGLE_FILE_VIEW_NAME, "1")
+}
+
+fn forward_diff(repository: &Path, data_root: &Path, name: &str, limit: &str) -> Result<()> {
     let cli = runner_environment::required_environment_path("GTL_E2E_CLI_BINARY")?;
     let output = Command::new(&cli)
-        .args(["diff", "-l", "10", "-n", VIEW_NAME])
+        .args(["diff", "-l", limit, "-n", name])
         .current_dir(repository)
         .env("GIT_TOOLS_DATA_DIR", data_root)
         .output()
@@ -405,7 +686,7 @@ fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "production CLI fixture forwarding failed (exit {}): {}{}",
+        "production CLI fixture forwarding failed for {name} (exit {}): {}{}",
         output.status.code().unwrap_or(-1),
         bounded_diagnostic(&output.stdout),
         bounded_diagnostic(&output.stderr)
@@ -415,16 +696,17 @@ fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
 async fn wait_for_ready_view(
     driver: &WebDriver,
     process_sampler: &mut process_memory::ReadinessProcessSampler,
+    expectation: ReadyViewExpectation,
 ) -> Result<()> {
     let readiness = wait::until(
-        "complete 10-commit, 50-file production desktop view",
+        "complete production desktop diff view",
         ASSERTION_TIMEOUT,
         || {
             let process_observation = process_sampler.observe();
             async move {
                 process_observation?;
                 let snapshot = readiness_snapshot(driver).await?;
-                Ok(snapshot.is_ready().then_some(()))
+                Ok(snapshot.is_ready(expectation).then_some(()))
             }
         },
     )
@@ -436,6 +718,64 @@ async fn wait_for_ready_view(
         return Err(error).context(format!("last readiness observation: {diagnostic}"));
     }
     Ok(())
+}
+
+async fn verify_diff_row_count(
+    driver: &WebDriver,
+    expectation: ReadyViewExpectation,
+) -> Result<()> {
+    let result = driver
+        .execute(DIFF_ROW_COUNT_SCRIPT, Vec::new())
+        .await
+        .context("count completed production diff rows")?;
+    let actual: usize = result
+        .convert()
+        .context("decode production diff row count")?;
+    ensure!(
+        actual == expectation.diff_row_count,
+        "{} rendered {actual} diff rows, expected {}",
+        expectation.name,
+        expectation.diff_row_count
+    );
+    Ok(())
+}
+
+async fn expand_diff_files_for_scroll(
+    driver: &WebDriver,
+    expectation: ReadyViewExpectation,
+) -> Result<()> {
+    let expanded_file_count: usize = driver
+        .execute(EXPAND_DIFF_FILES_SCRIPT, Vec::new())
+        .await
+        .context("expand every completed diff file before scrolling")?
+        .convert()
+        .context("decode expanded diff-file count")?;
+    ensure!(
+        expanded_file_count == expectation.file_count,
+        "expanded {expanded_file_count} diff files, expected {}",
+        expectation.file_count
+    );
+    let protocol = ScrollProtocol::diff_document();
+    wait::until(
+        "expanded diff document with the fixed scroll range",
+        ASSERTION_TIMEOUT,
+        || async {
+            let ready: bool = driver
+                .execute(
+                    DIFF_DOCUMENT_SCROLL_READY_SCRIPT,
+                    vec![
+                        serde_json::json!(expectation.file_count),
+                        serde_json::json!(protocol.distance_css_pixels),
+                    ],
+                )
+                .await
+                .context("observe expanded diff-document scroll range")?
+                .convert()
+                .context("decode expanded diff-document scroll readiness")?;
+            Ok(ready.then_some(()))
+        },
+    )
+    .await
 }
 
 async fn readiness_snapshot(driver: &WebDriver) -> Result<ReadinessSnapshot> {
@@ -477,22 +817,32 @@ async fn visible_element(
         .with_context(|| format!("decode visible {label}"))
 }
 
-fn changed_files_summary_is_ready(text: &str) -> bool {
+fn changed_files_summary_is_ready(text: &str, expectation: ReadyViewExpectation) -> bool {
     let normalized = text
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .to_ascii_lowercase();
-    normalized.contains(&format!("# {} files", desktop_scroll::DISTINCT_FILE_COUNT))
-        && normalized.contains(&format!("{} commits", desktop_scroll::COMMIT_COUNT))
+    let file_label = if expectation.file_count == 1 {
+        "file"
+    } else {
+        "files"
+    };
+    let commit_label = if expectation.commit_count == 1 {
+        "commit"
+    } else {
+        "commits"
+    };
+    normalized.contains(&format!("# {} {file_label}", expectation.file_count))
+        && normalized.contains(&format!("{} {commit_label}", expectation.commit_count))
 }
 
-async fn scroll_panel(
+async fn scroll_element(
     driver: &WebDriver,
     element: &WebElement,
     panel: &str,
+    protocol: ScrollProtocol,
 ) -> Result<ScrollSample> {
-    let protocol = ScrollProtocol::fixed();
     let arguments = vec![
         element.to_json().context("encode scroll-panel element")?,
         serde_json::to_value(protocol).context("encode fixed scroll protocol")?,
@@ -556,7 +906,28 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
 
 #[test]
 fn readiness_normalizes_rendered_changed_files_summary() {
-    assert!(changed_files_summary_is_ready("# 50 FILES\n10\ncommits"));
+    assert!(changed_files_summary_is_ready(
+        "# 50 FILES\n10\ncommits",
+        ReadyViewExpectation {
+            name: VIEW_NAME,
+            file_count: 50,
+            commit_count: 10,
+            diff_row_count: 4_247,
+        }
+    ));
+}
+
+#[test]
+fn readiness_accepts_singular_file_and_commit_labels() {
+    assert!(changed_files_summary_is_ready(
+        "# 1 FILE\n1\ncommit",
+        ReadyViewExpectation {
+            name: SINGLE_FILE_VIEW_NAME,
+            file_count: 1,
+            commit_count: 1,
+            diff_row_count: desktop_scroll::SINGLE_FILE_DIFF_ROW_COUNT,
+        }
+    ));
 }
 
 #[test]
@@ -580,5 +951,10 @@ fn readiness_accepts_complete_production_dom_snapshot() {
         commit_count: desktop_scroll::COMMIT_COUNT,
     };
 
-    assert!(snapshot.is_ready());
+    assert!(snapshot.is_ready(ReadyViewExpectation {
+        name: VIEW_NAME,
+        file_count: desktop_scroll::DISTINCT_FILE_COUNT,
+        commit_count: desktop_scroll::COMMIT_COUNT,
+        diff_row_count: MANY_FILE_DIFF_ROW_COUNT,
+    }));
 }

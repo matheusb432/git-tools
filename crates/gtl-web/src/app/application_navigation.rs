@@ -5,7 +5,7 @@ use gtl_wire::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
     ViewerTabState, ViewerTheme,
 };
-use lucide_dioxus::{Ellipsis, History, LoaderCircle, Settings, TriangleAlert, X};
+use lucide_dioxus::{Ellipsis, History, Settings, TriangleAlert, X};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -17,8 +17,8 @@ use crate::{
         browser,
         ui::{
             Button, ButtonSize, ButtonVariant, CountBadge, IconPopover, IconPopoverIconMotion,
-            MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea, ScrollAreaVariant,
-            ViewerThemePicker, use_toast,
+            LoadingSpinner, MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea,
+            ScrollAreaVariant, ViewerThemePicker, use_toast,
         },
     },
 };
@@ -31,6 +31,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let navigator = use_navigator();
     let toast = use_toast();
     let shell = viewer.shell();
+    let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
     let tab_ids = use_memo(move || match &*shell.read() {
         ViewerShellLoad::Ready(shell) => shell.tabs.iter().map(|tab| tab.id).collect(),
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => Vec::new(),
@@ -67,6 +68,10 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         let focus_tab_id = close_focus_target(tabs, tab_id);
                         let key_tabs = tab_ids;
                         let tab_label = tab.label.clone();
+                        let presentation_state = tab_presentation_state(
+                            &tab.state,
+                            diff_rows_loading_tab_id == Some(tab_id),
+                        );
                         rsx! {
                             div {
                                 key: "{tab.id}",
@@ -77,6 +82,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     r#type: "button",
                                     role: "tab",
                                     aria_selected: active.to_string(),
+                                    aria_busy: presentation_state.is_loading().to_string(),
                                     aria_controls: "viewer-active-view",
                                     tabindex: if active { "0" } else { "-1" },
                                     title: tab.label.clone(),
@@ -128,11 +134,13 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         aria_hidden: "true",
                                         {tab_kind_label(tab.kind)}
                                     }
-                                    span { class: "min-w-0 truncate", "{tab.label}" }
-                                    if tab.kind == ViewerTabKind::Live {
-                                        span { class: "sr-only", "Live" }
+                                    span { class: "flex min-w-0 flex-1 items-center gap-1.5",
+                                        span { class: "min-w-0 flex-1 truncate", "{tab.label}" }
+                                        if tab.kind == ViewerTabKind::Live {
+                                            span { class: "sr-only", ", Live" }
+                                        }
+                                        TabStateMarker { state: presentation_state }
                                     }
-                                    TabStateMarker { state: tab.state.clone() }
                                 }
                                 Button {
                                     size: ButtonSize::IconCompact,
@@ -239,34 +247,61 @@ const fn tab_kind_label(kind: ViewerTabKind) -> &'static str {
     }
 }
 
-const fn tab_state_label(state: &ViewerTabState) -> &'static str {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TabPresentationState {
+    Ready,
+    Loading,
+    Broken,
+    Error,
+}
+
+impl TabPresentationState {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Ready => "Ready",
+            Self::Loading => "Rendering",
+            Self::Broken => "Render stopped",
+            Self::Error => "Render failed",
+        }
+    }
+
+    const fn is_loading(self) -> bool {
+        matches!(self, Self::Loading)
+    }
+}
+
+const fn tab_presentation_state(
+    state: &ViewerTabState,
+    diff_rows_loading: bool,
+) -> TabPresentationState {
     match state {
-        ViewerTabState::Ready => "Ready",
-        ViewerTabState::Pending => "Rendering",
-        ViewerTabState::Broken => "Render stopped",
-        ViewerTabState::Error => "Render failed",
+        ViewerTabState::Ready if diff_rows_loading => TabPresentationState::Loading,
+        ViewerTabState::Ready => TabPresentationState::Ready,
+        ViewerTabState::Pending => TabPresentationState::Loading,
+        ViewerTabState::Broken => TabPresentationState::Broken,
+        ViewerTabState::Error => TabPresentationState::Error,
     }
 }
 
 #[component]
-fn TabStateMarker(state: ViewerTabState) -> Element {
-    let label = tab_state_label(&state);
+fn TabStateMarker(state: TabPresentationState) -> Element {
+    let label = state.label();
 
     rsx! {
-        match state {
-            ViewerTabState::Ready => rsx! {},
-            ViewerTabState::Pending => rsx! {
-                span {
-                    class: "flex-none animate-spin text-acc motion-reduce:animate-none",
-                    aria_hidden: "true",
-                    LoaderCircle { size: 13 }
-                }
-            },
-            ViewerTabState::Broken | ViewerTabState::Error => rsx! {
-                span { class: "flex-none text-del", aria_hidden: "true",
-                    TriangleAlert { size: 13 }
-                }
-            },
+        span {
+            class: "inline-flex size-3.5 flex-none items-center justify-center text-acc",
+            aria_hidden: "true",
+            match state {
+                TabPresentationState::Ready => rsx! {},
+                TabPresentationState::Loading => rsx! {
+                    LoadingSpinner {}
+                },
+                TabPresentationState::Broken | TabPresentationState::Error => rsx! {
+                    span { class: "text-del",
+                        TriangleAlert { size: 13 }
+                    }
+                },
+            }
         }
         span { class: "sr-only", ", {label}" }
     }
@@ -304,9 +339,13 @@ fn close_focus_target(tabs: &[ViewerTab], closing: ViewerTabId) -> Option<Viewer
 
 #[cfg(test)]
 mod tests {
+    use dioxus::prelude::*;
     use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
 
-    use super::{TabMovement, close_focus_target, tab_focus_target, tab_state_label};
+    use super::{
+        TabMovement, TabPresentationState, TabStateMarker, close_focus_target, tab_focus_target,
+        tab_presentation_state,
+    };
     use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
@@ -346,10 +385,42 @@ mod tests {
     }
 
     #[test]
+    fn row_stream_loading_uses_the_tab_loading_state() {
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Ready, true),
+            TabPresentationState::Loading
+        );
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Ready, false),
+            TabPresentationState::Ready
+        );
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Error, true),
+            TabPresentationState::Error
+        );
+    }
+
+    #[test]
     fn every_tab_state_has_a_non_color_label() {
-        assert_eq!(tab_state_label(&ViewerTabState::Ready), "Ready");
-        assert_eq!(tab_state_label(&ViewerTabState::Pending), "Rendering");
-        assert_eq!(tab_state_label(&ViewerTabState::Broken), "Render stopped");
-        assert_eq!(tab_state_label(&ViewerTabState::Error), "Render failed");
+        assert_eq!(TabPresentationState::Ready.label(), "Ready");
+        assert_eq!(TabPresentationState::Loading.label(), "Rendering");
+        assert_eq!(TabPresentationState::Broken.label(), "Render stopped");
+        assert_eq!(TabPresentationState::Error.label(), "Render failed");
+    }
+
+    #[test]
+    fn tab_state_marker_reserves_its_footprint_while_idle() {
+        for state in [
+            TabPresentationState::Ready,
+            TabPresentationState::Loading,
+            TabPresentationState::Broken,
+            TabPresentationState::Error,
+        ] {
+            let html = dioxus_ssr::render_element(rsx! {
+                TabStateMarker { state }
+            });
+
+            assert!(html.contains("inline-flex size-3.5 flex-none"));
+        }
     }
 }

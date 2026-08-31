@@ -22,9 +22,9 @@ pub use comparison::{
 pub use report::{
     BENCHMARK_NAME, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch,
     DesktopScrollProcessMemory, DesktopScrollReadinessSample, DesktopScrollReport,
-    DesktopScrollResourceBounds, DesktopScrollRunner, DesktopScrollSource,
-    DesktopScrollSystemConditions, DesktopScrollWindow, REPORT_FORMAT_VERSION, ScrollProtocol,
-    ScrollSample,
+    DesktopScrollResourceBounds, DesktopScrollRunner, DesktopScrollSingleFileLaunch,
+    DesktopScrollSingleFileWorkload, DesktopScrollSource, DesktopScrollSystemConditions,
+    DesktopScrollWindow, REPORT_FORMAT_VERSION, ScrollProtocol, ScrollSample,
 };
 
 pub const FIXTURE_RELATIVE_PATH: &str = "benchmarks/fixtures/desktop-scroll";
@@ -38,6 +38,8 @@ pub const DISTINCT_FILE_COUNT: usize = 50;
 pub const FILE_TOUCH_COUNT_PER_COMMIT: usize = 7;
 pub const FIXTURE_INPUT_BYTES_MAX: u64 = 2 * 1024 * 1024;
 pub const PATCH_FILE_BYTES_MAX: u64 = 256 * 1024;
+pub const SINGLE_FILE_SOURCE_LINE_COUNT: usize = 20_000;
+pub const SINGLE_FILE_DIFF_ROW_COUNT: usize = SINGLE_FILE_SOURCE_LINE_COUNT + 5;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DesktopScrollManifest {

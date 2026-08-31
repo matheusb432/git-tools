@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn fixed_protocol_collects_200_frame_gaps() {
-        let protocol = ScrollProtocol::fixed();
+        let protocol = ScrollProtocol::side_panel();
         let frame_gap_count =
             protocol.distance_css_pixels / protocol.step_css_pixels * protocol.traversals;
 
@@ -117,10 +117,23 @@ mod tests {
     }
 
     #[test]
+    fn document_protocol_crosses_twenty_thousand_pixels_in_four_traversals() {
+        let protocol = ScrollProtocol::diff_document();
+
+        assert_eq!(protocol.distance_css_pixels, 20_000);
+        assert_eq!(protocol.step_css_pixels, 200);
+        assert_eq!(protocol.traversals, 4);
+        assert_eq!(
+            protocol.distance_css_pixels / protocol.step_css_pixels * protocol.traversals,
+            400
+        );
+    }
+
+    #[test]
     fn frame_metrics_preserve_gaps_and_count_slow_frames() {
         let sample = summarize(
             "changed-files",
-            ScrollProtocol::fixed(),
+            ScrollProtocol::side_panel(),
             &BrowserScrollSample {
                 error: None,
                 frame_timestamps_ms: vec![0.0, 16.0, 33.0, 68.0, 88.0],
@@ -145,7 +158,7 @@ mod tests {
     fn frame_metrics_reject_a_panel_without_the_fixed_scroll_range() {
         let error = summarize(
             "commits",
-            ScrollProtocol::fixed(),
+            ScrollProtocol::side_panel(),
             &BrowserScrollSample {
                 error: None,
                 frame_timestamps_ms: vec![0.0, 16.0],

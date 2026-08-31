@@ -111,9 +111,7 @@ fn DiffFileLoadState(
 ) -> Element {
     match &*state.read() {
         #[cfg(feature = "desktop")]
-        ClientDiffFileState::Loading => rsx! {
-            DiffFileLoading {}
-        },
+        ClientDiffFileState::Loading => rsx! {},
         ClientDiffFileState::Complete => rsx! {},
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
@@ -123,14 +121,6 @@ fn DiffFileLoadState(
                 DiffFileLoadError { message, retryable, onretry }
             }
         }
-    }
-}
-
-#[cfg(feature = "desktop")]
-#[component]
-fn DiffFileLoading() -> Element {
-    rsx! {
-        div { class: "min-h-[22px] px-3 text-ink-3", role: "status", "Loading…" }
     }
 }
 

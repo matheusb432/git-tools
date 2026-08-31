@@ -3,6 +3,7 @@ mod badge;
 mod button;
 mod empty_notice;
 mod icon_popover;
+mod loading_spinner;
 mod skeleton;
 mod text_input;
 mod toast;

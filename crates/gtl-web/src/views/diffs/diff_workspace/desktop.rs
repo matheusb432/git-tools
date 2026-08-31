@@ -5,7 +5,7 @@ use gtl_wire::viewer::{
     CommitSelectionAction, OpenViewerDiffFile, SetViewerPreference, ViewerActiveState,
     ViewerActiveView, ViewerTabKind, ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{FileDiff, LoaderCircle, RefreshCw};
+use lucide_dioxus::{FileDiff, RefreshCw};
 
 use super::{
     DiffWorkspaceDocument, MobilePanel,
@@ -110,9 +110,7 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                     ViewerActiveState::Empty => rsx! {
                         EmptyWorkspace {}
                     },
-                    ViewerActiveState::Pending { .. } => rsx! {
-                        PendingWorkspace {}
-                    },
+                    ViewerActiveState::Pending { .. } => rsx! {},
                     ViewerActiveState::Broken { code, message, .. } => rsx! {
                         WorkspaceFailure {
                             title: format!("Render stopped ({})", code.as_str()),
@@ -154,23 +152,6 @@ fn EmptyWorkspace() -> Element {
             p { class: "mt-1 max-w-md leading-5 text-ink-2",
                 "Run a git-tools diff command to open a snapshot or live view."
             }
-        }
-    }
-}
-
-#[component]
-fn PendingWorkspace() -> Element {
-    rsx! {
-        section {
-            class: "grid h-full place-content-center px-5 text-center",
-            role: "status",
-            span {
-                class: "mx-auto animate-spin text-acc motion-reduce:animate-none",
-                aria_hidden: "true",
-                LoaderCircle { size: 20 }
-            }
-            h2 { class: "mt-3 font-semibold text-ink", "Rendering diff" }
-            p { class: "mt-1 text-ink-2", "The viewer will update when the render is ready." }
         }
     }
 }

@@ -92,6 +92,31 @@ struct ViewerRenderCommandScheduler {
     pending: Option<ViewerRenderCommand>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ViewerDiffRowsLoading {
+    tab_id: Option<ViewerTabId>,
+}
+
+impl ViewerDiffRowsLoading {
+    const fn tab_id(self) -> Option<ViewerTabId> {
+        self.tab_id
+    }
+
+    fn set(&mut self, tab_id: ViewerTabId, loading: bool) {
+        if loading {
+            self.tab_id = Some(tab_id);
+        } else if self.tab_id == Some(tab_id) {
+            self.tab_id = None;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ViewerRenderState {
+    commands: ViewerRenderCommandScheduler,
+    diff_rows_loading: ViewerDiffRowsLoading,
+}
+
 impl ViewerRenderCommandScheduler {
     fn submit(&mut self, command: ViewerRenderCommand) -> ViewerRenderCommandSubmission {
         if self.active.is_some() {
@@ -191,7 +216,7 @@ pub(crate) struct ViewerContext {
     shell_order: Signal<ViewerShellOrder>,
     reconnect_generation: Signal<u64>,
     server_instance_id: Signal<Option<String>>,
-    render_command_scheduler: Signal<ViewerRenderCommandScheduler>,
+    render_state: Signal<ViewerRenderState>,
     toast: ToastHandle,
 }
 
@@ -237,7 +262,7 @@ impl ViewerContext {
             self.toast.error(ViewerClientError::Unavailable.message());
             return;
         }
-        let submission = self.render_command_scheduler.write().submit(command);
+        let submission = self.render_state.write().commands.submit(command);
         if let ViewerRenderCommandSubmission::Started(ticket) = submission {
             self.start_render_command(ticket, command);
         }
@@ -252,7 +277,7 @@ impl ViewerContext {
         ticket: ViewerRenderCommandTicket,
         result: Result<ViewerShell, ViewerClientError>,
     ) {
-        let next = match self.render_command_scheduler.write().complete(ticket) {
+        let next = match self.render_state.write().commands.complete(ticket) {
             ViewerRenderCommandCompletion::Stale => return,
             ViewerRenderCommandCompletion::Finished => None,
             ViewerRenderCommandCompletion::Continue { ticket, command } => Some((ticket, command)),
@@ -267,7 +292,18 @@ impl ViewerContext {
     }
 
     pub(crate) fn render_command_pending(self) -> bool {
-        (self.render_command_scheduler)().is_pending()
+        (self.render_state)().commands.is_pending()
+    }
+
+    pub(crate) fn diff_rows_loading_tab_id(self) -> Option<ViewerTabId> {
+        (self.render_state)().diff_rows_loading.tab_id()
+    }
+
+    pub(crate) fn set_diff_rows_loading(mut self, tab_id: ViewerTabId, loading: bool) {
+        self.render_state
+            .write()
+            .diff_rows_loading
+            .set(tab_id, loading);
     }
 
     fn connected_to(mut self, server_instance_id: String) -> bool {
@@ -279,8 +315,7 @@ impl ViewerContext {
         if server_changed {
             self.shell_order.set(ViewerShellOrder::default());
             self.shell.set(ViewerShellLoad::Loading);
-            self.render_command_scheduler
-                .set(ViewerRenderCommandScheduler::default());
+            self.render_state.set(ViewerRenderState::default());
         }
         self.server_instance_id.set(Some(server_instance_id));
         self.connection.set(ViewerConnection::Connected);
@@ -382,7 +417,7 @@ fn ApplicationLayoutContent() -> Element {
     let shell_order = use_signal(ViewerShellOrder::default);
     let reconnect_generation = use_signal(|| 0_u64);
     let server_instance_id = use_signal(|| None::<String>);
-    let render_command_scheduler = use_signal(ViewerRenderCommandScheduler::default);
+    let render_state = use_signal(ViewerRenderState::default);
     let state_change_version = use_signal(|| None::<ViewerVersion>);
     let toast = use_toast();
     let context = ViewerContext {
@@ -392,7 +427,7 @@ fn ApplicationLayoutContent() -> Element {
         shell_order,
         reconnect_generation,
         server_instance_id,
-        render_command_scheduler,
+        render_state,
         toast,
     };
     use_context_provider(|| context);
@@ -558,9 +593,9 @@ mod tests {
     };
 
     use super::{
-        ViewerFeedbackToast, ViewerRenderCommand, ViewerRenderCommandCompletion,
-        ViewerRenderCommandScheduler, ViewerRenderCommandSubmission, ViewerRenderCommandTicket,
-        ViewerShellOrder, viewer_feedback_toast,
+        ViewerDiffRowsLoading, ViewerFeedbackToast, ViewerRenderCommand,
+        ViewerRenderCommandCompletion, ViewerRenderCommandScheduler, ViewerRenderCommandSubmission,
+        ViewerRenderCommandTicket, ViewerShellOrder, viewer_feedback_toast,
     };
     use crate::test_support::{TestResult, viewer_tab_id};
 
@@ -741,6 +776,20 @@ mod tests {
             viewer_feedback_toast(Some(&ViewerFeedback::TabClosed)),
             None
         );
+    }
+
+    #[test]
+    fn stale_row_stream_cleanup_preserves_the_current_loading_tab() -> TestResult {
+        let mut loading = ViewerDiffRowsLoading::default();
+        let first = viewer_tab_id(4)?;
+        let current = viewer_tab_id(8)?;
+
+        loading.set(first, true);
+        loading.set(current, true);
+        loading.set(first, false);
+
+        assert_eq!(loading.tab_id(), Some(current));
+        Ok(())
     }
 
     #[test]

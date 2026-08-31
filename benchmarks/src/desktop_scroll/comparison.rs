@@ -25,9 +25,14 @@ pub struct FrameGapComparison {
 pub struct DesktopScrollComparison {
     pub readiness_wall_time_milliseconds: MetricDelta,
     pub readiness_process_cpu_time_milliseconds: MetricDelta,
+    pub diff_document: PanelComparison,
     pub changed_files: PanelComparison,
     pub commits: PanelComparison,
     pub peak_rss_bytes: MetricDelta,
+    pub single_file_readiness_wall_time_milliseconds: MetricDelta,
+    pub single_file_readiness_process_cpu_time_milliseconds: MetricDelta,
+    pub single_file_diff_document: PanelComparison,
+    pub single_file_peak_rss_bytes: MetricDelta,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +52,7 @@ impl std::fmt::Display for DesktopScrollReportRole {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DesktopScrollPanel {
+    DiffDocument,
     ChangedFiles,
     Commits,
 }
@@ -54,6 +60,7 @@ pub enum DesktopScrollPanel {
 impl DesktopScrollPanel {
     const fn name(self) -> &'static str {
         match self {
+            Self::DiffDocument => "diff-document",
             Self::ChangedFiles => "changed-files",
             Self::Commits => "commits",
         }
@@ -61,6 +68,7 @@ impl DesktopScrollPanel {
 
     fn sample(self, launch: &super::DesktopScrollLaunch) -> &ScrollSample {
         match self {
+            Self::DiffDocument => &launch.diff_document,
             Self::ChangedFiles => &launch.changed_files,
             Self::Commits => &launch.commits,
         }
@@ -99,9 +107,25 @@ pub enum DesktopScrollComparisonError {
         actual: usize,
     },
     #[error(
+        "{report} desktop scroll report contains {actual} single-file launches but its protocol records {expected}"
+    )]
+    SingleFileLaunchCountMismatch {
+        report: DesktopScrollReportRole,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
         "{report} desktop scroll report expected launch {expected} but recorded launch {actual}"
     )]
     LaunchOutOfSequence {
+        report: DesktopScrollReportRole,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "{report} desktop scroll report expected single-file launch {expected} but recorded launch {actual}"
+    )]
+    SingleFileLaunchOutOfSequence {
         report: DesktopScrollReportRole,
         expected: usize,
         actual: usize,
@@ -212,6 +236,10 @@ pub fn compare_reports(
     let current_changed_files = panel_metrics(current, DesktopScrollPanel::ChangedFiles);
     let baseline_commits = panel_metrics(baseline, DesktopScrollPanel::Commits);
     let current_commits = panel_metrics(current, DesktopScrollPanel::Commits);
+    let baseline_diff_document = panel_metrics(baseline, DesktopScrollPanel::DiffDocument);
+    let current_diff_document = panel_metrics(current, DesktopScrollPanel::DiffDocument);
+    let baseline_single_file_diff_document = single_file_panel_metrics(baseline);
+    let current_single_file_diff_document = single_file_panel_metrics(current);
 
     Ok(DesktopScrollComparison {
         readiness_wall_time_milliseconds: MetricDelta::between(
@@ -232,11 +260,38 @@ pub fn compare_reports(
             process_cpu_time_milliseconds(baseline),
             process_cpu_time_milliseconds(current),
         ),
+        diff_document: compare_panels(baseline_diff_document, current_diff_document),
         changed_files: compare_panels(baseline_changed_files, current_changed_files),
         commits: compare_panels(baseline_commits, current_commits),
         peak_rss_bytes: MetricDelta::between(
             u64_to_f64(peak_rss_bytes(baseline)),
             u64_to_f64(peak_rss_bytes(current)),
+        ),
+        single_file_readiness_wall_time_milliseconds: MetricDelta::between(
+            median_u64_as_f64(
+                baseline
+                    .single_file_launches
+                    .iter()
+                    .map(|launch| launch.readiness.wall_time_milliseconds),
+            ),
+            median_u64_as_f64(
+                current
+                    .single_file_launches
+                    .iter()
+                    .map(|launch| launch.readiness.wall_time_milliseconds),
+            ),
+        ),
+        single_file_readiness_process_cpu_time_milliseconds: MetricDelta::between(
+            single_file_process_cpu_time_milliseconds(baseline),
+            single_file_process_cpu_time_milliseconds(current),
+        ),
+        single_file_diff_document: compare_panels(
+            baseline_single_file_diff_document,
+            current_single_file_diff_document,
+        ),
+        single_file_peak_rss_bytes: MetricDelta::between(
+            u64_to_f64(single_file_peak_rss_bytes(baseline)),
+            u64_to_f64(single_file_peak_rss_bytes(current)),
         ),
     })
 }
@@ -292,7 +347,24 @@ fn validate_report(
             actual: report.launches.len(),
         });
     }
+    if report.single_file_launches.len() != report.protocol.independent_launches {
+        return Err(
+            DesktopScrollComparisonError::SingleFileLaunchCountMismatch {
+                report: report_role,
+                expected: report.protocol.independent_launches,
+                actual: report.single_file_launches.len(),
+            },
+        );
+    }
 
+    validate_many_file_launches(report_role, report)?;
+    validate_single_file_launches(report_role, report)
+}
+
+fn validate_many_file_launches(
+    report_role: DesktopScrollReportRole,
+    report: &DesktopScrollReport,
+) -> Result<(), DesktopScrollComparisonError> {
     for (launch_index, launch) in report.launches.iter().enumerate() {
         let expected_launch = launch_index + 1;
         if launch.launch != expected_launch {
@@ -304,6 +376,7 @@ fn validate_report(
         }
         let memory_snapshots = [
             &launch.readiness.peak_memory,
+            &launch.memory_after_diff_document,
             &launch.memory_after_changed_files,
             &launch.memory_after_commits,
         ];
@@ -319,10 +392,50 @@ fn validate_report(
         validate_sample(
             report_role,
             report,
+            DesktopScrollPanel::DiffDocument,
+            launch,
+        )?;
+        validate_sample(
+            report_role,
+            report,
             DesktopScrollPanel::ChangedFiles,
             launch,
         )?;
         validate_sample(report_role, report, DesktopScrollPanel::Commits, launch)?;
+    }
+    Ok(())
+}
+
+fn validate_single_file_launches(
+    report_role: DesktopScrollReportRole,
+    report: &DesktopScrollReport,
+) -> Result<(), DesktopScrollComparisonError> {
+    for (launch_index, launch) in report.single_file_launches.iter().enumerate() {
+        let expected_launch = launch_index + 1;
+        if launch.launch != expected_launch {
+            return Err(
+                DesktopScrollComparisonError::SingleFileLaunchOutOfSequence {
+                    report: report_role,
+                    expected: expected_launch,
+                    actual: launch.launch,
+                },
+            );
+        }
+        if launch.readiness.peak_memory.attribution != report.protocol.memory_attribution
+            || launch.memory_after_diff_document.attribution != report.protocol.memory_attribution
+        {
+            return Err(DesktopScrollComparisonError::MemoryAttributionMismatch {
+                report: report_role,
+                launch: launch.launch,
+            });
+        }
+        validate_scroll_sample(
+            report_role,
+            launch.launch,
+            DesktopScrollPanel::DiffDocument,
+            &launch.diff_document,
+            report.protocol.diff_document_scroll,
+        )?;
     }
     Ok(())
 }
@@ -334,28 +447,44 @@ fn validate_sample(
     launch: &super::DesktopScrollLaunch,
 ) -> Result<(), DesktopScrollComparisonError> {
     let sample = panel.sample(launch);
+    let protocol = match panel {
+        DesktopScrollPanel::DiffDocument => report.protocol.diff_document_scroll,
+        DesktopScrollPanel::ChangedFiles | DesktopScrollPanel::Commits => {
+            report.protocol.side_panel_scroll
+        }
+    };
+    validate_scroll_sample(report_role, launch.launch, panel, sample, protocol)
+}
+
+fn validate_scroll_sample(
+    report_role: DesktopScrollReportRole,
+    launch: usize,
+    panel: DesktopScrollPanel,
+    sample: &ScrollSample,
+    protocol: super::ScrollProtocol,
+) -> Result<(), DesktopScrollComparisonError> {
     if sample.panel != panel.name() {
         return Err(DesktopScrollComparisonError::PanelIdentityMismatch {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
             actual: sample.panel.clone(),
         });
     }
-    if sample.distance_css_pixels != report.protocol.scroll.distance_css_pixels
-        || sample.step_css_pixels != report.protocol.scroll.step_css_pixels
-        || sample.traversals != report.protocol.scroll.traversals
+    if sample.distance_css_pixels != protocol.distance_css_pixels
+        || sample.step_css_pixels != protocol.step_css_pixels
+        || sample.traversals != protocol.traversals
     {
         return Err(DesktopScrollComparisonError::ScrollProtocolMismatch {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
         });
     }
     if sample.frame_gaps_ms.is_empty() {
         return Err(DesktopScrollComparisonError::MissingFrameGaps {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
         });
     }
@@ -364,7 +493,7 @@ fn validate_sample(
     {
         return Err(DesktopScrollComparisonError::FrameCountMismatch {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
         });
     }
@@ -375,7 +504,7 @@ fn validate_sample(
     {
         return Err(DesktopScrollComparisonError::InvalidFrameGap {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
             index,
         });
@@ -388,7 +517,7 @@ fn validate_sample(
     if sample.frames_exceeding_33_ms != slow_frame_count {
         return Err(DesktopScrollComparisonError::SlowFrameCountMismatch {
             report: report_role,
-            launch: launch.launch,
+            launch,
             panel,
         });
     }
@@ -401,6 +530,30 @@ fn panel_metrics(report: &DesktopScrollReport, panel: DesktopScrollPanel) -> Pan
         .iter()
         .flat_map(|launch| panel.sample(launch).frame_gaps_ms.iter().copied())
         .collect::<Vec<_>>();
+    frame_gaps_ms.sort_by(f64::total_cmp);
+    PanelMetrics {
+        frame_gap_ms: FrameGapMetrics {
+            p50: nearest_rank(&frame_gaps_ms, 50),
+            p95: nearest_rank(&frame_gaps_ms, 95),
+            p99: nearest_rank(&frame_gaps_ms, 99),
+        },
+        frames_exceeding_33_ms: frame_gaps_ms
+            .iter()
+            .fold(0_u64, |count, gap| count + u64::from(*gap > 33.0)),
+    }
+}
+
+fn single_file_panel_metrics(report: &DesktopScrollReport) -> PanelMetrics {
+    panel_metrics_from_gaps(
+        report
+            .single_file_launches
+            .iter()
+            .flat_map(|launch| launch.diff_document.frame_gaps_ms.iter().copied()),
+    )
+}
+
+fn panel_metrics_from_gaps(frame_gaps_ms: impl Iterator<Item = f64>) -> PanelMetrics {
+    let mut frame_gaps_ms = frame_gaps_ms.collect::<Vec<_>>();
     frame_gaps_ms.sort_by(f64::total_cmp);
     PanelMetrics {
         frame_gap_ms: FrameGapMetrics {
@@ -461,6 +614,16 @@ fn process_cpu_time_milliseconds(report: &DesktopScrollReport) -> f64 {
         * 1_000.0
 }
 
+fn single_file_process_cpu_time_milliseconds(report: &DesktopScrollReport) -> f64 {
+    median_u64_as_f64(
+        report
+            .single_file_launches
+            .iter()
+            .map(|launch| launch.readiness.process_cpu_clock_ticks),
+    ) / u64_to_f64(report.protocol.process_cpu_clock_ticks_per_second)
+        * 1_000.0
+}
+
 fn peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
     report
         .launches
@@ -468,8 +631,23 @@ fn peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
         .flat_map(|launch| {
             [
                 launch.readiness.peak_memory.rss_bytes,
+                launch.memory_after_diff_document.rss_bytes,
                 launch.memory_after_changed_files.rss_bytes,
                 launch.memory_after_commits.rss_bytes,
+            ]
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn single_file_peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
+    report
+        .single_file_launches
+        .iter()
+        .flat_map(|launch| {
+            [
+                launch.readiness.peak_memory.rss_bytes,
+                launch.memory_after_diff_document.rss_bytes,
             ]
         })
         .max()
@@ -482,21 +660,22 @@ mod tests {
     use crate::desktop_scroll::{
         DesktopScrollBenchmarkProtocol, DesktopScrollLaunch, DesktopScrollProcessMemory,
         DesktopScrollReadinessSample, DesktopScrollResourceBounds, DesktopScrollRunner,
-        DesktopScrollSource, DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
+        DesktopScrollSingleFileLaunch, DesktopScrollSingleFileWorkload, DesktopScrollSource,
+        DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
     };
 
     #[test]
     fn comparison_combines_launch_distributions_and_peak_memory() {
         let baseline = report(
-            [vec![10.0, 20.0], vec![30.0, 40.0], vec![25.0, 35.0]],
-            [vec![16.0, 16.0], vec![16.0, 16.0], vec![16.0, 16.0]],
+            &[vec![10.0, 20.0], vec![30.0, 40.0], vec![25.0, 35.0]],
+            &[vec![16.0, 16.0], vec![16.0, 16.0], vec![16.0, 16.0]],
             [900, 1_000, 1_100],
             [90, 100, 110],
             [100, 120, 110],
         );
         let current = report(
-            [vec![20.0, 30.0], vec![40.0, 50.0], vec![35.0, 45.0]],
-            [vec![17.0, 17.0], vec![17.0, 17.0], vec![17.0, 17.0]],
+            &[vec![20.0, 30.0], vec![40.0, 50.0], vec![35.0, 45.0]],
+            &[vec![17.0, 17.0], vec![17.0, 17.0], vec![17.0, 17.0]],
             [700, 800, 900],
             [70, 80, 90],
             [140, 150, 145],
@@ -545,15 +724,15 @@ mod tests {
     #[test]
     fn zero_baselines_have_no_relative_percentage() {
         let baseline = report(
-            [vec![0.0], vec![0.0], vec![0.0]],
-            [vec![0.0], vec![0.0], vec![0.0]],
+            &[vec![0.0], vec![0.0], vec![0.0]],
+            &[vec![0.0], vec![0.0], vec![0.0]],
             [0, 0, 0],
             [0, 0, 0],
             [0, 0, 0],
         );
         let current = report(
-            [vec![1.0], vec![1.0], vec![1.0]],
-            [vec![1.0], vec![1.0], vec![1.0]],
+            &[vec![1.0], vec![1.0], vec![1.0]],
+            &[vec![1.0], vec![1.0], vec![1.0]],
             [1, 1, 1],
             [1, 1, 1],
             [1, 1, 1],
@@ -582,7 +761,7 @@ mod tests {
     fn incompatible_protocols_are_rejected() {
         let baseline = standard_report();
         let mut current = standard_report();
-        current.protocol.scroll.step_css_pixels += 1;
+        current.protocol.side_panel_scroll.step_css_pixels += 1;
         for launch in &mut current.launches {
             launch.changed_files.step_css_pixels += 1;
             launch.commits.step_css_pixels += 1;
@@ -657,8 +836,8 @@ mod tests {
 
     fn standard_report() -> DesktopScrollReport {
         report(
-            [vec![16.0], vec![16.0], vec![16.0]],
-            [vec![16.0], vec![16.0], vec![16.0]],
+            &[vec![16.0], vec![16.0], vec![16.0]],
+            &[vec![16.0], vec![16.0], vec![16.0]],
             [1_000, 1_000, 1_000],
             [100, 100, 100],
             [100, 100, 100],
@@ -666,39 +845,25 @@ mod tests {
     }
 
     fn report(
-        changed_files_gaps: [Vec<f64>; 3],
-        commit_gaps: [Vec<f64>; 3],
+        changed_files_gaps: &[Vec<f64>; 3],
+        commit_gaps: &[Vec<f64>; 3],
         readiness_wall_time_milliseconds: [u64; 3],
         readiness_process_cpu_clock_ticks: [u64; 3],
         peak_rss_bytes: [u64; 3],
     ) -> DesktopScrollReport {
-        let launches = changed_files_gaps
-            .into_iter()
-            .zip(commit_gaps)
-            .zip(peak_rss_bytes)
-            .enumerate()
-            .map(
-                |(index, ((changed_files, commits), peak_rss_bytes))| DesktopScrollLaunch {
-                    launch: index + 1,
-                    conditions_before_launch: conditions(),
-                    outer_window: DesktopScrollWindow {
-                        x: 20,
-                        y: 20,
-                        width: 1_200,
-                        height: 700,
-                    },
-                    readiness: DesktopScrollReadinessSample {
-                        wall_time_milliseconds: readiness_wall_time_milliseconds[index],
-                        process_cpu_clock_ticks: readiness_process_cpu_clock_ticks[index],
-                        peak_memory: memory(peak_rss_bytes),
-                    },
-                    changed_files: sample("changed-files", changed_files),
-                    memory_after_changed_files: memory(peak_rss_bytes.saturating_sub(2)),
-                    commits: sample("commits", commits),
-                    memory_after_commits: memory(peak_rss_bytes.saturating_sub(1)),
-                },
-            )
-            .collect();
+        let launches = benchmark_launches(
+            changed_files_gaps,
+            commit_gaps,
+            readiness_wall_time_milliseconds,
+            readiness_process_cpu_clock_ticks,
+            peak_rss_bytes,
+        );
+        let single_file_launches = benchmark_single_file_launches(
+            changed_files_gaps,
+            readiness_wall_time_milliseconds,
+            readiness_process_cpu_clock_ticks,
+            peak_rss_bytes,
+        );
         DesktopScrollReport {
             format_version: REPORT_FORMAT_VERSION,
             benchmark: BENCHMARK_NAME.to_owned(),
@@ -721,10 +886,12 @@ mod tests {
                 memory_attribution: "server and viewer process trees".to_owned(),
                 process_cpu_clock_ticks_per_second: 100,
                 script_timeout_seconds: 30,
-                scroll: ScrollProtocol {
-                    distance_css_pixels: 160,
-                    step_css_pixels: 8,
-                    traversals: 10,
+                side_panel_scroll: ScrollProtocol::side_panel(),
+                diff_document_scroll: ScrollProtocol::diff_document(),
+                single_file: DesktopScrollSingleFileWorkload {
+                    file_count: 1,
+                    source_line_count: 20_000,
+                    expected_diff_row_count: 20_005,
                 },
             },
             resource_bounds: DesktopScrollResourceBounds {
@@ -751,6 +918,93 @@ mod tests {
                 webkitgtk_version: "2.0.0".to_owned(),
             },
             launches,
+            single_file_launches,
+        }
+    }
+
+    fn benchmark_launches(
+        changed_files_gaps: &[Vec<f64>; 3],
+        commit_gaps: &[Vec<f64>; 3],
+        readiness_wall_time_milliseconds: [u64; 3],
+        readiness_process_cpu_clock_ticks: [u64; 3],
+        peak_rss_bytes: [u64; 3],
+    ) -> Vec<DesktopScrollLaunch> {
+        (0..3)
+            .map(|index| DesktopScrollLaunch {
+                launch: index + 1,
+                conditions_before_launch: conditions(),
+                outer_window: window(),
+                readiness: readiness(
+                    readiness_wall_time_milliseconds[index],
+                    readiness_process_cpu_clock_ticks[index],
+                    peak_rss_bytes[index],
+                ),
+                diff_document: sample(
+                    "diff-document",
+                    changed_files_gaps[index].clone(),
+                    ScrollProtocol::diff_document(),
+                ),
+                memory_after_diff_document: memory(peak_rss_bytes[index].saturating_sub(3)),
+                changed_files: sample(
+                    "changed-files",
+                    changed_files_gaps[index].clone(),
+                    ScrollProtocol::side_panel(),
+                ),
+                memory_after_changed_files: memory(peak_rss_bytes[index].saturating_sub(2)),
+                commits: sample(
+                    "commits",
+                    commit_gaps[index].clone(),
+                    ScrollProtocol::side_panel(),
+                ),
+                memory_after_commits: memory(peak_rss_bytes[index].saturating_sub(1)),
+            })
+            .collect()
+    }
+
+    fn benchmark_single_file_launches(
+        diff_document_gaps: &[Vec<f64>; 3],
+        readiness_wall_time_milliseconds: [u64; 3],
+        readiness_process_cpu_clock_ticks: [u64; 3],
+        peak_rss_bytes: [u64; 3],
+    ) -> Vec<DesktopScrollSingleFileLaunch> {
+        (0..3)
+            .map(|index| DesktopScrollSingleFileLaunch {
+                launch: index + 1,
+                conditions_before_launch: conditions(),
+                outer_window: window(),
+                readiness: readiness(
+                    readiness_wall_time_milliseconds[index],
+                    readiness_process_cpu_clock_ticks[index],
+                    peak_rss_bytes[index],
+                ),
+                diff_document: sample(
+                    "diff-document",
+                    diff_document_gaps[index].clone(),
+                    ScrollProtocol::diff_document(),
+                ),
+                memory_after_diff_document: memory(peak_rss_bytes[index]),
+            })
+            .collect()
+    }
+
+    fn window() -> DesktopScrollWindow {
+        DesktopScrollWindow {
+            x: 20,
+            y: 20,
+            width: 1_200,
+            height: 700,
+        }
+    }
+
+    fn readiness(
+        wall_time_milliseconds: u64,
+        process_cpu_clock_ticks: u64,
+        peak_rss_bytes: u64,
+    ) -> DesktopScrollReadinessSample {
+        DesktopScrollReadinessSample {
+            wall_time_milliseconds,
+            process_cpu_clock_ticks,
+            peak_memory: memory(peak_rss_bytes),
         }
     }
 
@@ -775,15 +1029,16 @@ mod tests {
         }
     }
 
-    fn sample(panel: &str, frame_gaps_ms: Vec<f64>) -> ScrollSample {
+    fn sample(panel: &str, frame_gaps_ms: Vec<f64>, protocol: ScrollProtocol) -> ScrollSample {
         let frame_gap_count = frame_gaps_ms.len();
         let frames_exceeding_33_ms = frame_gaps_ms.iter().filter(|gap| **gap > 33.0).count();
         ScrollSample {
             panel: panel.to_owned(),
-            distance_css_pixels: 160,
-            step_css_pixels: 8,
-            traversals: 10,
-            total_distance_css_pixels: 1_600,
+            distance_css_pixels: protocol.distance_css_pixels,
+            step_css_pixels: protocol.step_css_pixels,
+            traversals: protocol.traversals,
+            total_distance_css_pixels: u64::from(protocol.distance_css_pixels)
+                * u64::from(protocol.traversals),
             scroll_height_css_pixels: 800,
             client_height_css_pixels: 500,
             final_scroll_top_css_pixels: 0.0,

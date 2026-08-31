@@ -223,8 +223,7 @@ fn process_identities() -> Result<BTreeMap<u32, ProcessIdentity>> {
         };
         let stat = match fs::read_to_string(entry.path().join("stat")) {
             Ok(stat) => stat,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => continue,
+            Err(error) if process_identity_is_unavailable(&error) => continue,
             Err(error) => return Err(error).context("read Linux process identity"),
         };
         let Some(identity) = parse_process_identity(process_id, &stat) else {
@@ -366,8 +365,16 @@ fn process_disappeared(error: &anyhow::Error) -> bool {
     error.chain().any(|source| {
         source
             .downcast_ref::<std::io::Error>()
-            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            .is_some_and(process_disappeared_from_table)
     })
+}
+
+fn process_identity_is_unavailable(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::PermissionDenied || process_disappeared_from_table(error)
+}
+
+fn process_disappeared_from_table(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
 }
 
 #[cfg(test)]
@@ -491,5 +498,13 @@ mod tests {
             process_cpu_clock_ticks_delta(&started, &latest).unwrap(),
             42
         );
+    }
+
+    #[test]
+    fn process_inventory_treats_a_racing_linux_process_as_unavailable() {
+        let error = std::io::Error::from_raw_os_error(libc::ESRCH);
+
+        assert!(process_identity_is_unavailable(&error));
+        assert!(process_disappeared_from_table(&error));
     }
 }

@@ -358,20 +358,40 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
         "metric", "baseline", "current", "change"
     );
     print_metric(
-        "readiness wall time",
+        "many-file readiness wall time",
         comparison.readiness_wall_time_milliseconds,
         |value| format!("{value:.2} ms"),
     );
     print_metric(
-        "readiness process CPU time",
+        "many-file readiness process CPU time",
         comparison.readiness_process_cpu_time_milliseconds,
         |value| format!("{value:.2} ms"),
     );
+    print_panel("many-file diff document", comparison.diff_document);
     print_panel("changed files", comparison.changed_files);
     print_panel("commits", comparison.commits);
-    print_metric("peak RSS", comparison.peak_rss_bytes, |value| {
+    print_metric("many-file peak RSS", comparison.peak_rss_bytes, |value| {
         format!("{:.1} MiB", value / 1024.0 / 1024.0)
     });
+    print_metric(
+        "single-file readiness wall time",
+        comparison.single_file_readiness_wall_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
+    print_metric(
+        "single-file readiness process CPU time",
+        comparison.single_file_readiness_process_cpu_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
+    print_panel(
+        "single-file diff document",
+        comparison.single_file_diff_document,
+    );
+    print_metric(
+        "single-file peak RSS",
+        comparison.single_file_peak_rss_bytes,
+        |value| format!("{:.1} MiB", value / 1024.0 / 1024.0),
+    );
 }
 
 fn print_panel(name: &str, comparison: PanelComparison) {

@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use lucide_dioxus::LoaderCircle;
+
+use super::LoadingSpinner;
 
 const BUTTON_CLASSES: &str = "cursor-pointer items-center whitespace-nowrap rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -163,11 +164,7 @@ pub(crate) fn Button(
             },
             ..attributes,
             if state.is_loading() {
-                span {
-                    class: "shrink-0 animate-spin motion-reduce:animate-none",
-                    aria_hidden: "true",
-                    LoaderCircle { size: 14 }
-                }
+                LoadingSpinner {}
             }
             {children}
         }

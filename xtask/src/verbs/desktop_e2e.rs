@@ -736,7 +736,7 @@ impl DomJourney {
                 "--test",
                 "viewer",
                 "--",
-                "desktop_scroll_baseline::production_viewer_scrolls_realistic_files_and_commits",
+                "desktop_scroll_baseline::production_viewer_scrolls_large_diff_workloads",
                 "--exact",
                 "--ignored",
                 "--nocapture",

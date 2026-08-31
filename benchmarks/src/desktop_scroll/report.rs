@@ -2,11 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use super::DesktopScrollManifest;
 
-pub const REPORT_FORMAT_VERSION: u32 = 4;
+pub const REPORT_FORMAT_VERSION: u32 = 5;
 pub const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const DISTANCE_CSS_PIXELS: u32 = 160;
 const STEP_CSS_PIXELS: u32 = 8;
 const TRAVERSALS: u32 = 10;
+const DOCUMENT_DISTANCE_CSS_PIXELS: u32 = 20_000;
+const DOCUMENT_STEP_CSS_PIXELS: u32 = 200;
+const DOCUMENT_TRAVERSALS: u32 = 4;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DesktopScrollReport {
@@ -18,6 +21,7 @@ pub struct DesktopScrollReport {
     pub resource_bounds: DesktopScrollResourceBounds,
     pub runner: DesktopScrollRunner,
     pub launches: Vec<DesktopScrollLaunch>,
+    pub single_file_launches: Vec<DesktopScrollSingleFileLaunch>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -51,7 +55,16 @@ pub struct DesktopScrollBenchmarkProtocol {
     pub memory_attribution: String,
     pub process_cpu_clock_ticks_per_second: u64,
     pub script_timeout_seconds: u64,
-    pub scroll: ScrollProtocol,
+    pub side_panel_scroll: ScrollProtocol,
+    pub diff_document_scroll: ScrollProtocol,
+    pub single_file: DesktopScrollSingleFileWorkload,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DesktopScrollSingleFileWorkload {
+    pub file_count: usize,
+    pub source_line_count: usize,
+    pub expected_diff_row_count: usize,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -63,11 +76,20 @@ pub struct ScrollProtocol {
 
 impl ScrollProtocol {
     #[must_use]
-    pub const fn fixed() -> Self {
+    pub const fn side_panel() -> Self {
         Self {
             distance_css_pixels: DISTANCE_CSS_PIXELS,
             step_css_pixels: STEP_CSS_PIXELS,
             traversals: TRAVERSALS,
+        }
+    }
+
+    #[must_use]
+    pub const fn diff_document() -> Self {
+        Self {
+            distance_css_pixels: DOCUMENT_DISTANCE_CSS_PIXELS,
+            step_css_pixels: DOCUMENT_STEP_CSS_PIXELS,
+            traversals: DOCUMENT_TRAVERSALS,
         }
     }
 }
@@ -92,10 +114,22 @@ pub struct DesktopScrollLaunch {
     pub conditions_before_launch: DesktopScrollSystemConditions,
     pub outer_window: DesktopScrollWindow,
     pub readiness: DesktopScrollReadinessSample,
+    pub diff_document: ScrollSample,
+    pub memory_after_diff_document: DesktopScrollProcessMemory,
     pub changed_files: ScrollSample,
     pub memory_after_changed_files: DesktopScrollProcessMemory,
     pub commits: ScrollSample,
     pub memory_after_commits: DesktopScrollProcessMemory,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DesktopScrollSingleFileLaunch {
+    pub launch: usize,
+    pub conditions_before_launch: DesktopScrollSystemConditions,
+    pub outer_window: DesktopScrollWindow,
+    pub readiness: DesktopScrollReadinessSample,
+    pub diff_document: ScrollSample,
+    pub memory_after_diff_document: DesktopScrollProcessMemory,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
