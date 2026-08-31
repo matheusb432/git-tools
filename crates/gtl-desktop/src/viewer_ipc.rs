@@ -2,8 +2,9 @@ use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 
 use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersionStream};
 use gtl_wire::viewer::{
-    GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
+    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
@@ -192,6 +193,18 @@ viewer_request_command!(
     ListViewerCommits,
     ViewerCommitPage,
     list_commits
+);
+viewer_request_command!(
+    viewer_search_files,
+    SearchViewerFiles,
+    ViewerFileSearchResult,
+    search_files
+);
+viewer_request_command!(
+    viewer_find_diff,
+    FindViewerDiff,
+    ViewerDiffSearchResult,
+    find_diff
 );
 viewer_request_command!(
     viewer_list_history,

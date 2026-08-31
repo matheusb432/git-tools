@@ -3,11 +3,14 @@
 mod complete_recipe_computation;
 mod compute_recipe;
 mod diff_view;
+pub mod ensure_view_full_context;
+pub mod find_viewer_diff;
 pub mod initial_recipe_label;
 pub mod prepare_recipe;
 mod probe_recipe;
 mod recipe_label;
 pub mod rows;
+pub mod search_viewer_files;
 pub mod session;
 pub mod shell;
 mod state;

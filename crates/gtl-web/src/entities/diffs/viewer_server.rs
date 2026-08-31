@@ -1,6 +1,7 @@
 use gtl_wire::viewer::{
-    GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
+    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
     ViewerUserSettings,
 };
@@ -55,6 +56,13 @@ viewer_request!(
     ViewerCommitPage,
     list_commits
 );
+viewer_request!(
+    search_files,
+    SearchViewerFiles,
+    ViewerFileSearchResult,
+    search_files
+);
+viewer_request!(find_diff, FindViewerDiff, ViewerDiffSearchResult, find_diff);
 viewer_request!(
     list_history,
     ListViewerHistory,

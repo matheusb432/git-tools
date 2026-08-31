@@ -22,20 +22,20 @@ pub(super) struct MergeViewBuild {
 }
 
 pub(super) fn build(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     base: Option<&GitRevision>,
     pinned: Option<&PinnedRange>,
     exclusions: &gtl_models::diffs::DiffExclusions,
 ) -> anyhow::Result<MergeViewBuild> {
-    let branch = source.current_branch(top)?;
+    let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
     let excluded = exclusions.for_project_or_default(&repo_name);
     let base = base.cloned().unwrap_or_else(GitRevision::main);
 
     let (io_ranges, view_ranges) = pinned.map_or_else(
         || -> anyhow::Result<_> {
-            source.verify_commit(top, &base)?;
+            git.verify_commit(top, &base)?;
             let symbolic = DiffRanges::merge(&base);
             Ok((symbolic.clone(), symbolic))
         },
@@ -51,7 +51,8 @@ pub(super) fn build(
         commits,
         files,
         hidden_paths,
-    } = assemble(source, top, &io_ranges.diff, &io_ranges.log, excluded)?;
+        full_context,
+    } = assemble(git, top, &io_ranges.diff, &io_ranges.log, excluded)?;
 
     let view = View {
         repo_name,
@@ -64,6 +65,7 @@ pub(super) fn build(
         foot: range_view.foot,
         commits,
         files,
+        full_context,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     Ok(MergeViewBuild {

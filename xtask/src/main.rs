@@ -30,6 +30,9 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::ServerHighlightingBenchmark(arguments) => {
             verbs::server_highlighting::run_benchmark(&arguments)
         }
+        cli::Command::ViewSourceBenchmark(arguments) => {
+            verbs::view_source::run_benchmark(&arguments)
+        }
         cli::Command::GrpcTransportBenchmark(arguments) => {
             verbs::grpc_transport::run_benchmark(&arguments)
         }

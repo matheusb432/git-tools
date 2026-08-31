@@ -15,18 +15,20 @@ use gtl_models::{
 use crate::{
     v1,
     viewer::{
-        GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-        OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows,
-        ViewerActiveState, ViewerActiveView, ViewerAppliedExclusions, ViewerCodeLine,
-        ViewerCodeSpan, ViewerCommandLine, ViewerCommitCursor, ViewerCommitPage,
-        ViewerCommitSelection, ViewerCommitSummary, ViewerDiffDensity, ViewerDiffExclusions,
-        ViewerDiffLayout, ViewerFailureCode, ViewerFeedback, ViewerFileFailureCode,
-        ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerHistoryCopyPayload,
-        ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
-        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerRenderOptions, ViewerRowEvent,
-        ViewerRowStreamItem, ViewerShell, ViewerSplitCell, ViewerSplitRow, ViewerStateChanged,
-        ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabRequest, ViewerTabState, ViewerTheme,
-        ViewerUnifiedRow, ViewerUnifiedSourceRow, ViewerUserSettings, ViewerViewIdentity,
+        FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory,
+        OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles, SelectViewerCommit,
+        SetViewerPreference, StreamViewerRows, ViewerActiveState, ViewerActiveView,
+        ViewerAppliedExclusions, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine,
+        ViewerCommitCursor, ViewerCommitPage, ViewerCommitSelection, ViewerCommitSummary,
+        ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout, ViewerDiffSearchDirection,
+        ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFailureCode, ViewerFeedback,
+        ViewerFileFailureCode, ViewerFileSearchResult, ViewerFileStatus, ViewerFileSummary,
+        ViewerFooter, ViewerHistoryCopyPayload, ViewerHistoryCursor, ViewerHistoryEntry,
+        ViewerHistoryPage, ViewerPreferences, ViewerProjectDiffExclusions, ViewerRecipeKind,
+        ViewerRenderOptions, ViewerRowEvent, ViewerRowStreamItem, ViewerShell, ViewerSplitCell,
+        ViewerSplitRow, ViewerStateChanged, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
+        ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow, ViewerUnifiedSourceRow,
+        ViewerUserSettings, ViewerViewIdentity,
     },
 };
 
@@ -568,6 +570,142 @@ pub fn decode_stream_viewer_rows_response(
         identity: decode_viewer_view_identity(required(response.identity)?)?,
         sequence: response.sequence,
         event: decode_viewer_row_event(required(response.event)?)?,
+    })
+}
+
+#[must_use]
+pub fn encode_search_viewer_files_request(
+    request: SearchViewerFiles,
+) -> v1::SearchViewerFilesRequest {
+    v1::SearchViewerFilesRequest {
+        identity: Some(encode_viewer_view_identity(request.identity)),
+        query: request.query,
+    }
+}
+
+pub fn decode_search_viewer_files_request(
+    request: v1::SearchViewerFilesRequest,
+) -> Result<SearchViewerFiles, ViewerCodecError> {
+    Ok(SearchViewerFiles {
+        identity: decode_viewer_view_identity(required(request.identity)?)?,
+        query: request.query,
+    })
+}
+
+#[must_use]
+pub fn encode_search_viewer_files_response(
+    result: ViewerFileSearchResult,
+) -> v1::SearchViewerFilesResponse {
+    v1::SearchViewerFilesResponse {
+        identity: Some(encode_viewer_view_identity(result.identity)),
+        file_ids: result
+            .files
+            .into_iter()
+            .map(|file| file.as_str().to_owned())
+            .collect(),
+    }
+}
+
+pub fn decode_search_viewer_files_response(
+    response: v1::SearchViewerFilesResponse,
+) -> Result<ViewerFileSearchResult, ViewerCodecError> {
+    Ok(ViewerFileSearchResult {
+        identity: decode_viewer_view_identity(required(response.identity)?)?,
+        files: response
+            .file_ids
+            .into_iter()
+            .map(decode_viewer_diff_file_id)
+            .collect::<Result<Vec<_>, _>>()?,
+    })
+}
+
+#[must_use]
+pub fn encode_find_viewer_diff_request(request: FindViewerDiff) -> v1::FindViewerDiffRequest {
+    v1::FindViewerDiffRequest {
+        identity: Some(encode_viewer_view_identity(request.identity)),
+        query: request.query,
+        direction: encode_viewer_diff_search_direction(request.direction) as i32,
+        anchor: request.anchor.as_ref().map(encode_viewer_diff_search_match),
+    }
+}
+
+pub fn decode_find_viewer_diff_request(
+    request: v1::FindViewerDiffRequest,
+) -> Result<FindViewerDiff, ViewerCodecError> {
+    Ok(FindViewerDiff {
+        identity: decode_viewer_view_identity(required(request.identity)?)?,
+        query: request.query,
+        direction: decode_viewer_diff_search_direction(request.direction)?,
+        anchor: request
+            .anchor
+            .map(decode_viewer_diff_search_match)
+            .transpose()?,
+    })
+}
+
+#[must_use]
+pub fn encode_find_viewer_diff_response(
+    result: &ViewerDiffSearchResult,
+) -> v1::FindViewerDiffResponse {
+    v1::FindViewerDiffResponse {
+        identity: Some(encode_viewer_view_identity(result.identity)),
+        total_matches: result.total_matches,
+        active_match: result
+            .active_match
+            .as_ref()
+            .map(encode_viewer_diff_search_match),
+        wrapped: result.wrapped,
+    }
+}
+
+pub fn decode_find_viewer_diff_response(
+    response: v1::FindViewerDiffResponse,
+) -> Result<ViewerDiffSearchResult, ViewerCodecError> {
+    Ok(ViewerDiffSearchResult {
+        identity: decode_viewer_view_identity(required(response.identity)?)?,
+        total_matches: response.total_matches,
+        active_match: response
+            .active_match
+            .map(decode_viewer_diff_search_match)
+            .transpose()?,
+        wrapped: response.wrapped,
+    })
+}
+
+const fn encode_viewer_diff_search_direction(
+    direction: ViewerDiffSearchDirection,
+) -> v1::ViewerDiffSearchDirection {
+    match direction {
+        ViewerDiffSearchDirection::Forward => v1::ViewerDiffSearchDirection::Forward,
+        ViewerDiffSearchDirection::Backward => v1::ViewerDiffSearchDirection::Backward,
+    }
+}
+
+fn decode_viewer_diff_search_direction(
+    direction: i32,
+) -> Result<ViewerDiffSearchDirection, ViewerCodecError> {
+    match v1::ViewerDiffSearchDirection::try_from(direction) {
+        Ok(v1::ViewerDiffSearchDirection::Forward) => Ok(ViewerDiffSearchDirection::Forward),
+        Ok(v1::ViewerDiffSearchDirection::Backward) => Ok(ViewerDiffSearchDirection::Backward),
+        Ok(v1::ViewerDiffSearchDirection::Unspecified) | Err(_) => {
+            Err(ViewerCodecError::InvalidMessage)
+        }
+    }
+}
+
+fn encode_viewer_diff_search_match(found: &ViewerDiffSearchMatch) -> v1::ViewerDiffSearchMatch {
+    v1::ViewerDiffSearchMatch {
+        file_id: found.file.as_str().to_owned(),
+        row_index: found.row_index,
+    }
+}
+
+fn decode_viewer_diff_search_match(
+    found: v1::ViewerDiffSearchMatch,
+) -> Result<ViewerDiffSearchMatch, ViewerCodecError> {
+    Ok(ViewerDiffSearchMatch {
+        file: decode_viewer_diff_file_id(found.file_id)?,
+        row_index: found.row_index,
     })
 }
 

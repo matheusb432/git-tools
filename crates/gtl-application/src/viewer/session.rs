@@ -579,6 +579,91 @@ impl ViewerSession {
         Some(ActiveContentSnapshot { identity, view })
     }
 
+    pub(super) fn replace_active_content_if_current(
+        &mut self,
+        identity: ActiveContentIdentity,
+        expected: &Arc<View>,
+        replacement: Arc<View>,
+    ) -> Option<Arc<View>> {
+        if self.active_content_identity() != Some(identity) {
+            return None;
+        }
+        let current = self.active_content_snapshot()?.shared_view();
+        if !Arc::ptr_eq(&current, expected) {
+            return None;
+        }
+
+        let cached = self.cache.get(identity.tab_id()).cloned()?;
+        if Arc::ptr_eq(&cached.view, expected) {
+            return Some(self.replace_cached_range(identity.tab_id(), cached, replacement));
+        }
+
+        if cached
+            .selected
+            .as_ref()
+            .is_some_and(|selected| Arc::ptr_eq(selected, expected))
+        {
+            return self.replace_cached_selection(identity.tab_id(), &cached, replacement);
+        }
+
+        self.replace_transient_selection(identity.tab_id(), expected, replacement)
+    }
+
+    fn replace_cached_range(
+        &mut self,
+        tab_id: ViewerTabId,
+        cached: CachedView,
+        replacement: Arc<View>,
+    ) -> Arc<View> {
+        let candidate = CachedView::new(Arc::clone(&replacement));
+        let disposition = self.cache.insert(tab_id, candidate);
+        if disposition == CacheDisposition::Oversize {
+            self.cache.insert(tab_id, cached);
+        }
+        replacement
+    }
+
+    fn replace_cached_selection(
+        &mut self,
+        tab_id: ViewerTabId,
+        cached: &CachedView,
+        replacement: Arc<View>,
+    ) -> Option<Arc<View>> {
+        let enriched = cached.with_selected(Arc::clone(&replacement));
+        if self.cache.insert(tab_id, enriched) != CacheDisposition::Oversize {
+            return Some(replacement);
+        }
+
+        self.cache.insert(tab_id, cached.without_selected());
+        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == tab_id)?;
+        let CommitSelection::Ready { transient, .. } = &mut tab.selection else {
+            return None;
+        };
+        *transient = Some(Arc::clone(&replacement));
+        Some(replacement)
+    }
+
+    fn replace_transient_selection(
+        &mut self,
+        tab_id: ViewerTabId,
+        expected: &Arc<View>,
+        replacement: Arc<View>,
+    ) -> Option<Arc<View>> {
+        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == tab_id)?;
+        let CommitSelection::Ready {
+            transient: Some(transient),
+            ..
+        } = &mut tab.selection
+        else {
+            return None;
+        };
+        if !Arc::ptr_eq(transient, expected) {
+            return None;
+        }
+        *transient = Arc::clone(&replacement);
+        Some(replacement)
+    }
+
     #[must_use]
     pub const fn version(&self) -> ViewerVersion {
         self.version
@@ -685,6 +770,7 @@ mod tests {
             },
             commits_label: String::new(),
             foot: Foot { cmd: String::new() },
+            full_context: crate::diffs::FullContextDiffState::Unavailable,
         })
     }
 
@@ -779,6 +865,47 @@ mod tests {
             CommitSelectionSnapshot::None
         ));
         assert!(session.cached_view(id).unwrap().selected.is_none());
+    }
+
+    #[test]
+    fn active_content_replacement_updates_only_the_selected_patch() {
+        let (mut session, id, ids) = ready_session_with_commits();
+        let (ticket, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
+        session.publish_commit_patch_if_current(ticket, view("patch"));
+        let identity = session.active_content_identity().unwrap();
+        let expected = session.active_content_snapshot().unwrap().shared_view();
+        let replacement = view("patch full");
+
+        let published = session
+            .replace_active_content_if_current(identity, &expected, Arc::clone(&replacement))
+            .unwrap();
+
+        assert!(Arc::ptr_eq(&published, &replacement));
+        assert_eq!(session.cached_view(id).unwrap().view.title, "range");
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Ready { view, .. }
+                if Arc::ptr_eq(&view, &replacement)
+        ));
+        assert!(session.clear_commit_selection(id));
+        assert_eq!(
+            session.active_content_snapshot().unwrap().view().title,
+            "range"
+        );
+    }
+
+    #[test]
+    fn active_content_replacement_rejects_a_refreshed_identity() {
+        let (mut session, id) = ready_session();
+        let identity = session.active_content_identity().unwrap();
+        let expected = session.active_content_snapshot().unwrap().shared_view();
+        session.refresh(id).unwrap();
+
+        assert!(
+            session
+                .replace_active_content_if_current(identity, &expected, view("stale"))
+                .is_none()
+        );
     }
 
     #[test]

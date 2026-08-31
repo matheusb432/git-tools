@@ -3,9 +3,10 @@ use gtl_wire::{
     proto,
     v1::{self, viewer_service_client::ViewerServiceClient},
     viewer::{
-        GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-        OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows,
-        VIEWER_ROW_MAX_ENCODED_BYTES, ViewerCommitPage, ViewerHistoryCopyPayload,
+        FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory,
+        OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles, SelectViewerCommit,
+        SetViewerPreference, StreamViewerRows, VIEWER_ROW_MAX_ENCODED_BYTES, ViewerCommitPage,
+        ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
     },
@@ -127,6 +128,10 @@ impl ViewerClient {
             encode_set_viewer_preference_request, set_viewer_preference, decode_set_viewer_preference_response;
         list_commits(ListViewerCommits) -> ViewerCommitPage =>
             encode_list_viewer_commits_request, list_viewer_commits, decode_list_viewer_commits_response;
+        search_files(SearchViewerFiles) -> ViewerFileSearchResult =>
+            encode_search_viewer_files_request, search_viewer_files, decode_search_viewer_files_response;
+        find_diff(FindViewerDiff) -> ViewerDiffSearchResult =>
+            encode_find_viewer_diff_request, find_viewer_diff, decode_find_viewer_diff_response;
     }
 
     viewer_unary_methods_with_fallible_request! {

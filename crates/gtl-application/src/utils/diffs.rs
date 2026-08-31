@@ -50,6 +50,7 @@ pub(crate) fn view() -> View {
         foot: Foot {
             cmd: "git diff".into(),
         },
+        full_context: crate::diffs::FullContextDiffState::Unavailable,
         exclusions: None,
     }
 }

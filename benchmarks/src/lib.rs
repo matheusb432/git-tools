@@ -3,6 +3,7 @@
 pub mod desktop_scroll;
 pub mod release_server;
 pub mod server_highlighting;
+pub mod view_source;
 
 /// Returns a benchmark fixture value or terminates the benchmark process with context.
 pub fn require<T, Error>(result: Result<T, Error>, context: &str) -> T

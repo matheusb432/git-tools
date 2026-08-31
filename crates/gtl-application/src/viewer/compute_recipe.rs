@@ -22,7 +22,7 @@ pub enum ComputeRecipeError {
 pub fn execute(
     recipe: Recipe,
     user_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
 ) -> Result<View, ComputeRecipeError> {
     let cwd = recipe.cwd();
     let view = match recipe.op {
@@ -33,7 +33,7 @@ pub fn execute(
                     target: diff_target(target),
                 },
                 user_settings,
-                source,
+                git,
             )?
             .view
         }
@@ -45,7 +45,7 @@ pub fn execute(
                     pinned,
                 },
                 user_settings,
-                source,
+                git,
             )?
             .view
         }

@@ -23,7 +23,7 @@ mise bootstrap --yes
 
 Mise converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
 
-On Ubuntu, installation also reconciles and starts `gtl-server` as a systemd user service. The CLI discovers the resident server through its private local endpoint and capability token.
+On Linux with systemd and on macOS, installation reconciles and starts `gtl-server` through the native user-service manager. The CLI discovers the resident server through its private local endpoint and capability token.
 
 Refresh an existing installation with:
 

@@ -53,7 +53,7 @@ pub enum RenderProjectDiffError {
 pub fn execute(
     req: RenderProjectDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
@@ -63,7 +63,7 @@ pub fn execute(
     let settings = app_settings.load()?;
     let mut notes = Vec::new();
     let batch = render_batch(
-        source,
+        git,
         &DiffTarget::Unpushed { pinned: None },
         &settings,
         &repos,

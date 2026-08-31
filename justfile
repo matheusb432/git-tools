@@ -85,6 +85,12 @@ bench-scroll update="":
 bench-highlight update="":
     cargo run --quiet -p xtask -- server-highlighting-benchmark {{ update }}
 
+# Compare demand-loaded viewer source construction against the local baseline.
+[arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
+[group('performance')]
+bench-view-source update="":
+    cargo run --quiet -p xtask -- view-source-benchmark {{ update }}
+
 # Compare the release gRPC transport against the local ghz baseline. Use --update to replace it.
 [arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
 [group('performance')]

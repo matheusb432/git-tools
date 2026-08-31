@@ -58,6 +58,7 @@ fn view(repo_root: &RepositoryRoot) -> View {
         foot: Foot {
             cmd: "git diff aaaa..bbbb".into(),
         },
+        full_context: gtl_application::diffs::FullContextDiffState::Loaded,
         exclusions: None,
     }
 }

@@ -22,6 +22,7 @@ pub(crate) mod server_highlighting;
 pub(crate) mod setup;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
+pub(crate) mod view_source;
 pub(crate) mod wasm_c;
 
 #[derive(Clone, Copy)]
@@ -37,6 +38,7 @@ impl Verb {
     pub(crate) const DESKTOP_SCROLL_FIXTURE: Self = Self("desktop-scroll-fixture");
     pub(crate) const SERVER_HIGHLIGHTING_BENCHMARK: Self = Self("server-highlighting-benchmark");
     pub(crate) const SERVER_HIGHLIGHTING_PROFILE: Self = Self("server-highlighting-profile");
+    pub(crate) const VIEW_SOURCE_BENCHMARK: Self = Self("view-source-benchmark");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const GRPC_TRANSPORT_BENCHMARK: Self = Self("grpc-transport-benchmark");

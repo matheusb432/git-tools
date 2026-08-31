@@ -1,4 +1,5 @@
 use gtl_application::viewer::{
+    ensure_view_full_context::{self, EnsureViewFullContext, EnsureViewFullContextOk},
     rows::{ViewerFileRowParser, ViewerRowBatch, ViewerSyntaxDiagnostic},
     shell, viewer_diff_file_source,
 };
@@ -60,7 +61,7 @@ pub(super) fn start(
             state,
             identity,
             proto_identity,
-            snapshot.view(),
+            snapshot.shared_view(),
             files,
             row_stream,
             sender,
@@ -73,7 +74,56 @@ fn produce_rows(
     state: AppState,
     identity: ViewerViewIdentity,
     proto_identity: v1::ViewerViewIdentity,
-    view: &gtl_application::diffs::View,
+    view: std::sync::Arc<gtl_application::diffs::View>,
+    files: Vec<ViewerDiffFileId>,
+    row_stream: u64,
+    sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
+) {
+    let view = if identity.render_options.density == gtl_wire::viewer::ViewerDiffDensity::Full {
+        match ensure_view_full_context::execute(
+            EnsureViewFullContext::Identity {
+                identity,
+                render_options: to_render_options(identity.render_options),
+            },
+            &state.viewer,
+            &state.git,
+        ) {
+            Ok(EnsureViewFullContextOk::Ready(view)) => view,
+            Ok(EnsureViewFullContextOk::Stale) => return,
+            Err(error) => {
+                tracing::error!(error = ?error, "load full-context viewer rows failed");
+                return produce_source_failures(
+                    state,
+                    identity,
+                    proto_identity,
+                    files,
+                    row_stream,
+                    sender,
+                );
+            }
+        }
+    } else {
+        view
+    };
+    let mut writer = StreamWriter {
+        state,
+        identity,
+        proto_identity,
+        sequence: 0,
+        row_stream,
+        sender,
+    };
+    for file_id in files {
+        if !produce_file_rows(&mut writer, &view, &file_id) {
+            return;
+        }
+    }
+}
+
+fn produce_source_failures(
+    state: AppState,
+    identity: ViewerViewIdentity,
+    proto_identity: v1::ViewerViewIdentity,
     files: Vec<ViewerDiffFileId>,
     row_stream: u64,
     sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
@@ -87,7 +137,16 @@ fn produce_rows(
         sender,
     };
     for file_id in files {
-        if !produce_file_rows(&mut writer, view, &file_id) {
+        if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
+            v1::ViewerFileStarted {
+                file_id: file_id.as_str().to_owned(),
+            },
+        )) || !writer.file_failed(
+            &file_id,
+            v1::ViewerFileFailureCode::SourceUnavailable,
+            "The full-context diff source is unavailable. Refresh and retry.",
+            true,
+        ) {
             return;
         }
     }

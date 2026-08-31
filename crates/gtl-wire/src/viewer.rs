@@ -13,13 +13,16 @@ use gtl_models::{
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 2;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 3;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
 pub const VIEWER_ROW_BATCH_MAX_ROWS: usize = 64;
 pub const VIEWER_ROW_BATCH_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_ROW_MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024;
+pub const VIEWER_SEARCH_QUERY_MAX_BYTES: usize = 256;
+pub const VIEWER_FILE_SEARCH_MAX_MATCHES: usize = 50_000;
+pub const VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -671,6 +674,47 @@ pub struct ViewerRowStreamItem {
 pub struct StreamViewerRows {
     pub identity: ViewerViewIdentity,
     pub file: Option<ViewerDiffFileId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchViewerFiles {
+    pub identity: ViewerViewIdentity,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerFileSearchResult {
+    pub identity: ViewerViewIdentity,
+    pub files: Vec<ViewerDiffFileId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerDiffSearchDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ViewerDiffSearchMatch {
+    pub file: ViewerDiffFileId,
+    pub row_index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindViewerDiff {
+    pub identity: ViewerViewIdentity,
+    pub query: String,
+    pub direction: ViewerDiffSearchDirection,
+    pub anchor: Option<ViewerDiffSearchMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffSearchResult {
+    pub identity: ViewerViewIdentity,
+    pub total_matches: u64,
+    pub active_match: Option<ViewerDiffSearchMatch>,
+    pub wrapped: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

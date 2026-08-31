@@ -11,6 +11,7 @@ pub mod compute_diff;
 pub mod compute_merge_diff;
 mod diff_computation;
 mod exclusions;
+pub mod fetch_full_context_diff;
 mod file;
 pub mod open_diff_file_in_configured_editor;
 pub mod present_diff;
@@ -20,9 +21,14 @@ pub mod render_diff;
 pub mod render_diff_subrepos;
 pub mod render_merge_diff;
 mod target;
+mod unified_diff;
 mod view;
 
 pub use batch::RepoRef;
+pub use fetch_full_context_diff::FetchFullContextDiff;
 pub use file::{FileDiff, FileStatus};
 pub use target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange};
-pub use view::{Cmd, Foot, View};
+pub use view::{
+    Cmd, Foot, FullContextDiff, FullContextDiffSource, FullContextDiffState,
+    FullContextDiffTransitionError, View,
+};

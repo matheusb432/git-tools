@@ -6,6 +6,7 @@ use crate::verbs::{
     Verb, desktop_scroll::DesktopScrollBenchmarkArguments,
     grpc_transport::GrpcTransportBenchmarkArguments,
     server_highlighting::ServerHighlightingBenchmarkArguments,
+    view_source::ViewSourceBenchmarkArguments,
 };
 
 #[derive(Parser)]
@@ -60,6 +61,9 @@ pub enum Command {
     /// Measure production server-owned syntax highlighting and compare it with the local baseline.
     #[command(name = Verb::SERVER_HIGHLIGHTING_BENCHMARK.as_str())]
     ServerHighlightingBenchmark(ServerHighlightingBenchmarkArguments),
+    /// Measure Compact construction and the first demand-loaded Full transition.
+    #[command(name = Verb::VIEW_SOURCE_BENCHMARK.as_str())]
+    ViewSourceBenchmark(ViewSourceBenchmarkArguments),
     /// Measure the release gRPC transport with ghz and compare it with the local baseline.
     #[command(name = Verb::GRPC_TRANSPORT_BENCHMARK.as_str())]
     GrpcTransportBenchmark(GrpcTransportBenchmarkArguments),

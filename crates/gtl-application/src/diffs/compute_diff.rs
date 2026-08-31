@@ -1,7 +1,10 @@
 use gtl_models::paths::RepositoryRoot;
 
 use crate::{
-    diffs::{DiffTarget, View, diff_computation},
+    diffs::{
+        DiffTarget, FetchFullContextDiff, FullContextDiffState, View, diff_computation,
+        fetch_full_context_diff,
+    },
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
     shared::notes::Note,
 };
@@ -31,11 +34,22 @@ pub enum ComputeDiffError {
 pub fn execute(
     req: ComputeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { repo_root, target } = req;
     let settings = app_settings.load()?;
-    let built = diff_computation::build(source, &repo_root, &target, settings.diff_exclusions())?;
+    let mut built = diff_computation::build(git, &repo_root, &target, settings.diff_exclusions())?;
+    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
+        && let FullContextDiffState::Deferred(source) = &built.view.full_context
+    {
+        let request = FetchFullContextDiff::new(&built.view.repo_root, source);
+        let full_context =
+            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
+        built.view = built
+            .view
+            .with_full_context(full_context)
+            .map_err(anyhow::Error::from)?;
+    }
     Ok(ComputeDiffOk {
         view: built.view,
         summary: built.summary,
@@ -45,7 +59,11 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
+    use gtl_models::{
+        diffs::DiffExclusions,
+        settings::UserSettings,
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
+    };
 
     use super::*;
     use crate::{
@@ -102,6 +120,26 @@ mod tests {
         assert_eq!(response.view.commits_label, LABEL_UNPUSHED_COMMITS);
         assert_eq!(response.summary, "1 unpushed commit(s)");
         assert!(response.notes.is_empty());
+    }
+
+    #[test]
+    fn compact_compute_defers_full_context_source() {
+        let source = FakeGitClient {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            full_diff_output: format!(
+                "{DIFF_SINGLE_FILE} context retained only for full density\n"
+            ),
+            ..Default::default()
+        };
+
+        let response =
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source).unwrap();
+
+        assert!(response.view.files[0].full_lines.is_none());
     }
 
     #[test]
@@ -278,6 +316,80 @@ index 333..444 100644\n\
             exclusions,
             gtl_models::settings::PushAllExclusions::default(),
         )
+    }
+
+    fn settings_with_density(density: DiffDensity) -> UserSettings {
+        UserSettings::new(
+            None,
+            RenderOptions::new(DiffLayout::Unified, density),
+            true,
+            DiffExclusions::default(),
+            gtl_models::settings::PushAllExclusions::default(),
+        )
+    }
+
+    #[test]
+    fn full_compute_loads_the_deferred_source() {
+        let source = FakeGitClient {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            full_diff_output: format!("{DIFF_SINGLE_FILE} retained context\n"),
+            ..Default::default()
+        };
+
+        let response = compute_diff::execute(
+            req(DiffTarget::Unpushed { pinned: None }),
+            &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
+            &source,
+        )
+        .unwrap();
+
+        assert!(
+            response.view.files[0]
+                .full_lines
+                .as_ref()
+                .is_some_and(|lines| lines.iter().any(|line| line == " retained context"))
+        );
+        assert_eq!(
+            response.view.full_context,
+            crate::diffs::FullContextDiffState::Loaded
+        );
+    }
+
+    #[test]
+    fn full_compute_does_not_fetch_when_no_modified_file_needs_context() {
+        let source = FakeGitClient {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: "diff --git a/new.txt b/new.txt\n\
+new file mode 100644\n\
+--- /dev/null\n\
++++ b/new.txt\n\
+@@ -0,0 +1 @@\n\
++new\n"
+                .into(),
+            full_diff_output: "diff --git a/../invalid b/../invalid\n".into(),
+            ..Default::default()
+        };
+
+        let response = compute_diff::execute(
+            req(DiffTarget::Unpushed { pinned: None }),
+            &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
+            &source,
+        )
+        .unwrap();
+
+        assert_eq!(response.view.files.len(), 1);
+        assert_eq!(response.view.files[0].path.to_string_lossy(), "new.txt");
+        assert!(matches!(
+            response.view.full_context,
+            crate::diffs::FullContextDiffState::Loaded
+        ));
     }
 
     #[test]

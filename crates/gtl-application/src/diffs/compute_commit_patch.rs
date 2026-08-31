@@ -8,8 +8,9 @@ use gtl_models::{
 
 use crate::{
     diffs::{
-        Cmd, Foot, View,
+        Cmd, FetchFullContextDiff, Foot, FullContextDiffState, View,
         assemble::{DiffData, assemble},
+        fetch_full_context_diff,
         view::sort_files_tree_order,
     },
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
@@ -36,7 +37,7 @@ pub enum ComputeCommitPatchError {
 pub fn execute(
     request: ComputeCommitPatch,
     settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
 ) -> Result<View, ComputeCommitPatchError> {
     let repo_path = request.repo_root;
     let repo_name = repo_path.project_name();
@@ -63,14 +64,15 @@ pub fn execute(
         commits,
         mut files,
         hidden_paths,
-    } = assemble(source, &repo_path, &diff_spec, &log_range, excluded)?;
+        full_context,
+    } = assemble(git, &repo_path, &diff_spec, &log_range, excluded)?;
     sort_files_tree_order(&mut files);
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);
-    Ok(View {
+    let view = View {
         repo_name,
         repo_root: repo_path.clone(),
-        branch: source.current_branch(&repo_path)?,
+        branch: git.current_branch(&repo_path)?,
         upstream: base_abbreviated.clone(),
         title: format!("commit {abbreviated_id}"),
         cmd: Cmd {
@@ -84,8 +86,21 @@ pub fn execute(
         },
         commits,
         files,
+        full_context,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
-    })
+    };
+    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
+        && let FullContextDiffState::Deferred(source) = &view.full_context
+    {
+        let request = FetchFullContextDiff::new(&view.repo_root, source);
+        let full_context =
+            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
+        return view
+            .with_full_context(full_context)
+            .map_err(anyhow::Error::from)
+            .map_err(ComputeCommitPatchError::Unexpected);
+    }
+    Ok(view)
 }
 
 #[cfg(test)]

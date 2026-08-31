@@ -56,13 +56,13 @@ pub enum RenderMergeDiffError {
 pub fn execute(
     req: RenderMergeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderMergeDiffOk, RenderMergeDiffError> {
     let RenderMergeDiff { cwd, base } = req;
-    let repo_root = source.top_level(&cwd)?;
+    let repo_root = git.top_level(&cwd)?;
     let computed = compute_merge_diff::execute(
         ComputeMergeDiff {
             repo_root,
@@ -70,19 +70,18 @@ pub fn execute(
             pinned: None,
         },
         app_settings,
-        source,
+        git,
     )?;
     let store_root = super::artifacts::root(computed.top.as_ref());
     let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
     let html = renderer.build_html(&view, computed.render_options, computed.theme)?;
-    let commit_range = source
+    let commit_range = git
         .resolve_commit_id(&computed.top, &computed.base)
         .ok()
         .zip(
-            source
-                .resolve_commit_id(&computed.top, &GitRevision::head())
+            git.resolve_commit_id(&computed.top, &GitRevision::head())
                 .ok(),
         )
         .map(|(base, head)| PinnedRange { base, head });
@@ -96,7 +95,7 @@ pub fn execute(
         )
         .map_err(anyhow::Error::from)?,
         range_label: computed.diff_range.to_string(),
-        head_committed_at: source.committed_at(&computed.top, &GitRevision::head()),
+        head_committed_at: git.committed_at(&computed.top, &GitRevision::head()),
         generated_at: clock.now().map_err(anyhow::Error::from)?,
         title: TITLE_MERGE_DIFF.to_string(),
         render_options: computed.render_options,

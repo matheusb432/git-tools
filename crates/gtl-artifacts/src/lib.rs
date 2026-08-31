@@ -73,6 +73,7 @@ mod tests {
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".to_owned(),
             },
+            full_context: gtl_application::diffs::FullContextDiffState::Loaded,
         }
     }
 

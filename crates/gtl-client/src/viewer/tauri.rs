@@ -1,8 +1,9 @@
 use std::{cell::RefCell, collections::VecDeque};
 
 use gtl_wire::viewer::{
-    GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
+    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
@@ -112,6 +113,8 @@ impl ViewerClient {
         clear_commit_selection(ViewerTabRequest) -> ViewerShell => "viewer_clear_commit_selection";
         set_preference(SetViewerPreference) -> ViewerShell => "viewer_set_preference";
         list_commits(ListViewerCommits) -> ViewerCommitPage => "viewer_list_commits";
+        search_files(SearchViewerFiles) -> ViewerFileSearchResult => "viewer_search_files";
+        find_diff(FindViewerDiff) -> ViewerDiffSearchResult => "viewer_find_diff";
         list_history(ListViewerHistory) -> ViewerHistoryPage => "viewer_list_history";
         open_history(OpenViewerHistory) -> ViewerShell => "viewer_open_history";
         get_history_copy(GetViewerHistoryCopy) -> ViewerHistoryCopyPayload => "viewer_get_history_copy";

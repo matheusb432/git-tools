@@ -8,7 +8,9 @@ use gtl_models::{
 };
 
 use crate::{
-    diffs::{PinnedRange, View},
+    diffs::{
+        FetchFullContextDiff, FullContextDiffState, PinnedRange, View, fetch_full_context_diff,
+    },
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
 };
 
@@ -44,7 +46,7 @@ pub enum ComputeMergeDiffError {
 pub fn execute(
     req: ComputeMergeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
 ) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
     let settings = app_settings.load()?;
     let ComputeMergeDiff {
@@ -52,13 +54,24 @@ pub fn execute(
         base,
         pinned,
     } = req;
-    let built = view::build(
-        source,
+    let mut built = view::build(
+        git,
         &repo_root,
         base.as_ref(),
         pinned.as_ref(),
         settings.diff_exclusions(),
     )?;
+    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
+        && let FullContextDiffState::Deferred(source) = &built.view.full_context
+    {
+        let request = FetchFullContextDiff::new(&built.view.repo_root, source);
+        let full_context =
+            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
+        built.view = built
+            .view
+            .with_full_context(full_context)
+            .map_err(anyhow::Error::from)?;
+    }
     let excluded_extensions = settings
         .diff_exclusions()
         .for_project_or_default(&built.view.repo_name)

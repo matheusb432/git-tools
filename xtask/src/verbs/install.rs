@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use crate::cli::InstallTarget;
 
 mod linux_desktop;
-mod linux_server;
+mod server_service;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
@@ -199,13 +199,21 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
             server_src.display()
         );
     }
+    let server_destination = bindir.join(server_bin_name());
+    let service = server_service::prepare(&server_destination)?;
+    if let Some(service) = service.as_ref()
+        && service.unregister_if_installed()?
+    {
+        println!("stopped and unregistered the existing gtl-server user service");
+    }
     let server_action = install_binary_atomic(&server_src, bindir)?;
     println!(
         "gtl-server {server_action} -> {}",
-        bindir.join(server_bin_name()).display()
+        server_destination.display()
     );
-    if let Some(path) = linux_server::install(&bindir.join(server_bin_name()))? {
-        println!("gtl-server user service -> {}", path.display());
+    if let Some(service) = service {
+        service.install_and_start()?;
+        println!("gtl-server user service installed and started");
     }
     Ok(())
 }
@@ -230,8 +238,8 @@ fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
 
 pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
     let bindir = bindir()?;
-    if let Some(path) = linux_server::uninstall()? {
-        println!("removed {}", path.display());
+    if server_service::uninstall()? {
+        println!("removed gtl-server user service");
     }
     match uninstall_cli_binary(&bindir)? {
         Removal::Removed => println!("removed {}", bindir.join(cli_bin_name()).display()),

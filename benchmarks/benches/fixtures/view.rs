@@ -48,5 +48,6 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
         foot: Foot {
             cmd: "git diff origin/main..HEAD".into(),
         },
+        full_context: gtl_application::diffs::FullContextDiffState::Loaded,
     }
 }

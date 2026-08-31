@@ -1,10 +1,11 @@
 use gtl_models::{
     diffs::{AppliedExclusions, Commit},
-    git::{GitHead, GitRevision},
-    paths::{ProjectName, RepositoryRoot},
+    git::{GitDiffSpec, GitHead, GitRevision},
+    paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
 };
 
 use super::file::FileDiff;
+use crate::ports::{GitDiffFormat, GitDiffRequest};
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +21,63 @@ pub struct Foot {
     pub cmd: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FullContextDiffState {
+    Unavailable,
+    Deferred(FullContextDiffSource),
+    Loaded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullContextDiffSource {
+    git_request: GitDiffRequest,
+}
+
+impl FullContextDiffSource {
+    #[must_use]
+    pub fn new(spec: GitDiffSpec, excluded_paths: Vec<RepositoryRelativePath>) -> Self {
+        Self {
+            git_request: GitDiffRequest {
+                spec,
+                format: GitDiffFormat::FullContext,
+                excluded_paths,
+            },
+        }
+    }
+
+    pub(crate) fn git_request(&self) -> &GitDiffRequest {
+        &self.git_request
+    }
+
+    pub(crate) fn spec(&self) -> &GitDiffSpec {
+        &self.git_request.spec
+    }
+
+    pub(crate) fn excluded_paths(&self) -> &[RepositoryRelativePath] {
+        &self.git_request.excluded_paths
+    }
+}
+
+/// Parsed source returned by an explicit full-context fetch.
+#[derive(Debug, PartialEq)]
+pub struct FullContextDiff {
+    pub(in crate::diffs) files: Vec<FileDiff>,
+}
+
+impl FullContextDiff {
+    pub(in crate::diffs) fn from_files(files: Vec<FileDiff>) -> Self {
+        Self { files }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FullContextDiffTransitionError {
+    #[error("full-context diff source is unavailable")]
+    Unavailable,
+    #[error("full-context diff is already loaded")]
+    AlreadyLoaded,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub repo_name: ProjectName,
@@ -32,6 +90,7 @@ pub struct View {
     pub cmd: Cmd,
     pub commits_label: String,
     pub foot: Foot,
+    pub full_context: FullContextDiffState,
     /// Renderers must disclose hidden files when this is present.
     pub exclusions: Option<AppliedExclusions>,
 }
@@ -40,6 +99,46 @@ impl View {
     #[must_use]
     pub fn has_diff_content(&self) -> bool {
         !self.commits.is_empty() || !self.files.is_empty()
+    }
+
+    /// Applies fetched full-context source to a deferred view.
+    pub fn with_full_context(
+        mut self,
+        full_context: FullContextDiff,
+    ) -> Result<Self, FullContextDiffTransitionError> {
+        match &self.full_context {
+            FullContextDiffState::Unavailable => {
+                return Err(FullContextDiffTransitionError::Unavailable);
+            }
+            FullContextDiffState::Loaded => {
+                return Err(FullContextDiffTransitionError::AlreadyLoaded);
+            }
+            FullContextDiffState::Deferred(_) => {}
+        }
+
+        attach_full_context(&mut self.files, full_context);
+        self.full_context = FullContextDiffState::Loaded;
+        Ok(self)
+    }
+}
+
+fn attach_full_context(files: &mut [FileDiff], full_context: FullContextDiff) {
+    let mut full_by_path: std::collections::HashMap<RepositoryRelativePath, Vec<String>> =
+        full_context
+            .files
+            .into_iter()
+            .map(|file| (file.path, file.lines))
+            .collect();
+    for file in files {
+        if file.status() != super::FileStatus::Modified {
+            continue;
+        }
+        let Some(full_lines) = full_by_path.remove(&file.path) else {
+            continue;
+        };
+        if full_lines != file.lines {
+            file.full_lines = Some(full_lines);
+        }
     }
 }
 
@@ -101,6 +200,91 @@ mod tests {
         view.commits.clear();
         view.files.push(file());
         assert!(view.has_diff_content());
+    }
+
+    #[test]
+    fn full_context_transition_rejects_a_view_without_deferred_source() {
+        let mut view = view();
+        view.full_context = FullContextDiffState::Loaded;
+
+        let error = view
+            .with_full_context(FullContextDiff::from_files(Vec::new()))
+            .unwrap_err();
+
+        assert_eq!(error, FullContextDiffTransitionError::AlreadyLoaded);
+    }
+
+    #[test]
+    fn full_context_transition_rejects_an_unavailable_source() {
+        let error = view()
+            .with_full_context(FullContextDiff::from_files(Vec::new()))
+            .unwrap_err();
+
+        assert_eq!(error, FullContextDiffTransitionError::Unavailable);
+    }
+
+    #[test]
+    fn full_context_transition_updates_only_modified_files_without_reordering() {
+        let compact = crate::diffs::unified_diff::parse(
+            "diff --git a/f.txt b/f.txt\n\
+index 111..222 100644\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/g.txt b/g.txt\n\
+new file mode 100644\n\
+--- /dev/null\n\
++++ b/g.txt\n\
+@@ -0,0 +1 @@\n\
++new file\n",
+        )
+        .unwrap();
+        let full = crate::diffs::unified_diff::parse(
+            "diff --git a/f.txt b/f.txt\n\
+index 111..222 100644\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1,3 +1,3 @@\n\
+ before\n\
+-old\n\
++new\n\
+ after\n\
+diff --git a/g.txt b/g.txt\n\
+new file mode 100644\n\
+--- /dev/null\n\
++++ b/g.txt\n\
+@@ -0,0 +1 @@\n\
++new file\n",
+        )
+        .unwrap();
+        let mut view = view();
+        view.files = compact;
+        view.full_context = FullContextDiffState::Deferred(FullContextDiffSource::new(
+            gtl_models::git::GitDiffSpec::Range(crate::utils::git_range("a..b")),
+            Vec::new(),
+        ));
+
+        let view = view
+            .with_full_context(FullContextDiff::from_files(full))
+            .unwrap();
+
+        assert!(matches!(view.full_context, FullContextDiffState::Loaded));
+        assert_eq!(
+            view.files
+                .iter()
+                .map(|file| file.path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            ["f.txt", "g.txt"]
+        );
+        assert!(
+            view.files[0]
+                .full_lines
+                .as_ref()
+                .is_some_and(|lines| lines.iter().any(|line| line == "before"))
+        );
+        assert!(view.files[1].full_lines.is_none());
     }
 
     #[test]

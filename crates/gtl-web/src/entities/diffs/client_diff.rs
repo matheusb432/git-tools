@@ -368,7 +368,9 @@ impl ClientDiffLoad {
             return false;
         };
         let mut batches = file.rows().unified();
-        batches.write().extend(bounded_batches(rows));
+        for batch in bounded_batches(rows) {
+            batches.push(batch);
+        }
         true
     }
 
@@ -383,7 +385,9 @@ impl ClientDiffLoad {
             return false;
         };
         let mut batches = file.rows().split();
-        batches.write().extend(bounded_batches(rows));
+        for batch in bounded_batches(rows) {
+            batches.push(batch);
+        }
         true
     }
 

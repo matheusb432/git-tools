@@ -59,13 +59,13 @@ impl ResolvedTarget {
 }
 
 pub(super) fn build(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     target: &DiffTarget,
     exclusions: &DiffExclusions,
 ) -> anyhow::Result<DiffComputation> {
     let mut notes = Vec::new();
-    let branch = source.current_branch(top)?;
+    let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
     let excluded = exclusions.for_project_or_default(&repo_name);
 
@@ -75,14 +75,15 @@ pub(super) fn build(
         view_ranges,
         presentation,
         fallback_to_main,
-    } = resolve_target_ranges(source, top, target, &mut notes)?;
+    } = resolve_target_ranges(git, top, target, &mut notes)?;
     let range_view = RangeView::new(&view_ranges.diff, presentation);
 
     let DiffData {
         commits,
         mut files,
         hidden_paths,
-    } = assemble(source, top, &io_ranges.diff, &io_ranges.log, excluded)?;
+        full_context,
+    } = assemble(git, top, &io_ranges.diff, &io_ranges.log, excluded)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
@@ -96,6 +97,7 @@ pub(super) fn build(
         foot: range_view.foot,
         commits,
         files,
+        full_context,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     notes.extend(exclusions::note("diff-artifact", &view));
@@ -116,7 +118,7 @@ pub(super) fn build(
 }
 
 fn resolve_target_ranges(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     target: &DiffTarget,
     notes: &mut Vec<Note>,
@@ -136,7 +138,7 @@ fn resolve_target_ranges(
             range,
             pinned: None,
         } => {
-            verify_exact_range(source, top, range)?;
+            verify_exact_range(git, top, range)?;
             ResolvedTarget::same_ranges(
                 GitRevision::from(range),
                 DiffRanges::exact(range.clone()),
@@ -145,8 +147,8 @@ fn resolve_target_ranges(
             )
         }
         DiffTarget::Base(base) => {
-            source.verify_commit(top, base)?;
-            let short = source.resolve_commit_id(top, base)?;
+            git.verify_commit(top, base)?;
+            let short = git.resolve_commit_id(top, base)?;
             let short =
                 GitRevision::abbreviated_commit(&short, CommitIdAbbreviation::TenCharacters);
             ResolvedTarget {
@@ -162,7 +164,7 @@ fn resolve_target_ranges(
             pinned: Some(pin),
         } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
         DiffTarget::Merge { base, pinned: None } => {
-            source.verify_commit(top, base)?;
+            git.verify_commit(top, base)?;
             ResolvedTarget::same_ranges(
                 base.clone(),
                 DiffRanges::merge(base),
@@ -174,7 +176,7 @@ fn resolve_target_ranges(
             ResolvedTarget::pinned(pin, pin.to_display_base(), RangePresentation::Exact)
         }
         DiffTarget::Unpushed { pinned: None } => {
-            let base = unpushed_or_main_base(source, top, notes)?;
+            let base = unpushed_or_main_base(git, top, notes)?;
             let (ranges, presentation) = if base.is_upstream {
                 (
                     DiffRanges::unpushed(&base.ref_name),
@@ -193,7 +195,7 @@ fn resolve_target_ranges(
             pinned: None,
         } => {
             let range = GitRange::head_commits(*count);
-            verify_exact_range(source, top, &range)?;
+            verify_exact_range(git, top, &range)?;
             ResolvedTarget::same_ranges(
                 GitRevision::from(&range),
                 DiffRanges::exact(range),
@@ -211,18 +213,17 @@ struct DiffBase {
 }
 
 fn unpushed_or_main_base(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<DiffBase> {
-    match source.upstream(top) {
+    match git.upstream(top) {
         Ok(crate::ports::GitEffect::Applied(upstream)) => Ok(DiffBase {
             ref_name: GitRevision::from(&upstream),
             is_upstream: true,
         }),
         Ok(crate::ports::GitEffect::Rejected(upstream_error)) => {
-            source
-                .verify_commit(top, &GitRevision::main())
+            git.verify_commit(top, &GitRevision::main())
                 .map_err(|_| anyhow::anyhow!(upstream_error))?;
             notes.push(Note::warn(
                 "diff-artifact: no upstream; falling back to main",
@@ -237,7 +238,7 @@ fn unpushed_or_main_base(
 }
 
 fn verify_exact_range(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     range: &GitRange,
 ) -> anyhow::Result<()> {
@@ -249,7 +250,7 @@ fn verify_exact_range(
     }
     let start = GitRevision::try_new(start.to_owned())?;
     let end = GitRevision::try_new(end.to_owned())?;
-    source.verify_commit(top, &start)?;
-    source.verify_commit(top, &end)?;
+    git.verify_commit(top, &start)?;
+    git.verify_commit(top, &end)?;
     Ok(())
 }

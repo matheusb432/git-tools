@@ -7,7 +7,7 @@ use gtl_models::{
 use lru::LruCache;
 
 use crate::{
-    diffs::{FileDiff, View},
+    diffs::{FileDiff, FullContextDiffState, View},
     viewer::ViewerTabId,
 };
 
@@ -181,6 +181,7 @@ fn view_weight(view: &View) -> ViewCacheWeight {
         + string_weight(&view.cmd.trail)
         + string_weight(&view.commits_label)
         + string_weight(&view.foot.cmd)
+        + full_context_weight(&view.full_context)
         + view
             .exclusions
             .as_ref()
@@ -197,6 +198,22 @@ fn view_weight(view: &View) -> ViewCacheWeight {
                         .map(|path| path_weight(path.as_path()))
                         .sum()
             })
+}
+
+fn full_context_weight(state: &FullContextDiffState) -> ViewCacheWeight {
+    match state {
+        FullContextDiffState::Deferred(source) => {
+            ViewCacheWeight::new(source.spec().as_arg().len())
+                + source
+                    .excluded_paths()
+                    .iter()
+                    .map(|path| path_weight(path.as_path()))
+                    .sum()
+        }
+        FullContextDiffState::Unavailable | FullContextDiffState::Loaded => {
+            ViewCacheWeight::default()
+        }
+    }
 }
 
 fn commit_weight(commit: &Commit) -> ViewCacheWeight {
@@ -276,6 +293,7 @@ mod tests {
             },
             commits_label: String::new(),
             foot: Foot { cmd: String::new() },
+            full_context: crate::diffs::FullContextDiffState::Unavailable,
         }))
     }
 
@@ -369,6 +387,7 @@ mod tests {
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".into(),
             },
+            full_context: crate::diffs::FullContextDiffState::Loaded,
         });
         let mut cache = WeightedViewCache::new(super::super::DEFAULT_VIEW_CACHE_WEIGHT);
 

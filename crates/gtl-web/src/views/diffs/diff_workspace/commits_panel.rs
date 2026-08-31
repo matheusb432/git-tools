@@ -33,13 +33,20 @@ pub fn CommitsPanel(
     let files_folded = use_signal(|| None::<bool>);
     let copy_context_enabled = use_signal(|| true);
     let flashing_file = use_signal(|| None::<String>);
+    #[cfg(feature = "desktop")]
+    let find_open = use_signal(|| false);
     let _context = super::use_diff_workspace_context(
         view.into(),
         commits.into(),
-        file_filter,
-        files_folded,
-        copy_context_enabled,
-        flashing_file,
+        super::DiffWorkspaceSignals {
+            file_filter,
+            files_folded,
+            copy_context_enabled,
+            flashing_file,
+            #[cfg(feature = "desktop")]
+            find_open,
+        },
+        false,
     );
 
     rsx! {

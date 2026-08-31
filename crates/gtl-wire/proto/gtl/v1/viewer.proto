@@ -9,6 +9,8 @@ service ViewerService {
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
   rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
   rpc StreamViewerRows(StreamViewerRowsRequest) returns (stream StreamViewerRowsResponse);
+  rpc SearchViewerFiles(SearchViewerFilesRequest) returns (SearchViewerFilesResponse);
+  rpc FindViewerDiff(FindViewerDiffRequest) returns (FindViewerDiffResponse);
   rpc ActivateViewerTab(ActivateViewerTabRequest) returns (ActivateViewerTabResponse);
   rpc CloseViewerTab(CloseViewerTabRequest) returns (CloseViewerTabResponse);
   rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
@@ -286,6 +288,41 @@ message ListViewerCommitsResponse {
 message StreamViewerRowsRequest {
   ViewerViewIdentity identity = 1;
   optional string file_id = 2;
+}
+
+message SearchViewerFilesRequest {
+  ViewerViewIdentity identity = 1;
+  string query = 2;
+}
+
+message SearchViewerFilesResponse {
+  ViewerViewIdentity identity = 1;
+  repeated string file_ids = 2;
+}
+
+enum ViewerDiffSearchDirection {
+  VIEWER_DIFF_SEARCH_DIRECTION_UNSPECIFIED = 0;
+  VIEWER_DIFF_SEARCH_DIRECTION_FORWARD = 1;
+  VIEWER_DIFF_SEARCH_DIRECTION_BACKWARD = 2;
+}
+
+message ViewerDiffSearchMatch {
+  string file_id = 1;
+  uint32 row_index = 2;
+}
+
+message FindViewerDiffRequest {
+  ViewerViewIdentity identity = 1;
+  string query = 2;
+  ViewerDiffSearchDirection direction = 3;
+  optional ViewerDiffSearchMatch anchor = 4;
+}
+
+message FindViewerDiffResponse {
+  ViewerViewIdentity identity = 1;
+  uint64 total_matches = 2;
+  optional ViewerDiffSearchMatch active_match = 3;
+  bool wrapped = 4;
 }
 
 enum ViewerSyntaxClass {

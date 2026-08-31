@@ -36,7 +36,7 @@ pub(crate) struct BatchBuild {
 /// view is kept regardless of emptiness (diff --all -- matches its current no-skip
 /// behavior exactly, do not "fix" this asymmetry).
 pub(crate) fn render_batch(
-    source: &impl GitClient,
+    git: &impl GitClient,
     target: &DiffTarget,
     settings: &UserSettings,
     repos: &[RepoRef],
@@ -46,7 +46,7 @@ pub(crate) fn render_batch(
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     for repo in repos {
-        let built = diff_computation::build(source, &repo.top, target, settings.diff_exclusions());
+        let built = diff_computation::build(git, &repo.top, target, settings.diff_exclusions());
         if !skip_empty {
             let mut response = built?;
             notes.append(&mut response.notes);

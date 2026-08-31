@@ -10,6 +10,8 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSummary};
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
+#[cfg(feature = "desktop")]
+use self::files_panel::{WorkspaceFileSearch, use_workspace_file_search};
 #[cfg(feature = "artifact")]
 use self::titlebar::{ViewActions, ViewActionsLayout};
 use self::{
@@ -49,19 +51,41 @@ pub(super) struct DiffWorkspaceContext {
     commits: ReadStore<Vec<ViewerCommitSummary>>,
     files: Memo<WorkspaceFilesModel>,
     file_filter: Signal<String>,
+    #[cfg(feature = "desktop")]
+    file_search: Signal<WorkspaceFileSearch>,
     pub(super) files_folded: Signal<Option<bool>>,
     pub(super) copy_context_enabled: Signal<bool>,
     pub(super) flashing_file: Signal<Option<String>>,
+    #[cfg(feature = "desktop")]
+    pub(super) find_open: Signal<bool>,
+}
+
+#[derive(Clone, Copy)]
+struct DiffWorkspaceSignals {
+    file_filter: Signal<String>,
+    files_folded: Signal<Option<bool>>,
+    copy_context_enabled: Signal<bool>,
+    flashing_file: Signal<Option<String>>,
+    #[cfg(feature = "desktop")]
+    find_open: Signal<bool>,
 }
 
 fn use_diff_workspace_context(
     view: ReadSignal<ViewerActiveView>,
     commits: ReadStore<Vec<ViewerCommitSummary>>,
-    file_filter: Signal<String>,
-    files_folded: Signal<Option<bool>>,
-    copy_context_enabled: Signal<bool>,
-    flashing_file: Signal<Option<String>>,
+    signals: DiffWorkspaceSignals,
+    server_owned_file_search: bool,
 ) -> DiffWorkspaceContext {
+    #[cfg(not(feature = "desktop"))]
+    let _ = server_owned_file_search;
+    let DiffWorkspaceSignals {
+        file_filter,
+        files_folded,
+        copy_context_enabled,
+        flashing_file,
+        #[cfg(feature = "desktop")]
+        find_open,
+    } = signals;
     let data_generation = use_memo(move || {
         let identity = view.read().identity;
         (
@@ -70,9 +94,23 @@ fn use_diff_workspace_context(
             identity.selection_generation,
         )
     });
+    #[cfg(feature = "desktop")]
+    let file_search = use_workspace_file_search(view, file_filter.into(), server_owned_file_search);
     let files = use_memo(move || {
         let _data_generation = data_generation();
-        WorkspaceFilesModel::new(&view.peek(), &file_filter.read())
+        let view = view.peek();
+        let filter = file_filter.read();
+        #[cfg(feature = "desktop")]
+        if server_owned_file_search && !filter.is_empty() {
+            return file_search
+                .read()
+                .files_for(view.identity, &filter)
+                .map_or_else(
+                    || WorkspaceFilesModel::empty(&view),
+                    |files| WorkspaceFilesModel::from_file_ids(&view, files),
+                );
+        }
+        WorkspaceFilesModel::new(&view, &filter)
     });
     let context = DiffWorkspaceContext {
         view,
@@ -80,9 +118,13 @@ fn use_diff_workspace_context(
         commits,
         files,
         file_filter,
+        #[cfg(feature = "desktop")]
+        file_search,
         files_folded,
         copy_context_enabled,
         flashing_file,
+        #[cfg(feature = "desktop")]
+        find_open,
     };
     use_context_provider(|| context);
     context
@@ -149,13 +191,20 @@ pub(crate) fn ArtifactDiffWorkspace(
     let files_folded = use_signal(|| None::<bool>);
     let copy_context_enabled = use_signal(|| true);
     let flashing_file = use_signal(|| None::<String>);
+    #[cfg(feature = "desktop")]
+    let find_open = use_signal(|| false);
     let context = use_diff_workspace_context(
         view.into(),
         commits.into(),
-        file_filter,
-        files_folded,
-        copy_context_enabled,
-        flashing_file,
+        DiffWorkspaceSignals {
+            file_filter,
+            files_folded,
+            copy_context_enabled,
+            flashing_file,
+            #[cfg(feature = "desktop")]
+            find_open,
+        },
+        false,
     );
     let (file_count, commit_count) = context
         .files

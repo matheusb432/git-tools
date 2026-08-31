@@ -50,7 +50,7 @@ pub enum RenderDiffError {
 }
 
 fn resolved_range(
-    source: &impl GitClient,
+    git: &impl GitClient,
     top: &RepositoryRoot,
     target: &DiffTarget,
 ) -> Option<ArtifactCommitRange> {
@@ -99,7 +99,7 @@ fn resolved_range(
         }
         DiffTarget::Unpushed { pinned: None } => {
             // The compute path owns the no-upstream fallback and warning.
-            let crate::ports::GitEffect::Applied(upstream) = source.upstream(top).ok()? else {
+            let crate::ports::GitEffect::Applied(upstream) = git.upstream(top).ok()? else {
                 return None;
             };
             let upstream = GitRevision::from(&upstream);
@@ -107,8 +107,8 @@ fn resolved_range(
         }
         DiffTarget::Base(_) => return None,
     };
-    let base = source.resolve_commit_id(top, &range_base(&range)?).ok()?;
-    let head = source.resolve_commit_id(top, &range_head(&range)?).ok()?;
+    let base = git.resolve_commit_id(top, &range_base(&range)?).ok()?;
+    let head = git.resolve_commit_id(top, &range_head(&range)?).ok()?;
     Some(ArtifactCommitRange {
         kind: ArtifactRangeKind::try_from(kind).ok()?,
         commits: PinnedRange { base, head },
@@ -119,7 +119,7 @@ fn resolved_range(
 pub fn execute(
     req: RenderDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
@@ -130,14 +130,14 @@ pub fn execute(
     let settings = app_settings.load()?;
     let render_options = settings.viewer_render_options();
     let theme = settings.theme();
-    let top = source.top_level(&cwd)?;
+    let top = git.top_level(&cwd)?;
     let store_root = super::artifacts::root(top.as_ref());
     let excluded = settings
         .diff_exclusions()
         .for_project_or_default(&top.project_name());
 
     if name.is_none()
-        && let Some(range) = resolved_range(source, &top, &target)
+        && let Some(range) = resolved_range(git, &top, &target)
         && let Some(hit) = store.lookup_by_range(
             &store_root,
             &top,
@@ -159,8 +159,8 @@ pub fn execute(
         });
     }
 
-    let commit_range = resolved_range(source, &top, &target).map(|range| range.commits);
-    let computed = diff_computation::build(source, &top, &target, settings.diff_exclusions())?;
+    let commit_range = resolved_range(git, &top, &target).map(|range| range.commits);
+    let computed = diff_computation::build(git, &top, &target, settings.diff_exclusions())?;
     let mut view = computed.view;
     let summary = computed.summary;
     notes.extend(computed.notes);
@@ -188,7 +188,7 @@ pub fn execute(
         )
         .map_err(anyhow::Error::from)?,
         range_label: view.cmd.range.clone(),
-        head_committed_at: source.committed_at(&top, &GitRevision::head()),
+        head_committed_at: git.committed_at(&top, &GitRevision::head()),
         generated_at: clock.now().map_err(anyhow::Error::from)?,
         title: view.title.clone(),
         render_options,

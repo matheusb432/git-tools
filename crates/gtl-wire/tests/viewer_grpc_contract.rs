@@ -10,9 +10,13 @@ use gtl_models::{
 };
 use gtl_wire::{
     proto::viewer::{
-        ViewerCodecError, decode_get_viewer_settings_response, decode_get_viewer_shell_response,
-        decode_list_viewer_history_response, decode_stream_viewer_rows_response,
+        ViewerCodecError, decode_find_viewer_diff_request, decode_find_viewer_diff_response,
+        decode_get_viewer_settings_response, decode_get_viewer_shell_response,
+        decode_list_viewer_history_response, decode_search_viewer_files_request,
+        decode_search_viewer_files_response, decode_stream_viewer_rows_response,
+        encode_find_viewer_diff_request, encode_find_viewer_diff_response,
         encode_get_viewer_settings_response, encode_list_viewer_history_response,
+        encode_search_viewer_files_request, encode_search_viewer_files_response,
         encode_viewer_shell, encode_viewer_unified_row, encode_viewer_view_identity,
     },
     v1::{
@@ -20,10 +24,12 @@ use gtl_wire::{
         ViewerViewIdentity, stream_viewer_rows_response, viewer_unified_row,
     },
     viewer::{
-        self, ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffExclusions,
-        ViewerDiffFileId, ViewerDiffLayout, ViewerFeedback, ViewerHistoryEntry, ViewerHistoryPage,
-        ViewerPreferences, ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerRowEvent,
-        ViewerShell, ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
+        self, FindViewerDiff, SearchViewerFiles, ViewerActiveState, ViewerCodeSpan,
+        ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffFileId, ViewerDiffLayout,
+        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
+        ViewerFileSearchResult, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
+        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerRowEvent, ViewerShell,
+        ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
         ViewerUnifiedSourceRow, ViewerUserSettings,
     },
 };
@@ -159,6 +165,79 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
             rows: vec![row],
         }
     );
+}
+
+#[test]
+fn viewer_file_search_codec_round_trips_identity_query_and_matches()
+-> Result<(), Box<dyn std::error::Error>> {
+    let identity = viewer_identity()?;
+    let request = SearchViewerFiles {
+        identity,
+        query: "src/render".into(),
+    };
+    let result = ViewerFileSearchResult {
+        identity,
+        files: vec![
+            ViewerDiffFileId::for_index(2),
+            ViewerDiffFileId::for_index(7),
+        ],
+    };
+
+    assert_eq!(
+        decode_search_viewer_files_request(encode_search_viewer_files_request(request.clone()))
+            .unwrap(),
+        request
+    );
+    assert_eq!(
+        decode_search_viewer_files_response(encode_search_viewer_files_response(result.clone()))
+            .unwrap(),
+        result
+    );
+    Ok(())
+}
+
+#[test]
+fn viewer_diff_search_codec_round_trips_direction_anchor_and_result()
+-> Result<(), Box<dyn std::error::Error>> {
+    let identity = viewer_identity()?;
+    let found = ViewerDiffSearchMatch {
+        file: ViewerDiffFileId::for_index(3),
+        row_index: 42,
+    };
+    let request = FindViewerDiff {
+        identity,
+        query: "needle".into(),
+        direction: ViewerDiffSearchDirection::Backward,
+        anchor: Some(found.clone()),
+    };
+    let result = ViewerDiffSearchResult {
+        identity,
+        total_matches: 9,
+        active_match: Some(found),
+        wrapped: true,
+    };
+
+    assert_eq!(
+        decode_find_viewer_diff_request(encode_find_viewer_diff_request(request.clone())).unwrap(),
+        request
+    );
+    assert_eq!(
+        decode_find_viewer_diff_response(encode_find_viewer_diff_response(&result)).unwrap(),
+        result
+    );
+    Ok(())
+}
+
+fn viewer_identity() -> Result<viewer::ViewerViewIdentity, Box<dyn std::error::Error>> {
+    Ok(viewer::ViewerViewIdentity {
+        tab_id: ViewerTabId::try_new(7)?,
+        range_generation: ViewerRangeGeneration::new(3),
+        selection_generation: ViewerSelectionGeneration::new(2),
+        render_options: viewer::ViewerRenderOptions {
+            layout: ViewerDiffLayout::Unified,
+            density: ViewerDiffDensity::Compact,
+        },
+    })
 }
 
 #[test]

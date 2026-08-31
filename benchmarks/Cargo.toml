@@ -39,11 +39,18 @@ path = "src/bin/server_highlighting_driver/main.rs"
 name = "grpc-transport-driver"
 path = "src/bin/grpc_transport_driver/main.rs"
 
+[[bin]]
+name = "view-source-driver"
+path = "src/bin/view_source_driver/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 gtl-client.workspace = true
+gtl-application.workspace = true
+gtl-infra.workspace = true
 gtl-local-auth.workspace = true
+gtl-models.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
 libc.workspace = true
 prost.workspace = true
@@ -60,10 +67,7 @@ tonic = { workspace = true, features = ["transport"] }
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 dx-preview = { workspace = true, features = ["benchmark-support"] }
-gtl-application.workspace = true
-gtl-models.workspace = true
 gtl-server = { workspace = true, features = ["benchmark-support"] }
-gtl-infra.workspace = true
 gtl-artifacts.workspace = true
 gtl-parser = { workspace = true, features = ["syntax"] }
 

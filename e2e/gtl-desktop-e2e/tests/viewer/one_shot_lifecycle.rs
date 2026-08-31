@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
 use serde::Deserialize;
-use thirtyfour::{By, WebDriver, prelude::ElementQueryable as _};
+use thirtyfour::{By, Key, WebDriver, prelude::ElementQueryable as _};
 
 use crate::support::{self, fixture::OneShotFixture, wait};
 
@@ -18,6 +18,7 @@ async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> 
     fixture.forward()?;
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker")
         .await?;
+    assert_server_owned_searches(session.driver()).await?;
     let copied =
         support::copy_selected_diff_line(session.driver(), "work.txt", "alpha-one-shot-marker")
             .await?;
@@ -84,6 +85,127 @@ async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> 
         .context("reopen the snapshot from history")?;
 
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
+}
+
+async fn assert_server_owned_searches(driver: &WebDriver) -> Result<()> {
+    assert_server_owned_file_search(driver).await?;
+    assert_server_owned_diff_search(driver).await
+}
+
+async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
+    let file_panel = support::selectors::by_test_id(driver, test_ids::CHANGED_FILES_PANEL).await?;
+    let file_filter = file_panel
+        .find(By::Css("input[placeholder^='Filter files']"))
+        .await
+        .context("find changed-file filter")?;
+    file_filter
+        .send_keys("missing-file")
+        .await
+        .context("filter changed files through the server")?;
+    wait::until(
+        "server-filtered empty file list",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(file_panel
+                .text()
+                .await?
+                .contains("no files match this filter")
+                .then_some(()))
+        },
+    )
+    .await?;
+    file_filter
+        .send_keys(Key::Control + "a")
+        .await
+        .context("select the changed-file filter")?;
+    file_filter
+        .send_keys("work")
+        .await
+        .context("replace the changed-file filter")?;
+    wait::until(
+        "server-filtered changed file",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(file_panel
+                .find_all(By::Css("button[title='work.txt']"))
+                .await?
+                .into_iter()
+                .next()
+                .map(|_| ()))
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
+    let intercepted: bool = driver
+        .execute(
+            r"
+                const target = document.querySelector('[data-gtl-diff-document]');
+                const event = new KeyboardEvent('keydown', {
+                    key: 'f',
+                    ctrlKey: true,
+                    bubbles: true,
+                    cancelable: true,
+                });
+                target.dispatchEvent(event);
+                return event.defaultPrevented;
+            ",
+            Vec::new(),
+        )
+        .await
+        .context("open diff search with Ctrl+F")?
+        .convert()
+        .context("decode Ctrl+F interception")?;
+    ensure!(intercepted, "the viewer did not suppress native Ctrl+F");
+    let find_input = driver
+        .query(By::Id("viewer-diff-find-input"))
+        .ignore_errors(true)
+        .and_displayed()
+        .wait(
+            wait::ASSERTION_TIMEOUT,
+            std::time::Duration::from_millis(100),
+        )
+        .first()
+        .await
+        .context("show the diff search input")?;
+    find_input
+        .send_keys("alpha-one-shot-marker")
+        .await
+        .context("search rendered diff rows through the server")?;
+    wait::until(
+        "server-owned diff match",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let matches = driver.find_all(By::Css("[data-gtl-find-active]")).await?;
+            let Some(found) = matches.into_iter().next() else {
+                return Ok(None);
+            };
+            Ok(found
+                .text()
+                .await?
+                .contains("alpha-one-shot-marker")
+                .then_some(()))
+        },
+    )
+    .await?;
+    let find_region = driver
+        .find(By::Css("[role='search'][aria-label='Find in diff']"))
+        .await
+        .context("find diff search controls")?;
+    ensure!(
+        find_region.text().await?.contains("1 match"),
+        "diff search did not report its server match count"
+    );
+    find_region
+        .find(By::Css("button[aria-label='Close find']"))
+        .await?
+        .click()
+        .await
+        .context("close diff search")?;
+    Ok(())
 }
 
 #[derive(Deserialize)]

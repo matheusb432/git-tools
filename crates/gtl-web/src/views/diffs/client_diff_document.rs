@@ -1,6 +1,8 @@
 #[cfg(feature = "desktop")]
 mod copy_context;
 mod file;
+#[cfg(feature = "desktop")]
+mod find;
 
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
@@ -50,6 +52,12 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
                 };
                 toast.ok(message);
             },
+            find::DiffFindBar {
+                open: diff.find_open,
+                identity,
+                rows_loading: is_loading,
+                workspace: workspace_store,
+            }
             DiffDocumentBody {
                 title,
                 workspace: workspace_store,

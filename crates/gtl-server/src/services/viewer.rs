@@ -16,7 +16,11 @@ use gtl_application::{
         get_user_settings::{self, GetUserSettings},
         set_setting_key,
     },
-    viewer::{self, shell, work},
+    viewer::{
+        self,
+        ensure_view_full_context::{self, EnsureViewFullContext, EnsureViewFullContextOk},
+        find_viewer_diff, search_viewer_files, shell, work,
+    },
 };
 use gtl_models::{
     diffs::CommitId,
@@ -28,10 +32,11 @@ use gtl_wire::{
     v1::{self, viewer_service_server::ViewerService},
     viewer::{
         SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
-        VIEWER_COMMIT_PAGE_MAX_ENTRIES, ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout,
-        ViewerFeedback, ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage,
-        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerShell, ViewerTheme,
-        ViewerUserSettings, ViewerViewIdentity,
+        VIEWER_COMMIT_PAGE_MAX_ENTRIES, VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES,
+        VIEWER_FILE_SEARCH_MAX_MATCHES, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffDensity,
+        ViewerDiffExclusions, ViewerDiffLayout, ViewerFeedback, ViewerHistoryCursor,
+        ViewerHistoryEntry, ViewerHistoryPage, ViewerProjectDiffExclusions, ViewerRecipeKind,
+        ViewerShell, ViewerTheme, ViewerUserSettings, ViewerViewIdentity,
     },
 };
 use prost::Message as _;
@@ -208,6 +213,7 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::SetViewerPreferenceRequest>,
     ) -> Result<Response<v1::SetViewerPreferenceResponse>, Status> {
         let mutation = preference(request.into_inner())?;
+        let loads_full_context = matches!(&mutation, SettingKeyValue::Density(DiffDensity::Full));
         let mut store = self.state.user_settings.clone();
         let viewer = self.state.viewer.clone();
         let change = run_blocking(move || set_setting_key::execute(mutation, &mut store, &viewer))
@@ -218,6 +224,21 @@ impl ViewerService for ViewerGrpcService {
                 .viewer_row_streams
                 .cancel_current_stream()
                 .map_err(|error| unexpected_viewer(error, "cancel viewer row stream"))?;
+        }
+        if loads_full_context && change.viewer_rows_changed {
+            let state = self.state.clone();
+            let loaded = run_blocking(move || {
+                ensure_view_full_context::execute(
+                    EnsureViewFullContext::Active,
+                    &state.viewer,
+                    &state.git,
+                )
+            })
+            .await?
+            .map_err(|error| unexpected_viewer(error, "load full-context viewer source"))?;
+            if matches!(loaded, EnsureViewFullContextOk::Stale) {
+                tracing::debug!("full-context viewer source became stale before publication");
+            }
         }
         Ok(Response::new(v1::SetViewerPreferenceResponse {
             shell: Some(project_shell(&self.state, None)?),
@@ -330,6 +351,77 @@ impl ViewerService for ViewerGrpcService {
                 .path()
                 .map(|path| path.display().to_string()),
         )))
+    }
+
+    async fn search_viewer_files(
+        &self,
+        request: Request<v1::SearchViewerFilesRequest>,
+    ) -> Result<Response<v1::SearchViewerFilesResponse>, Status> {
+        let request = proto::viewer::decode_search_viewer_files_request(request.into_inner())
+            .map_err(|_| Status::invalid_argument("viewer file search is invalid"))?;
+        validate_search_query(&request.query)?;
+        let options = load_user_settings(&self.state)?.viewer_render_options();
+        let snapshot =
+            shell::content_snapshot_for_identity(&self.state.viewer, request.identity, options)
+                .map_err(|error| viewer_state_error(error, "search viewer files"))?
+                .ok_or_else(|| Status::aborted("viewer identity changed"))?;
+        let view = snapshot.shared_view();
+        let result = run_blocking(move || search_viewer_files::execute(&request, &view)).await?;
+        if result.files.len() > VIEWER_FILE_SEARCH_MAX_MATCHES {
+            return Err(Status::resource_exhausted(
+                "viewer file search has too many matches",
+            ));
+        }
+        let response = proto::viewer::encode_search_viewer_files_response(result);
+        if response.encoded_len() > VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES {
+            return Err(Status::resource_exhausted(
+                "viewer file search exceeds the response limit",
+            ));
+        }
+        Ok(Response::new(response))
+    }
+
+    async fn find_viewer_diff(
+        &self,
+        request: Request<v1::FindViewerDiffRequest>,
+    ) -> Result<Response<v1::FindViewerDiffResponse>, Status> {
+        let request = proto::viewer::decode_find_viewer_diff_request(request.into_inner())
+            .map_err(|_| Status::invalid_argument("viewer diff search is invalid"))?;
+        validate_search_query(&request.query)?;
+        let options = load_user_settings(&self.state)?.viewer_render_options();
+        let view = if request.identity.render_options.density == ViewerDiffDensity::Full {
+            let state = self.state.clone();
+            let identity = request.identity;
+            let loaded = run_blocking(move || {
+                ensure_view_full_context::execute(
+                    EnsureViewFullContext::Identity {
+                        identity,
+                        render_options: options,
+                    },
+                    &state.viewer,
+                    &state.git,
+                )
+            })
+            .await?
+            .map_err(|error| unexpected_viewer(error, "load full-context viewer search"))?;
+            match loaded {
+                EnsureViewFullContextOk::Ready(view) => view,
+                EnsureViewFullContextOk::Stale => {
+                    return Err(Status::aborted("viewer identity changed"));
+                }
+            }
+        } else {
+            shell::content_snapshot_for_identity(&self.state.viewer, request.identity, options)
+                .map_err(|error| viewer_state_error(error, "search viewer diff"))?
+                .ok_or_else(|| Status::aborted("viewer identity changed"))?
+                .shared_view()
+        };
+        let result = run_blocking(move || find_viewer_diff::execute(&request, &view))
+            .await?
+            .map_err(|_| Status::resource_exhausted("viewer diff search exceeds server limits"))?;
+        Ok(Response::new(
+            proto::viewer::encode_find_viewer_diff_response(&result),
+        ))
     }
 
     async fn open_viewer_diff_file(
@@ -538,6 +630,18 @@ fn tab_id(raw: u64) -> Result<ViewerTabId, Status> {
     ViewerTabId::try_new(raw).map_err(|_| Status::invalid_argument("tab_id must be positive"))
 }
 
+fn validate_search_query(query: &str) -> Result<(), Status> {
+    if query.len() > VIEWER_SEARCH_QUERY_MAX_BYTES {
+        return Err(Status::invalid_argument("search query is too long"));
+    }
+    if query.chars().any(char::is_control) {
+        return Err(Status::invalid_argument(
+            "search query contains control characters",
+        ));
+    }
+    Ok(())
+}
+
 fn render_history_id(raw: u64) -> Result<RenderHistoryId, Status> {
     let raw = i64::try_from(raw).map_err(|_| Status::invalid_argument("render_id is invalid"))?;
     RenderHistoryId::try_new(raw)
@@ -606,4 +710,30 @@ pub(super) fn unexpected_viewer(
 ) -> Status {
     tracing::error!(error = ?error, operation, "viewer operation failed");
     Status::internal("viewer operation failed")
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::Code;
+
+    use super::*;
+
+    #[test]
+    fn viewer_search_query_accepts_the_wire_limit() {
+        assert!(validate_search_query(&"x".repeat(VIEWER_SEARCH_QUERY_MAX_BYTES)).is_ok());
+    }
+
+    #[test]
+    fn viewer_search_query_rejects_oversize_or_control_text() {
+        assert_eq!(
+            validate_search_query(&"x".repeat(VIEWER_SEARCH_QUERY_MAX_BYTES + 1))
+                .unwrap_err()
+                .code(),
+            Code::InvalidArgument
+        );
+        assert_eq!(
+            validate_search_query("line\nnext").unwrap_err().code(),
+            Code::InvalidArgument
+        );
+    }
 }

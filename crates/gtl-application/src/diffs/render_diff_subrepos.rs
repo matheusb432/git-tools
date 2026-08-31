@@ -63,7 +63,7 @@ pub enum RenderDiffSubreposError {
 pub fn execute(
     req: RenderDiffSubrepos,
     app_settings: &impl UserSettingsStore,
-    source: &impl GitClient,
+    git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
@@ -77,7 +77,7 @@ pub fn execute(
     let target = DiffTarget::try_from(target)?;
     let settings = app_settings.load()?;
     let mut notes = Vec::new();
-    let batch = render_batch(source, &target, &settings, &repos, true, &mut notes)?;
+    let batch = render_batch(git, &target, &settings, &repos, true, &mut notes)?;
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(

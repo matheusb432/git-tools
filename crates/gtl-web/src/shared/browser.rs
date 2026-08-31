@@ -57,6 +57,66 @@ pub(crate) fn scroll_to_file(id: &str) {
     details.scroll_into_view_with_bool(true);
 }
 
+#[cfg(feature = "desktop")]
+pub(crate) fn show_diff_search_match(file_index: usize, row_index: usize) -> bool {
+    clear_diff_search_match();
+    let Some(container) = document()
+        .and_then(|document| document.get_element_by_id(&format!("viewer-diff-{file_index}")))
+    else {
+        return false;
+    };
+    let Ok(rows) = container.query_selector_all("[data-gtl-diff-row]") else {
+        return false;
+    };
+    let Ok(row_index) = u32::try_from(row_index) else {
+        return false;
+    };
+    let Some(element) = rows
+        .item(row_index)
+        .and_then(|row| row.dyn_into::<HtmlElement>().ok())
+    else {
+        return false;
+    };
+    if let Ok(Some(details)) = element.closest("details")
+        && let Ok(details) = details.dyn_into::<HtmlDetailsElement>()
+    {
+        details.set_open(true);
+    }
+    let style = element.style();
+    if style
+        .set_property("outline", "2px solid var(--color-acc)")
+        .is_err()
+    {
+        return false;
+    }
+    if style.set_property("outline-offset", "-2px").is_err() {
+        let _ = style.remove_property("outline");
+        return false;
+    }
+    if element.set_attribute("data-gtl-find-active", "").is_err() {
+        let _ = style.remove_property("outline");
+        let _ = style.remove_property("outline-offset");
+        return false;
+    }
+    element.scroll_into_view_with_bool(true);
+    true
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn clear_diff_search_match() {
+    let Some(element) = document()
+        .and_then(|document| document.query_selector("[data-gtl-find-active]").ok())
+        .flatten()
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+    else {
+        return;
+    };
+    let style = element.style();
+    let _ = style.remove_property("outline");
+    let _ = style.remove_property("outline-offset");
+    let _ = element.remove_attribute("data-gtl-find-active");
+}
+
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) async fn copy_text(text: &str) -> bool {
     if let Some(window) = web_sys::window()

@@ -183,14 +183,19 @@ fn ReadyWorkspace(
     let files_folded = use_signal(|| None::<bool>);
     let copy_context_enabled = use_signal(|| true);
     let mut flashing_file = use_signal(|| None::<String>);
+    let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
     let _workspace = super::use_diff_workspace_context(
         view,
         commit_pages.commits(),
-        file_filter,
-        files_folded,
-        copy_context_enabled,
-        flashing_file,
+        super::DiffWorkspaceSignals {
+            file_filter,
+            files_folded,
+            copy_context_enabled,
+            flashing_file,
+            find_open,
+        },
+        true,
     );
     let (tab_id, identity) = view.with(|view| (view.identity.tab_id, view.identity));
     let ready_shell = shell.with(|shell| {
@@ -262,7 +267,15 @@ fn ReadyWorkspace(
         return rsx! {};
     };
     rsx! {
-        section { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+        section {
+            class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+            onkeydown: move |event: KeyboardEvent| {
+                if is_diff_find_shortcut(&event) {
+                    event.prevent_default();
+                    find_open.set(true);
+                    browser::focus_element("viewer-diff-find-input".to_owned());
+                }
+            },
             div { class: "border-b border-line bg-surface px-3 py-2 text-ink-2",
                 div { class: "hidden min-w-0 items-center justify-between gap-3 expanded:flex",
                     DisplayControls {
@@ -400,6 +413,12 @@ fn ReadyWorkspace(
             },
         }
     }
+}
+
+fn is_diff_find_shortcut(event: &KeyboardEvent) -> bool {
+    let modifiers = event.modifiers();
+    (modifiers.ctrl() || modifiers.meta())
+        && matches!(event.key(), Key::Character(value) if value.eq_ignore_ascii_case("f"))
 }
 
 #[component]
