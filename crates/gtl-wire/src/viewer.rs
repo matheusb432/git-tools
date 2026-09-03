@@ -500,6 +500,7 @@ pub struct ViewerHistoryPage {
 pub struct ViewerProjectDiffExclusions {
     pub project_name: ProjectName,
     pub extensions: ExcludedExtensions,
+    pub excluded_from_push_all: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,6 +517,31 @@ pub struct ViewerUserSettings {
     pub render_options: ViewerRenderOptions,
     pub push_confirmation_required: bool,
     pub diff_exclusions: ViewerDiffExclusions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FieldUpdate<T> {
+    Update(T),
+    Clear,
+    #[default]
+    Unchanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerProjectSettingsUpdate {
+    pub project_name: ProjectName,
+    pub excluded_from_push_all: bool,
+    pub diff_exclusions: ExcludedExtensions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EditSettingsRequest {
+    pub theme: FieldUpdate<ViewerTheme>,
+    pub layout: FieldUpdate<ViewerDiffLayout>,
+    pub density: FieldUpdate<ViewerDiffDensity>,
+    pub push_confirmation_required: FieldUpdate<bool>,
+    pub default_diff_exclusions: FieldUpdate<ExcludedExtensions>,
+    pub projects: FieldUpdate<Vec<ViewerProjectSettingsUpdate>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

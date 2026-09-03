@@ -51,6 +51,7 @@ async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> 
         },
     )
     .await?;
+    assert_commit_details_hover_popover(session.driver()).await?;
     assert_path_copy_popover(session.driver()).await?;
 
     support::selectors::by_test_id(session.driver(), test_ids::VIEWER_TAB_CLOSE)
@@ -85,6 +86,160 @@ async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> 
         .context("reopen the snapshot from history")?;
 
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
+}
+
+async fn assert_commit_details_hover_popover(driver: &WebDriver) -> Result<()> {
+    let commits = support::selectors::by_test_id(driver, test_ids::COMMITS_PANEL).await?;
+    ensure!(
+        commits.find_all(By::Css("button")).await?.len() == 1,
+        "the commit shelf retained a separate details trigger"
+    );
+    let card = commits
+        .find(By::Css("[data-gtl-hover-popover-target]"))
+        .await
+        .context("find the desktop commit hover target")?;
+    let popover = card
+        .find(By::Css("[popover][role='tooltip']"))
+        .await
+        .context("find the desktop commit details popover")?;
+    ensure!(
+        !popover.is_displayed().await?,
+        "desktop commit details are visible before hover"
+    );
+
+    driver
+        .action_chain_with_delay(None, Some(std::time::Duration::ZERO))
+        .move_to_element_center(&card)
+        .perform()
+        .await
+        .context("hover the desktop commit card")?;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    ensure!(
+        !popover.is_displayed().await?,
+        "desktop commit details opened before the 350-millisecond hover delay"
+    );
+    wait::until(
+        "visible desktop commit details after sustained hover",
+        wait::ASSERTION_TIMEOUT,
+        || async { Ok(popover.is_displayed().await?.then_some(())) },
+    )
+    .await?;
+    let animation_style = read_commit_popover_animation_style(driver).await?;
+    ensure!(
+        animation_style.animation_name == "commit-popover-enter"
+            && animation_style.animation_duration == "0.1s"
+            && animation_style.animation_timing_function == "linear"
+            && animation_style.overflow_x == "hidden"
+            && animation_style.overflow_y == "auto"
+            && animation_style.opacity_only,
+        "desktop commit details use unexpected animation styles: {animation_style:?}"
+    );
+    let details = popover
+        .text()
+        .await
+        .context("read desktop commit details")?;
+    ensure!(
+        details.contains("one-shot change")
+            && details.contains("Date")
+            && details.contains("Commit ID")
+            && !details.contains("Committed"),
+        "desktop commit details are incomplete: {details:?}"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let card_rect = card
+        .rect()
+        .await
+        .context("measure the desktop commit card")?;
+    let popover_rect = popover
+        .rect()
+        .await
+        .context("measure the desktop commit details")?;
+    ensure!(
+        (popover_rect.y - card_rect.y).abs() <= 1.0,
+        "desktop commit details are detached from the card top"
+    );
+    ensure!(
+        popover_rect.x + popover_rect.width <= card_rect.x - 4.0,
+        "desktop commit details do not float beside the card: card={card_rect:?}, popover={popover_rect:?}"
+    );
+    support::evidence::capture(driver, "viewer-commit-details-hover", true).await?;
+
+    let diff_document = driver
+        .find(By::Css("[data-gtl-diff-document]"))
+        .await
+        .context("find the desktop diff document")?;
+    driver
+        .action_chain()
+        .move_to_element_center(&diff_document)
+        .perform()
+        .await
+        .context("leave the desktop commit card")?;
+    wait::until(
+        "hidden desktop commit details",
+        wait::ASSERTION_TIMEOUT,
+        || async { Ok((!popover.is_displayed().await?).then_some(())) },
+    )
+    .await
+}
+
+async fn read_commit_popover_animation_style(
+    driver: &WebDriver,
+) -> Result<CommitPopoverAnimationStyle> {
+    Ok(driver
+        .execute(
+            r#"
+                const surface = document.querySelector(
+                    "[popover][role='tooltip'] > .animate-commit-popover-enter",
+                );
+                if (surface === null) {
+                    return null;
+                }
+
+                const findKeyframes = (rules, name) => {
+                    for (const rule of rules) {
+                        if (rule instanceof CSSKeyframesRule && rule.name === name) {
+                            return Array.from(rule.cssRules);
+                        }
+                        if ("cssRules" in rule) {
+                            const nested = findKeyframes(rule.cssRules, name);
+                            if (nested !== null) {
+                                return nested;
+                            }
+                        }
+                    }
+                    return null;
+                };
+                const style = getComputedStyle(surface);
+                let keyframes = null;
+                for (const sheet of document.styleSheets) {
+                    try {
+                        keyframes = findKeyframes(sheet.cssRules, style.animationName);
+                    } catch {
+                        continue;
+                    }
+                    if (keyframes !== null) {
+                        break;
+                    }
+                }
+
+                return {
+                    animationName: style.animationName,
+                    animationDuration: style.animationDuration,
+                    animationTimingFunction: style.animationTimingFunction,
+                    overflowX: style.overflowX,
+                    overflowY: style.overflowY,
+                    opacityOnly: keyframes !== null && keyframes.length > 0 &&
+                        keyframes.every((keyframe) =>
+                            Array.from(keyframe.style).every((property) =>
+                                property === "opacity"
+                            )
+                        ),
+                };
+            "#,
+            Vec::new(),
+        )
+        .await?
+        .convert()?)
 }
 
 async fn assert_server_owned_searches(driver: &WebDriver) -> Result<()> {
@@ -206,6 +361,17 @@ async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
         .await
         .context("close diff search")?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitPopoverAnimationStyle {
+    animation_name: String,
+    animation_duration: String,
+    animation_timing_function: String,
+    overflow_x: String,
+    overflow_y: String,
+    opacity_only: bool,
 }
 
 #[derive(Deserialize)]

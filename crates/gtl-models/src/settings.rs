@@ -30,6 +30,12 @@ impl PushAllExclusions {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Iterates excluded project names in stable order.
+    #[must_use]
+    pub fn projects(&self) -> impl ExactSizeIterator<Item = &ProjectName> {
+        self.0.iter()
+    }
 }
 
 // TODO: remove Clone once a store-owned smart pointer is added.

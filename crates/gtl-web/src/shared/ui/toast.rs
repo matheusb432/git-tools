@@ -137,15 +137,21 @@ pub(crate) fn ToastHost(children: Element) -> Element {
     let mut queue = use_signal(ToastQueue::default);
     use_context_provider(|| ToastHandle { queue });
 
+    let mut expiry = use_action(move |id: ToastId| async move {
+        dioxus_sdk_time::sleep(TOAST_LIFETIME).await;
+        queue.write().expire(id);
+        Ok::<(), std::convert::Infallible>(())
+    });
     let active_id = queue.read().active_id();
-    use_effect(use_reactive((&active_id,), move |(active_id,)| {
-        if let Some(id) = active_id {
-            spawn(async move {
-                dioxus_sdk_time::sleep(TOAST_LIFETIME).await;
-                queue.write().expire(id);
-            });
-        }
-    }));
+    use_effect(use_reactive(
+        (&active_id,),
+        move |(active_id,)| match active_id {
+            Some(id) => {
+                expiry.call(id);
+            }
+            None => expiry.reset(),
+        },
+    ));
 
     rsx! {
         {children}

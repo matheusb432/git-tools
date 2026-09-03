@@ -1,11 +1,12 @@
 use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
-    DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetViewerShellRequest, GetWorktreeBaseRequest, PushProjectRepositoriesRequest,
-    RenderDiffRequest, SetViewerThemeRequest, ViewerTheme, WatchViewerRequest,
-    diff_service_client::DiffServiceClient, diff_target,
-    project_service_client::ProjectServiceClient,
+    BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, ExtensionsFieldUpdate,
+    ExtensionsValue, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
+    GetViewerSettingsRequest, GetViewerShellRequest, GetWorktreeBaseRequest,
+    PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest, ViewerTheme,
+    WatchViewerRequest, bool_field_update, diff_service_client::DiffServiceClient, diff_target,
+    extensions_field_update, project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
     worktree_service_client::WorktreeServiceClient,
@@ -211,6 +212,47 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
         .ok_or("viewer watch ended before the theme change")??
         .version;
     assert!(changed_version > initial_version);
+
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_listener() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("config.toml");
+    let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
+    let mut viewer =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+
+    viewer
+        .edit_settings(EditSettingsRequest {
+            push_confirmation_required: Some(BoolFieldUpdate {
+                operation: Some(bool_field_update::Operation::Update(false)),
+            }),
+            default_diff_exclusions: Some(ExtensionsFieldUpdate {
+                operation: Some(extensions_field_update::Operation::Update(
+                    ExtensionsValue {
+                        extensions: Vec::new(),
+                    },
+                )),
+            }),
+            ..Default::default()
+        })
+        .await?;
+    let settings = viewer
+        .get_viewer_settings(GetViewerSettingsRequest {})
+        .await?
+        .into_inner();
+    assert!(!settings.push_confirmation_required);
+    assert!(
+        settings
+            .diff_exclusions
+            .ok_or("settings response omitted exclusions")?
+            .default_extensions
+            .is_empty()
+    );
 
     server.stop().await?;
     Ok(())

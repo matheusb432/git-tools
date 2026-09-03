@@ -2,10 +2,9 @@ use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
-    SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
-    ViewerTabState, ViewerTheme,
+    SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabRequest, ViewerTheme,
 };
-use lucide_dioxus::{Ellipsis, History, Settings, TriangleAlert, X};
+use lucide_dioxus::{Ellipsis, History, Settings};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -16,14 +15,20 @@ use crate::{
     shared::{
         browser,
         ui::{
-            Button, ButtonSize, ButtonVariant, CountBadge, IconPopover, IconPopoverIconMotion,
-            LoadingSpinner, MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea,
-            ScrollAreaVariant, ViewerThemePicker, use_toast,
+            CountBadge, IconPopover, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES,
+            MenuActionContent, ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerThemePicker,
+            use_toast, viewer_tab_element_id,
         },
     },
 };
 
 const VIEWER_MENU_ID: &str = "viewer-menu";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewerTabActivation {
+    tab_id: ViewerTabId,
+    focus: bool,
+}
 
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
@@ -35,6 +40,23 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let tab_ids = use_memo(move || match &*shell.read() {
         ViewerShellLoad::Ready(shell) => shell.tabs.iter().map(|tab| tab.id).collect(),
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => Vec::new(),
+    });
+    let mut activate_tab = use_action(move |activation: ViewerTabActivation| async move {
+        match viewer_server::activate_tab(ViewerTabRequest {
+            tab_id: activation.tab_id,
+        })
+        .await
+        {
+            Ok(shell) => {
+                viewer.replace_shell(shell);
+                navigator.push(Route::Workspace {});
+                if activation.focus {
+                    browser::focus_element(viewer_tab_element_id(activation.tab_id));
+                }
+            }
+            Err(error) => toast.error(error.message()),
+        }
+        Ok::<(), std::convert::Infallible>(())
     });
     let shell_state = shell.read();
     let (active_tab_id, tabs, theme, shell_ready) = match &*shell_state {
@@ -55,7 +77,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
             aria_label: "Viewer navigation",
             ScrollArea {
                 variant: ScrollAreaVariant::Rail,
-                class: "flex min-w-0 flex-1 items-end gap-1 overflow-x-auto",
+                class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
                 role: "tablist",
                 aria_label: "Open diffs",
                 if tabs.is_empty() {
@@ -67,107 +89,57 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         let active = active_tab_id == Some(tab_id);
                         let focus_tab_id = close_focus_target(tabs, tab_id);
                         let key_tabs = tab_ids;
-                        let tab_label = tab.label.clone();
-                        let presentation_state = tab_presentation_state(
-                            &tab.state,
-                            diff_rows_loading_tab_id == Some(tab_id),
-                        );
                         rsx! {
-                            div {
+                            ViewerTabItem {
                                 key: "{tab.id}",
-                                class: if active { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-acc-line bg-bg text-ink" } else { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink" },
-                                button {
-                                    id: tab_element_id(tab_id),
-                                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
-                                    r#type: "button",
-                                    role: "tab",
-                                    aria_selected: active.to_string(),
-                                    aria_busy: presentation_state.is_loading().to_string(),
-                                    aria_controls: "viewer-active-view",
-                                    tabindex: if active { "0" } else { "-1" },
-                                    title: tab.label.clone(),
-                                    onclick: move |_| {
-                                        if active {
-                                            navigator.push(Route::Workspace {});
-                                            return;
-                                        }
-                                        spawn(async move {
-                                            match viewer_server::activate_tab(ViewerTabRequest { tab_id }).await {
-                                                Ok(shell) => {
-                                                    viewer.replace_shell(shell);
-                                                    navigator.push(Route::Workspace {});
-                                                }
-                                                Err(error) => toast.error(error.message()),
-                                            }
+                                tab: tab.clone(),
+                                active,
+                                rows_loading: diff_rows_loading_tab_id == Some(tab_id),
+                                onactivate: move |_| {
+                                    if active {
+                                        navigator.push(Route::Workspace {});
+                                        return;
+                                    }
+                                    activate_tab
+                                        .call(ViewerTabActivation {
+                                            tab_id,
+                                            focus: false,
                                         });
-                                    },
-                                    onkeydown: move |event| {
-                                        let movement = match event.key() {
-                                            Key::ArrowRight => Some(TabMovement::Next),
-                                            Key::ArrowLeft => Some(TabMovement::Previous),
-                                            Key::Home => Some(TabMovement::First),
-                                            Key::End => Some(TabMovement::Last),
-                                            _ => None,
-                                        };
-                                        if let Some(movement) = movement {
-                                            event.prevent_default();
-                                            if let Some(target) = tab_focus_target(&key_tabs.peek(), tab_id, movement) {
-                                                spawn(async move {
-                                                    match viewer_server::activate_tab(ViewerTabRequest {
-                                                            tab_id: target,
-                                                        })
-                                                        .await
-                                                    {
-                                                        Ok(shell) => {
-                                                            viewer.replace_shell(shell);
-                                                            navigator.push(Route::Workspace {});
-                                                            browser::focus_element(tab_element_id(target));
-                                                        }
-                                                        Err(error) => toast.error(error.message()),
-                                                    }
+                                },
+                                onkeydown: move |event: KeyboardEvent| {
+                                    let movement = match event.key() {
+                                        Key::ArrowRight => Some(TabMovement::Next),
+                                        Key::ArrowLeft => Some(TabMovement::Previous),
+                                        Key::Home => Some(TabMovement::First),
+                                        Key::End => Some(TabMovement::Last),
+                                        _ => None,
+                                    };
+                                    if let Some(movement) = movement {
+                                        event.prevent_default();
+                                        if let Some(target) = tab_focus_target(&key_tabs.peek(), tab_id, movement) {
+                                            activate_tab
+                                                .call(ViewerTabActivation {
+                                                    tab_id: target,
+                                                    focus: true,
                                                 });
-                                            }
                                         }
-                                    },
-                                    span {
-                                        class: "inline-flex size-4 flex-none items-center justify-center rounded-sm border border-line-2 text-xs font-bold text-ink-3",
-                                        aria_hidden: "true",
-                                        {tab_kind_label(tab.kind)}
                                     }
-                                    span { class: "flex min-w-0 flex-1 items-center gap-1.5",
-                                        span { class: "min-w-0 flex-1 truncate", "{tab.label}" }
-                                        if tab.kind == ViewerTabKind::Live {
-                                            span { class: "sr-only", ", Live" }
-                                        }
-                                        TabStateMarker { state: presentation_state }
-                                    }
-                                }
-                                Button {
-                                    size: ButtonSize::IconCompact,
-                                    variant: ButtonVariant::Ghost,
-                                    class: "mr-1 text-del",
-                                    aria_label: "Close {tab_label}",
-                                    title: "Close tab",
-                                    "data-testid": test_ids::VIEWER_TAB_CLOSE.value(),
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
-                                                Ok(shell) => {
-                                                    viewer.replace_shell(shell);
-                                                    if let Some(focus_id) = focus_tab_id {
-                                                        browser::focus_element(tab_element_id(focus_id));
-                                                    } else {
-                                                        browser::focus_element("workspace-heading".to_owned());
-                                                    }
+                                },
+                                onclose: move |_| {
+                                    spawn(async move {
+                                        match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
+                                            Ok(shell) => {
+                                                viewer.replace_shell(shell);
+                                                if let Some(focus_id) = focus_tab_id {
+                                                    browser::focus_element(viewer_tab_element_id(focus_id));
+                                                } else {
+                                                    browser::focus_element("workspace-heading".to_owned());
                                                 }
-                                                Err(error) => toast.error(error.message()),
                                             }
-                                        });
-                                    },
-                                    span { aria_hidden: "true",
-                                        X { size: 14 }
-                                    }
-                                }
+                                            Err(error) => toast.error(error.message()),
+                                        }
+                                    });
+                                },
                             }
                         }
                     }
@@ -236,77 +208,6 @@ const fn active_tab_id(active: &ViewerActiveState) -> Option<ViewerTabId> {
     }
 }
 
-fn tab_element_id(tab_id: ViewerTabId) -> String {
-    format!("viewer-tab-{tab_id}")
-}
-
-const fn tab_kind_label(kind: ViewerTabKind) -> &'static str {
-    match kind {
-        ViewerTabKind::Snapshot => "S",
-        ViewerTabKind::Live => "L",
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TabPresentationState {
-    Ready,
-    Loading,
-    Broken,
-    Error,
-}
-
-impl TabPresentationState {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Ready => "Ready",
-            Self::Loading => "Rendering",
-            Self::Broken => "Render stopped",
-            Self::Error => "Render failed",
-        }
-    }
-
-    const fn is_loading(self) -> bool {
-        matches!(self, Self::Loading)
-    }
-}
-
-const fn tab_presentation_state(
-    state: &ViewerTabState,
-    diff_rows_loading: bool,
-) -> TabPresentationState {
-    match state {
-        ViewerTabState::Ready if diff_rows_loading => TabPresentationState::Loading,
-        ViewerTabState::Ready => TabPresentationState::Ready,
-        ViewerTabState::Pending => TabPresentationState::Loading,
-        ViewerTabState::Broken => TabPresentationState::Broken,
-        ViewerTabState::Error => TabPresentationState::Error,
-    }
-}
-
-#[component]
-fn TabStateMarker(state: TabPresentationState) -> Element {
-    let label = state.label();
-
-    rsx! {
-        span {
-            class: "inline-flex size-3.5 flex-none items-center justify-center text-acc",
-            aria_hidden: "true",
-            match state {
-                TabPresentationState::Ready => rsx! {},
-                TabPresentationState::Loading => rsx! {
-                    LoadingSpinner {}
-                },
-                TabPresentationState::Broken | TabPresentationState::Error => rsx! {
-                    span { class: "text-del",
-                        TriangleAlert { size: 13 }
-                    }
-                },
-            }
-        }
-        span { class: "sr-only", ", {label}" }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TabMovement {
     Next,
@@ -339,13 +240,9 @@ fn close_focus_target(tabs: &[ViewerTab], closing: ViewerTabId) -> Option<Viewer
 
 #[cfg(test)]
 mod tests {
-    use dioxus::prelude::*;
     use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
 
-    use super::{
-        TabMovement, TabPresentationState, TabStateMarker, close_focus_target, tab_focus_target,
-        tab_presentation_state,
-    };
+    use super::{TabMovement, close_focus_target, tab_focus_target};
     use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
@@ -382,45 +279,5 @@ mod tests {
 
         assert_eq!(close_focus_target(&tabs, viewer_tab_id(4)?), None);
         Ok(())
-    }
-
-    #[test]
-    fn row_stream_loading_uses_the_tab_loading_state() {
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Ready, true),
-            TabPresentationState::Loading
-        );
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Ready, false),
-            TabPresentationState::Ready
-        );
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Error, true),
-            TabPresentationState::Error
-        );
-    }
-
-    #[test]
-    fn every_tab_state_has_a_non_color_label() {
-        assert_eq!(TabPresentationState::Ready.label(), "Ready");
-        assert_eq!(TabPresentationState::Loading.label(), "Rendering");
-        assert_eq!(TabPresentationState::Broken.label(), "Render stopped");
-        assert_eq!(TabPresentationState::Error.label(), "Render failed");
-    }
-
-    #[test]
-    fn tab_state_marker_reserves_its_footprint_while_idle() {
-        for state in [
-            TabPresentationState::Ready,
-            TabPresentationState::Loading,
-            TabPresentationState::Broken,
-            TabPresentationState::Error,
-        ] {
-            let html = dioxus_ssr::render_element(rsx! {
-                TabStateMarker { state }
-            });
-
-            assert!(html.contains("inline-flex size-3.5 flex-none"));
-        }
     }
 }

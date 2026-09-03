@@ -7,6 +7,7 @@
   const feedbackTimers = new WeakMap();
   const copyContextFeedbackTimers = new WeakMap();
   const flashTimers = new WeakMap();
+  const hoverPopoverTimers = new WeakMap();
 
   function classWords(value) {
     return (value ?? "").split(/\s+/).filter(Boolean);
@@ -25,6 +26,73 @@
 
   function panelWorkspace(panel) {
     return panel.querySelector("[data-gtl-workspace]");
+  }
+
+  function hoverPopoverTarget(node) {
+    const element = node instanceof Element ? node : node?.parentElement;
+    const target = element?.closest("[data-gtl-hover-popover-target]");
+    return target !== undefined && target !== null && root.contains(target)
+      ? target
+      : null;
+  }
+
+  function hoverPopover(target) {
+    const id = target.dataset.gtlHoverPopoverId;
+    if (id === undefined) return null;
+    const popover = document.getElementById(id);
+    return popover instanceof HTMLElement && target.contains(popover)
+      ? popover
+      : null;
+  }
+
+  function scheduleHoverPopover(target) {
+    const previousTimer = hoverPopoverTimers.get(target);
+    const popover = hoverPopover(target);
+    if (
+      previousTimer !== undefined ||
+      (popover !== null && popover.matches(":popover-open"))
+    ) {
+      return;
+    }
+    const delay = Number.parseInt(
+      target.dataset.gtlHoverPopoverDelayMs ?? "0",
+      10,
+    );
+    hoverPopoverTimers.set(
+      target,
+      setTimeout(() => {
+        hoverPopoverTimers.delete(target);
+        if (
+          !target.matches(":hover") &&
+          !target.contains(document.activeElement)
+        ) {
+          return;
+        }
+        const popover = hoverPopover(target);
+        if (popover !== null && !popover.matches(":popover-open")) {
+          popover.showPopover();
+        }
+      }, Number.isNaN(delay) ? 0 : delay),
+    );
+  }
+
+  function hideHoverPopover(target) {
+    const timer = hoverPopoverTimers.get(target);
+    if (timer !== undefined) clearTimeout(timer);
+    hoverPopoverTimers.delete(target);
+    const popover = hoverPopover(target);
+    if (popover !== null && popover.matches(":popover-open")) {
+      popover.hidePopover();
+    }
+  }
+
+  function hoverPopoverInteractionEnded(target) {
+    if (
+      target.matches(":hover") || target.contains(document.activeElement)
+    ) {
+      return;
+    }
+    hideHoverPopover(target);
   }
 
   function setTabSelected(tab, selected) {
@@ -82,29 +150,17 @@
         "[data-gtl-action='toggle-files']",
       )
     ) {
-      control.textContent = folded ? "Expand all" : "Collapse all";
+      const label = control.querySelector("[data-gtl-files-label]");
+      if (label !== null) {
+        label.textContent = folded ? "Expand all" : "Collapse all";
+      }
+      const accessibleLabel = folded ? "Expand all" : "Collapse all";
+      control.setAttribute("aria-label", accessibleLabel);
+      control.setAttribute("title", accessibleLabel);
     }
-  }
-
-  function setCopyContext(panel, enabled) {
-    const workspace = panelWorkspace(panel);
-    if (workspace === null) return;
-    workspace.dataset.gtlCopyContext = String(enabled);
-    for (
-      const control of panel.querySelectorAll(
-        "[data-gtl-action='toggle-copy-context']",
-      )
-    ) {
-      control.setAttribute("aria-pressed", String(enabled));
-      swapClasses(
-        control,
-        enabled
-          ? control.dataset.gtlUnselectedClasses
-          : control.dataset.gtlSelectedClasses,
-        enabled
-          ? control.dataset.gtlSelectedClasses
-          : control.dataset.gtlUnselectedClasses,
-      );
+    if (folded) {
+      const diffDocument = panel.querySelector("[data-gtl-diff-document]");
+      if (diffDocument instanceof HTMLElement) diffDocument.scrollTop = 0;
     }
   }
 
@@ -205,6 +261,13 @@
     for (const dialog of panel.querySelectorAll("dialog[open]")) {
       closeDialog(dialog, false);
     }
+    for (
+      const target of panel.querySelectorAll(
+        "[data-gtl-hover-popover-target]",
+      )
+    ) {
+      hideHoverPopover(target);
+    }
     const copyContextFeedback = panel.querySelector(
       "[data-gtl-copy-context-feedback]",
     );
@@ -268,10 +331,6 @@
     if (file === null || file !== diffFileForNode(selection.focusNode)) {
       return null;
     }
-    const panel = artifactPanel(file);
-    const workspace = panel === null ? null : panelWorkspace(panel);
-    if (workspace?.dataset.gtlCopyContext === "false") return null;
-
     const lines = [];
     let firstLine;
     let lastLine;
@@ -412,6 +471,30 @@
     }
   }
 
+  root.addEventListener("mouseover", (event) => {
+    const target = hoverPopoverTarget(event.target);
+    if (target === null || target.contains(event.relatedTarget)) return;
+    scheduleHoverPopover(target);
+  });
+
+  root.addEventListener("mouseout", (event) => {
+    const target = hoverPopoverTarget(event.target);
+    if (target === null || target.contains(event.relatedTarget)) return;
+    hoverPopoverInteractionEnded(target);
+  });
+
+  root.addEventListener("focusin", (event) => {
+    const target = hoverPopoverTarget(event.target);
+    if (target === null || target.contains(event.relatedTarget)) return;
+    scheduleHoverPopover(target);
+  });
+
+  root.addEventListener("focusout", (event) => {
+    const target = hoverPopoverTarget(event.target);
+    if (target === null || target.contains(event.relatedTarget)) return;
+    hoverPopoverInteractionEnded(target);
+  });
+
   root.addEventListener("copy", (event) => {
     const selection = window.getSelection();
     if (selection === null || event.clipboardData === null) return;
@@ -444,18 +527,6 @@
           setFilesFolded(
             panel,
             workspace.dataset.gtlFilesFolded !== "true",
-          );
-        }
-        break;
-      }
-      case "toggle-copy-context": {
-        event.preventDefault();
-        const panel = artifactPanel(action);
-        const workspace = panel === null ? null : panelWorkspace(panel);
-        if (panel !== null && workspace !== null) {
-          setCopyContext(
-            panel,
-            workspace.dataset.gtlCopyContext !== "true",
           );
         }
         break;

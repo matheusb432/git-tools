@@ -301,6 +301,63 @@ pub(super) fn edit(
     })
 }
 
+pub(super) fn edit_document(
+    path: &Path,
+    apply: impl FnOnce(&mut DocumentMut) -> Result<(), UserSettingsEditError>,
+) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
+    let lock_parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(lock_parent)
+        .with_context(|| format!("create user-settings directory {}", lock_parent.display()))?;
+    let replacement_path = replacement_path(path)?;
+    let replacement_parent = replacement_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(replacement_parent).with_context(|| {
+        format!(
+            "create user-settings replacement directory {}",
+            replacement_parent.display()
+        )
+    })?;
+    let _lease = acquire_lock(&replacement_path)?;
+    let (baseline_bytes, raw, mut document) = read_document(&replacement_path)?;
+    super::validate_raw_for_edit(&replacement_path, &raw)?;
+    apply(&mut document)?;
+    let raw_new = document.to_string();
+    super::validate_raw_for_edit(&replacement_path, &raw_new)?;
+    if raw_new == raw {
+        return Ok(UserSettingsEditOutcome::Unchanged);
+    }
+    let current_bytes = read_document_bytes(&replacement_path)?;
+    if current_bytes != baseline_bytes {
+        return Err(UserSettingsEditError::ConcurrentModification {
+            path: replacement_path,
+        });
+    }
+    let mut temporary = tempfile::NamedTempFile::new_in(replacement_parent).with_context(|| {
+        format!(
+            "create temporary settings file in {}",
+            replacement_parent.display()
+        )
+    })?;
+    temporary
+        .write_all(raw_new.as_bytes())
+        .context("write edited user settings")?;
+    temporary.flush().context("flush edited user settings")?;
+    temporary
+        .as_file()
+        .sync_all()
+        .context("synchronize edited user settings")?;
+    temporary
+        .persist(&replacement_path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("replace user settings {}", replacement_path.display()))?;
+    Ok(UserSettingsEditOutcome::Changed)
+}
+
 fn read_document_bytes(path: &Path) -> anyhow::Result<Vec<u8>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(bytes),

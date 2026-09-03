@@ -2,11 +2,11 @@ use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 
 use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersionStream};
 use gtl_wire::viewer::{
-    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
-    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
+    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
+    ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
 use serde::Serialize;
 use tauri::State;
@@ -225,6 +225,7 @@ viewer_request_command!(
     get_history_copy
 );
 viewer_query_command!(viewer_get_settings, ViewerUserSettings, get_settings);
+viewer_request_command!(viewer_edit_settings, EditSettingsRequest, (), edit_settings);
 viewer_request_command!(
     viewer_open_diff_file,
     OpenViewerDiffFile,

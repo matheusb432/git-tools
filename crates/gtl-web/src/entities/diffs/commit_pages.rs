@@ -14,6 +14,13 @@ struct ViewerCommitListKey {
     range_generation: ViewerRangeGeneration,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewerCommitPageCommand {
+    identity: ViewerViewIdentity,
+    key: ViewerCommitListKey,
+    cursor: ViewerCommitCursor,
+}
+
 impl From<ViewerViewIdentity> for ViewerCommitListKey {
     fn from(identity: ViewerViewIdentity) -> Self {
         Self {
@@ -79,8 +86,7 @@ impl ViewerCommitPages {
 pub(crate) struct ViewerCommitPagesController {
     pages: Store<ViewerCommitPages>,
     commits: ReadStore<Vec<ViewerCommitSummary>>,
-    request: Resource<()>,
-    request_generation: Signal<u64>,
+    load_next: Callback<()>,
 }
 
 impl ViewerCommitPagesController {
@@ -100,12 +106,8 @@ impl ViewerCommitPagesController {
         self.pages.next_cursor().read().is_some()
     }
 
-    pub(crate) fn load_next(mut self) {
-        if self.request.pending() || self.pages.peek().request().is_none() {
-            return;
-        }
-        let mut generation = self.request_generation.write();
-        *generation = generation.wrapping_add(1);
+    pub(crate) fn load_next(self) {
+        self.load_next.call(());
     }
 }
 
@@ -120,45 +122,41 @@ pub(crate) fn use_viewer_commit_pages(
         let view = view.peek();
         ViewerCommitPages::new(view.identity, view.commit_count)
     });
-    let request_generation = use_signal(|| 0_u64);
-    let request = use_resource(move || {
+    let mut request = use_action(move |command: ViewerCommitPageCommand| async move {
+        let result = viewer_server::list_commits(ListViewerCommits {
+            identity: command.identity,
+            cursor: Some(command.cursor),
+        })
+        .await;
+        finish_page_request(pages, command.key, command.cursor, result);
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let load_next = use_callback(move |()| {
+        let Some((key, cursor)) = pages.peek().request() else {
+            return;
+        };
+        pages.request().set(ViewerCommitPageRequest::Loading);
+        request.call(ViewerCommitPageCommand {
+            identity: view.peek().identity,
+            key,
+            cursor,
+        });
+    });
+    use_effect(move || {
         let (expected_key, expected_count) = list();
-        let _request_generation = request_generation();
         let identity = view.peek().identity;
         if pages.peek().key != expected_key || pages.peek().expected_count != expected_count {
             pages.set(ViewerCommitPages::new(identity, expected_count));
         }
-        let page_request = pages.peek().request();
-        if page_request.is_some() {
-            pages.request().set(ViewerCommitPageRequest::Loading);
-        }
-
-        request_next_page(pages, identity, page_request)
+        load_next.call(());
     });
     let commits: ReadStore<Vec<ViewerCommitSummary>> = use_hook(move || pages.commits().into());
 
     ViewerCommitPagesController {
         pages,
         commits,
-        request,
-        request_generation,
+        load_next,
     }
-}
-
-async fn request_next_page(
-    pages: Store<ViewerCommitPages>,
-    identity: ViewerViewIdentity,
-    page_request: Option<(ViewerCommitListKey, ViewerCommitCursor)>,
-) {
-    let Some((key, cursor)) = page_request else {
-        return;
-    };
-    let result = viewer_server::list_commits(ListViewerCommits {
-        identity,
-        cursor: Some(cursor),
-    })
-    .await;
-    finish_page_request(pages, key, cursor, result);
 }
 
 fn finish_page_request(

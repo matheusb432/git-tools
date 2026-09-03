@@ -1,62 +1,154 @@
 use dioxus::prelude::*;
 use gtl_models::git::{GitHead, GitRevision};
 use gtl_wire::viewer::ViewerAppliedExclusions;
+use lucide_dioxus::ChevronsDownUp;
+#[cfg(feature = "component-preview")]
+use lucide_dioxus::{Ellipsis, RefreshCw, Trash2};
 
-use crate::shared::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ViewActionsLayout {
-    Panel,
-    Toolbar,
-}
+#[cfg(feature = "component-preview")]
+use crate::shared::ui::{
+    IconPopover, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+};
+use crate::shared::{
+    browser,
+    ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant},
+};
 
 #[component]
 pub(super) fn ViewTitlebar(
-    mobile_navigation: Option<Element>,
+    live_actions: Option<Element>,
     artifact_view_id: Option<String>,
 ) -> Element {
     let workspace = super::use_workspace_context();
     let view = workspace.view.read();
     rsx! {
-        header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2",
-            RepositoryIdentity {
-                repository_name: view.repository_name.clone(),
-                title: view.title.clone(),
+        header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1 mobile:px-2 mobile:py-1.5",
+            div { class: "min-w-0 mobile:hidden",
+                RepositoryIdentity { repository_name: view.repository_name.clone() }
             }
             BranchRange { branch: view.branch.clone(), upstream: view.upstream.clone() }
             if let Some(exclusions) = &view.exclusions {
-                ExclusionsBadge { exclusions: exclusions.clone() }
+                div { class: "mobile:hidden",
+                    ExclusionsBadge { exclusions: exclusions.clone() }
+                }
             }
-            div { class: "flex-1" }
-            if let Some(mobile_navigation) = mobile_navigation {
-                {mobile_navigation}
+            div { class: "flex-1 mobile:hidden" }
+            if let Some(live_actions) = live_actions {
+                {live_actions}
             }
-            ViewActions { layout: ViewActionsLayout::Toolbar, artifact_view_id }
+            CollapseFilesButton { artifact_view_id }
+        }
+    }
+}
+
+#[cfg(feature = "component-preview")]
+#[component]
+pub(super) fn PreviewViewTitlebar(#[props(default)] mobile: bool) -> Element {
+    let workspace = super::use_workspace_context();
+    let view = workspace.view.read();
+    let header_classes = if mobile {
+        "col-span-3 row-start-1 flex min-w-0 items-center gap-1 border-b border-line bg-surface px-2 py-1.5"
+    } else {
+        "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3"
+    };
+
+    rsx! {
+        header { class: "{header_classes}",
+            if !mobile {
+                RepositoryIdentity { repository_name: view.repository_name.clone() }
+            }
+            BranchRange {
+                branch: view.branch.clone(),
+                upstream: view.upstream.clone(),
+                compact: mobile,
+            }
+            if !mobile {
+                if let Some(exclusions) = &view.exclusions {
+                    ExclusionsBadge { exclusions: exclusions.clone() }
+                }
+            }
+            if !mobile {
+                div { class: "flex-1" }
+            }
+            PreviewLiveViewActions { mobile }
+            CollapseFilesButton { preview_mobile: mobile }
+        }
+    }
+}
+
+#[cfg(feature = "component-preview")]
+#[component]
+fn PreviewLiveViewActions(mobile: bool) -> Element {
+    let action_size = if mobile {
+        ButtonSize::IconTouch
+    } else {
+        ButtonSize::Small
+    };
+    let icon_size = if mobile { 18 } else { 14 };
+
+    rsx! {
+        div { class: "flex flex-none items-center gap-1",
+            Button {
+                size: action_size,
+                variant: ButtonVariant::Ghost,
+                aria_label: "Refresh diff",
+                title: "Refresh diff",
+                span { aria_hidden: "true",
+                    RefreshCw { size: icon_size }
+                }
+                if !mobile {
+                    "Refresh"
+                }
+            }
+            IconPopover {
+                id: if mobile { "preview-mobile-live-actions" } else { "preview-desktop-live-actions" },
+                aria_label: "Live view actions",
+                placement: IconPopoverPlacement::TriggerEnd,
+                trigger_size: action_size,
+                icon: rsx! {
+                    Ellipsis { size: if mobile { 20 } else { 18 } }
+                },
+                div { class: "grid gap-0.5 p-1.5",
+                    button { class: MENU_ACTION_HOST_CLASSES, r#type: "button",
+                        MenuActionContent {
+                            icon: rsx! {
+                                Trash2 { size: 16 }
+                            },
+                            label: "Delete live view",
+                            description: "Remove this saved live view",
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 #[component]
-fn RepositoryIdentity(repository_name: String, title: String) -> Element {
+pub(super) fn RepositoryIdentity(repository_name: String) -> Element {
     rsx! {
         div { class: "flex min-w-0 items-baseline gap-2 text-lg font-semibold tracking-tight mobile:text-base",
             span { class: "truncate",
                 "~/"
                 b { class: "font-bold text-acc", "{repository_name}" }
             }
-            Badge {
-                class: "flex-none self-center px-2 py-0.5 text-xs",
-                variant: BadgeVariant::Accent,
-                "{title}"
-            }
         }
     }
 }
 
 #[component]
-fn BranchRange(branch: GitHead, upstream: GitRevision) -> Element {
+pub(super) fn BranchRange(
+    branch: GitHead,
+    upstream: GitRevision,
+    #[props(default)] compact: bool,
+) -> Element {
+    let classes = if compact {
+        "flex min-w-0 flex-1 items-center gap-1.5 text-ink-2"
+    } else {
+        "flex min-w-0 items-center gap-1.5 text-ink-2 mobile:flex-1"
+    };
     rsx! {
-        div { class: "flex min-w-0 items-center gap-1.5 text-ink-2 tablet:order-3 tablet:w-full",
+        div { class: "{classes}",
             span { class: "truncate text-acc", "{branch}" }
             span { class: "text-ink-3", "\u{2192}" }
             span { class: "truncate text-ink-3", "{upstream}" }
@@ -77,49 +169,47 @@ fn ExclusionsBadge(exclusions: ViewerAppliedExclusions) -> Element {
 }
 
 #[component]
-pub(super) fn ViewActions(layout: ViewActionsLayout, artifact_view_id: Option<String>) -> Element {
+fn CollapseFilesButton(
+    artifact_view_id: Option<String>,
+    #[props(default)] preview_mobile: bool,
+) -> Element {
     let mut workspace = super::use_workspace_context();
     let files_folded = (workspace.files_folded)().unwrap_or(false);
-    let copy_context_enabled = (workspace.copy_context_enabled)();
-    let container_classes = match layout {
-        ViewActionsLayout::Panel => "grid grid-cols-2 gap-2",
-        ViewActionsLayout::Toolbar => "flex items-center gap-2 mobile:hidden",
+    let button_size = if preview_mobile {
+        ButtonSize::IconTouch
+    } else {
+        ButtonSize::Small
     };
-    let button_size = match layout {
-        ViewActionsLayout::Panel => ButtonSize::Medium,
-        ViewActionsLayout::Toolbar => ButtonSize::Small,
-    };
-    let artifact_selected_classes = artifact_view_id
-        .as_ref()
-        .map(|_| ButtonVariant::Pressed.classes());
-    let artifact_unselected_classes = artifact_view_id
-        .as_ref()
-        .map(|_| ButtonVariant::Outline.classes());
+    let icon_size = if preview_mobile { 18 } else { 14 };
 
     rsx! {
-        div { class: "{container_classes}",
-            Button {
-                size: button_size,
-                variant: ButtonVariant::Outline,
-                title: "Collapse or expand all files",
-                "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
-                onclick: move |_| workspace.files_folded.set(Some(!files_folded)),
+        Button {
+            class: "mobile:size-11 mobile:p-0",
+            size: button_size,
+            variant: ButtonVariant::Outline,
+            aria_label: if files_folded { "Expand all" } else { "Collapse all" },
+            title: if files_folded { "Expand all" } else { "Collapse all" },
+            "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
+            onclick: move |_| {
+                let folded = !files_folded;
+                workspace.files_folded.set(Some(folded));
+                if folded {
+                    browser::scroll_diff_document_to_start();
+                }
+            },
+            span {
+                class: "inline-flex flex-none mobile:[&_svg]:size-5",
+                aria_hidden: "true",
+                ChevronsDownUp { size: icon_size }
+            }
+            span {
+                class: if preview_mobile { "hidden" } else { "mobile:hidden" },
+                "data-gtl-files-label": artifact_view_id.as_ref().map(|_| ""),
                 if files_folded {
                     "Expand all"
                 } else {
                     "Collapse all"
                 }
-            }
-            Button {
-                size: button_size,
-                variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                aria_pressed: copy_context_enabled.to_string(),
-                title: "Prepend a commented path and selected line range when copying diff lines",
-                "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-copy-context"),
-                "data-gtl-selected-classes": artifact_selected_classes,
-                "data-gtl-unselected-classes": artifact_unselected_classes,
-                onclick: move |_| workspace.copy_context_enabled.set(!copy_context_enabled),
-                "+ context"
             }
         }
     }

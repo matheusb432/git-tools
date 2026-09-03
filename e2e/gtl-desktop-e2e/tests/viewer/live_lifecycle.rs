@@ -90,14 +90,14 @@ async fn enqueue_copy_toast(driver: &WebDriver) -> Result<()> {
 
 async fn confirm_live_view_deletion(driver: &WebDriver) -> Result<()> {
     driver
-        .find(By::Id("mobile-display-trigger"))
+        .find(By::Css("[popovertarget='live-view-actions']"))
         .await
-        .context("find the compact display controls")?
+        .context("find the live-view actions trigger")?
         .click()
         .await
-        .context("open the compact display controls")?;
+        .context("open the live-view actions")?;
     driver
-        .find(By::Id("delete-live-view-mobile"))
+        .find(By::Id("delete-live-view-trigger"))
         .await
         .context("find the live-view delete action")?
         .click()
@@ -196,7 +196,7 @@ async fn wait_for_commit_card_selection(
     driver
         .query(By::Css("[aria-label='Commits'] button[aria-pressed]"))
         .ignore_errors(true)
-        .with_text(StringMatch::new(subject).partial())
+        .with_attribute("aria-label", StringMatch::new(subject).partial())
         .with_attribute("aria-pressed", aria_pressed)
         .and_enabled()
         .and_displayed()

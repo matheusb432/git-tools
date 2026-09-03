@@ -16,9 +16,17 @@ use crate::{
 const FIND_INPUT_ID: &str = "viewer-diff-find-input";
 const FIND_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
 
+#[derive(Clone, Copy)]
+struct DiffFindController {
+    query: ReadSignal<String>,
+    state: ReadSignal<DiffFindState>,
+    update_query: Callback<String>,
+    navigate: Callback<ViewerDiffSearchDirection>,
+    close: Callback<()>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DiffFindRequest {
-    generation: u64,
     identity: ViewerViewIdentity,
     query: String,
     direction: ViewerDiffSearchDirection,
@@ -80,30 +88,26 @@ const fn wrapped_label(wrapped: bool) -> &'static str {
     if wrapped { " \u{00b7} wrapped" } else { "" }
 }
 
-#[component]
-pub(super) fn DiffFindBar(
+fn use_diff_find(
     mut open: Signal<bool>,
     identity: ViewerViewIdentity,
     rows_loading: bool,
     workspace: ReadStore<ClientDiffWorkspace>,
-) -> Element {
+) -> DiffFindController {
     let mut query = use_signal(String::new);
-    let request = use_signal(|| None::<DiffFindRequest>);
     let state = use_signal(|| DiffFindState::Idle);
-    let _search = use_resource(move || {
-        let next = request();
-        async move {
-            let Some(next) = next else {
-                return;
-            };
-            execute_find_request(next, request, state, workspace).await;
-        }
+    let search = use_action(move |next: DiffFindRequest| async move {
+        execute_find_request(next, state, workspace).await;
+        Ok::<(), std::convert::Infallible>(())
     });
 
     use_effect(move || {
         if open() {
             browser::focus_element(FIND_INPUT_ID.to_owned());
+            queue_initial_search(search, state, identity, query.peek().clone(), rows_loading);
         } else {
+            let mut search = search;
+            search.reset();
             browser::clear_diff_search_match();
         }
     });
@@ -111,15 +115,49 @@ pub(super) fn DiffFindBar(
         (&identity, &rows_loading),
         move |(identity, rows_loading)| {
             browser::clear_diff_search_match();
-            queue_initial_search(request, state, identity, query.peek().clone(), rows_loading);
+            if *open.peek() {
+                queue_initial_search(search, state, identity, query.peek().clone(), rows_loading);
+            }
         },
     ));
     use_drop(browser::clear_diff_search_match);
 
+    let update_query = use_callback(move |value: String| {
+        query.set(value.clone());
+        browser::clear_diff_search_match();
+        queue_initial_search(search, state, identity, value, rows_loading);
+    });
+    let navigate = use_callback(move |direction| {
+        queue_navigation(search, state, identity, query.peek().clone(), direction);
+    });
+    let close = use_callback(move |()| {
+        open.set(false);
+        browser::clear_diff_search_match();
+        browser::focus_element("workspace-heading".to_owned());
+    });
+
+    DiffFindController {
+        query: query.into(),
+        state: state.into(),
+        update_query,
+        navigate,
+        close,
+    }
+}
+
+#[component]
+pub(super) fn DiffFindBar(
+    open: Signal<bool>,
+    identity: ViewerViewIdentity,
+    rows_loading: bool,
+    workspace: ReadStore<ClientDiffWorkspace>,
+) -> Element {
+    let find = use_diff_find(open, identity, rows_loading, workspace);
+
     if !open() {
         return rsx! {};
     }
-    let current_state = state.read().clone();
+    let current_state = find.state.read().clone();
     let status_message = current_state.message();
     let navigation_state = if current_state.navigation_enabled() {
         ButtonState::Enabled
@@ -136,9 +174,7 @@ pub(super) fn DiffFindBar(
                 match event.key() {
                     Key::Escape => {
                         event.prevent_default();
-                        open.set(false);
-                        browser::clear_diff_search_match();
-                        browser::focus_element("workspace-heading".to_owned());
+                        find.close.call(());
                     }
                     Key::Enter => {
                         event.prevent_default();
@@ -147,13 +183,7 @@ pub(super) fn DiffFindBar(
                         } else {
                             ViewerDiffSearchDirection::Forward
                         };
-                        queue_navigation(
-                            request,
-                            state,
-                            identity,
-                            query.peek().clone(),
-                            direction,
-                        );
+                        find.navigate.call(direction);
                     }
                     _ => {}
                 }
@@ -164,14 +194,11 @@ pub(super) fn DiffFindBar(
                     label: "Find in diff",
                     label_visibility: TextInputLabelVisibility::Hidden,
                     class: "h-8 py-1.5",
-                    value: query(),
+                    value: (find.query)(),
                     maxlength: VIEWER_SEARCH_QUERY_MAX_BYTES.to_string(),
                     placeholder: "Find in diff\u{2026}",
                     oninput: move |event: FormEvent| {
-                        let value = event.value();
-                        query.set(value.clone());
-                        browser::clear_diff_search_match();
-                        queue_initial_search(request, state, identity, value, rows_loading);
+                        find.update_query.call(event.value());
                     },
                 }
                 p {
@@ -187,13 +214,7 @@ pub(super) fn DiffFindBar(
                 state: navigation_state,
                 aria_label: "Previous match",
                 title: "Previous match (Shift+Enter)",
-                onclick: move |_| queue_navigation(
-                    request,
-                    state,
-                    identity,
-                    query.peek().clone(),
-                    ViewerDiffSearchDirection::Backward,
-                ),
+                onclick: move |_| find.navigate.call(ViewerDiffSearchDirection::Backward),
                 span { aria_hidden: "true", "\u{2191}" }
             }
             Button {
@@ -202,13 +223,7 @@ pub(super) fn DiffFindBar(
                 state: navigation_state,
                 aria_label: "Next match",
                 title: "Next match (Enter)",
-                onclick: move |_| queue_navigation(
-                    request,
-                    state,
-                    identity,
-                    query.peek().clone(),
-                    ViewerDiffSearchDirection::Forward,
-                ),
+                onclick: move |_| find.navigate.call(ViewerDiffSearchDirection::Forward),
                 span { aria_hidden: "true", "\u{2193}" }
             }
             Button {
@@ -216,11 +231,7 @@ pub(super) fn DiffFindBar(
                 variant: ButtonVariant::Ghost,
                 aria_label: "Close find",
                 title: "Close find (Escape)",
-                onclick: move |_| {
-                    open.set(false);
-                    browser::clear_diff_search_match();
-                    browser::focus_element("workspace-heading".to_owned());
-                },
+                onclick: move |_| find.close.call(()),
                 span { aria_hidden: "true", "\u{00d7}" }
             }
         }
@@ -228,29 +239,29 @@ pub(super) fn DiffFindBar(
 }
 
 fn queue_initial_search(
-    mut request: Signal<Option<DiffFindRequest>>,
+    mut search: Action<(DiffFindRequest,), ()>,
     mut state: Signal<DiffFindState>,
     identity: ViewerViewIdentity,
     query: String,
     rows_loading: bool,
 ) {
     if query.is_empty() {
-        request.set(None);
+        search.reset();
         state.set(DiffFindState::Idle);
         return;
     }
     if query.len() > VIEWER_SEARCH_QUERY_MAX_BYTES {
-        request.set(None);
+        search.reset();
         state.set(DiffFindState::QueryTooLong);
         return;
     }
     if rows_loading {
-        request.set(None);
+        search.reset();
         state.set(DiffFindState::WaitingForRows);
         return;
     }
     queue_search(
-        request,
+        search,
         state,
         identity,
         query,
@@ -261,7 +272,7 @@ fn queue_initial_search(
 }
 
 fn queue_navigation(
-    request: Signal<Option<DiffFindRequest>>,
+    search: Action<(DiffFindRequest,), ()>,
     state: Signal<DiffFindState>,
     identity: ViewerViewIdentity,
     query: String,
@@ -271,11 +282,11 @@ fn queue_navigation(
         return;
     }
     let anchor = state.peek().active_match();
-    queue_search(request, state, identity, query, direction, anchor, false);
+    queue_search(search, state, identity, query, direction, anchor, false);
 }
 
 fn queue_search(
-    mut request: Signal<Option<DiffFindRequest>>,
+    mut search: Action<(DiffFindRequest,), ()>,
     mut state: Signal<DiffFindState>,
     identity: ViewerViewIdentity,
     query: String,
@@ -283,32 +294,23 @@ fn queue_search(
     anchor: Option<ViewerDiffSearchMatch>,
     debounce: bool,
 ) {
-    let generation = request
-        .peek()
-        .as_ref()
-        .map_or(1, |request| request.generation.wrapping_add(1));
     state.set(DiffFindState::Loading);
-    request.set(Some(DiffFindRequest {
-        generation,
+    search.call(DiffFindRequest {
         identity,
         query,
         direction,
         anchor,
         debounce,
-    }));
+    });
 }
 
 async fn execute_find_request(
     next: DiffFindRequest,
-    request: Signal<Option<DiffFindRequest>>,
     mut state: Signal<DiffFindState>,
     workspace: ReadStore<ClientDiffWorkspace>,
 ) {
     if next.debounce {
         dioxus_sdk_time::sleep(FIND_DEBOUNCE).await;
-    }
-    if request.peek().as_ref() != Some(&next) {
-        return;
     }
     let result = viewer_server::find_diff(FindViewerDiff {
         identity: next.identity,
@@ -318,9 +320,6 @@ async fn execute_find_request(
     })
     .await
     .and_then(|result| validate_diff_search_result(&workspace.peek(), next.identity, result));
-    if request.peek().as_ref() != Some(&next) {
-        return;
-    }
     match result {
         Ok((result, row_target)) => {
             if let Some((file_index, row_index)) = row_target

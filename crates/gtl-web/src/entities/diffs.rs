@@ -22,26 +22,10 @@ pub(crate) use commit_pages::use_viewer_commit_pages;
 #[cfg(feature = "desktop")]
 pub(crate) use diff_history::history_navigation;
 #[cfg(feature = "desktop")]
-use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
+use gtl_wire::viewer::ViewerRecipeKind;
 #[cfg(feature = "desktop")]
 pub(crate) use rows::ViewerRowEvent;
 pub(crate) use rows::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
-#[cfg(feature = "desktop")]
-pub(crate) const fn layout_label(layout: ViewerDiffLayout) -> &'static str {
-    match layout {
-        ViewerDiffLayout::Unified => "Unified",
-        ViewerDiffLayout::Split => "Split",
-    }
-}
-
-#[cfg(feature = "desktop")]
-pub(crate) const fn density_label(density: ViewerDiffDensity) -> &'static str {
-    match density {
-        ViewerDiffDensity::Compact => "Changes",
-        ViewerDiffDensity::Full => "Full file",
-    }
-}
-
 #[cfg(feature = "desktop")]
 pub(crate) const fn recipe_kind_label(kind: ViewerRecipeKind) -> &'static str {
     match kind {

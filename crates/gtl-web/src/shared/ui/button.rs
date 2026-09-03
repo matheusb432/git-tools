@@ -6,10 +6,27 @@ use super::LoadingSpinner;
 const BUTTON_CLASSES: &str = "cursor-pointer items-center whitespace-nowrap rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ButtonType {
+    #[default]
+    Button,
+    #[cfg(feature = "interactive-ui")]
+    Submit,
+}
+
+impl ButtonType {
+    const fn as_html_type(self) -> &'static str {
+        match self {
+            Self::Button => "button",
+            #[cfg(feature = "interactive-ui")]
+            Self::Submit => "submit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonLayout {
     #[default]
     Inline,
-    #[cfg(feature = "artifact")]
     Content,
     FullWidthStart,
     Block,
@@ -19,7 +36,6 @@ impl ButtonLayout {
     const fn classes(self) -> &'static str {
         match self {
             Self::Inline => "inline-flex shrink-0 justify-center",
-            #[cfg(feature = "artifact")]
             Self::Content => "",
             Self::FullWidthStart => "flex w-full justify-start",
             Self::Block => "block",
@@ -32,6 +48,7 @@ pub(crate) enum ButtonVariant {
     #[default]
     Primary,
     Secondary,
+    #[cfg(feature = "artifact")]
     Pressed,
     #[cfg(feature = "interactive-ui")]
     Destructive,
@@ -50,6 +67,7 @@ impl ButtonVariant {
             Self::Secondary => {
                 "border border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg"
             }
+            #[cfg(feature = "artifact")]
             Self::Pressed => {
                 "border border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
             }
@@ -83,6 +101,7 @@ pub(crate) enum ButtonSize {
     IconSmall,
     #[cfg(feature = "interactive-ui")]
     IconMedium,
+    IconTouch,
 }
 
 impl ButtonSize {
@@ -97,6 +116,7 @@ impl ButtonSize {
             Self::IconSmall => "size-8 p-0",
             #[cfg(feature = "interactive-ui")]
             Self::IconMedium => "size-9 p-0",
+            Self::IconTouch => "size-11 p-0",
         }
     }
 }
@@ -132,6 +152,7 @@ impl ButtonState {
 
 #[component]
 pub(crate) fn Button(
+    #[props(default)] button_type: ButtonType,
     #[props(default)] variant: ButtonVariant,
     #[props(default)] layout: ButtonLayout,
     #[props(default)] size: ButtonSize,
@@ -149,7 +170,7 @@ pub(crate) fn Button(
             variant.classes(),
             size.classes()
         ),
-        r#type: "button",
+        r#type: button_type.as_html_type(),
         disabled: state.is_disabled(),
         aria_busy: state.is_loading().then_some("true"),
     });
@@ -168,5 +189,21 @@ pub(crate) fn Button(
             }
             {children}
         }
+    }
+}
+
+#[cfg(all(test, feature = "interactive-ui"))]
+mod tests {
+    use dioxus::prelude::*;
+
+    use super::{Button, ButtonType};
+
+    #[test]
+    fn submit_type_uses_native_form_semantics() {
+        let html = dioxus_ssr::render_element(rsx! {
+            Button { button_type: ButtonType::Submit, "Save settings" }
+        });
+
+        assert!(html.contains("type=\"submit\""));
     }
 }

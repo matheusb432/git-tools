@@ -4,9 +4,12 @@ mod button;
 mod empty_notice;
 mod icon_popover;
 mod loading_spinner;
+mod page_notice;
 mod skeleton;
 mod text_input;
 mod toast;
+mod viewer_settings_redesign;
+mod viewer_tab_overflow_menu;
 
 #[cfg(test)]
 mod tests {
@@ -64,6 +67,31 @@ mod tests {
     #[test]
     fn lookup_resolves_only_cataloged_paths() {
         assert!(find("button", "interactive").unwrap().is_some());
+        assert!(
+            find("viewer-tab-overflow-menu", "interactive")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find("viewer-tab-overflow-menu", "narrow-rail")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find("viewer-settings-redesign", "desktop-viewer")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find("viewer-settings-redesign", "mobile-viewer")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find("viewer-settings-redesign", "settings-form")
+                .unwrap()
+                .is_some()
+        );
         assert!(find("button", "missing").unwrap().is_none());
         assert!(find("missing", "interactive").unwrap().is_none());
     }

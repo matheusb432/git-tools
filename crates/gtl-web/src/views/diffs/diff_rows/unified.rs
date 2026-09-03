@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use super::{
-    HeaderTone,
+    HEADER_CODE_CLASSES, HeaderTone,
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
@@ -9,7 +9,6 @@ use crate::entities::diffs::{
     ClientDiffWorkspaceStoreExt, ViewerUnifiedRow,
 };
 
-const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
 const UNIFIED_ROW_SHELL_CLASSES: &str = "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal";
 

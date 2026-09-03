@@ -5,7 +5,7 @@ pub(super) fn Keybar() -> Element {
     let view = workspace.view.read();
     rsx! {
         footer {
-            class: "col-span-3 row-start-3 flex items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-ink-3",
+            class: "col-span-3 row-start-4 hidden items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-ink-3 workspace:row-start-3 workspace:flex",
             aria_label: "Keyboard shortcuts",
             span { class: "overflow-hidden text-ellipsis whitespace-nowrap text-ink-2",
                 "{view.footer.command}"

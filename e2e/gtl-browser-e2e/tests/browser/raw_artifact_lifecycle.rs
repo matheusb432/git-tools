@@ -2,7 +2,7 @@ use anyhow::{Context as _, ensure};
 use gtl_web_contracts::test_ids;
 use playwright_rs::{
     expect,
-    protocol::{Locator, Page},
+    protocol::{Locator, Page, Viewport},
 };
 
 use crate::support;
@@ -86,8 +86,81 @@ async fn assert_initial_artifact(page: &Page, files: &RawArtifactFiles) -> anyho
         .to_have_count(1)
         .await
         .context("retain the requested split full presentation")?;
+    assert_commit_details_hover_popover(page).await?;
     assert_selection_copy_context(page).await?;
     assert_path_copy_popover(page).await
+}
+
+async fn assert_commit_details_hover_popover(page: &Page) -> anyhow::Result<()> {
+    let commits = page.locator(test_ids::COMMITS_PANEL.selector());
+    let card = commits.locator("[data-gtl-hover-popover-target]").first();
+    let popover = card.locator("[popover][role='tooltip']");
+    expect(commits.locator("button"))
+        .to_have_count(1)
+        .await
+        .context("keep the commit shelf free of a details trigger")?;
+    expect(popover.clone())
+        .to_be_hidden()
+        .await
+        .context("hide commit details before hover")?;
+
+    card.hover(None)
+        .await
+        .context("hover the raw commit card")?;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    ensure!(
+        popover.is_hidden().await?,
+        "raw commit details opened before the 350-millisecond hover delay"
+    );
+    expect(popover.clone())
+        .to_be_visible()
+        .await
+        .context("show raw commit details after sustained hover")?;
+    expect(popover.clone())
+        .to_contain_text("artifact change")
+        .await
+        .context("show the commit message in raw details")?;
+    expect(popover.clone())
+        .to_contain_text("Commit ID")
+        .await
+        .context("show the commit ID in raw details")?;
+    expect(popover.clone())
+        .to_contain_text("Date")
+        .await
+        .context("label the raw commit date concisely")?;
+    expect(popover.clone())
+        .not()
+        .to_contain_text("Committed")
+        .await
+        .context("omit the redundant raw commit date label")?;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let card_box = card
+        .bounding_box()
+        .await
+        .context("measure the raw commit card")?
+        .context("raw commit card has no layout box")?;
+    let popover_box = popover
+        .bounding_box()
+        .await
+        .context("measure the raw commit details")?
+        .context("raw commit details have no layout box")?;
+    ensure!(
+        (popover_box.y - card_box.y).abs() <= 1.0,
+        "raw commit details are detached from the card top"
+    );
+    ensure!(
+        popover_box.x + popover_box.width <= card_box.x - 4.0,
+        "raw commit details do not float beside the card: card={card_box:?}, popover={popover_box:?}"
+    );
+
+    page.locator("[data-gtl-diff-document]")
+        .hover(None)
+        .await
+        .context("leave the raw commit card")?;
+    expect(popover)
+        .to_be_hidden()
+        .await
+        .context("hide raw commit details after hover leaves")
 }
 
 async fn assert_large_line_interaction(
@@ -125,6 +198,25 @@ async fn assert_collapsed_file_navigation(
     page: &Page,
     files: &RawArtifactFiles,
 ) -> anyhow::Result<()> {
+    page.set_viewport_size(Viewport {
+        width: 1_200,
+        height: 220,
+    })
+    .await
+    .context("make the raw diff document vertically scrollable")?;
+    let diff_document = page.locator("[data-gtl-diff-document]");
+    let scrolled_top: f64 = diff_document
+        .evaluate(
+            "(element) => { element.scrollTop = element.scrollHeight; return element.scrollTop; }",
+            None::<&()>,
+        )
+        .await
+        .context("scroll near the end of the raw diff document")?;
+    ensure!(
+        scrolled_top > 0.0,
+        "the raw diff fixture did not produce a vertical scroll range"
+    );
+
     support::click(
         &support::get_button(page, "Collapse all"),
         "collapse raw diff files",
@@ -142,6 +234,14 @@ async fn assert_collapsed_file_navigation(
         .to_be_visible()
         .await
         .context("show the expand-all action after collapsing files")?;
+    let collapsed_top: f64 = diff_document
+        .evaluate("(element) => element.scrollTop", None::<&()>)
+        .await
+        .context("read the collapsed raw diff scroll position")?;
+    ensure!(
+        collapsed_top == 0.0,
+        "collapsing raw diff files retained scroll position {collapsed_top}"
+    );
     support::click(
         &page
             .locator(test_ids::CHANGED_FILES_PANEL.selector())

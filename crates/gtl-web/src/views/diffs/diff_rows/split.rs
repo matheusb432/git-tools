@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use super::{
-    HeaderTone,
+    HEADER_CODE_CLASSES, HeaderTone,
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
@@ -9,7 +9,6 @@ use crate::entities::diffs::{
     ClientDiffWorkspaceStoreExt, ViewerSplitRow,
 };
 
-const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

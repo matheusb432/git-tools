@@ -10,10 +10,11 @@ use gtl_models::{
 };
 use gtl_wire::{
     proto::viewer::{
-        ViewerCodecError, decode_find_viewer_diff_request, decode_find_viewer_diff_response,
-        decode_get_viewer_settings_response, decode_get_viewer_shell_response,
-        decode_list_viewer_history_response, decode_search_viewer_files_request,
-        decode_search_viewer_files_response, decode_stream_viewer_rows_response,
+        ViewerCodecError, decode_edit_settings_request, decode_find_viewer_diff_request,
+        decode_find_viewer_diff_response, decode_get_viewer_settings_response,
+        decode_get_viewer_shell_response, decode_list_viewer_history_response,
+        decode_search_viewer_files_request, decode_search_viewer_files_response,
+        decode_stream_viewer_rows_response, encode_edit_settings_request,
         encode_find_viewer_diff_request, encode_find_viewer_diff_response,
         encode_get_viewer_settings_response, encode_list_viewer_history_response,
         encode_search_viewer_files_request, encode_search_viewer_files_response,
@@ -24,11 +25,12 @@ use gtl_wire::{
         ViewerViewIdentity, stream_viewer_rows_response, viewer_unified_row,
     },
     viewer::{
-        self, FindViewerDiff, SearchViewerFiles, ViewerActiveState, ViewerCodeSpan,
-        ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffFileId, ViewerDiffLayout,
-        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
-        ViewerFileSearchResult, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
-        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerRowEvent, ViewerShell,
+        self, EditSettingsRequest, FieldUpdate, FindViewerDiff, SearchViewerFiles,
+        ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffExclusions,
+        ViewerDiffFileId, ViewerDiffLayout, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
+        ViewerDiffSearchResult, ViewerFeedback, ViewerFileSearchResult, ViewerHistoryEntry,
+        ViewerHistoryPage, ViewerPreferences, ViewerProjectDiffExclusions,
+        ViewerProjectSettingsUpdate, ViewerRecipeKind, ViewerRowEvent, ViewerShell,
         ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
         ViewerUnifiedSourceRow, ViewerUserSettings,
     },
@@ -326,6 +328,7 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
             projects: vec![ViewerProjectDiffExclusions {
                 project_name: ProjectName::try_new("git-tools").unwrap(),
                 extensions: ExcludedExtensions::new(["snap"]),
+                excluded_from_push_all: true,
             }],
         },
     };
@@ -334,4 +337,25 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
     let decoded = decode_get_viewer_settings_response(encoded).unwrap();
 
     assert_eq!(decoded, settings);
+}
+
+#[test]
+fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
+    let request = EditSettingsRequest {
+        theme: FieldUpdate::Clear,
+        layout: FieldUpdate::Unchanged,
+        density: FieldUpdate::Update(ViewerDiffDensity::Compact),
+        push_confirmation_required: FieldUpdate::Update(false),
+        default_diff_exclusions: FieldUpdate::Update(ExcludedExtensions::default()),
+        projects: FieldUpdate::Update(vec![ViewerProjectSettingsUpdate {
+            project_name: ProjectName::try_new("git-tools").unwrap(),
+            excluded_from_push_all: true,
+            diff_exclusions: ExcludedExtensions::new(["lock"]),
+        }]),
+    };
+
+    assert_eq!(
+        decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+        request
+    );
 }

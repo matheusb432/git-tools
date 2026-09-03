@@ -24,15 +24,15 @@ pub(super) fn DiffFileCard(
     file_index: usize,
     artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
-    let initially_expanded = file.summary().peek().initially_expanded;
+    let summary = file.summary();
+    let initially_expanded = summary.peek().initially_expanded;
     let mut open = use_signal(|| initially_expanded);
     use_effect(move || {
         if let Some(folded) = folded() {
             open.set(!folded);
         }
     });
-    let summary = file.summary();
-    let (file_id, original_anchor_id, path, absolute_path, initially_expanded, comment_leader) =
+    let (file_id, original_anchor_id, path, absolute_path, comment_leader) =
         summary.with(|summary| {
             (
                 summary.id.clone(),
@@ -43,7 +43,6 @@ pub(super) fn DiffFileCard(
                     .as_path()
                     .to_string_lossy()
                     .into_owned(),
-                summary.initially_expanded,
                 copy_comment_leader(&summary.path),
             )
         });
@@ -52,10 +51,9 @@ pub(super) fn DiffFileCard(
     let copy_popover_id = format!("{anchor_id}-copy-menu");
     let artifact_path = artifact_file_id.as_ref().map(|_| path.clone());
     let artifact_absolute_path = artifact_file_id.as_ref().map(|_| absolute_path);
-    let artifact_initial_open = artifact_file_id
-        .as_ref()
-        .map(|_| if initially_expanded { "true" } else { "false" });
     let artifact_enhancement = artifact_file_id.is_some();
+    let artifact_initial_open =
+        artifact_enhancement.then_some(if initially_expanded { "true" } else { "false" });
     let is_flashing = flashing_file
         .read()
         .as_deref()
@@ -71,7 +69,6 @@ pub(super) fn DiffFileCard(
             "data-gtl-absolute-path": artifact_absolute_path,
             "data-gtl-comment-leader": comment_leader,
             "data-gtl-initial-open": artifact_initial_open,
-            // TODO: review stlying
             class: "group/file mb-2.5 rounded-panel border border-line bg-surface [&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 print:break-inside-avoid print:[&[hidden]]:block!",
             class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
             open: open(),

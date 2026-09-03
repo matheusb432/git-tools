@@ -11,8 +11,10 @@ use gtl_application::{
         },
     },
     live_views::delete_live_viewer_tab::{self, DeleteLiveViewerTabError},
+    ports::UserSettingsEditError,
     recipes::RecipeOp,
     settings::{
+        edit_settings::{self, EditSettingsError, FieldUpdate, ProjectSettingsUpdate},
         get_user_settings::{self, GetUserSettings},
         set_setting_key,
     },
@@ -31,6 +33,7 @@ use gtl_wire::{
     proto,
     v1::{self, viewer_service_server::ViewerService},
     viewer::{
+        EditSettingsRequest as ViewerEditSettingsRequest, FieldUpdate as ViewerFieldUpdate,
         SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
         VIEWER_COMMIT_PAGE_MAX_ENTRIES, VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES,
         VIEWER_FILE_SEARCH_MAX_MATCHES, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffDensity,
@@ -353,6 +356,43 @@ impl ViewerService for ViewerGrpcService {
         )))
     }
 
+    async fn edit_settings(
+        &self,
+        request: Request<v1::EditSettingsRequest>,
+    ) -> Result<Response<v1::EditSettingsResponse>, Status> {
+        let request = proto::viewer::decode_edit_settings_request(request.into_inner())
+            .map_err(|_| Status::invalid_argument("settings patch is invalid"))?;
+        let loads_full_context = matches!(
+            request.density,
+            ViewerFieldUpdate::Update(ViewerDiffDensity::Full)
+        );
+        let request = application_settings_request(request)?;
+        let mut store = self.state.user_settings.clone();
+        let viewer = self.state.viewer.clone();
+        let change = run_blocking(move || edit_settings::execute(request, &mut store, &viewer))
+            .await?
+            .map_err(edit_settings_error)?;
+        if change.viewer_rows_changed {
+            self.state
+                .viewer_row_streams
+                .cancel_current_stream()
+                .map_err(|error| unexpected_viewer(error, "cancel viewer row stream"))?;
+        }
+        if loads_full_context && change.viewer_rows_changed {
+            let state = self.state.clone();
+            run_blocking(move || {
+                ensure_view_full_context::execute(
+                    EnsureViewFullContext::Active,
+                    &state.viewer,
+                    &state.git,
+                )
+            })
+            .await?
+            .map_err(|error| unexpected_viewer(error, "load full-context viewer source"))?;
+        }
+        Ok(Response::new(v1::EditSettingsResponse {}))
+    }
+
     async fn search_viewer_files(
         &self,
         request: Request<v1::SearchViewerFilesRequest>,
@@ -454,6 +494,85 @@ impl ViewerService for ViewerGrpcService {
         .await?
         .map_err(open_file_error)?;
         Ok(Response::new(v1::OpenViewerDiffFileResponse {}))
+    }
+}
+
+fn application_field_update<Input, Output>(
+    update: ViewerFieldUpdate<Input>,
+    map: impl FnOnce(Input) -> Output,
+) -> FieldUpdate<Output> {
+    match update {
+        ViewerFieldUpdate::Update(value) => FieldUpdate::Update(map(value)),
+        ViewerFieldUpdate::Clear => FieldUpdate::Clear,
+        ViewerFieldUpdate::Unchanged => FieldUpdate::Unchanged,
+    }
+}
+
+fn application_settings_request(
+    request: ViewerEditSettingsRequest,
+) -> Result<edit_settings::EditSettingsRequest, Status> {
+    let projects = match request.projects {
+        ViewerFieldUpdate::Update(projects) => {
+            let mut names = std::collections::BTreeSet::new();
+            let mut mapped = Vec::with_capacity(projects.len());
+            for project in projects {
+                if !names.insert(project.project_name.clone()) {
+                    return Err(Status::invalid_argument(
+                        "project settings contain duplicate names",
+                    ));
+                }
+                mapped.push(ProjectSettingsUpdate {
+                    name: project.project_name,
+                    excluded_from_push_all: project.excluded_from_push_all,
+                    diff_exclusions: project.diff_exclusions,
+                });
+            }
+            FieldUpdate::Update(mapped)
+        }
+        ViewerFieldUpdate::Clear => FieldUpdate::Clear,
+        ViewerFieldUpdate::Unchanged => FieldUpdate::Unchanged,
+    };
+    Ok(edit_settings::EditSettingsRequest {
+        theme: application_field_update(request.theme, |value| match value {
+            ViewerTheme::Light => Theme::Light,
+            ViewerTheme::Dark => Theme::Dark,
+            ViewerTheme::Hearth => Theme::Hearth,
+            ViewerTheme::Mirage => Theme::Mirage,
+            ViewerTheme::Glacier => Theme::Glacier,
+            ViewerTheme::Noir => Theme::Noir,
+            ViewerTheme::Graphite => Theme::Graphite,
+        }),
+        layout: application_field_update(request.layout, |value| match value {
+            ViewerDiffLayout::Unified => DiffLayout::Unified,
+            ViewerDiffLayout::Split => DiffLayout::Split,
+        }),
+        density: application_field_update(request.density, |value| match value {
+            ViewerDiffDensity::Compact => DiffDensity::Compact,
+            ViewerDiffDensity::Full => DiffDensity::Full,
+        }),
+        push_confirmation_required: application_field_update(
+            request.push_confirmation_required,
+            |value| value,
+        ),
+        default_diff_exclusions: application_field_update(
+            request.default_diff_exclusions,
+            |value| value,
+        ),
+        projects,
+    })
+}
+
+fn edit_settings_error(error: EditSettingsError) -> Status {
+    match error {
+        EditSettingsError::Settings(
+            UserSettingsEditError::InvalidValueShape
+            | UserSettingsEditError::InvalidConfiguration { .. },
+        ) => Status::failed_precondition("user settings are invalid"),
+        EditSettingsError::Settings(
+            UserSettingsEditError::LockTimeout { .. }
+            | UserSettingsEditError::ConcurrentModification { .. },
+        ) => Status::aborted("user settings edit conflicted with another writer"),
+        error => unexpected(error, "edit settings"),
     }
 }
 
@@ -615,13 +734,28 @@ fn project_settings(
         push_confirmation_required: settings.push_confirmation_required(),
         diff_exclusions: ViewerDiffExclusions {
             default_extensions: exclusions.default_exclusions().clone(),
-            projects: exclusions
-                .project_exclusions()
-                .map(|(project_name, extensions)| ViewerProjectDiffExclusions {
-                    project_name: project_name.clone(),
-                    extensions: extensions.clone(),
-                })
-                .collect(),
+            projects: {
+                let mut names = std::collections::BTreeSet::new();
+                names.extend(
+                    exclusions
+                        .project_exclusions()
+                        .map(|(name, _)| name.clone()),
+                );
+                names.extend(settings.push_all_exclusions().projects().cloned());
+                names
+                    .into_iter()
+                    .map(|project_name| ViewerProjectDiffExclusions {
+                        extensions: exclusions
+                            .for_project(&project_name)
+                            .cloned()
+                            .unwrap_or_default(),
+                        excluded_from_push_all: settings
+                            .push_all_exclusions()
+                            .contains(&project_name),
+                        project_name,
+                    })
+                    .collect()
+            },
         },
     })
 }

@@ -3,10 +3,10 @@ use gtl_wire::{
     proto,
     v1::{self, viewer_service_client::ViewerServiceClient},
     viewer::{
-        FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory,
-        OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles, SelectViewerCommit,
-        SetViewerPreference, StreamViewerRows, VIEWER_ROW_MAX_ENCODED_BYTES, ViewerCommitPage,
-        ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
+        EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
+        ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+        SelectViewerCommit, SetViewerPreference, StreamViewerRows, VIEWER_ROW_MAX_ENCODED_BYTES,
+        ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
     },
@@ -166,6 +166,17 @@ impl ViewerClient {
             .map(tonic::Response::into_inner)
             .map_err(|status| decode_status(&status))?;
         proto::viewer::decode_get_viewer_settings_response(response).map_err(Into::into)
+    }
+
+    pub async fn edit_settings(
+        &mut self,
+        request: EditSettingsRequest,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .edit_settings(proto::viewer::encode_edit_settings_request(request))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
     }
 
     pub async fn open_diff_file(

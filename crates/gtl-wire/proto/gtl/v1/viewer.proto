@@ -23,6 +23,7 @@ service ViewerService {
   rpc OpenViewerHistory(OpenViewerHistoryRequest) returns (OpenViewerHistoryResponse);
   rpc GetViewerHistoryCopy(GetViewerHistoryCopyRequest) returns (GetViewerHistoryCopyResponse);
   rpc GetViewerSettings(GetViewerSettingsRequest) returns (GetViewerSettingsResponse);
+  rpc EditSettings(EditSettingsRequest) returns (EditSettingsResponse);
   rpc OpenViewerDiffFile(OpenViewerDiffFileRequest) returns (OpenViewerDiffFileResponse);
 }
 
@@ -502,6 +503,7 @@ message GetViewerSettingsRequest {}
 message ViewerProjectDiffExclusions {
   string project_name = 1;
   repeated string extensions = 2;
+  bool excluded_from_push_all = 3;
 }
 
 message ViewerDiffExclusions {
@@ -517,6 +519,33 @@ message GetViewerSettingsResponse {
   bool push_confirmation_required = 5;
   ViewerDiffExclusions diff_exclusions = 6;
 }
+
+message ClearSetting {}
+
+message ThemeFieldUpdate { oneof operation { ViewerTheme update = 1; ClearSetting clear = 2; } }
+message LayoutFieldUpdate { oneof operation { ViewerDiffLayout update = 1; ClearSetting clear = 2; } }
+message DensityFieldUpdate { oneof operation { ViewerDiffDensity update = 1; ClearSetting clear = 2; } }
+message BoolFieldUpdate { oneof operation { bool update = 1; ClearSetting clear = 2; } }
+message ExtensionsValue { repeated string extensions = 1; }
+message ExtensionsFieldUpdate { oneof operation { ExtensionsValue update = 1; ClearSetting clear = 2; } }
+message ViewerProjectSettingsUpdate {
+  string project_name = 1;
+  bool excluded_from_push_all = 2;
+  repeated string diff_exclusions = 3;
+}
+message ProjectSettingsValue { repeated ViewerProjectSettingsUpdate projects = 1; }
+message ProjectSettingsFieldUpdate { oneof operation { ProjectSettingsValue update = 1; ClearSetting clear = 2; } }
+
+message EditSettingsRequest {
+  ThemeFieldUpdate theme = 1;
+  LayoutFieldUpdate layout = 2;
+  DensityFieldUpdate density = 3;
+  BoolFieldUpdate push_confirmation_required = 4;
+  ExtensionsFieldUpdate default_diff_exclusions = 5;
+  ProjectSettingsFieldUpdate projects = 6;
+}
+
+message EditSettingsResponse {}
 
 message OpenViewerDiffFileRequest {
   ViewerViewIdentity identity = 1;

@@ -348,6 +348,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
             projects: vec![ViewerProjectDiffExclusions {
                 project_name: project_name("git-tools")?,
                 extensions: ExcludedExtensions::new(["js"]),
+                excluded_from_push_all: false,
             }],
         },
     };

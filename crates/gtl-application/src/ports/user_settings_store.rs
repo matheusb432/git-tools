@@ -68,4 +68,12 @@ pub trait UserSettingsStore: Clone + Send + Sync + 'static {
         &mut self,
         key: SettingKey,
     ) -> Result<UserSettingsEditOutcome, UserSettingsEditError>;
+
+    /// Applies one complete validated settings patch atomically.
+    fn edit_settings(
+        &mut self,
+        _request: crate::settings::edit_settings::EditSettingsRequest,
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
+        Err(anyhow::anyhow!("settings store does not support batch edits").into())
+    }
 }

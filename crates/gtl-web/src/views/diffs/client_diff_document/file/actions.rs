@@ -97,6 +97,12 @@ enum CopyState {
     Failed,
 }
 
+#[derive(Clone, Copy)]
+struct CopyFeedbackController {
+    state: ReadSignal<CopyState>,
+    copy: Callback<()>,
+}
+
 impl CopyState {
     const fn value(self) -> &'static str {
         match self {
@@ -144,14 +150,33 @@ impl DiffPathCopyKind {
     }
 }
 
+fn use_copy_feedback(payload: String) -> CopyFeedbackController {
+    let state = use_signal(|| CopyState::Idle);
+    let copy_action = use_action(move || {
+        let payload = payload.clone();
+        async move {
+            update_copy_state(state, &payload).await;
+            Ok::<(), std::convert::Infallible>(())
+        }
+    });
+    let copy = use_callback(move |()| {
+        let mut copy_action = copy_action;
+        copy_action.call();
+    });
+
+    CopyFeedbackController {
+        state: state.into(),
+        copy,
+    }
+}
+
 #[component]
 fn DiffPathCopyAction(
     kind: DiffPathCopyKind,
     payload: String,
     artifact_enhancement: bool,
 ) -> Element {
-    let state = use_signal(|| CopyState::Idle);
-    let copied_payload = payload.clone();
+    let feedback = use_copy_feedback(payload);
     let artifact_copy = artifact_enhancement.then_some(kind.artifact_value());
     let icon = match kind {
         DiffPathCopyKind::Relative => rsx! {
@@ -171,13 +196,10 @@ fn DiffPathCopyAction(
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
-                let payload = copied_payload.clone();
-                spawn(async move {
-                    update_copy_state(state, &payload).await;
-                });
+                feedback.copy.call(());
             },
             MenuActionContent { icon, label: kind.label(),
-                CopyActionFeedback { state: state(), artifact_enhancement }
+                CopyActionFeedback { state: (feedback.state)(), artifact_enhancement }
             }
         }
     }

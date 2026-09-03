@@ -31,6 +31,44 @@ fn single_commit_panel_is_read_only_but_keeps_copy_action() -> TestResult {
     assert!(!html.contains("aria-pressed"));
     assert_eq!(html.matches("<button").count(), 1);
     assert!(html.contains("title=\"Copy commit ID\""));
+    assert!(!html.contains("data-testid=\"commit-details-trigger\""));
+    assert!(html.contains("data-gtl-hover-popover-target=\"\""));
+    assert!(html.contains("data-gtl-hover-popover-delay-ms=\"350\""));
+    assert!(html.contains("aria-label=\"Commit details for 0123456789\""));
+    assert!(html.contains("popover=\"auto\""));
+    assert!(html.contains("animate-commit-popover-enter"));
+    assert!(html.contains("overflow-x-hidden"));
+    assert!(html.contains("2026-08-19T10:00:00Z"));
     assert!(html.contains("data-testid=\"commits-panel\""));
+    Ok(())
+}
+
+#[test]
+fn hover_details_replace_the_body_title() -> TestResult {
+    let mut commit = viewer_commit_summary()?;
+    commit.body = "Explain the implementation constraints.".to_owned();
+    let view = viewer_active_view(vec![commit])?;
+    let props = CommitsPanelProps {
+        view,
+        test_id: None,
+        onselect: None,
+        onclear: None,
+        loading: false,
+        load_error: None,
+        has_more: false,
+        onloadmore: None,
+    };
+    let mut panel = VirtualDom::new_with_props(CommitsPanel, props);
+    panel.rebuild_in_place();
+
+    let html = dioxus_ssr::render(&panel);
+
+    assert!(html.contains("Explain the implementation constraints."));
+    assert!(!html.contains("title=\"Explain the implementation constraints.\""));
+    assert!(html.contains("Commit details"));
+    assert!(html.contains(">Date</dt>"));
+    assert!(!html.contains(">Committed</dt>"));
+    assert!(!html.contains(">2026-08-19T10:00:00Z<"));
+    assert!(html.contains("Commit ID"));
     Ok(())
 }

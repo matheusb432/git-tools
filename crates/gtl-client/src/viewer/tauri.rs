@@ -1,11 +1,11 @@
 use std::{cell::RefCell, collections::VecDeque};
 
 use gtl_wire::viewer::{
-    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
-    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
+    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
+    ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -118,6 +118,7 @@ impl ViewerClient {
         list_history(ListViewerHistory) -> ViewerHistoryPage => "viewer_list_history";
         open_history(OpenViewerHistory) -> ViewerShell => "viewer_open_history";
         get_history_copy(GetViewerHistoryCopy) -> ViewerHistoryCopyPayload => "viewer_get_history_copy";
+        edit_settings(EditSettingsRequest) -> () => "viewer_edit_settings";
         open_diff_file(OpenViewerDiffFile) -> () => "viewer_open_diff_file";
     }
 

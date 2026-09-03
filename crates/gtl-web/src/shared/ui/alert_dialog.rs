@@ -1,10 +1,7 @@
 use dioxus::prelude::*;
 use lucide_dioxus::TriangleAlert;
 
-use super::{
-    Button, ButtonState, ButtonVariant,
-    dialog::{DialogState, sync_dialog},
-};
+use super::{Button, ButtonState, ButtonVariant, dialog::use_dialog};
 
 #[component]
 pub(crate) fn AlertDialog(
@@ -19,20 +16,7 @@ pub(crate) fn AlertDialog(
     onconfirm: EventHandler<()>,
     oncancel: EventHandler<()>,
 ) -> Element {
-    let mut was_open = use_signal(|| false);
-    use_effect(use_reactive(
-        (&id, &trigger_id, &open),
-        move |(id, trigger_id, open)| {
-            let restore_focus = *was_open.peek() && !open;
-            was_open.set(open);
-            sync_dialog(DialogState {
-                id,
-                trigger_id,
-                open,
-                restore_focus,
-            });
-        },
-    ));
+    use_dialog(&id, &trigger_id, open);
 
     let title_id = format!("{id}-title");
     let description_id = format!("{id}-description");

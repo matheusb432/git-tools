@@ -2,17 +2,14 @@ use dioxus::prelude::*;
 use gtl_models::diffs::CommitId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
-    CommitSelectionAction, OpenViewerDiffFile, SetViewerPreference, ViewerActiveState,
-    ViewerActiveView, ViewerTabKind, ViewerTabRequest, make_commit_selection_action,
+    CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView, ViewerTabKind,
+    ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{FileDiff, RefreshCw};
+use lucide_dioxus::{Ellipsis, FileDiff, RefreshCw, Trash2};
 
 use super::{
-    DiffWorkspaceDocument, MobilePanel,
-    commits_panel::WorkspaceCommitsPanel,
-    display_controls::{DisplayControls, MobilePanelButton},
-    files_panel::FilesPanel,
-    titlebar::{ViewActions, ViewActionsLayout},
+    DiffWorkspaceDocument, MobilePanel, WorkspaceMobileNavigation,
+    commits_panel::WorkspaceCommitsPanel, files_panel::FilesPanel,
 };
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
@@ -20,12 +17,16 @@ use crate::{
     shared::{
         browser,
         ui::{
-            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, Popover, Skeleton,
-            use_toast,
+            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, IconPopover,
+            IconPopoverPlacement, MENU_ACTION_HOST_CLASSES, MenuActionContent, PageNotice, Popover,
+            Skeleton, use_toast,
         },
     },
     views::diffs::ClientDiffDocument,
 };
+
+const LIVE_VIEW_ACTIONS_POPOVER_ID: &str = "live-view-actions";
+const DELETE_LIVE_VIEW_TRIGGER_ID: &str = "delete-live-view-trigger";
 
 #[component]
 pub(crate) fn DiffWorkspaceView() -> Element {
@@ -47,9 +48,11 @@ pub(crate) fn DiffWorkspaceView() -> Element {
                 ViewerShellLoad::Error(error) => {
                     let message = error.message();
                     rsx! {
-                        section { class: "grid h-full place-content-center px-5 text-center", role: "alert",
-                            p { class: "font-semibold text-ink", "Viewer state is unavailable" }
-                            p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
+                        PageNotice {
+                            class: "h-full px-5",
+                            role: "alert",
+                            title: "Viewer state is unavailable",
+                            message,
                             Button {
                                 class: "mx-auto mt-4",
                                 variant: ButtonVariant::Outline,
@@ -108,17 +111,31 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
             div { class: "min-h-0 flex-1 overflow-hidden",
                 match &shell_state.active {
                     ViewerActiveState::Empty => rsx! {
-                        EmptyWorkspace {}
+                        PageNotice {
+                            class: "h-full px-5",
+                            title: "No diff is open",
+                            message: "Run a git-tools diff command to open a snapshot or live view.",
+                            icon: rsx! {
+                                FileDiff { size: 22 }
+                            },
+                        }
                     },
                     ViewerActiveState::Pending { .. } => rsx! {},
                     ViewerActiveState::Broken { code, message, .. } => rsx! {
-                        WorkspaceFailure {
+                        PageNotice {
+                            class: "h-full px-5",
+                            role: "alert",
                             title: format!("Render stopped ({})", code.as_str()),
                             message: message.clone(),
                         }
                     },
                     ViewerActiveState::Error { message, .. } => rsx! {
-                        WorkspaceFailure { title: "Render failed".to_owned(), message: message.clone() }
+                        PageNotice {
+                            class: "h-full px-5",
+                            role: "alert",
+                            title: "Render failed",
+                            message: message.clone(),
+                        }
                     },
                     ViewerActiveState::Ready { .. } => rsx! {
                         ReadyWorkspace { view, shell }
@@ -142,33 +159,6 @@ fn ready_active_view(shell: &ViewerShellLoad) -> &ViewerActiveView {
 }
 
 #[component]
-fn EmptyWorkspace() -> Element {
-    rsx! {
-        section { class: "grid h-full place-content-center px-5 text-center",
-            span { class: "mx-auto text-acc", aria_hidden: "true",
-                FileDiff { size: 22 }
-            }
-            h2 { class: "mt-3 font-semibold text-ink", "No diff is open" }
-            p { class: "mt-1 max-w-md leading-5 text-ink-2",
-                "Run a git-tools diff command to open a snapshot or live view."
-            }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceFailure(title: String, message: String) -> Element {
-    rsx! {
-        section {
-            class: "grid h-full place-content-center px-5 text-center",
-            role: "alert",
-            h2 { class: "font-semibold text-ink", "{title}" }
-            p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
-        }
-    }
-}
-
-#[component]
 fn ReadyWorkspace(
     view: ReadSignal<ViewerActiveView>,
     shell: ReadSignal<ViewerShellLoad>,
@@ -177,21 +167,18 @@ fn ReadyWorkspace(
     let toast = use_toast();
     let mut delete_open = use_signal(|| false);
     let mut delete_pending = use_signal(|| false);
-    let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
     let file_filter = use_signal(String::new);
     let files_folded = use_signal(|| None::<bool>);
-    let copy_context_enabled = use_signal(|| true);
     let mut flashing_file = use_signal(|| None::<String>);
     let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
-    let _workspace = super::use_diff_workspace_context(
+    let workspace = super::use_diff_workspace_context(
         view,
         commit_pages.commits(),
         super::DiffWorkspaceSignals {
             file_filter,
             files_folded,
-            copy_context_enabled,
             flashing_file,
             find_open,
         },
@@ -202,57 +189,60 @@ fn ReadyWorkspace(
         let ViewerShellLoad::Ready(shell) = shell else {
             return None;
         };
-        Some((
-            shell.preferences,
+        Some(
             shell
                 .tabs
                 .iter()
                 .any(|tab| tab.id == tab_id && tab.kind == ViewerTabKind::Live),
-        ))
+        )
     });
     let commits_loading = commit_pages.is_loading();
     let commits_error = commit_pages.error().map(|error| error.message().to_owned());
     let commits_has_more = commit_pages.has_more();
     let onload_commits = use_callback(move |()| commit_pages.load_next());
 
-    let onpreference = move |preference: SetViewerPreference| viewer.set_preference(preference);
     let onrefresh = move |_| viewer.refresh_tab(tab_id);
 
-    // TODO: remove unit from param
-    let onclear_commit = use_callback(move |()| {
-        spawn(async move {
-            match viewer_server::clear_commit_selection(ViewerTabRequest { tab_id }).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => toast.error(error.message()),
+    let mut commit_selection = use_action(move |action: CommitSelectionAction| async move {
+        let result = match action {
+            CommitSelectionAction::FetchCommit(request) => {
+                viewer_server::select_commit(request).await
             }
-        });
+            CommitSelectionAction::UnselectCommit => {
+                viewer_server::clear_commit_selection(ViewerTabRequest { tab_id }).await
+            }
+            CommitSelectionAction::NoAction => return Ok::<(), std::convert::Infallible>(()),
+        };
+        match result {
+            Ok(shell) => viewer.replace_shell(shell),
+            Err(error) => toast.error(error.message()),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let onclear_commit = use_callback(move |()| {
+        commit_selection.call(CommitSelectionAction::UnselectCommit);
     });
 
     let onselect_commit = use_callback(move |id: CommitId| {
-        let commit_selection = view.peek().commit_selection.clone();
-        match make_commit_selection_action(&commit_selection, tab_id, id) {
-            CommitSelectionAction::FetchCommit(request) => {
-                spawn(async move {
-                    match viewer_server::select_commit(request).await {
-                        Ok(shell) => viewer.replace_shell(shell),
-                        Err(error) => toast.error(error.message()),
-                    }
-                });
-            }
-            CommitSelectionAction::UnselectCommit => onclear_commit.call(()),
+        let current_selection = view.peek().commit_selection.clone();
+        let action = make_commit_selection_action(&current_selection, tab_id, id);
+        match action {
             CommitSelectionAction::NoAction => {}
+            action => {
+                commit_selection.call(action);
+            }
         }
     });
 
+    let mut clear_file_flash = use_action(move || async move {
+        dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
+        flashing_file.set(None);
+        Ok::<(), std::convert::Infallible>(())
+    });
     let onnavigate = move |anchor_id: String| {
         browser::scroll_to_file(&anchor_id);
-        flashing_file.set(Some(anchor_id.clone()));
-        spawn(async move {
-            dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
-            if flashing_file().as_deref() == Some(anchor_id.as_str()) {
-                flashing_file.set(None);
-            }
-        });
+        flashing_file.set(Some(anchor_id));
+        clear_file_flash.call();
     };
     let onopen = move |file: gtl_wire::viewer::ViewerDiffFileId| {
         spawn(async move {
@@ -263,12 +253,41 @@ fn ReadyWorkspace(
             }
         });
     };
-    let Some((preferences, is_live)) = ready_shell else {
+    let Some(is_live) = ready_shell else {
         return rsx! {};
     };
+    let (file_count, commit_count) = workspace
+        .files
+        .with(|files| (files.file_count(), files.commit_count()));
+    let mobile_navigation = rsx! {
+        WorkspaceMobileNavigation {
+            files_trigger_id: "mobile-files-trigger",
+            files_panel_id: "mobile-files-panel",
+            commits_trigger_id: "mobile-commits-trigger",
+            commits_panel_id: "mobile-commits-panel",
+            file_count,
+            commit_count,
+            files_open: mobile_panel() == Some(MobilePanel::Files),
+            commits_open: mobile_panel() == Some(MobilePanel::Commits),
+            onfiles: move |_| mobile_panel.set(Some(MobilePanel::Files)),
+            oncommits: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
+        }
+    };
+    let live_actions = is_live.then(|| {
+        rsx! {
+            LiveViewTitlebarActions {
+                pending: viewer.render_command_pending(),
+                onrefresh,
+                ondelete: move |_| {
+                    browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
+                    delete_open.set(true);
+                },
+            }
+        }
+    });
     rsx! {
         section {
-            class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+            class: "h-full min-h-0 overflow-hidden",
             onkeydown: move |event: KeyboardEvent| {
                 if is_diff_find_shortcut(&event) {
                     event.prevent_default();
@@ -276,55 +295,13 @@ fn ReadyWorkspace(
                     browser::focus_element("viewer-diff-find-input".to_owned());
                 }
             },
-            div { class: "border-b border-line bg-surface px-3 py-2 text-ink-2",
-                div { class: "hidden min-w-0 items-center justify-between gap-3 expanded:flex",
-                    DisplayControls {
-                        preferences,
-                        pending: viewer.render_command_pending(),
-                        is_live,
-                        delete_trigger_id: "delete-live-view-desktop",
-                        onpreference,
-                        onrefresh,
-                        ondelete: move |_| {
-                            delete_trigger_id.set("delete-live-view-desktop".to_owned());
-                            delete_open.set(true);
-                        },
-                    }
-                }
-                div { class: "flex items-center gap-2 expanded:hidden",
-                    MobilePanelButton {
-                        id: "mobile-display-trigger",
-                        label: "Display",
-                        icon: MobilePanel::Display,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)),
-                    }
-                    MobilePanelButton {
-                        id: "mobile-files-trigger",
-                        label: "Files",
-                        icon: MobilePanel::Files,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)),
-                    }
-                    MobilePanelButton {
-                        id: "mobile-commits-trigger",
-                        label: "Commits",
-                        icon: MobilePanel::Commits,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
-                    }
-                    MobileRefreshButton {
-                        pending: viewer.render_command_pending(),
-                        onrefresh,
-                    }
-                }
-                if viewer.render_command_pending() {
-                    p { class: "sr-only", role: "status", "Applying the latest viewer update" }
-                }
-            }
-
             DiffWorkspaceDocument {
                 diff_document: rsx! {
                     ClientDiffDocument { onopen }
                 },
                 onnavigate,
+                mobile_navigation,
+                live_actions,
                 onselect_commit,
                 onclear_commit,
                 commits_loading,
@@ -334,29 +311,6 @@ fn ReadyWorkspace(
             }
         }
 
-        Popover {
-            id: "mobile-display-panel",
-            trigger_id: "mobile-display-trigger",
-            open: mobile_panel() == Some(MobilePanel::Display),
-            title: "Display controls",
-            onclose: move |()| mobile_panel.set(None),
-            div { class: "grid gap-3",
-                DisplayControls {
-                    preferences,
-                    pending: viewer.render_command_pending(),
-                    is_live,
-                    delete_trigger_id: "delete-live-view-mobile",
-                    onpreference,
-                    onrefresh,
-                    ondelete: move |_| {
-                        mobile_panel.set(None);
-                        delete_trigger_id.set("mobile-display-trigger".to_owned());
-                        delete_open.set(true);
-                    },
-                }
-                ViewActions { layout: ViewActionsLayout::Panel }
-            }
-        }
         Popover {
             id: "mobile-files-panel",
             trigger_id: "mobile-files-trigger",
@@ -373,6 +327,7 @@ fn ReadyWorkspace(
             title: "Commits",
             onclose: move |()| mobile_panel.set(None),
             WorkspaceCommitsPanel {
+                details_popover_id_prefix: "mobile-commits-panel",
                 onselect: onselect_commit,
                 onclear: onclear_commit,
                 loading: commits_loading,
@@ -383,7 +338,7 @@ fn ReadyWorkspace(
         }
         AlertDialog {
             id: "delete-live-view-dialog",
-            trigger_id: delete_trigger_id(),
+            trigger_id: DELETE_LIVE_VIEW_TRIGGER_ID,
             open: delete_open(),
             title: "Delete live view",
             description: "This removes the saved live view and closes its tab. Render history remains available.",
@@ -422,20 +377,52 @@ fn is_diff_find_shortcut(event: &KeyboardEvent) -> bool {
 }
 
 #[component]
-fn MobileRefreshButton(pending: bool, onrefresh: EventHandler<MouseEvent>) -> Element {
+fn LiveViewTitlebarActions(
+    pending: bool,
+    onrefresh: EventHandler<MouseEvent>,
+    ondelete: EventHandler<MouseEvent>,
+) -> Element {
     rsx! {
-        Button {
-            class: "ml-auto",
-            size: ButtonSize::IconSmall,
-            variant: ButtonVariant::Ghost,
-            state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
-            aria_label: "Refresh diff",
-            title: "Refresh diff",
-            "data-testid": test_ids::LIVE_VIEW_REFRESH.value(),
-            onclick: onrefresh,
-            if !pending {
-                span { aria_hidden: "true",
-                    RefreshCw { size: 14 }
+        div { class: "flex flex-none items-center gap-1",
+            Button {
+                class: "mobile:size-11 mobile:p-0",
+                size: ButtonSize::Small,
+                variant: ButtonVariant::Ghost,
+                state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
+                aria_label: "Refresh diff",
+                title: "Refresh diff",
+                "data-testid": test_ids::LIVE_VIEW_REFRESH.value(),
+                onclick: onrefresh,
+                if !pending {
+                    span {
+                        class: "inline-flex flex-none mobile:[&_svg]:size-5",
+                        aria_hidden: "true",
+                        RefreshCw { size: 14 }
+                    }
+                }
+                span { class: "mobile:hidden", "Refresh" }
+            }
+            IconPopover {
+                id: LIVE_VIEW_ACTIONS_POPOVER_ID,
+                aria_label: "Live view actions",
+                placement: IconPopoverPlacement::TriggerEnd,
+                icon: rsx! {
+                    Ellipsis { size: 18 }
+                },
+                div { class: "grid gap-0.5 p-1.5",
+                    button {
+                        id: DELETE_LIVE_VIEW_TRIGGER_ID,
+                        class: MENU_ACTION_HOST_CLASSES,
+                        r#type: "button",
+                        onclick: ondelete,
+                        MenuActionContent {
+                            icon: rsx! {
+                                Trash2 { size: 16 }
+                            },
+                            label: "Delete live view",
+                            description: "Remove this saved live view",
+                        }
+                    }
                 }
             }
         }

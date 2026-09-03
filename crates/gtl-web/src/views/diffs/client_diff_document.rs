@@ -44,9 +44,6 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
             oncopy: move |event: ClipboardEvent| {
-                if !(diff.copy_context_enabled)() {
-                    return;
-                }
                 let Some(message) = copy_context::copy_selected_diff_lines(&event) else {
                     return;
                 };

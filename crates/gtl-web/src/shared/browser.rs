@@ -8,9 +8,9 @@ use wasm_bindgen::JsCast;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "desktop")]
-use web_sys::{HtmlDetailsElement, HtmlElement};
+use web_sys::HtmlDetailsElement;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
-use web_sys::{HtmlDocument, HtmlTextAreaElement};
+use web_sys::{HtmlDocument, HtmlElement, HtmlTextAreaElement};
 
 #[cfg(feature = "interactive-ui")]
 pub(crate) fn apply_theme(theme: &'static str) {
@@ -34,7 +34,7 @@ pub(crate) fn focus_element(id: String) {
     });
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn hide_popover(id: &str) {
     let Some(element) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -43,6 +43,17 @@ pub(crate) fn hide_popover(id: &str) {
         return;
     };
     let _ = element.hide_popover();
+}
+
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub(crate) fn show_popover(id: &str) {
+    let Some(element) = document()
+        .and_then(|document| document.get_element_by_id(id))
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+    else {
+        return;
+    };
+    let _ = element.show_popover();
 }
 
 #[cfg(feature = "desktop")]
@@ -55,6 +66,17 @@ pub(crate) fn scroll_to_file(id: &str) {
     };
     details.set_open(true);
     details.scroll_into_view_with_bool(true);
+}
+
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub(crate) fn scroll_diff_document_to_start() {
+    let Some(diff_document) = document()
+        .and_then(|document| document.query_selector("[data-gtl-diff-document]").ok())
+        .flatten()
+    else {
+        return;
+    };
+    diff_document.set_scroll_top(0);
 }
 
 #[cfg(feature = "desktop")]

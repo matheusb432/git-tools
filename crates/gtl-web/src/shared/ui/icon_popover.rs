@@ -39,6 +39,7 @@ pub(crate) fn IconPopover(
     icon: Element,
     #[props(default)] placement: IconPopoverPlacement,
     #[props(default)] icon_motion: IconPopoverIconMotion,
+    #[props(default = ButtonSize::IconSmall)] trigger_size: ButtonSize,
     trigger_test_id: Option<String>,
     children: Element,
 ) -> Element {
@@ -50,7 +51,7 @@ pub(crate) fn IconPopover(
                     aria_label: aria_label.clone(),
                     icon,
                     icon_motion,
-                    placement,
+                    trigger_size,
                     trigger_test_id,
                 }
                 div {
@@ -70,7 +71,7 @@ pub(crate) fn IconPopover(
                     aria_label: aria_label.clone(),
                     icon,
                     icon_motion,
-                    placement,
+                    trigger_size,
                     trigger_test_id,
                 }
                 span {
@@ -92,20 +93,13 @@ fn IconPopoverTrigger(
     aria_label: String,
     icon: Element,
     icon_motion: IconPopoverIconMotion,
-    placement: IconPopoverPlacement,
+    trigger_size: ButtonSize,
     trigger_test_id: Option<String>,
 ) -> Element {
-    let trigger_classes = match placement {
-        IconPopoverPlacement::ViewportEnd => {
-            "mobile:size-11 group-has-[:popover-open]/icon-popover:border-acc-line group-has-[:popover-open]/icon-popover:bg-acc-soft group-has-[:popover-open]/icon-popover:text-acc"
-        }
-        IconPopoverPlacement::TriggerEnd => {
-            "group-has-[:popover-open]/icon-popover:border-acc-line group-has-[:popover-open]/icon-popover:bg-acc-soft group-has-[:popover-open]/icon-popover:text-acc"
-        }
-    };
+    let trigger_classes = "mobile:size-11 group-has-[:popover-open]/icon-popover:border-acc-line group-has-[:popover-open]/icon-popover:bg-acc-soft group-has-[:popover-open]/icon-popover:text-acc";
     rsx! {
         Button {
-            size: ButtonSize::IconSmall,
+            size: trigger_size,
             variant: ButtonVariant::Ghost,
             class: trigger_classes,
             popovertarget: id.clone(),

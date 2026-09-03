@@ -59,6 +59,7 @@ workspace = true
 default = ["desktop"]
 artifact = ["dep:dioxus-ssr", "dep:thiserror"]
 component-preview = [
+  "artifact",
   "dep:dx-preview",
   "dx-preview/catalog",
   "interactive-ui",

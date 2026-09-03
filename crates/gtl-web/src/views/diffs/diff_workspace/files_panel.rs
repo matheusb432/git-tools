@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct WorkspaceLineTotals {
     added: DiffLineCount,
     removed: DiffLineCount,
@@ -31,14 +31,10 @@ struct WorkspaceLineTotals {
 
 impl WorkspaceLineTotals {
     fn from_files(files: &[ViewerFileSummary]) -> Self {
-        Self {
-            added: files.iter().fold(DiffLineCount::default(), |total, file| {
-                total.saturating_add(file.added)
-            }),
-            removed: files.iter().fold(DiffLineCount::default(), |total, file| {
-                total.saturating_add(file.removed)
-            }),
-        }
+        files.iter().fold(Self::default(), |totals, file| Self {
+            added: totals.added.saturating_add(file.added),
+            removed: totals.removed.saturating_add(file.removed),
+        })
     }
 }
 
@@ -117,85 +113,45 @@ impl WorkspaceFilesModel {
         }
     }
 
-    #[cfg(feature = "artifact")]
     pub(super) const fn file_count(&self) -> usize {
         self.file_count
     }
 
-    #[cfg(feature = "artifact")]
     pub(super) const fn commit_count(&self) -> usize {
         self.commit_count
     }
 }
 
 #[cfg(feature = "desktop")]
+pub(super) type WorkspaceFileSearch = Resource<Option<WorkspaceFileSearchOutcome>>;
+
+#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum WorkspaceFileSearch {
-    Idle,
-    Loading {
-        identity: ViewerViewIdentity,
-        query: String,
-    },
-    Ready {
-        identity: ViewerViewIdentity,
-        query: String,
-        files: HashSet<ViewerDiffFileId>,
-    },
-    Error {
-        identity: ViewerViewIdentity,
-        query: String,
-        error: ViewerClientError,
-    },
+pub(super) struct WorkspaceFileSearchOutcome {
+    identity: ViewerViewIdentity,
+    query: String,
+    result: Result<HashSet<ViewerDiffFileId>, ViewerClientError>,
 }
 
 #[cfg(feature = "desktop")]
-impl WorkspaceFileSearch {
+impl WorkspaceFileSearchOutcome {
     pub(super) fn files_for(
         &self,
         identity: ViewerViewIdentity,
         query: &str,
     ) -> Option<&HashSet<ViewerDiffFileId>> {
-        match self {
-            Self::Ready {
-                identity: ready_identity,
-                query: ready_query,
-                files,
-            } if *ready_identity == identity && ready_query == query => Some(files),
-            Self::Idle | Self::Loading { .. } | Self::Ready { .. } | Self::Error { .. } => None,
+        if self.identity != identity || self.query != query {
+            return None;
         }
+        self.result.as_ref().ok()
     }
 
-    fn status_for(
-        &self,
-        identity: ViewerViewIdentity,
-        query: &str,
-    ) -> WorkspaceFileSearchStatus<'_> {
-        match self {
-            Self::Loading {
-                identity: request_identity,
-                query: request_query,
-            } if *request_identity == identity && request_query == query => {
-                WorkspaceFileSearchStatus::Loading
-            }
-            Self::Error {
-                identity: request_identity,
-                query: request_query,
-                error,
-            } if *request_identity == identity && request_query == query => {
-                WorkspaceFileSearchStatus::Error(error)
-            }
-            Self::Idle | Self::Loading { .. } | Self::Ready { .. } | Self::Error { .. } => {
-                WorkspaceFileSearchStatus::Ready
-            }
+    fn error_for(&self, identity: ViewerViewIdentity, query: &str) -> Option<&ViewerClientError> {
+        if self.identity != identity || self.query != query {
+            return None;
         }
+        self.result.as_ref().err()
     }
-}
-
-#[cfg(feature = "desktop")]
-enum WorkspaceFileSearchStatus<'a> {
-    Loading,
-    Ready,
-    Error(&'a ViewerClientError),
 }
 
 #[cfg(feature = "desktop")]
@@ -203,71 +159,36 @@ pub(super) fn use_workspace_file_search(
     view: ReadSignal<ViewerActiveView>,
     file_filter: ReadSignal<String>,
     server_owned: bool,
-) -> Signal<WorkspaceFileSearch> {
-    let mut search = use_signal(|| WorkspaceFileSearch::Idle);
-    let _request = use_resource(move || {
+) -> WorkspaceFileSearch {
+    use_resource(move || {
         let identity = view.read().identity;
         let query = file_filter.read().clone();
-        if !server_owned || query.is_empty() {
-            search.set(WorkspaceFileSearch::Idle);
-        } else {
-            search.set(WorkspaceFileSearch::Loading {
-                identity,
-                query: query.clone(),
-            });
-        }
-        request_workspace_files(view, file_filter, search, server_owned, identity, query)
-    });
-    search
+        request_workspace_files(view, server_owned, identity, query)
+    })
 }
 
 #[cfg(feature = "desktop")]
 async fn request_workspace_files(
     view: ReadSignal<ViewerActiveView>,
-    file_filter: ReadSignal<String>,
-    mut search: Signal<WorkspaceFileSearch>,
     server_owned: bool,
     identity: ViewerViewIdentity,
     query: String,
-) {
+) -> Option<WorkspaceFileSearchOutcome> {
     if !server_owned || query.is_empty() {
-        return;
+        return None;
     }
     dioxus_sdk_time::sleep(std::time::Duration::from_millis(150)).await;
-    if !file_search_is_current(view, file_filter, identity, &query) {
-        return;
-    }
     let result = viewer_server::search_files(SearchViewerFiles {
         identity,
         query: query.clone(),
     })
     .await
     .and_then(|result| validate_file_search_result(&view.peek(), identity, result));
-    if !file_search_is_current(view, file_filter, identity, &query) {
-        return;
-    }
-    match result {
-        Ok(files) => search.set(WorkspaceFileSearch::Ready {
-            identity,
-            query,
-            files,
-        }),
-        Err(error) => search.set(WorkspaceFileSearch::Error {
-            identity,
-            query,
-            error,
-        }),
-    }
-}
-
-#[cfg(feature = "desktop")]
-fn file_search_is_current(
-    view: ReadSignal<ViewerActiveView>,
-    file_filter: ReadSignal<String>,
-    identity: ViewerViewIdentity,
-    query: &str,
-) -> bool {
-    view.peek().identity == identity && *file_filter.peek() == query
+    Some(WorkspaceFileSearchOutcome {
+        identity,
+        query,
+        result,
+    })
 }
 
 #[cfg(feature = "desktop")]
@@ -311,11 +232,15 @@ pub(super) fn FilesPanel(
     } else {
         let identity = workspace.view.peek().identity;
         let filter = workspace.file_filter.peek();
-        match workspace.file_search.read().status_for(identity, &filter) {
-            WorkspaceFileSearchStatus::Loading => (true, None),
-            WorkspaceFileSearchStatus::Ready => (false, None),
-            WorkspaceFileSearchStatus::Error(error) => (false, Some(error.message().to_owned())),
-        }
+        let searching = !filter.is_empty()
+            && workspace.file_search.state().cloned() == UseResourceState::Pending;
+        let search = workspace.file_search.read();
+        let error = search
+            .as_ref()
+            .and_then(Option::as_ref)
+            .and_then(|outcome| outcome.error_for(identity, &filter))
+            .map(|error| error.message().to_owned());
+        (searching, error)
     };
     #[cfg(not(feature = "desktop"))]
     let (searching, search_error) = (false, None::<String>);
@@ -518,10 +443,23 @@ const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "desktop")]
+    use std::collections::HashSet;
+
     use gtl_models::diffs::DiffLineCount;
+    #[cfg(feature = "desktop")]
+    use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration};
+    #[cfg(feature = "desktop")]
+    use gtl_wire::viewer::{
+        ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerViewIdentity,
+    };
     use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
 
+    #[cfg(feature = "desktop")]
+    use super::WorkspaceFileSearchOutcome;
     use super::{WorkspaceFileTree, WorkspaceLineTotals};
+    #[cfg(feature = "desktop")]
+    use crate::test_support::viewer_tab_id;
     use crate::test_support::{TestResult, absolute_file_path, repository_relative_path};
 
     fn file(path: &str, added: u64, removed: u64) -> TestResult<ViewerFileSummary> {
@@ -571,6 +509,43 @@ mod tests {
                 .1
                 .files[0],
             0
+        );
+        Ok(())
+    }
+
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn completed_search_applies_only_to_its_identity_and_query() -> TestResult {
+        let identity = ViewerViewIdentity {
+            tab_id: viewer_tab_id(4)?,
+            range_generation: ViewerRangeGeneration::new(2),
+            selection_generation: ViewerSelectionGeneration::new(1),
+            render_options: ViewerRenderOptions {
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+            },
+        };
+        let file_id = ViewerDiffFileId::for_index(3);
+        let outcome = WorkspaceFileSearchOutcome {
+            identity,
+            query: "src".to_owned(),
+            result: Ok(HashSet::from([file_id.clone()])),
+        };
+
+        assert_eq!(
+            outcome.files_for(identity, "src"),
+            Some(&HashSet::from([file_id]))
+        );
+        assert_eq!(outcome.files_for(identity, "tests"), None);
+        assert_eq!(
+            outcome.files_for(
+                ViewerViewIdentity {
+                    selection_generation: ViewerSelectionGeneration::new(2),
+                    ..identity
+                },
+                "src",
+            ),
+            None
         );
         Ok(())
     }

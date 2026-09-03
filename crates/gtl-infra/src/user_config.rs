@@ -8,8 +8,11 @@ use std::{
 };
 
 use anyhow::Context;
-use gtl_application::ports::{
-    UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+use gtl_application::{
+    ports::{
+        UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+    },
+    settings::edit_settings::{EditSettingsRequest, FieldUpdate},
 };
 use gtl_models::{
     diffs::DiffExclusions,
@@ -18,6 +21,7 @@ use gtl_models::{
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
 use gtl_wire::settings::{ProjectSettingsDocument, RawSettingValue, UserSettingsDocument};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 fn default_settings() -> UserSettings {
     UserSettings::new(
@@ -280,6 +284,87 @@ impl UserSettingsStore for TomlSettingsStore {
             string_editor::StringEdit::Remove,
         )
         .map(Into::into)
+    }
+
+    fn edit_settings(
+        &mut self,
+        request: EditSettingsRequest,
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
+        string_editor::edit_document(self.required_path()?, move |document| {
+            apply_settings_patch(document, request);
+            Ok(())
+        })
+    }
+}
+
+fn apply_scalar<T: ToString>(document: &mut DocumentMut, key: &str, update: FieldUpdate<T>) {
+    match update {
+        FieldUpdate::Update(value) => document[key] = toml_edit::value(value.to_string()),
+        FieldUpdate::Clear => {
+            document.remove(key);
+        }
+        FieldUpdate::Unchanged => {}
+    }
+}
+
+fn apply_settings_patch(document: &mut DocumentMut, request: EditSettingsRequest) {
+    apply_scalar(document, "theme", request.theme);
+    apply_scalar(document, "layout", request.layout);
+    apply_scalar(document, "density", request.density);
+    match request.push_confirmation_required {
+        FieldUpdate::Update(value) => {
+            if !document.contains_key("push") {
+                document["push"] = Item::Table(Table::new());
+            }
+            document["push"]["confirm"] = toml_edit::value(value);
+        }
+        FieldUpdate::Clear => {
+            if let Some(push) = document.get_mut("push").and_then(Item::as_table_mut) {
+                push.remove("confirm");
+            }
+        }
+        FieldUpdate::Unchanged => {}
+    }
+    match request.default_diff_exclusions {
+        FieldUpdate::Update(extensions) => {
+            if !document.contains_key("diff") {
+                document["diff"] = Item::Table(Table::new());
+            }
+            let mut values = Array::new();
+            for extension in extensions.extensions() {
+                values.push(extension.as_str());
+            }
+            document["diff"]["exclude"] = Item::Value(Value::Array(values));
+        }
+        FieldUpdate::Clear => {
+            if let Some(diff) = document.get_mut("diff").and_then(Item::as_table_mut) {
+                diff.remove("exclude");
+            }
+        }
+        FieldUpdate::Unchanged => {}
+    }
+    match request.projects {
+        FieldUpdate::Update(projects) => {
+            let mut tables = ArrayOfTables::new();
+            for project in projects {
+                let mut table = Table::new();
+                table["name"] = toml_edit::value(project.name.to_string());
+                table["excluded_from_push_all"] = toml_edit::value(project.excluded_from_push_all);
+                let mut diff = Table::new();
+                let mut values = Array::new();
+                for extension in project.diff_exclusions.extensions() {
+                    values.push(extension.as_str());
+                }
+                diff["exclude"] = Item::Value(Value::Array(values));
+                table["diff"] = Item::Table(diff);
+                tables.push(table);
+            }
+            document["projects"] = Item::ArrayOfTables(tables);
+        }
+        FieldUpdate::Clear => {
+            document.remove("projects");
+        }
+        FieldUpdate::Unchanged => {}
     }
 }
 
@@ -544,6 +629,56 @@ excluded_from_push_all = true
             std::fs::read_to_string(path)
                 .unwrap()
                 .contains("# settings")
+        );
+    }
+
+    #[test]
+    fn batch_edit_applies_every_field_atomically_and_clear_restores_defaults() {
+        use gtl_application::settings::edit_settings::{
+            EditSettingsRequest, FieldUpdate, ProjectSettingsUpdate,
+        };
+        use gtl_models::diffs::ExcludedExtensions;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        let request = EditSettingsRequest {
+            theme: FieldUpdate::Clear,
+            layout: FieldUpdate::Update(DiffLayout::Split),
+            density: FieldUpdate::Update(DiffDensity::Full),
+            push_confirmation_required: FieldUpdate::Update(false),
+            default_diff_exclusions: FieldUpdate::Update(ExcludedExtensions::new([".MD"])),
+            projects: FieldUpdate::Update(vec![ProjectSettingsUpdate {
+                name: ProjectName::try_from("git-tools").unwrap(),
+                excluded_from_push_all: true,
+                diff_exclusions: ExcludedExtensions::new(["lock"]),
+            }]),
+        };
+
+        assert_eq!(
+            store.edit_settings(request.clone()).unwrap(),
+            UserSettingsEditOutcome::Changed
+        );
+        assert_eq!(
+            store.edit_settings(request).unwrap(),
+            UserSettingsEditOutcome::Unchanged
+        );
+        let settings = store.load().unwrap();
+        assert_eq!(settings.theme(), None);
+        assert_eq!(
+            settings.viewer_render_options(),
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Full)
+        );
+        assert!(!settings.push_confirmation_required());
+        assert_eq!(
+            settings.diff_exclusions().default_exclusions().extensions(),
+            ["md"]
+        );
+        assert!(
+            settings
+                .push_all_exclusions()
+                .contains(&ProjectName::try_from("git-tools").unwrap())
         );
     }
 

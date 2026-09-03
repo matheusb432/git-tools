@@ -393,6 +393,13 @@ impl v1::project_service_server::ProjectService for ProjectCatalogueService {
     ) -> Result<Response<v1::StyleProjectSessionsResponse>, Status> {
         Err(Status::unimplemented("style_project_sessions"))
     }
+
+    async fn create_project(
+        &self,
+        _request: Request<v1::CreateProjectRequest>,
+    ) -> Result<Response<v1::CreateProjectResponse>, Status> {
+        Err(Status::unimplemented("create_project"))
+    }
 }
 
 fn managed_report(fixture: &PushFixture, config: &Path) -> Result<serde_json::Value> {

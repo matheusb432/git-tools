@@ -1,18 +1,35 @@
 use std::time::Duration;
 
-use dioxus::prelude::spawn;
+use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlDialogElement, HtmlElement};
 
-pub(super) struct DialogState {
-    pub(super) id: String,
-    pub(super) trigger_id: String,
-    pub(super) open: bool,
-    pub(super) restore_focus: bool,
+struct DialogState {
+    id: String,
+    trigger_id: String,
+    open: bool,
+    restore_focus: bool,
 }
 
-pub(super) fn sync_dialog(state: DialogState) {
-    spawn(sync_dialog_state(state));
+pub(super) fn use_dialog(id: &String, trigger_id: &String, open: bool) {
+    let mut was_open = use_signal(|| false);
+    let mut sync = use_action(move |state: DialogState| async move {
+        sync_dialog_state(state).await;
+        Ok::<(), std::convert::Infallible>(())
+    });
+    use_effect(use_reactive(
+        (id, trigger_id, &open),
+        move |(id, trigger_id, open)| {
+            let restore_focus = *was_open.peek() && !open;
+            was_open.set(open);
+            sync.call(DialogState {
+                id,
+                trigger_id,
+                open,
+                restore_focus,
+            });
+        },
+    ));
 }
 
 async fn sync_dialog_state(state: DialogState) {

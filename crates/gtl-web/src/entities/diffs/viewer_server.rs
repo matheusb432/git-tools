@@ -1,9 +1,9 @@
 use gtl_wire::viewer::{
-    FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
-    OpenViewerHistory, SearchViewerFiles, SelectViewerCommit, SetViewerPreference,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
-    ViewerUserSettings,
+    EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
+    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
+    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
 
 use crate::shared::viewer_client::ViewerClientError;
@@ -105,6 +105,7 @@ viewer_request!(
 );
 viewer_request!(open_diff_file, OpenViewerDiffFile, (), open_diff_file);
 viewer_query!(get_settings, ViewerUserSettings, get_settings);
+viewer_request!(edit_settings, EditSettingsRequest, (), edit_settings);
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn listen_for_state_changes<Ready, Handler>(

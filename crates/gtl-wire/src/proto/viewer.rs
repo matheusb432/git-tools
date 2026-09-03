@@ -15,16 +15,17 @@ use gtl_models::{
 use crate::{
     v1,
     viewer::{
-        FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory,
-        OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles, SelectViewerCommit,
-        SetViewerPreference, StreamViewerRows, ViewerActiveState, ViewerActiveView,
-        ViewerAppliedExclusions, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine,
-        ViewerCommitCursor, ViewerCommitPage, ViewerCommitSelection, ViewerCommitSummary,
-        ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout, ViewerDiffSearchDirection,
-        ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFailureCode, ViewerFeedback,
-        ViewerFileFailureCode, ViewerFileSearchResult, ViewerFileStatus, ViewerFileSummary,
-        ViewerFooter, ViewerHistoryCopyPayload, ViewerHistoryCursor, ViewerHistoryEntry,
-        ViewerHistoryPage, ViewerPreferences, ViewerProjectDiffExclusions, ViewerRecipeKind,
+        EditSettingsRequest, FieldUpdate, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
+        ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+        SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerActiveState,
+        ViewerActiveView, ViewerAppliedExclusions, ViewerCodeLine, ViewerCodeSpan,
+        ViewerCommandLine, ViewerCommitCursor, ViewerCommitPage, ViewerCommitSelection,
+        ViewerCommitSummary, ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout,
+        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult,
+        ViewerFailureCode, ViewerFeedback, ViewerFileFailureCode, ViewerFileSearchResult,
+        ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerHistoryCopyPayload,
+        ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
+        ViewerProjectDiffExclusions, ViewerProjectSettingsUpdate, ViewerRecipeKind,
         ViewerRenderOptions, ViewerRowEvent, ViewerRowStreamItem, ViewerShell, ViewerSplitCell,
         ViewerSplitRow, ViewerStateChanged, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
         ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow, ViewerUnifiedSourceRow,
@@ -505,6 +506,7 @@ pub fn decode_get_viewer_settings_response(
                         project_name: ProjectName::try_new(project.project_name)
                             .map_err(|_| ViewerCodecError::InvalidMessage)?,
                         extensions: ExcludedExtensions::new(project.extensions),
+                        excluded_from_push_all: project.excluded_from_push_all,
                     })
                 })
                 .collect::<Result<Vec<_>, ViewerCodecError>>()?,
@@ -538,10 +540,180 @@ pub fn encode_get_viewer_settings_response(
                 .map(|project| v1::ViewerProjectDiffExclusions {
                     project_name: project.project_name.to_string(),
                     extensions: project.extensions.extensions().to_vec(),
+                    excluded_from_push_all: project.excluded_from_push_all,
                 })
                 .collect(),
         }),
     }
+}
+
+#[must_use]
+pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSettingsRequest {
+    use v1::{
+        bool_field_update, density_field_update, extensions_field_update, layout_field_update,
+        project_settings_field_update, theme_field_update,
+    };
+    let theme = match request.theme {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::ThemeFieldUpdate {
+            operation: Some(theme_field_update::Operation::Clear(v1::ClearSetting {})),
+        }),
+        FieldUpdate::Update(value) => Some(v1::ThemeFieldUpdate {
+            operation: Some(theme_field_update::Operation::Update(
+                encode_viewer_theme(value) as i32,
+            )),
+        }),
+    };
+    let layout = match request.layout {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::LayoutFieldUpdate {
+            operation: Some(layout_field_update::Operation::Clear(v1::ClearSetting {})),
+        }),
+        FieldUpdate::Update(value) => Some(v1::LayoutFieldUpdate {
+            operation: Some(layout_field_update::Operation::Update(
+                encode_viewer_diff_layout(value) as i32,
+            )),
+        }),
+    };
+    let density = match request.density {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::DensityFieldUpdate {
+            operation: Some(density_field_update::Operation::Clear(v1::ClearSetting {})),
+        }),
+        FieldUpdate::Update(value) => Some(v1::DensityFieldUpdate {
+            operation: Some(density_field_update::Operation::Update(
+                encode_viewer_diff_density(value) as i32,
+            )),
+        }),
+    };
+    let push_confirmation_required = match request.push_confirmation_required {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::BoolFieldUpdate {
+            operation: Some(bool_field_update::Operation::Clear(v1::ClearSetting {})),
+        }),
+        FieldUpdate::Update(value) => Some(v1::BoolFieldUpdate {
+            operation: Some(bool_field_update::Operation::Update(value)),
+        }),
+    };
+    let default_diff_exclusions = match request.default_diff_exclusions {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::ExtensionsFieldUpdate {
+            operation: Some(extensions_field_update::Operation::Clear(
+                v1::ClearSetting {},
+            )),
+        }),
+        FieldUpdate::Update(value) => Some(v1::ExtensionsFieldUpdate {
+            operation: Some(extensions_field_update::Operation::Update(
+                v1::ExtensionsValue {
+                    extensions: value.extensions().to_vec(),
+                },
+            )),
+        }),
+    };
+    let projects = match request.projects {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::ProjectSettingsFieldUpdate {
+            operation: Some(project_settings_field_update::Operation::Clear(
+                v1::ClearSetting {},
+            )),
+        }),
+        FieldUpdate::Update(values) => Some(v1::ProjectSettingsFieldUpdate {
+            operation: Some(project_settings_field_update::Operation::Update(
+                v1::ProjectSettingsValue {
+                    projects: values
+                        .into_iter()
+                        .map(|value| v1::ViewerProjectSettingsUpdate {
+                            project_name: value.project_name.to_string(),
+                            excluded_from_push_all: value.excluded_from_push_all,
+                            diff_exclusions: value.diff_exclusions.extensions().to_vec(),
+                        })
+                        .collect(),
+                },
+            )),
+        }),
+    };
+    v1::EditSettingsRequest {
+        theme,
+        layout,
+        density,
+        push_confirmation_required,
+        default_diff_exclusions,
+        projects,
+    }
+}
+
+pub fn decode_edit_settings_request(
+    request: v1::EditSettingsRequest,
+) -> Result<EditSettingsRequest, ViewerCodecError> {
+    use v1::{
+        bool_field_update, density_field_update, extensions_field_update, layout_field_update,
+        project_settings_field_update, theme_field_update,
+    };
+    Ok(EditSettingsRequest {
+        theme: match request.theme {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                theme_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                theme_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(decode_viewer_theme(value)?)
+                }
+            },
+        },
+        layout: match request.layout {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                layout_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                layout_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(decode_viewer_diff_layout(value)?)
+                }
+            },
+        },
+        density: match request.density {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                density_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                density_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(decode_viewer_diff_density(value)?)
+                }
+            },
+        },
+        push_confirmation_required: match request.push_confirmation_required {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                bool_field_update::Operation::Update(value) => FieldUpdate::Update(value),
+            },
+        },
+        default_diff_exclusions: match request.default_diff_exclusions {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                extensions_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                extensions_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(ExcludedExtensions::new(value.extensions))
+                }
+            },
+        },
+        projects: match request.projects {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                project_settings_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                project_settings_field_update::Operation::Update(value) => FieldUpdate::Update(
+                    value
+                        .projects
+                        .into_iter()
+                        .map(|project| {
+                            Ok(ViewerProjectSettingsUpdate {
+                                project_name: ProjectName::try_new(project.project_name)
+                                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                                excluded_from_push_all: project.excluded_from_push_all,
+                                diff_exclusions: ExcludedExtensions::new(project.diff_exclusions),
+                            })
+                        })
+                        .collect::<Result<Vec<_>, ViewerCodecError>>()?,
+                ),
+            },
+        },
+    })
 }
 
 #[must_use]

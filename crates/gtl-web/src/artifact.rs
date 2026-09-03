@@ -206,8 +206,10 @@ mod tests {
     fn enhancement_script_only_mutates_existing_document_state() {
         let script = static_artifact_enhancement_script();
 
-        assert_eq!(script.matches("addEventListener").count(), 4);
+        assert_eq!(script.matches("addEventListener").count(), 8);
         assert!(script.contains("root.addEventListener(\"copy\""));
+        assert!(script.contains("root.addEventListener(\"mouseover\""));
+        assert!(script.contains("data-gtl-hover-popover-target"));
         assert!(script.contains("data-gtl-copy-line"));
         assert!(!script.contains("function codePayload"));
         assert!(script.contains("data-gtl-action='select-view'"));

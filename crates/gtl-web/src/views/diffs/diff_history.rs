@@ -12,126 +12,89 @@ use crate::{
     entities::diffs::{history_navigation, recipe_kind_label, viewer_server},
     shared::{
         browser,
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, Skeleton},
+        ui::{Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Skeleton},
         viewer_client::ViewerClientError,
     },
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum HistoryLoad {
-    Loading,
-    Ready(ViewerHistoryPage),
-    Error(ViewerClientError),
+#[derive(Clone, Copy)]
+struct HistoryActions {
+    error: ReadSignal<Option<ViewerClientError>>,
+    opening_id: ReadSignal<Option<RenderHistoryId>>,
+    copied_id: ReadSignal<Option<RenderHistoryId>>,
+    open: Callback<RenderHistoryId>,
+    copy: Callback<RenderHistoryId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct HistoryOpenTicket {
-    request: OpenViewerHistory,
-    generation: HistoryOpenGeneration,
-}
+fn use_history_actions() -> HistoryActions {
+    let viewer = use_context::<ViewerContext>();
+    let navigator = use_navigator();
+    let mut error = use_signal(|| None::<ViewerClientError>);
+    let mut opening_id = use_signal(|| None::<RenderHistoryId>);
+    let mut copied_id = use_signal(|| None::<RenderHistoryId>);
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct HistoryOpenGeneration(u64);
-
-impl HistoryOpenGeneration {
-    #[must_use]
-    const fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct HistoryOpenState {
-    generation: HistoryOpenGeneration,
-    ticket: Option<HistoryOpenTicket>,
-}
-
-impl HistoryOpenState {
-    fn begin(&mut self, render_id: RenderHistoryId) -> Option<HistoryOpenTicket> {
-        if self.ticket.is_some() {
-            return None;
+    let mut open_action = use_action(move |render_id: RenderHistoryId| async move {
+        let result = viewer_server::open_history(OpenViewerHistory { render_id }).await;
+        opening_id.set(None);
+        match result {
+            Ok(shell) => {
+                viewer.replace_shell(shell);
+                navigator.push(Route::Workspace {});
+            }
+            Err(next_error) => error.set(Some(next_error)),
         }
-
-        self.generation = self.generation.next();
-        let ticket = HistoryOpenTicket {
-            request: OpenViewerHistory { render_id },
-            generation: self.generation,
-        };
-        self.ticket = Some(ticket);
-        Some(ticket)
-    }
-
-    fn accepts(self, ticket: HistoryOpenTicket) -> bool {
-        self.ticket == Some(ticket)
-    }
-
-    fn finish(&mut self, ticket: HistoryOpenTicket) -> bool {
-        if !self.accepts(ticket) {
-            return false;
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let open = use_callback(move |render_id: RenderHistoryId| {
+        if opening_id.peek().is_some() {
+            return;
         }
-        self.ticket = None;
-        true
-    }
+        error.set(None);
+        opening_id.set(Some(render_id));
+        open_action.call(render_id);
+    });
 
-    const fn is_pending(self) -> bool {
-        self.ticket.is_some()
-    }
+    let mut copy_action = use_action(move |render_id: RenderHistoryId| async move {
+        match viewer_server::get_history_copy(GetViewerHistoryCopy { render_id }).await {
+            Ok(payload) if browser::copy_text(&payload.json).await => {
+                copied_id.set(Some(render_id));
+            }
+            Ok(_) => error.set(Some(ViewerClientError::Unavailable)),
+            Err(next_error) => error.set(Some(next_error)),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let copy = use_callback(move |render_id: RenderHistoryId| {
+        error.set(None);
+        copy_action.call(render_id);
+    });
 
-    fn is_opening(self, render_id: RenderHistoryId) -> bool {
-        matches!(self.ticket, Some(ticket) if ticket.request.render_id == render_id)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct HistoryQueryGeneration(u64);
-
-impl HistoryQueryGeneration {
-    #[must_use]
-    const fn next(self) -> Self {
-        Self(self.0.wrapping_add(1))
+    HistoryActions {
+        error: error.into(),
+        opening_id: opening_id.into(),
+        copied_id: copied_id.into(),
+        open,
+        copy,
     }
 }
 
 #[component]
 pub(crate) fn DiffHistoryView() -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let navigator = use_navigator();
     let mut cursor = use_signal(|| ViewerHistoryCursor::Newest);
-    let mut reload = use_signal(|| 0_u64);
-    let mut query_generation = use_signal(HistoryQueryGeneration::default);
-    let mut history = use_signal(|| HistoryLoad::Loading);
-    let mut action_error = use_signal(|| None::<ViewerClientError>);
-    let mut open_state = use_signal(HistoryOpenState::default);
-    let mut copied_id = use_signal(|| None::<RenderHistoryId>);
+    let mut history = use_resource(move || {
+        let cursor = cursor();
+        async move { viewer_server::list_history(ListViewerHistory { cursor }).await }
+    });
+    let actions = use_history_actions();
 
     use_effect(move || {
         browser::focus_element("history-heading".into());
     });
-    use_effect(move || {
-        let requested_cursor = cursor();
-        let _reload = reload();
-        let generation = {
-            let mut generation = query_generation.write();
-            *generation = generation.next();
-            *generation
-        };
-        history.set(HistoryLoad::Loading);
-        spawn(async move {
-            let result = viewer_server::list_history(ListViewerHistory {
-                cursor: requested_cursor,
-            })
-            .await;
-            if query_generation() != generation {
-                return;
-            }
-            history.set(match result {
-                Ok(page) => HistoryLoad::Ready(page),
-                Err(error) => HistoryLoad::Error(error),
-            });
-        });
-    });
-
-    let load = history();
+    let pending = history.state().cloned() == UseResourceState::Pending;
+    let load = history.read();
+    let action_error = (actions.error)();
+    let opening_id = (actions.opening_id)();
+    let copied_id = (actions.copied_id)();
 
     rsx! {
         document::Title { "History - git-tools" }
@@ -156,7 +119,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                         "Reopen a durable render or copy its complete recipe."
                     }
                 }
-                if let HistoryLoad::Ready(page) = &load {
+                if !pending && let Some(Ok(page)) = &*load {
                     p { class: "font-mono tabular-nums text-ink-3", "{page.total_count} renders" }
                 }
             }
@@ -165,91 +128,59 @@ pub(crate) fn DiffHistoryView() -> Element {
                 class: "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-bg",
                 aria_label: "Recent diff renders",
                 ScrollArea { class: "min-h-0 overflow-auto p-3 sm:p-4",
-                    if let Some(error) = action_error() {
+                    if let Some(error) = action_error {
                         div {
                             class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-del",
                             role: "alert",
                             "{error.message()}"
                         }
                     }
-                    match &load {
-                        HistoryLoad::Loading => rsx! {
+                    match (pending, &*load) {
+                        (true, _) | (false, None) => rsx! {
                             HistoryLoading {}
                         },
-                        HistoryLoad::Error(error) => {
+                        (false, Some(Err(error))) => {
                             let message = error.message();
                             rsx! {
-                                div { class: "grid min-h-64 place-content-center text-center", role: "alert",
-                                    p { class: "font-semibold text-ink", "History is unavailable" }
-                                    p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
+                                PageNotice {
+                                    class: "min-h-64",
+                                    role: "alert",
+                                    title: "History is unavailable",
+                                    message,
                                     Button {
                                         class: "mx-auto mt-4",
                                         variant: ButtonVariant::Outline,
-                                        onclick: move |_| *reload.write() += 1,
+                                        onclick: move |_| history.restart(),
                                         "Try again"
                                     }
                                 }
                             }
                         }
-                        HistoryLoad::Ready(page) if page.entries.is_empty() => rsx! {
-                            div { class: "grid min-h-64 place-content-center text-center",
-                                p { class: "font-semibold text-ink", "No history yet" }
-                                p { class: "mt-1 text-ink-2", "Rendered diffs appear here after they are opened." }
+                        (false, Some(Ok(page))) if page.entries.is_empty() => rsx! {
+                            PageNotice {
+                                class: "min-h-64",
+                                title: "No history yet",
+                                message: "Rendered diffs appear here after they are opened.",
                             }
                         },
-                        HistoryLoad::Ready(page) => rsx! {
+                        (false, Some(Ok(page))) => rsx! {
                             div { class: "grid gap-2",
                                 for entry in &page.entries {
                                     HistoryRow {
                                         key: "{entry.id}",
                                         entry: entry.clone(),
-                                        opening: open_state().is_opening(entry.id),
-                                        open_disabled: open_state().is_pending(),
-                                        copied: copied_id() == Some(entry.id),
-                                        onopen: move |render_id: RenderHistoryId| {
-                                            let Some(open_ticket) = open_state.write().begin(render_id) else {
-                                                return;
-                                            };
-                                            action_error.set(None);
-                                            spawn(async move {
-                                                let result = viewer_server::open_history(open_ticket.request).await;
-                                                if !open_state().accepts(open_ticket) {
-                                                    return;
-                                                }
-                                                let _ = open_state.write().finish(open_ticket);
-                                                match result {
-                                                    Ok(shell) => {
-                                                        viewer.replace_shell(shell);
-                                                        navigator.push(Route::Workspace {});
-                                                    }
-                                                    Err(error) => action_error.set(Some(error)),
-                                                }
-                                            });
-                                        },
-                                        oncopy: move |render_id: RenderHistoryId| {
-                                            action_error.set(None);
-                                            spawn(async move {
-                                                match viewer_server::get_history_copy(GetViewerHistoryCopy { render_id })
-                                                    .await
-                                                {
-                                                    Ok(payload) => {
-                                                        if browser::copy_text(&payload.json).await {
-                                                            copied_id.set(Some(render_id));
-                                                        } else {
-                                                            action_error.set(Some(ViewerClientError::Unavailable));
-                                                        }
-                                                    }
-                                                    Err(error) => action_error.set(Some(error)),
-                                                }
-                                            });
-                                        },
+                                        opening: opening_id == Some(entry.id),
+                                        open_disabled: opening_id.is_some(),
+                                        copied: copied_id == Some(entry.id),
+                                        onopen: move |render_id| actions.open.call(render_id),
+                                        oncopy: move |render_id| actions.copy.call(render_id),
                                     }
                                 }
                             }
                         },
                     }
                 }
-                if let HistoryLoad::Ready(page) = &load && !page.entries.is_empty() {
+                if !pending && let Some(Ok(page)) = &*load && !page.entries.is_empty() {
                     HistoryFooter {
                         page: page.clone(),
                         onnavigate: move |next| cursor.set(next),
@@ -397,41 +328,5 @@ fn HistoryFooter(
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use gtl_wire::viewer::OpenViewerHistory;
-
-    use super::{HistoryOpenGeneration, HistoryOpenState};
-    use crate::test_support::{TestResult, render_history_id};
-
-    #[test]
-    fn history_open_is_page_wide_and_rejects_stale_completion() -> TestResult {
-        let mut state = HistoryOpenState::default();
-        let first = super::HistoryOpenTicket {
-            request: OpenViewerHistory {
-                render_id: render_history_id(9)?,
-            },
-            generation: HistoryOpenGeneration(1),
-        };
-        assert_eq!(state.begin(render_history_id(9)?), Some(first));
-
-        assert!(state.is_pending());
-        assert!(state.is_opening(render_history_id(9)?));
-        assert_eq!(state.begin(render_history_id(10)?), None);
-
-        assert!(state.finish(first));
-        let second = super::HistoryOpenTicket {
-            request: OpenViewerHistory {
-                render_id: render_history_id(10)?,
-            },
-            generation: HistoryOpenGeneration(2),
-        };
-        assert_eq!(state.begin(render_history_id(10)?), Some(second));
-        assert!(!state.accepts(first));
-        assert!(state.accepts(second));
-        Ok(())
     }
 }
