@@ -15,28 +15,17 @@ use gtl_wire::viewer::{
     ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerRows, ViewerTab,
     ViewerTabKind, ViewerTabState, ViewerUnifiedRow, ViewerUnifiedSourceRow, ViewerViewIdentity,
 };
-use lucide_dioxus::{Check, Ellipsis, History, Settings};
+use lucide_dioxus::Settings;
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{
-        Button, ButtonSize, ButtonState, ButtonType, Checkbox, FieldLabel, IconPopover,
-        MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea, ScrollAreaVariant, Select,
-        SelectOption, ViewerTabItem,
+    shared::ui::{ButtonSize, ScrollArea, ScrollAreaVariant, ViewerTabItem},
+    views::{
+        diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
+        viewer_menu::ViewerMenu,
+        viewer_settings_form::{ViewerSettingsForm, ViewerSettingsSelection},
     },
-    views::diffs::diff_workspace::PreviewDiffWorkspace,
 };
-
-const LAYOUT_OPTIONS: &[(&str, &str)] = &[
-    ("", "Choose a layout"),
-    ("unified", "Unified"),
-    ("split", "Side by side"),
-];
-const DENSITY_OPTIONS: &[(&str, &str)] = &[
-    ("", "Choose a view"),
-    ("compact", "Changes only"),
-    ("full", "Full file"),
-];
 
 #[preview(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
@@ -66,6 +55,22 @@ fn desktop_viewer() -> Element {
     }
 }
 
+/// File-scoped code search attached to the active file context.
+#[preview(name = "Search active file")]
+fn search_active_file() -> Element {
+    rsx! {
+        ViewerPreview { initial_search: PreviewDiffSearch::ActiveFile }
+    }
+}
+
+/// Repository-wide code search with its distinct scope and shortcut.
+#[preview(name = "Search all files")]
+fn search_all_files() -> Element {
+    rsx! {
+        ViewerPreview { initial_search: PreviewDiffSearch::AllFiles }
+    }
+}
+
 /// Phone viewer with a lean titlebar and dedicated Files and Commits navigation.
 #[preview(name = "Mobile viewer")]
 fn mobile_viewer() -> Element {
@@ -83,7 +88,10 @@ fn settings_form() -> Element {
 }
 
 #[component]
-fn ViewerPreview(#[props(default)] mobile: bool) -> Element {
+fn ViewerPreview(
+    #[props(default)] mobile: bool,
+    #[props(default)] initial_search: PreviewDiffSearch,
+) -> Element {
     let fixture = match preview_fixture() {
         Ok(fixture) => fixture,
         Err(error) => {
@@ -108,6 +116,7 @@ fn ViewerPreview(#[props(default)] mobile: bool) -> Element {
                     view: fixture.view,
                     workspace: fixture.workspace,
                     mobile,
+                    initial_search,
                 }
             }
         }
@@ -126,7 +135,7 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
 
     rsx! {
         nav {
-            class: if mobile { "z-70 flex min-w-0 shrink-0 items-end gap-1 border-b border-line bg-surface px-2 pt-2" } else { "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2" },
+            class: if mobile { "z-70 flex min-w-0 shrink-0 items-end gap-1 border-b border-line bg-surface pr-2" } else { "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2" },
             aria_label: "Viewer navigation",
             ScrollArea {
                 variant: ScrollAreaVariant::Rail,
@@ -142,7 +151,7 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
                                     key: "{tab.id}",
                                     tab: tab.clone(),
                                     active: active_tab_id() == Some(tab_id),
-                                    onactivate: move |_| active_tab_id.set(Some(tab_id)),
+                                    onactivate: move |()| active_tab_id.set(Some(tab_id)),
                                     onkeydown: move |_| {},
                                     onclose: move |_| {},
                                 }
@@ -151,33 +160,12 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
                     }
                 }
             }
-            IconPopover {
+            ViewerMenu {
                 id: menu_id,
-                aria_label: "Viewer menu",
+                history_count: tabs.len(),
                 trigger_size: if mobile { ButtonSize::IconTouch } else { ButtonSize::IconSmall },
-                icon: rsx! {
-                    Ellipsis { size: 18 }
-                },
-                div { class: "grid gap-0.5 p-1.5",
-                    button { class: MENU_ACTION_HOST_CLASSES, r#type: "button",
-                        MenuActionContent {
-                            icon: rsx! {
-                                History { size: 15 }
-                            },
-                            label: "History",
-                            description: "Browse saved renders",
-                        }
-                    }
-                    button { class: MENU_ACTION_HOST_CLASSES, r#type: "button",
-                        MenuActionContent {
-                            icon: rsx! {
-                                Settings { size: 15 }
-                            },
-                            label: "Settings",
-                            description: "Viewer defaults",
-                        }
-                    }
-                }
+                onhistory: move |()| {},
+                onsettings: move |()| {},
             }
         }
     }
@@ -353,7 +341,7 @@ fn preview_commit(
 }
 
 fn settings_rows() -> ViewerFileRows {
-    unified_rows(vec![
+    let mut rows = vec![
         ViewerUnifiedRow::Hunk("@@ -18,6 +18,11 @@".to_owned()),
         ViewerUnifiedRow::Context(source_row(
             "pub fn resolve_viewer_settings() -> ViewerSettings {",
@@ -377,7 +365,15 @@ fn settings_rows() -> ViewerFileRows {
             Some(22),
         )),
         ViewerUnifiedRow::Context(source_row("    }", Some(23), Some(23))),
-    ])
+    ];
+    rows.extend((24..52).map(|line_number| {
+        ViewerUnifiedRow::Context(source_row(
+            &format!("    resolve_setting_{line_number}();"),
+            Some(line_number),
+            Some(line_number),
+        ))
+    }));
+    unified_rows(rows)
 }
 
 fn button_rows() -> ViewerFileRows {
@@ -451,7 +447,7 @@ fn SettingsMock() -> Element {
                         "Choose viewer defaults, then submit to save them."
                     }
                 }
-                SettingsEditableForm {}
+                SettingsFormPreview {}
                 SettingsResolved {}
                 SettingsProjects {}
             }
@@ -460,11 +456,14 @@ fn SettingsMock() -> Element {
 }
 
 #[component]
-fn SettingsEditableForm() -> Element {
-    let mut layout = use_signal(|| "split".to_owned());
-    let mut density = use_signal(|| "compact".to_owned());
-    let mut copy_with_context = use_signal(|| true);
-    let mut submission_attempted = use_signal(|| false);
+fn SettingsFormPreview() -> Element {
+    let initial = ViewerSettingsSelection::new(
+        Some(gtl_wire::viewer::ViewerTheme::Mirage),
+        ViewerRenderOptions {
+            layout: ViewerDiffLayout::Split,
+            density: ViewerDiffDensity::Compact,
+        },
+    );
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
     let mut finish_save = use_action(move || async move {
@@ -473,129 +472,19 @@ fn SettingsEditableForm() -> Element {
         saved.set(true);
         Ok::<(), Infallible>(())
     });
-    let layout_value = layout();
-    let density_value = density();
-    let layout_error = choice_error(
-        submission_attempted(),
-        &layout_value,
-        "Choose a diff layout.",
-    );
-    let density_error = choice_error(
-        submission_attempted(),
-        &density_value,
-        "Choose a diff view.",
-    );
-    let valid = layout_error.is_none() && density_error.is_none();
-
     rsx! {
-        form {
-            novalidate: true,
-            onsubmit: move |event: FormEvent| {
-                event.prevent_default();
-                submission_attempted.set(true);
+        ViewerSettingsForm {
+            initial,
+            pending: pending(),
+            saved: saved(),
+            onmodified: move |()| saved.set(false),
+            onsubmit: move |_| {
                 saved.set(false);
-                if valid {
-                    pending.set(true);
-                    finish_save.call();
-                }
+                pending.set(true);
+                finish_save.call();
             },
-            section {
-                class: "overflow-hidden rounded-panel border border-line bg-surface",
-                aria_label: "Editable viewer settings",
-                header { class: "border-b border-line bg-surface-2 px-4 py-3",
-                    h2 { class: "font-semibold text-ink", "Diff display" }
-                    p { class: "mt-0.5 text-xs leading-5 text-ink-3",
-                        "These defaults apply to viewer sessions and raw artifacts."
-                    }
-                }
-                div { class: "flex flex-col gap-4 p-4",
-                    div { class: "flex flex-col gap-1.5",
-                        FieldLabel {
-                            for_id: "mock-layout",
-                            label: "Layout",
-                            hint: "Choose how old and new lines share the diff canvas.",
-                        }
-                        Select {
-                            id: "mock-layout",
-                            name: "layout",
-                            aria_label: "Layout",
-                            value: layout_value,
-                            options: select_options(LAYOUT_OPTIONS),
-                            error: layout_error,
-                            disabled: pending(),
-                            required: true,
-                            onchange: move |event: FormEvent| layout.set(event.value()),
-                        }
-                    }
-                    div { class: "flex flex-col gap-1.5",
-                        FieldLabel {
-                            for_id: "mock-density",
-                            label: "View",
-                            hint: "Limit the document to changed regions or show the full file.",
-                        }
-                        Select {
-                            id: "mock-density",
-                            name: "density",
-                            aria_label: "View",
-                            value: density_value,
-                            options: select_options(DENSITY_OPTIONS),
-                            error: density_error,
-                            disabled: pending(),
-                            required: true,
-                            onchange: move |event: FormEvent| density.set(event.value()),
-                        }
-                    }
-                    div { class: "flex flex-col gap-1.5",
-                        FieldLabel {
-                            for_id: "mock-copy-context",
-                            label: "Copied diff lines",
-                        }
-                        Checkbox {
-                            id: "mock-copy-context",
-                            checked: copy_with_context(),
-                            disabled: pending(),
-                            onchange: move |event: FormEvent| copy_with_context.set(event.checked()),
-                            div { class: "min-w-0",
-                                span { class: "block font-semibold text-ink", "Copy with context" }
-                                span { class: "mt-0.5 block text-xs leading-5 text-ink-3",
-                                    "Prepend the path and selected line range when copying diff lines."
-                                }
-                            }
-                        }
-                    }
-                }
-                footer { class: "flex min-h-16 items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3",
-                    p {
-                        class: "text-xs text-add",
-                        role: "status",
-                        aria_live: "polite",
-                        if saved() {
-                            span { class: "inline-flex items-center gap-1.5",
-                                Check { size: 14 }
-                                "Settings saved"
-                            }
-                        }
-                    }
-                    Button {
-                        button_type: ButtonType::Submit,
-                        state: if pending() { ButtonState::Loading } else { ButtonState::Enabled },
-                        "Save settings"
-                    }
-                }
-            }
         }
     }
-}
-
-fn choice_error(attempted: bool, value: &str, message: &str) -> Option<String> {
-    (attempted && value.is_empty()).then(|| message.to_owned())
-}
-
-fn select_options(options: &[(&str, &str)]) -> Vec<SelectOption> {
-    options
-        .iter()
-        .map(|(value, label)| SelectOption::new(*value, *label))
-        .collect()
 }
 
 #[component]
@@ -613,7 +502,7 @@ fn SettingsResolved() -> Element {
                     term: "Configuration file",
                     value: "~/.config/git-tools/config.toml",
                 }
-                SettingsRow { term: "Effective theme", value: "Dark" }
+                SettingsRow { term: "Effective theme", value: "Mirage" }
                 SettingsRow { term: "Push confirmation", value: "Required" }
                 SettingsRow { term: "Default diff exclusions", value: "*.lock, *.snap" }
             }
@@ -655,22 +544,31 @@ fn SettingsRow(term: String, value: String) -> Element {
     name = "Viewer settings redesign",
     thumbnail = thumbnail
 )]
-const VIEWER_SETTINGS_REDESIGN_SHOWCASE: () = &[desktop_viewer, mobile_viewer, settings_form];
+const VIEWER_SETTINGS_REDESIGN_SHOWCASE: () = &[
+    desktop_viewer,
+    search_active_file,
+    search_all_files,
+    mobile_viewer,
+    settings_form,
+];
 
 #[cfg(test)]
 mod tests {
     use dioxus::prelude::*;
 
-    use super::{ViewerPreview, choice_error};
+    use super::{SettingsMock, ViewerPreview};
+    use crate::views::diffs::diff_workspace::PreviewDiffSearch;
 
     #[test]
-    fn validation_appears_only_after_submission() {
-        assert_eq!(choice_error(false, "", "Required"), None);
-        assert_eq!(
-            choice_error(true, "", "Required"),
-            Some("Required".to_owned())
-        );
-        assert_eq!(choice_error(true, "split", "Required"), None);
+    fn settings_preview_uses_the_production_theme_control() {
+        let html = dioxus_ssr::render_element(rsx! {
+            SettingsMock {}
+        });
+
+        assert!(html.contains(r#"aria-label="Theme""#));
+        assert!(html.contains("Built-in default (Dark)"));
+        assert!(html.contains(r#"value="mirage""#));
+        assert!(html.contains(">Mirage</option>"));
     }
 
     #[test]
@@ -679,14 +577,38 @@ mod tests {
             ViewerPreview {}
         });
 
-        assert!(html.contains("min-w-24 max-w-56 shrink-0"));
-        assert!(html.contains("border-acc bg-surface-2"));
+        assert!(html.contains("min-w-24 max-w-72 shrink-0"));
+        assert!(html.contains("bg-surface-2 text-ink"));
+        assert!(html.contains("bg-acc opacity-100 transition-opacity"));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
         assert!(html.contains(r#"data-gtl-action="copy-commit""#));
         assert!(html.contains(r#"aria-pressed="false""#));
         assert!(html.contains("Collapse all"));
+        assert!(html.contains("Search code in all files"));
+        assert!(html.contains("Search code in this file"));
+        assert!(html.contains(">Ctrl<"));
         assert!(!html.contains(">+ context<"));
         assert!(!html.contains(">Display<"));
+        assert!(!html.contains(">j<"));
+        assert!(!html.contains("alt+shift+c"));
+        assert!(!html.contains("<footer"));
+        assert!(!html.contains("gtl diff main"));
+    }
+
+    #[test]
+    fn search_previews_distinguish_file_and_workspace_scope() {
+        let active_file = dioxus_ssr::render_element(rsx! {
+            ViewerPreview { initial_search: PreviewDiffSearch::ActiveFile }
+        });
+        let all_files = dioxus_ssr::render_element(rsx! {
+            ViewerPreview { initial_search: PreviewDiffSearch::AllFiles }
+        });
+
+        assert!(active_file.contains("This file"));
+        assert!(active_file.contains("crates/gtl-web/src/views/user_settings.rs"));
+        assert!(active_file.contains("3 matches in this file"));
+        assert!(all_files.contains("All files"));
+        assert!(all_files.contains("9 matches in 3 files"));
     }
 
     #[test]

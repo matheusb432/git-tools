@@ -3,10 +3,10 @@ use std::{error::Error, time::Duration};
 use gtl_wire::v1::{
     BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, ExtensionsFieldUpdate,
     ExtensionsValue, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetViewerSettingsRequest, GetViewerShellRequest, GetWorktreeBaseRequest,
-    PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest, ViewerTheme,
-    WatchViewerRequest, bool_field_update, diff_service_client::DiffServiceClient, diff_target,
-    extensions_field_update, project_service_client::ProjectServiceClient,
+    GetViewerSettingsRequest, GetViewerShellRequest, GetWorktreeBaseRequest, MoveViewerTabRequest,
+    PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest, ViewerTabPlacement,
+    ViewerTheme, WatchViewerRequest, bool_field_update, diff_service_client::DiffServiceClient,
+    diff_target, extensions_field_update, project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
     worktree_service_client::WorktreeServiceClient,
@@ -177,6 +177,27 @@ async fn viewer_service_accepts_the_native_capability() -> TestResult {
         .unwrap_err();
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn move_viewer_tab_validates_identity_through_the_generated_client() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut viewer =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+
+    let error = viewer
+        .move_viewer_tab(MoveViewerTabRequest {
+            tab_id: 1,
+            target_tab_id: 2,
+            placement: ViewerTabPlacement::Before as i32,
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::NotFound);
     server.stop().await?;
     Ok(())
 }

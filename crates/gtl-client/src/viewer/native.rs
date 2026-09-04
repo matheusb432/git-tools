@@ -4,7 +4,7 @@ use gtl_wire::{
     v1::{self, viewer_service_client::ViewerServiceClient},
     viewer::{
         EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-        ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+        ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
         SelectViewerCommit, SetViewerPreference, StreamViewerRows, VIEWER_ROW_MAX_ENCODED_BYTES,
         ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
@@ -114,6 +114,8 @@ impl ViewerClient {
     viewer_unary_methods! {
         activate_tab(ViewerTabRequest) -> ViewerShell =>
             encode_activate_viewer_tab_request, activate_viewer_tab, decode_activate_viewer_tab_response;
+        move_tab(MoveViewerTab) -> ViewerShell =>
+            encode_move_viewer_tab_request, move_viewer_tab, decode_move_viewer_tab_response;
         close_tab(ViewerTabRequest) -> ViewerShell =>
             encode_close_viewer_tab_request, close_viewer_tab, decode_close_viewer_tab_response;
         refresh_tab(ViewerTabRequest) -> ViewerShell =>

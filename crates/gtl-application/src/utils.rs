@@ -61,7 +61,7 @@ use crate::ports::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, GitCommitReceipt,
     GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree,
     HistoryRecord, HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError, ProjectClient,
-    ProjectClientError, UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
+    ProjectClientError, UserSettingsLoadError, UserSettingsReader,
 };
 
 fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
@@ -231,23 +231,9 @@ impl Default for FixedUserSettingsStore {
     }
 }
 
-impl UserSettingsStore for FixedUserSettingsStore {
+impl UserSettingsReader for FixedUserSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
         Ok(self.settings.clone())
-    }
-
-    fn set_value(
-        &mut self,
-        _mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
-    }
-
-    fn remove_key(
-        &mut self,
-        _key: gtl_models::settings::SettingKey,
-    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
     }
 }
 
@@ -264,28 +250,11 @@ impl SequenceUserSettingsStore {
     }
 }
 
-impl UserSettingsStore for SequenceUserSettingsStore {
+impl UserSettingsReader for SequenceUserSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
-        lock_or_recover(&self.snapshots).pop_front().ok_or_else(|| {
-            UserSettingsLoadError::InvalidConfiguration {
-                path: PathBuf::from("<test settings sequence>"),
-                reason: "no configured snapshot remains".into(),
-            }
-        })
-    }
-
-    fn set_value(
-        &mut self,
-        _mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
-    }
-
-    fn remove_key(
-        &mut self,
-        _key: gtl_models::settings::SettingKey,
-    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
+        lock_or_recover(&self.snapshots)
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("no configured test settings snapshot remains").into())
     }
 }
 

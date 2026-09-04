@@ -11,7 +11,7 @@ use gtl_models::{
 use crate::{
     ports::{
         Clock, GitClient, GitEffect, ProjectClient, ProjectClientError, UserSettingsLoadError,
-        UserSettingsStore,
+        UserSettingsReader,
     },
     projects::remote_sync::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
 };
@@ -43,7 +43,7 @@ pub async fn execute(
     git: &impl GitClient,
     projects: &impl ProjectClient,
     clock: &impl Clock,
-    user_settings: &impl UserSettingsStore,
+    user_settings: &impl UserSettingsReader,
 ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
     let settings = user_settings.load()?;
     let selection = super::select_push_all_repositories(
@@ -519,7 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_load_failure_preserves_its_typed_category() {
+    async fn settings_adapter_failure_preserves_its_typed_category() {
         let error = push_repositories::execute(
             req(),
             &ProjectGitScript::default().git_client(),
@@ -532,7 +532,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            PushRepositoriesError::Settings(UserSettingsLoadError::InvalidConfiguration { .. })
+            PushRepositoriesError::Settings(UserSettingsLoadError::Adapter(_))
         ));
     }
 

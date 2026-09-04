@@ -88,6 +88,16 @@ mod tests {
                 .is_some()
         );
         assert!(
+            find("viewer-settings-redesign", "search-active-file")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            find("viewer-settings-redesign", "search-all-files")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
             find("viewer-settings-redesign", "settings-form")
                 .unwrap()
                 .is_some()

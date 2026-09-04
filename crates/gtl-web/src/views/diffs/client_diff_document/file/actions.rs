@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
-use lucide_dioxus::ExternalLink;
+use lucide_dioxus::{ExternalLink, Search};
 
 use crate::shared::{
     browser,
@@ -16,6 +16,7 @@ use crate::shared::{
 pub(super) fn DiffFileActions(
     summary: ReadSignal<ViewerFileSummary>,
     copy_popover_id: String,
+    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
@@ -23,6 +24,9 @@ pub(super) fn DiffFileActions(
         summary.with(|summary| (summary.id.clone(), summary.can_open_in_editor));
     rsx! {
         span { class: "flex flex-none items-center gap-1 mobile:hidden",
+            if let Some(onfind) = onfind {
+                FindInFileAction { file_id: file_id.clone(), onfind }
+            }
             DiffPathCopyMenu {
                 summary,
                 popover_id: copy_popover_id,
@@ -30,6 +34,26 @@ pub(super) fn DiffFileActions(
             }
             if let Some(onopen) = onopen.filter(|_| can_open_in_editor) {
                 OpenInTextEditorAction { file_id, onopen }
+            }
+        }
+    }
+}
+
+#[component]
+fn FindInFileAction(file_id: ViewerDiffFileId, onfind: EventHandler<ViewerDiffFileId>) -> Element {
+    rsx! {
+        Button {
+            size: ButtonSize::IconSmall,
+            variant: ButtonVariant::Ghost,
+            aria_label: "Search code in this file",
+            title: "Search code in this file",
+            onclick: move |event: MouseEvent| {
+                event.prevent_default();
+                event.stop_propagation();
+                onfind.call(file_id.clone());
+            },
+            span { aria_hidden: "true",
+                Search { size: 16, stroke_width: 2 }
             }
         }
     }
@@ -57,7 +81,7 @@ fn DiffPathCopyMenu(
             class: "flex flex-none print:hidden!",
             onclick: move |event: MouseEvent| event.stop_propagation(),
             IconPopover {
-                id: popover_id,
+                id: popover_id.clone(),
                 aria_label: "Copy file path",
                 placement: IconPopoverPlacement::TriggerEnd,
                 icon: rsx! {
@@ -67,11 +91,13 @@ fn DiffPathCopyMenu(
                     DiffPathCopyAction {
                         kind: DiffPathCopyKind::Relative,
                         payload: relative_path,
+                        popover_id: popover_id.clone(),
                         artifact_enhancement,
                     }
                     DiffPathCopyAction {
                         kind: DiffPathCopyKind::Absolute,
                         payload: absolute_path,
+                        popover_id,
                         artifact_enhancement,
                     }
                 }
@@ -174,6 +200,7 @@ fn use_copy_feedback(payload: String) -> CopyFeedbackController {
 fn DiffPathCopyAction(
     kind: DiffPathCopyKind,
     payload: String,
+    popover_id: String,
     artifact_enhancement: bool,
 ) -> Element {
     let feedback = use_copy_feedback(payload);
@@ -197,6 +224,7 @@ fn DiffPathCopyAction(
                 event.prevent_default();
                 event.stop_propagation();
                 feedback.copy.call(());
+                browser::hide_popover(&popover_id);
             },
             MenuActionContent { icon, label: kind.label(),
                 CopyActionFeedback { state: (feedback.state)(), artifact_enhancement }

@@ -12,6 +12,7 @@ service ViewerService {
   rpc SearchViewerFiles(SearchViewerFilesRequest) returns (SearchViewerFilesResponse);
   rpc FindViewerDiff(FindViewerDiffRequest) returns (FindViewerDiffResponse);
   rpc ActivateViewerTab(ActivateViewerTabRequest) returns (ActivateViewerTabResponse);
+  rpc MoveViewerTab(MoveViewerTabRequest) returns (MoveViewerTabResponse);
   rpc CloseViewerTab(CloseViewerTabRequest) returns (CloseViewerTabResponse);
   rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
   rpc DeleteLiveViewerTab(DeleteLiveViewerTabRequest) returns (DeleteLiveViewerTabResponse);
@@ -210,6 +211,22 @@ message ActivateViewerTabRequest {
 }
 
 message ActivateViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+enum ViewerTabPlacement {
+  VIEWER_TAB_PLACEMENT_UNSPECIFIED = 0;
+  VIEWER_TAB_PLACEMENT_BEFORE = 1;
+  VIEWER_TAB_PLACEMENT_AFTER = 2;
+}
+
+message MoveViewerTabRequest {
+  uint64 tab_id = 1;
+  uint64 target_tab_id = 2;
+  ViewerTabPlacement placement = 3;
+}
+
+message MoveViewerTabResponse {
   ViewerShell shell = 1;
 }
 

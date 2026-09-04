@@ -1,6 +1,6 @@
 use gtl_models::settings::UserSettings;
 
-use crate::ports::{UserSettingsLoadError, UserSettingsStore};
+use crate::ports::{UserSettingsLoadError, UserSettingsReader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetUserSettings;
@@ -14,9 +14,9 @@ pub enum GetUserSettingsError {
 #[cqrsy::query]
 pub fn execute(
     _query: GetUserSettings,
-    settings_store: &impl UserSettingsStore,
+    settings_reader: &impl UserSettingsReader,
 ) -> Result<UserSettings, GetUserSettingsError> {
-    Ok(settings_store.load()?)
+    Ok(settings_reader.load()?)
 }
 
 #[cfg(test)]
@@ -54,17 +54,14 @@ mod tests {
     }
 
     #[test]
-    fn query_preserves_a_typed_settings_load_failure() {
+    fn query_preserves_a_typed_settings_adapter_failure() {
         let store = SequenceUserSettingsStore::new([]);
 
         let error = get_user_settings::execute(GetUserSettings, &store).unwrap_err();
 
         assert!(matches!(
             error,
-            GetUserSettingsError::Settings(UserSettingsLoadError::InvalidConfiguration {
-                path,
-                ..
-            }) if path == std::path::Path::new("<test settings sequence>")
+            GetUserSettingsError::Settings(UserSettingsLoadError::Adapter(_))
         ));
     }
 }

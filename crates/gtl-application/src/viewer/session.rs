@@ -9,7 +9,7 @@ use gtl_models::{
     recipes::RecipeBatchId,
     viewer::{
         ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTab, ViewerTabId, ViewerTabKind,
-        ViewerTabState, ViewerVersion,
+        ViewerTabPlacement, ViewerTabState, ViewerVersion,
     },
 };
 
@@ -142,6 +142,12 @@ pub enum PublishOutcome {
 pub enum CloseOutcome {
     ActiveChanged,
     ActiveUnchanged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveOutcome {
+    Moved,
+    Unchanged,
 }
 
 /// Session-owned metadata for one recipe tab.
@@ -507,6 +513,37 @@ impl ViewerSession {
         self.cache.remove(id);
         self.bump_version();
         Some(outcome)
+    }
+
+    pub(crate) fn move_tab(
+        &mut self,
+        id: ViewerTabId,
+        target_id: ViewerTabId,
+        placement: ViewerTabPlacement,
+    ) -> Option<MoveOutcome> {
+        let from = self.tabs.iter().position(|tab| tab.tab.id() == id)?;
+        let target = self.tabs.iter().position(|tab| tab.tab.id() == target_id)?;
+        if from == target {
+            return Some(MoveOutcome::Unchanged);
+        }
+
+        let target_slot = match placement {
+            ViewerTabPlacement::Before => target,
+            ViewerTabPlacement::After => target + 1,
+        };
+        let insertion_index = if from < target_slot {
+            target_slot - 1
+        } else {
+            target_slot
+        };
+        if from == insertion_index {
+            return Some(MoveOutcome::Unchanged);
+        }
+
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(insertion_index, tab);
+        self.bump_version();
+        Some(MoveOutcome::Moved)
     }
 
     #[must_use]
@@ -1247,5 +1284,63 @@ mod tests {
             .open(range_recipe("c..d"), batch_id(2), ViewerTabKind::Snapshot)
             .unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn moving_a_tab_preserves_identity_and_active_state() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let open = |session: &mut ViewerSession, range: &str, batch| {
+            let recipe = Recipe {
+                source: RecipeSource::LocalRepo(repository_root("/repo")),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Range {
+                        range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
+                        pinned: None,
+                    },
+                },
+                name: None,
+            };
+            session
+                .open(recipe, batch_id(batch), ViewerTabKind::Snapshot)
+                .unwrap()
+        };
+        let first = open(&mut session, "a..b", 1);
+        let second = open(&mut session, "c..d", 2);
+        let third = open(&mut session, "e..f", 3);
+        let fourth = open(&mut session, "g..h", 4);
+        assert!(session.activate(second));
+        let version = session.version();
+
+        assert_eq!(
+            session.move_tab(first, third, ViewerTabPlacement::After),
+            Some(MoveOutcome::Moved)
+        );
+        assert_eq!(
+            session.tabs().map(|tab| tab.tab.id()).collect::<Vec<_>>(),
+            vec![second, third, first, fourth]
+        );
+        assert_eq!(session.active(), Some(second));
+        assert!(session.version() > version);
+    }
+
+    #[test]
+    fn moving_a_tab_to_its_current_slot_is_idempotent() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let first = session
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
+            .unwrap();
+        let mut second_recipe = recipe();
+        second_recipe.name = Some(project_name("second"));
+        let second = session
+            .open(second_recipe, batch_id(2), ViewerTabKind::Snapshot)
+            .unwrap();
+        assert_ne!(first, second);
+        let version = session.version();
+
+        assert_eq!(
+            session.move_tab(first, second, ViewerTabPlacement::Before),
+            Some(MoveOutcome::Unchanged)
+        );
+        assert_eq!(session.version(), version);
     }
 }

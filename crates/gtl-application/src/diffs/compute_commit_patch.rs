@@ -13,7 +13,7 @@ use crate::{
         fetch_full_context_diff,
         view::sort_files_tree_order,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
 const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -36,7 +36,7 @@ pub enum ComputeCommitPatchError {
 #[cqrsy::query]
 pub fn execute(
     request: ComputeCommitPatch,
-    settings: &impl UserSettingsStore,
+    settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> Result<View, ComputeCommitPatchError> {
     let repo_path = request.repo_root;

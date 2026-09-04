@@ -14,14 +14,17 @@ use gtl_application::{
     ports::UserSettingsEditError,
     recipes::RecipeOp,
     settings::{
-        edit_settings::{self, EditSettingsError, FieldUpdate, ProjectSettingsUpdate},
+        ProjectSettingsUpdate, ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
+        edit_settings::{self, EditSettingsError},
         get_user_settings::{self, GetUserSettings},
         set_setting_key,
     },
     viewer::{
         self,
         ensure_view_full_context::{self, EnsureViewFullContext, EnsureViewFullContextOk},
-        find_viewer_diff, search_viewer_files, shell, work,
+        find_viewer_diff,
+        move_viewer_tab::{self, MoveViewerTabError},
+        search_viewer_files, shell, work,
     },
 };
 use gtl_models::{
@@ -33,13 +36,13 @@ use gtl_wire::{
     proto,
     v1::{self, viewer_service_server::ViewerService},
     viewer::{
-        EditSettingsRequest as ViewerEditSettingsRequest, FieldUpdate as ViewerFieldUpdate,
-        SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
-        VIEWER_COMMIT_PAGE_MAX_ENTRIES, VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES,
-        VIEWER_FILE_SEARCH_MAX_MATCHES, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffDensity,
-        ViewerDiffExclusions, ViewerDiffLayout, ViewerFeedback, ViewerHistoryCursor,
-        ViewerHistoryEntry, ViewerHistoryPage, ViewerProjectDiffExclusions, ViewerRecipeKind,
-        ViewerShell, ViewerTheme, ViewerUserSettings, ViewerViewIdentity,
+        EditSettingsRequest, FieldUpdate, SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES,
+        VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES, VIEWER_COMMIT_PAGE_MAX_ENTRIES,
+        VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES, VIEWER_FILE_SEARCH_MAX_MATCHES,
+        VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout,
+        ViewerFeedback, ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage,
+        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerShell, ViewerTheme,
+        ViewerUserSettings, ViewerViewIdentity,
     },
 };
 use prost::Message as _;
@@ -121,6 +124,18 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::ActivateViewerTabResponse {
+            shell: Some(project_shell(&self.state, None)?),
+        }))
+    }
+
+    async fn move_viewer_tab(
+        &self,
+        request: Request<v1::MoveViewerTabRequest>,
+    ) -> Result<Response<v1::MoveViewerTabResponse>, Status> {
+        let request = proto::viewer::decode_move_viewer_tab_request(request.into_inner())
+            .map_err(|_| Status::invalid_argument("move viewer tab request is invalid"))?;
+        move_viewer_tab::execute(request, &self.state.viewer).map_err(move_viewer_tab_error)?;
+        Ok(Response::new(v1::MoveViewerTabResponse {
             shell: Some(project_shell(&self.state, None)?),
         }))
     }
@@ -364,7 +379,7 @@ impl ViewerService for ViewerGrpcService {
             .map_err(|_| Status::invalid_argument("settings patch is invalid"))?;
         let loads_full_context = matches!(
             request.density,
-            ViewerFieldUpdate::Update(ViewerDiffDensity::Full)
+            FieldUpdate::Update(ViewerDiffDensity::Full)
         );
         let request = application_settings_request(request)?;
         let mut store = self.state.user_settings.clone();
@@ -498,41 +513,40 @@ impl ViewerService for ViewerGrpcService {
 }
 
 fn application_field_update<Input, Output>(
-    update: ViewerFieldUpdate<Input>,
+    update: FieldUpdate<Input>,
     map: impl FnOnce(Input) -> Output,
-) -> FieldUpdate<Output> {
+) -> UserSettingsFieldUpdate<Output> {
     match update {
-        ViewerFieldUpdate::Update(value) => FieldUpdate::Update(map(value)),
-        ViewerFieldUpdate::Clear => FieldUpdate::Clear,
-        ViewerFieldUpdate::Unchanged => FieldUpdate::Unchanged,
+        FieldUpdate::Update(value) => UserSettingsFieldUpdate::Update(map(value)),
+        FieldUpdate::Clear => UserSettingsFieldUpdate::Clear,
+        FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     }
 }
 
-fn application_settings_request(
-    request: ViewerEditSettingsRequest,
-) -> Result<edit_settings::EditSettingsRequest, Status> {
+fn application_settings_request(request: EditSettingsRequest) -> Result<UserSettingsPatch, Status> {
     let projects = match request.projects {
-        ViewerFieldUpdate::Update(projects) => {
-            let mut names = std::collections::BTreeSet::new();
+        FieldUpdate::Update(projects) => {
             let mut mapped = Vec::with_capacity(projects.len());
             for project in projects {
-                if !names.insert(project.project_name.clone()) {
-                    return Err(Status::invalid_argument(
-                        "project settings contain duplicate names",
-                    ));
-                }
                 mapped.push(ProjectSettingsUpdate {
                     name: project.project_name,
                     excluded_from_push_all: project.excluded_from_push_all,
                     diff_exclusions: project.diff_exclusions,
                 });
             }
-            FieldUpdate::Update(mapped)
+            UserSettingsFieldUpdate::Update(ProjectSettingsUpdates::try_new(mapped).map_err(
+                |error| {
+                    Status::invalid_argument(format!(
+                        "project settings contain duplicate name `{}`",
+                        error.name()
+                    ))
+                },
+            )?)
         }
-        ViewerFieldUpdate::Clear => FieldUpdate::Clear,
-        ViewerFieldUpdate::Unchanged => FieldUpdate::Unchanged,
+        FieldUpdate::Clear => UserSettingsFieldUpdate::Clear,
+        FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     };
-    Ok(edit_settings::EditSettingsRequest {
+    Ok(UserSettingsPatch {
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Light => Theme::Light,
             ViewerTheme::Dark => Theme::Dark,
@@ -564,15 +578,16 @@ fn application_settings_request(
 
 fn edit_settings_error(error: EditSettingsError) -> Status {
     match error {
-        EditSettingsError::Settings(
-            UserSettingsEditError::InvalidValueShape
-            | UserSettingsEditError::InvalidConfiguration { .. },
-        ) => Status::failed_precondition("user settings are invalid"),
-        EditSettingsError::Settings(
-            UserSettingsEditError::LockTimeout { .. }
-            | UserSettingsEditError::ConcurrentModification { .. },
-        ) => Status::aborted("user settings edit conflicted with another writer"),
-        error => unexpected(error, "edit settings"),
+        EditSettingsError::Settings(error) => match error {
+            UserSettingsEditError::InvalidConfiguration(_) => {
+                Status::failed_precondition("user settings are invalid")
+            }
+            UserSettingsEditError::Conflict(_) => {
+                Status::aborted("user settings edit conflicted with another writer")
+            }
+            UserSettingsEditError::Adapter(error) => unexpected(error, "edit settings"),
+        },
+        EditSettingsError::ViewerState(error) => unexpected(error, "edit settings"),
     }
 }
 
@@ -788,6 +803,13 @@ fn map_reserve_recipe(error: viewer::work::ReserveRecipeError, operation: &'stat
             Status::not_found("viewer tab is not available")
         }
         error => unexpected_viewer(error, operation),
+    }
+}
+
+fn move_viewer_tab_error(error: MoveViewerTabError) -> Status {
+    match error {
+        MoveViewerTabError::UnknownTab => Status::not_found("viewer tab is not available"),
+        MoveViewerTabError::State(error) => viewer_state_error(error, "move viewer tab"),
     }
 }
 

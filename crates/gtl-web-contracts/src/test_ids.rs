@@ -42,3 +42,5 @@ define_test_id!(TOAST_VIEWPORT, "toast-viewport");
 define_test_id!(VIEWER_HISTORY_OPEN, "viewer-history-open");
 define_test_id!(VIEWER_MENU_TRIGGER, "viewer-menu-trigger");
 define_test_id!(VIEWER_TAB_CLOSE, "viewer-tab-close");
+define_test_id!(VIEWER_TAB_OVERFLOW_MENU, "viewer-tab-overflow-menu");
+define_test_id!(VIEWER_TAB_OVERFLOW_TRIGGER, "viewer-tab-overflow-trigger");

@@ -250,7 +250,7 @@ async fn assert_server_owned_searches(driver: &WebDriver) -> Result<()> {
 async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
     let file_panel = support::selectors::by_test_id(driver, test_ids::CHANGED_FILES_PANEL).await?;
     let file_filter = file_panel
-        .find(By::Css("input[placeholder^='Filter files']"))
+        .find(By::Css("input[placeholder^='Filter paths']"))
         .await
         .context("find changed-file filter")?;
     file_filter
@@ -347,7 +347,9 @@ async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
     )
     .await?;
     let find_region = driver
-        .find(By::Css("[role='search'][aria-label='Find in diff']"))
+        .find(By::Css(
+            "[role='search'][aria-label='Find code in all files']",
+        ))
         .await
         .context("find diff search controls")?;
     ensure!(
@@ -355,7 +357,7 @@ async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
         "diff search did not report its server match count"
     );
     find_region
-        .find(By::Css("button[aria-label='Close find']"))
+        .find(By::Css("button[aria-label='Close search']"))
         .await?
         .click()
         .await
@@ -457,22 +459,45 @@ async fn assert_path_copy_popover(driver: &WebDriver) -> Result<()> {
         geometry.end_alignment
     );
 
+    copy_desktop_path_and_expect_popover_closed(&popover, "Copy relative path").await?;
+
     trigger
         .click()
         .await
-        .context("close the desktop path popover")?;
+        .context("reopen the desktop path popover")?;
     wait::until(
-        "closed desktop path popover",
+        "reopened desktop path popover",
         wait::ASSERTION_TIMEOUT,
-        || async { Ok((!popover.is_displayed().await?).then_some(())) },
+        || async { Ok(popover.is_displayed().await?.then_some(())) },
     )
     .await?;
+    copy_desktop_path_and_expect_popover_closed(&popover, "Copy absolute path").await?;
+
     let file = driver
         .find(By::Css(format!("{file_selector}[open]")))
         .await
         .context("keep the desktop diff file expanded after using its path menu")?;
     ensure!(file.is_displayed().await?, "desktop diff file is hidden");
     Ok(())
+}
+
+async fn copy_desktop_path_and_expect_popover_closed(
+    popover: &thirtyfour::WebElement,
+    aria_label: &str,
+) -> Result<()> {
+    popover
+        .find(By::Css(format!("button[aria-label='{aria_label}']")))
+        .await
+        .with_context(|| format!("find the desktop {aria_label} action"))?
+        .click()
+        .await
+        .with_context(|| format!("activate the desktop {aria_label} action"))?;
+    wait::until(
+        &format!("closed desktop path popover after {aria_label}"),
+        wait::ASSERTION_TIMEOUT,
+        || async { Ok((!popover.is_displayed().await?).then_some(())) },
+    )
+    .await
 }
 
 async fn wait_for_empty_workspace(driver: &thirtyfour::WebDriver) -> Result<()> {

@@ -44,7 +44,7 @@
   --radius-panel: var(--r);
   --shadow-floating: var(--elevation-floating);
   --animate-commit-popover-enter: commit-popover-enter 100ms linear;
-  --animate-popover-enter: popover-enter 150ms ease-out;
+  --animate-popover-enter: popover-enter 100ms ease-out;
   --animate-toast-enter: toast-enter 180ms ease-out;
   --animate-toast-expiry: toast-expiry 5s linear forwards;
 }
@@ -62,12 +62,12 @@
 @keyframes popover-enter {
   from {
     opacity: 0;
-    transform: translateY(-0.25rem) scale(0.965);
+    transform: translateY(-0.125rem);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 

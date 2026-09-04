@@ -1,9 +1,9 @@
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
-    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
-    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    SelectViewerCommit, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
+    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
+    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
 };
 
 use crate::shared::viewer_client::ViewerClientError;
@@ -77,6 +77,7 @@ viewer_request!(
     get_history_copy
 );
 viewer_request!(activate_tab, ViewerTabRequest, ViewerShell, activate_tab);
+viewer_request!(move_tab, MoveViewerTab, ViewerShell, move_tab);
 viewer_request!(close_tab, ViewerTabRequest, ViewerShell, close_tab);
 viewer_request!(refresh_tab, ViewerTabRequest, ViewerShell, refresh_tab);
 viewer_request!(
@@ -96,12 +97,6 @@ viewer_request!(
     ViewerTabRequest,
     ViewerShell,
     clear_commit_selection
-);
-viewer_request!(
-    set_preference,
-    SetViewerPreference,
-    ViewerShell,
-    set_preference
 );
 viewer_request!(open_diff_file, OpenViewerDiffFile, (), open_diff_file);
 viewer_query!(get_settings, ViewerUserSettings, get_settings);

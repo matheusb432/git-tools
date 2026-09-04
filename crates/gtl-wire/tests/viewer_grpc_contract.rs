@@ -5,7 +5,7 @@ use gtl_models::{
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
         RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
-        ViewerVersion,
+        ViewerTabPlacement, ViewerVersion,
     },
 };
 use gtl_wire::{
@@ -13,10 +13,11 @@ use gtl_wire::{
         ViewerCodecError, decode_edit_settings_request, decode_find_viewer_diff_request,
         decode_find_viewer_diff_response, decode_get_viewer_settings_response,
         decode_get_viewer_shell_response, decode_list_viewer_history_response,
-        decode_search_viewer_files_request, decode_search_viewer_files_response,
-        decode_stream_viewer_rows_response, encode_edit_settings_request,
-        encode_find_viewer_diff_request, encode_find_viewer_diff_response,
-        encode_get_viewer_settings_response, encode_list_viewer_history_response,
+        decode_move_viewer_tab_request, decode_search_viewer_files_request,
+        decode_search_viewer_files_response, decode_stream_viewer_rows_response,
+        encode_edit_settings_request, encode_find_viewer_diff_request,
+        encode_find_viewer_diff_response, encode_get_viewer_settings_response,
+        encode_list_viewer_history_response, encode_move_viewer_tab_request,
         encode_search_viewer_files_request, encode_search_viewer_files_response,
         encode_viewer_shell, encode_viewer_unified_row, encode_viewer_view_identity,
     },
@@ -25,7 +26,7 @@ use gtl_wire::{
         ViewerViewIdentity, stream_viewer_rows_response, viewer_unified_row,
     },
     viewer::{
-        self, EditSettingsRequest, FieldUpdate, FindViewerDiff, SearchViewerFiles,
+        self, EditSettingsRequest, FieldUpdate, FindViewerDiff, MoveViewerTab, SearchViewerFiles,
         ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffExclusions,
         ViewerDiffFileId, ViewerDiffLayout, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
         ViewerDiffSearchResult, ViewerFeedback, ViewerFileSearchResult, ViewerHistoryEntry,
@@ -279,6 +280,29 @@ fn streamed_row_codec_rejects_invalid_handwritten_span_ranges() {
 fn missing_required_shell_is_an_invalid_message() {
     assert_eq!(
         decode_get_viewer_shell_response(v1::GetViewerShellResponse { shell: None }),
+        Err(ViewerCodecError::InvalidMessage)
+    );
+}
+
+#[test]
+fn move_tab_codec_preserves_identity_and_rejects_unspecified_placement() {
+    let request = MoveViewerTab {
+        tab_id: ViewerTabId::try_new(3).unwrap(),
+        target_tab_id: ViewerTabId::try_new(7).unwrap(),
+        placement: ViewerTabPlacement::After,
+    };
+    let encoded = encode_move_viewer_tab_request(request);
+
+    assert_eq!(encoded.tab_id, 3);
+    assert_eq!(encoded.target_tab_id, 7);
+    assert_eq!(encoded.placement, v1::ViewerTabPlacement::After as i32);
+    assert_eq!(decode_move_viewer_tab_request(encoded), Ok(request));
+    assert_eq!(
+        decode_move_viewer_tab_request(v1::MoveViewerTabRequest {
+            tab_id: 3,
+            target_tab_id: 7,
+            placement: v1::ViewerTabPlacement::Unspecified as i32,
+        }),
         Err(ViewerCodecError::InvalidMessage)
     );
 }

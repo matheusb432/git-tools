@@ -27,6 +27,8 @@ impl ScrollAreaVariant {
 pub(crate) fn ScrollArea(
     #[props(default)] variant: ScrollAreaVariant,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    onmounted: Option<EventHandler<MountedEvent>>,
+    onresize: Option<EventHandler<ResizeEvent>>,
     onscroll: Option<EventHandler<ScrollEvent>>,
     children: Element,
 ) -> Element {
@@ -37,6 +39,16 @@ pub(crate) fn ScrollArea(
 
     rsx! {
         div {
+            onmounted: move |event| {
+                if let Some(onmounted) = onmounted {
+                    onmounted.call(event);
+                }
+            },
+            onresize: move |event| {
+                if let Some(onresize) = onresize {
+                    onresize.call(event);
+                }
+            },
             onscroll: move |event| {
                 if let Some(onscroll) = onscroll {
                     onscroll.call(event);

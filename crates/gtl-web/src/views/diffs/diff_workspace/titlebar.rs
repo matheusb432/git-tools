@@ -3,16 +3,19 @@ use gtl_models::git::{GitHead, GitRevision};
 use gtl_wire::viewer::ViewerAppliedExclusions;
 use lucide_dioxus::ChevronsDownUp;
 #[cfg(feature = "component-preview")]
-use lucide_dioxus::{Ellipsis, RefreshCw, Trash2};
+use lucide_dioxus::{Ellipsis, RefreshCw, Search, Trash2};
 
 #[cfg(feature = "component-preview")]
 use crate::shared::ui::{
-    IconPopover, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+    IconPopover, IconPopoverPlacement, KeyboardShortcut, MENU_ACTION_HOST_CLASSES,
+    MenuActionContent,
 };
 use crate::shared::{
     browser,
     ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant},
 };
+#[cfg(feature = "component-preview")]
+use crate::views::diffs::search_keybindings::SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING;
 
 #[component]
 pub(super) fn ViewTitlebar(
@@ -43,7 +46,10 @@ pub(super) fn ViewTitlebar(
 
 #[cfg(feature = "component-preview")]
 #[component]
-pub(super) fn PreviewViewTitlebar(#[props(default)] mobile: bool) -> Element {
+pub(super) fn PreviewViewTitlebar(
+    #[props(default)] mobile: bool,
+    onfindall: EventHandler<()>,
+) -> Element {
     let workspace = super::use_workspace_context();
     let view = workspace.view.read();
     let header_classes = if mobile {
@@ -69,9 +75,29 @@ pub(super) fn PreviewViewTitlebar(#[props(default)] mobile: bool) -> Element {
             }
             if !mobile {
                 div { class: "flex-1" }
+                FindAllFilesButton { onfindall }
             }
             PreviewLiveViewActions { mobile }
             CollapseFilesButton { preview_mobile: mobile }
+        }
+    }
+}
+
+#[cfg(feature = "component-preview")]
+#[component]
+fn FindAllFilesButton(onfindall: EventHandler<()>) -> Element {
+    rsx! {
+        Button {
+            size: ButtonSize::Small,
+            variant: ButtonVariant::Outline,
+            aria_label: "Search code in all files",
+            title: "Search code in all files",
+            onclick: move |_| onfindall.call(()),
+            span { class: "inline-flex flex-none", aria_hidden: "true",
+                Search { size: 15 }
+            }
+            span { "All files" }
+            KeyboardShortcut { keys: SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING.to_vec() }
         }
     }
 }

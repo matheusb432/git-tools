@@ -92,11 +92,11 @@ fn project_client_failure(error: &ProjectClientError, code: Code) -> Status {
 
 pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
     match error {
-        UserSettingsLoadError::InvalidConfiguration { .. } => {
+        UserSettingsLoadError::InvalidConfiguration(_) => {
             tracing::warn!(error = ?error, "user settings are invalid");
             Status::failed_precondition("user settings are invalid")
         }
-        error => unexpected(error, "load user settings"),
+        error @ UserSettingsLoadError::Adapter(_) => unexpected(error, "load user settings"),
     }
 }
 

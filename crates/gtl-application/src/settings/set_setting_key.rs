@@ -1,18 +1,15 @@
-use gtl_models::settings::{SettingKey, SettingKeyValue};
+use gtl_models::settings::SettingKeyValue;
 use thiserror::Error;
 
 use super::{UserSettingChange, setting_changes_viewer_rows};
 use crate::{
-    ports::{UserSettingsEditError, UserSettingsStore},
+    ports::{UserSettingsEditError, UserSettingsEditor},
     viewer::{ViewerState, ViewerStateError},
 };
 
 /// Reports a rejected or failed setting replacement.
 #[derive(Debug, Error)]
-#[non_exhaustive]
 pub enum SetSettingKeyError {
-    #[error("user setting `{key}` must be a string")]
-    InvalidValueShape { key: SettingKey },
     #[error(transparent)]
     Settings(#[from] UserSettingsEditError),
     #[error(transparent)]
@@ -28,18 +25,11 @@ pub enum SetSettingKeyError {
 #[cqrsy::command]
 pub fn execute(
     mutation: SettingKeyValue,
-    settings_store: &mut impl UserSettingsStore,
+    settings_editor: &mut impl UserSettingsEditor,
     viewer_state: &ViewerState,
 ) -> Result<UserSettingChange, SetSettingKeyError> {
     let key = mutation.key();
-    let outcome = settings_store
-        .set_value(mutation)
-        .map_err(|error| match error {
-            UserSettingsEditError::InvalidValueShape => {
-                SetSettingKeyError::InvalidValueShape { key }
-            }
-            error => SetSettingKeyError::Settings(error),
-        })?;
+    let outcome = settings_editor.edit(mutation.into())?;
     if outcome.changed() {
         viewer_state.mark_shell_changed()?;
     }
@@ -52,45 +42,15 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        settings::{SettingKey, SettingKeyValue, UserSettings},
+        settings::SettingKeyValue,
         viewer::{DiffDensity, DiffLayout, Theme, ViewerVersion},
     };
 
-    use super::SetSettingKeyError;
     use crate::{
-        ports::{
-            UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError,
-            UserSettingsStore,
-        },
+        ports::UserSettingsEditOutcome,
         settings::{set_setting_key, test_support::FixedUserSettingsEditStore},
         viewer::ViewerState,
     };
-
-    #[derive(Clone)]
-    struct InvalidShapeSettingsStore;
-
-    impl UserSettingsStore for InvalidShapeSettingsStore {
-        fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
-            Err(UserSettingsLoadError::InvalidConfiguration {
-                path: "<unused>".into(),
-                reason: "set_setting_key does not load settings".into(),
-            })
-        }
-
-        fn set_value(
-            &mut self,
-            _mutation: SettingKeyValue,
-        ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-            Err(UserSettingsEditError::InvalidValueShape)
-        }
-
-        fn remove_key(
-            &mut self,
-            _key: SettingKey,
-        ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-            Err(UserSettingsEditError::InvalidValueShape)
-        }
-    }
 
     fn execute_with_outcome(
         mutation: SettingKeyValue,
@@ -130,22 +90,5 @@ mod tests {
             assert_eq!(response.viewer_rows_changed, viewer_rows_changed);
             assert_eq!(actual_version, version);
         }
-    }
-
-    #[test]
-    fn execute_adds_the_setting_key_to_an_invalid_shape_error() {
-        let viewer = ViewerState::new();
-        let error = set_setting_key::execute(
-            SettingKeyValue::Theme(Theme::Light),
-            &mut InvalidShapeSettingsStore,
-            &viewer,
-        )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            SetSettingKeyError::InvalidValueShape { key } if key == SettingKey::Theme
-        ));
-        assert_eq!(viewer.version().unwrap(), ViewerVersion::default());
     }
 }

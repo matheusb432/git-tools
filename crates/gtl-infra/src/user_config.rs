@@ -1,27 +1,25 @@
 //! TOML-backed user settings used by the server process root.
 
-mod string_editor;
+mod document;
+mod file_editor;
 
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use gtl_application::{
     ports::{
-        UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+        UserSettingsConfigurationError, UserSettingsEditError, UserSettingsEditOutcome,
+        UserSettingsEditor, UserSettingsLoadError, UserSettingsReader,
     },
-    settings::edit_settings::{EditSettingsRequest, FieldUpdate},
+    settings::UserSettingsPatch,
 };
 use gtl_models::{
     diffs::DiffExclusions,
-    paths::ProjectName,
     settings::{PushAllExclusions, UserSettings},
-    viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
+    viewer::RenderOptions,
 };
-use gtl_wire::settings::{ProjectSettingsDocument, RawSettingValue, UserSettingsDocument};
-use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
+
+use self::document::UserSettingsDocument;
 
 fn default_settings() -> UserSettings {
     UserSettings::new(
@@ -33,176 +31,13 @@ fn default_settings() -> UserSettings {
     )
 }
 
-fn invalid_configuration(path: &Path, reason: impl Into<String>) -> UserSettingsLoadError {
-    UserSettingsLoadError::InvalidConfiguration {
-        path: path.to_path_buf(),
-        reason: reason.into(),
-    }
-}
-
-fn optional_string(
+fn settings_document(
     path: &Path,
-    field: &str,
-    value: Option<RawSettingValue>,
-) -> Result<Option<String>, UserSettingsLoadError> {
-    value
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| invalid_configuration(path, format!("`{field}` must be a string")))
-        })
-        .transpose()
-}
-
-fn optional_bool(
-    path: &Path,
-    field: &str,
-    value: Option<RawSettingValue>,
-) -> Result<Option<bool>, UserSettingsLoadError> {
-    value
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| invalid_configuration(path, format!("`{field}` must be a boolean")))
-        })
-        .transpose()
-}
-
-fn excluded_extensions(
-    path: &Path,
-    field: &str,
-    value: Option<RawSettingValue>,
-) -> Result<Option<Vec<String>>, UserSettingsLoadError> {
-    value
-        .map(|value| string_array(path, field, value))
-        .transpose()
-}
-
-fn string_array(
-    path: &Path,
-    field: &str,
-    value: RawSettingValue,
-) -> Result<Vec<String>, UserSettingsLoadError> {
-    let RawSettingValue::Array(values) = value else {
-        return Err(invalid_configuration(
-            path,
-            format!("`{field}` must be an array of strings"),
-        ));
-    };
-    values
-        .into_iter()
-        .map(|value| {
-            value.as_str().map(str::to_owned).ok_or_else(|| {
-                invalid_configuration(path, format!("`{field}` must contain only strings"))
-            })
-        })
-        .collect()
-}
-
-fn project_settings(
-    path: &Path,
-    projects: Vec<ProjectSettingsDocument>,
-) -> Result<(BTreeMap<ProjectName, Vec<String>>, PushAllExclusions), UserSettingsLoadError> {
-    let mut diff_exclusions = BTreeMap::new();
-    let mut push_all_exclusions = Vec::new();
-    let mut project_names = std::collections::BTreeSet::new();
-
-    for (index, project) in projects.into_iter().enumerate() {
-        let name_field = format!("projects[{index}].name");
-        let name = optional_string(path, &name_field, project.name)?
-            .ok_or_else(|| invalid_configuration(path, format!("`{name_field}` is required")))?;
-        let name = ProjectName::try_new(name).map_err(|error| {
-            invalid_configuration(path, format!("`{name_field}` is invalid: {error}"))
-        })?;
-        if !project_names.insert(name.clone()) {
-            return Err(invalid_configuration(
-                path,
-                format!("`projects` contains duplicate project name `{name}`"),
-            ));
-        }
-
-        let diff_field = format!("projects[{index}].diff.exclude");
-        if let Some(exclusions) = excluded_extensions(
-            path,
-            &diff_field,
-            project.diff.and_then(|diff| diff.exclude),
-        )? {
-            diff_exclusions.insert(name.clone(), exclusions);
-        }
-        let push_field = format!("projects[{index}].excluded_from_push_all");
-        if optional_bool(path, &push_field, project.excluded_from_push_all)?.unwrap_or(false) {
-            push_all_exclusions.push(name);
-        }
-    }
-
-    Ok((diff_exclusions, PushAllExclusions::new(push_all_exclusions)))
-}
-
-fn parse_settings(path: &Path, raw: &str) -> Result<UserSettings, UserSettingsLoadError> {
-    let document = toml::from_str::<UserSettingsDocument>(raw)
-        .map_err(|error| invalid_configuration(path, error.to_string()))?;
-    let theme = optional_string(path, "theme", document.theme)?
-        .map(|value| {
-            value
-                .parse::<Theme>()
-                .map_err(|error| invalid_configuration(path, error.to_string()))
-        })
-        .transpose()?;
-    let layout = optional_string(path, "layout", document.layout)?
-        .map(|value| {
-            value
-                .parse::<DiffLayout>()
-                .map_err(|error| invalid_configuration(path, error.to_string()))
-        })
-        .transpose()?
-        .unwrap_or(DiffLayout::Unified);
-    let density = optional_string(path, "density", document.density)?
-        .map(|value| {
-            value
-                .parse::<DiffDensity>()
-                .map_err(|error| invalid_configuration(path, error.to_string()))
-        })
-        .transpose()?
-        .unwrap_or(DiffDensity::Compact);
-    let push_confirmation_required = optional_bool(
-        path,
-        "push.confirm",
-        document.push.and_then(|push| push.confirm),
-    )?
-    .unwrap_or(UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT);
-    let diff_exclusions_default = excluded_extensions(
-        path,
-        "diff.exclude",
-        document.diff.and_then(|diff| diff.exclude),
-    )?;
-    let (diff_exclusions_projects, push_all_exclusions) =
-        project_settings(path, document.projects)?;
-    let diff_exclusions = DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default);
-
-    Ok(UserSettings::new(
-        theme,
-        RenderOptions::new(layout, density),
-        push_confirmation_required,
-        diff_exclusions,
-        push_all_exclusions,
-    ))
-}
-
-pub(super) fn validate_raw_for_edit(path: &Path, raw: &str) -> Result<(), UserSettingsEditError> {
-    parse_settings(path, raw)
-        .map(|_| ())
-        .map_err(|error| match error {
-            UserSettingsLoadError::InvalidConfiguration { path, reason } => {
-                UserSettingsEditError::InvalidConfiguration { path, reason }
-            }
-            UserSettingsLoadError::Read { source, .. } => UserSettingsEditError::Unexpected(
-                anyhow::Error::new(source).context("validate user settings before editing"),
-            ),
-            error => UserSettingsEditError::Unexpected(
-                anyhow::Error::new(error).context("validate user settings before editing"),
-            ),
-        })
+    bytes: Vec<u8>,
+) -> Result<UserSettingsDocument, UserSettingsConfigurationError> {
+    UserSettingsDocument::parse(bytes).map_err(|source| {
+        UserSettingsConfigurationError::new(path.to_path_buf(), anyhow::Error::new(source))
+    })
 }
 
 fn load_from(path: Option<&Path>) -> Result<UserSettings, UserSettingsLoadError> {
@@ -210,16 +45,13 @@ fn load_from(path: Option<&Path>) -> Result<UserSettings, UserSettingsLoadError>
         return Ok(default_settings());
     };
     match std::fs::read(path) {
-        Ok(bytes) => {
-            let raw = String::from_utf8(bytes)
-                .map_err(|error| invalid_configuration(path, error.to_string()))?;
-            parse_settings(path, &raw)
-        }
+        Ok(bytes) => settings_document(path, bytes)
+            .map(UserSettingsDocument::into_settings)
+            .map_err(UserSettingsLoadError::from),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_settings()),
-        Err(source) => Err(UserSettingsLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        }),
+        Err(error) => Err(anyhow::Error::new(error)
+            .context(format!("read user settings {}", path.display()))
+            .into()),
     }
 }
 
@@ -255,116 +87,18 @@ impl TomlSettingsStore {
     }
 }
 
-impl UserSettingsStore for TomlSettingsStore {
+impl UserSettingsReader for TomlSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
         load_from(self.path.as_deref())
     }
-
-    fn set_value(
-        &mut self,
-        mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-        let key = mutation.key();
-        let value_new = mutation.value();
-        string_editor::edit(
-            self.required_path()?,
-            key.as_str(),
-            string_editor::StringEdit::Set(&value_new),
-        )
-        .map(Into::into)
-    }
-
-    fn remove_key(
-        &mut self,
-        key: gtl_models::settings::SettingKey,
-    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-        string_editor::edit(
-            self.required_path()?,
-            key.as_str(),
-            string_editor::StringEdit::Remove,
-        )
-        .map(Into::into)
-    }
-
-    fn edit_settings(
-        &mut self,
-        request: EditSettingsRequest,
-    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-        string_editor::edit_document(self.required_path()?, move |document| {
-            apply_settings_patch(document, request);
-            Ok(())
-        })
-    }
 }
 
-fn apply_scalar<T: ToString>(document: &mut DocumentMut, key: &str, update: FieldUpdate<T>) {
-    match update {
-        FieldUpdate::Update(value) => document[key] = toml_edit::value(value.to_string()),
-        FieldUpdate::Clear => {
-            document.remove(key);
-        }
-        FieldUpdate::Unchanged => {}
-    }
-}
-
-fn apply_settings_patch(document: &mut DocumentMut, request: EditSettingsRequest) {
-    apply_scalar(document, "theme", request.theme);
-    apply_scalar(document, "layout", request.layout);
-    apply_scalar(document, "density", request.density);
-    match request.push_confirmation_required {
-        FieldUpdate::Update(value) => {
-            if !document.contains_key("push") {
-                document["push"] = Item::Table(Table::new());
-            }
-            document["push"]["confirm"] = toml_edit::value(value);
-        }
-        FieldUpdate::Clear => {
-            if let Some(push) = document.get_mut("push").and_then(Item::as_table_mut) {
-                push.remove("confirm");
-            }
-        }
-        FieldUpdate::Unchanged => {}
-    }
-    match request.default_diff_exclusions {
-        FieldUpdate::Update(extensions) => {
-            if !document.contains_key("diff") {
-                document["diff"] = Item::Table(Table::new());
-            }
-            let mut values = Array::new();
-            for extension in extensions.extensions() {
-                values.push(extension.as_str());
-            }
-            document["diff"]["exclude"] = Item::Value(Value::Array(values));
-        }
-        FieldUpdate::Clear => {
-            if let Some(diff) = document.get_mut("diff").and_then(Item::as_table_mut) {
-                diff.remove("exclude");
-            }
-        }
-        FieldUpdate::Unchanged => {}
-    }
-    match request.projects {
-        FieldUpdate::Update(projects) => {
-            let mut tables = ArrayOfTables::new();
-            for project in projects {
-                let mut table = Table::new();
-                table["name"] = toml_edit::value(project.name.to_string());
-                table["excluded_from_push_all"] = toml_edit::value(project.excluded_from_push_all);
-                let mut diff = Table::new();
-                let mut values = Array::new();
-                for extension in project.diff_exclusions.extensions() {
-                    values.push(extension.as_str());
-                }
-                diff["exclude"] = Item::Value(Value::Array(values));
-                table["diff"] = Item::Table(diff);
-                tables.push(table);
-            }
-            document["projects"] = Item::ArrayOfTables(tables);
-        }
-        FieldUpdate::Clear => {
-            document.remove("projects");
-        }
-        FieldUpdate::Unchanged => {}
+impl UserSettingsEditor for TomlSettingsStore {
+    fn edit(
+        &mut self,
+        patch: UserSettingsPatch,
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
+        file_editor::edit(self.required_path()?, patch)
     }
 }
 
@@ -396,11 +130,24 @@ fn config_path() -> Option<PathBuf> {
 mod tests {
     use std::io::Write;
 
-    use gtl_application::settings::{remove_setting_key, set_setting_key};
-    use gtl_models::paths::RepositoryRelativePath;
+    use gtl_application::settings::{
+        ProjectSettingsUpdate, ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
+        remove_setting_key, set_setting_key,
+    };
+    use gtl_models::{
+        paths::{ProjectName, RepositoryRelativePath},
+        viewer::{DiffDensity, DiffLayout, Theme},
+    };
     use tempfile::NamedTempFile;
 
     use super::*;
+
+    fn parse_settings(
+        path: &Path,
+        raw: &str,
+    ) -> Result<UserSettings, UserSettingsConfigurationError> {
+        settings_document(path, raw.as_bytes().to_vec()).map(UserSettingsDocument::into_settings)
+    }
 
     #[test]
     fn load_from_reads_theme_from_file() {
@@ -433,7 +180,7 @@ mod tests {
 
         assert!(matches!(
             load_from(Some(directory.path())),
-            Err(UserSettingsLoadError::Read { path, .. }) if path == directory.path()
+            Err(UserSettingsLoadError::Adapter(_))
         ));
     }
 
@@ -453,7 +200,7 @@ mod tests {
             std::fs::write(file.path(), raw).unwrap();
             assert!(matches!(
                 load_from(Some(file.path())),
-                Err(UserSettingsLoadError::InvalidConfiguration { .. })
+                Err(UserSettingsLoadError::InvalidConfiguration(_))
             ));
         }
     }
@@ -549,8 +296,8 @@ excluded_from_push_all = true
 
         assert!(matches!(
             load_from(Some(file.path())),
-            Err(UserSettingsLoadError::InvalidConfiguration { path, .. })
-                if path == file.path()
+            Err(UserSettingsLoadError::InvalidConfiguration(configuration))
+                if configuration.path() == file.path()
         ));
     }
 
@@ -634,34 +381,36 @@ excluded_from_push_all = true
 
     #[test]
     fn batch_edit_applies_every_field_atomically_and_clear_restores_defaults() {
-        use gtl_application::settings::edit_settings::{
-            EditSettingsRequest, FieldUpdate, ProjectSettingsUpdate,
-        };
         use gtl_models::diffs::ExcludedExtensions;
 
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
-        let request = EditSettingsRequest {
-            theme: FieldUpdate::Clear,
-            layout: FieldUpdate::Update(DiffLayout::Split),
-            density: FieldUpdate::Update(DiffDensity::Full),
-            push_confirmation_required: FieldUpdate::Update(false),
-            default_diff_exclusions: FieldUpdate::Update(ExcludedExtensions::new([".MD"])),
-            projects: FieldUpdate::Update(vec![ProjectSettingsUpdate {
-                name: ProjectName::try_from("git-tools").unwrap(),
-                excluded_from_push_all: true,
-                diff_exclusions: ExcludedExtensions::new(["lock"]),
-            }]),
+        let settings_patch = UserSettingsPatch {
+            theme: UserSettingsFieldUpdate::Clear,
+            layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
+            density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
+            push_confirmation_required: UserSettingsFieldUpdate::Update(false),
+            default_diff_exclusions: UserSettingsFieldUpdate::Update(ExcludedExtensions::new([
+                ".MD",
+            ])),
+            projects: UserSettingsFieldUpdate::Update(
+                ProjectSettingsUpdates::try_new([ProjectSettingsUpdate {
+                    name: ProjectName::try_from("git-tools").unwrap(),
+                    excluded_from_push_all: true,
+                    diff_exclusions: ExcludedExtensions::new(["lock"]),
+                }])
+                .unwrap(),
+            ),
         };
 
         assert_eq!(
-            store.edit_settings(request.clone()).unwrap(),
+            store.edit(settings_patch.clone()).unwrap(),
             UserSettingsEditOutcome::Changed
         );
         assert_eq!(
-            store.edit_settings(request).unwrap(),
+            store.edit(settings_patch).unwrap(),
             UserSettingsEditOutcome::Unchanged
         );
         let settings = store.load().unwrap();
@@ -700,8 +449,9 @@ excluded_from_push_all = true
 
         assert!(matches!(
             error,
-            remove_setting_key::RemoveSettingKeyError::InvalidValueShape { key }
-                if key == gtl_models::settings::SettingKey::Layout
+            remove_setting_key::RemoveSettingKeyError::Settings(
+                UserSettingsEditError::InvalidConfiguration(configuration)
+            ) if configuration.path() == path
         ));
         assert_eq!(std::fs::read(path).unwrap(), raw);
     }
@@ -724,8 +474,8 @@ excluded_from_push_all = true
         assert!(matches!(
             error,
             set_setting_key::SetSettingKeyError::Settings(
-                UserSettingsEditError::InvalidConfiguration { path: error_path, .. }
-            ) if error_path == path
+                UserSettingsEditError::InvalidConfiguration(configuration)
+            ) if configuration.path() == path
         ));
         assert_eq!(std::fs::read(path).unwrap(), raw);
     }

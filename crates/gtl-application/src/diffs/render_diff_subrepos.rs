@@ -17,7 +17,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        UserSettingsLoadError, UserSettingsStore,
+        UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -62,7 +62,7 @@ pub enum RenderDiffSubreposError {
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiffSubrepos,
-    app_settings: &impl UserSettingsStore,
+    app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,

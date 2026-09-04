@@ -3,16 +3,13 @@ use thiserror::Error;
 
 use super::{UserSettingChange, setting_changes_viewer_rows};
 use crate::{
-    ports::{UserSettingsEditError, UserSettingsStore},
+    ports::{UserSettingsEditError, UserSettingsEditor},
     viewer::{ViewerState, ViewerStateError},
 };
 
 /// Reports a rejected or failed setting removal.
 #[derive(Debug, Error)]
-#[non_exhaustive]
 pub enum RemoveSettingKeyError {
-    #[error("user setting `{key}` must be a string")]
-    InvalidValueShape { key: SettingKey },
     #[error(transparent)]
     Settings(#[from] UserSettingsEditError),
     #[error(transparent)]
@@ -28,17 +25,10 @@ pub enum RemoveSettingKeyError {
 #[cqrsy::command]
 pub fn execute(
     key: SettingKey,
-    settings_store: &mut impl UserSettingsStore,
+    settings_editor: &mut impl UserSettingsEditor,
     viewer_state: &ViewerState,
 ) -> Result<UserSettingChange, RemoveSettingKeyError> {
-    let outcome = settings_store
-        .remove_key(key)
-        .map_err(|error| match error {
-            UserSettingsEditError::InvalidValueShape => {
-                RemoveSettingKeyError::InvalidValueShape { key }
-            }
-            error => RemoveSettingKeyError::Settings(error),
-        })?;
+    let outcome = settings_editor.edit(super::UserSettingsPatch::clear(key))?;
     if outcome.changed() {
         viewer_state.mark_shell_changed()?;
     }

@@ -14,7 +14,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, HtmlRenderer,
-        PlacedArtifact, UserSettingsLoadError, UserSettingsStore,
+        PlacedArtifact, UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -118,7 +118,7 @@ fn resolved_range(
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiff,
-    app_settings: &impl UserSettingsStore,
+    app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,

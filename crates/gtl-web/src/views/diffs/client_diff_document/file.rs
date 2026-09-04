@@ -3,7 +3,7 @@ mod rows;
 
 use dioxus::prelude::*;
 use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath, viewer::ViewerTabId};
-use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
 use crate::{
@@ -18,6 +18,7 @@ pub(super) fn DiffFileCard(
     density: ViewerDiffDensity,
     folded: ReadSignal<Option<bool>>,
     flashing_file: ReadSignal<Option<String>>,
+    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<()>,
     retry_allowed: bool,
@@ -69,13 +70,14 @@ pub(super) fn DiffFileCard(
             "data-gtl-absolute-path": artifact_absolute_path,
             "data-gtl-comment-leader": comment_leader,
             "data-gtl-initial-open": artifact_initial_open,
-            class: "group/file mb-2.5 rounded-panel border border-line bg-surface [&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 print:break-inside-avoid print:[&[hidden]]:block!",
+            class: "group/file border-b border-line-2 bg-bg print:break-inside-avoid print:[&[hidden]]:block!",
             class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
             DiffFileHeader {
                 summary,
                 open,
                 copy_popover_id,
+                onfind,
                 onopen,
                 artifact_enhancement,
             }
@@ -97,30 +99,47 @@ fn DiffFileHeader(
     summary: ReadSignal<gtl_wire::viewer::ViewerFileSummary>,
     mut open: Signal<bool>,
     copy_popover_id: String,
+    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
     let file_summary = summary.read();
-    let background_classes = file_header_background(file_summary.status);
+    let status_rail_classes = diff_file_status_rail_classes(file_summary.status);
     rsx! {
         summary {
-            class: "sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line px-2.5 py-2 hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]",
-            class: "{background_classes}",
+            class: "relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-open/file:border-b [&::-webkit-details-marker]:hidden mobile:min-h-11 mobile:gap-1.5 mobile:py-1.5 mobile:pr-2 mobile:pl-4 print:static print:bg-[#f2f2f2]",
             onclick: move |event| {
                 event.prevent_default();
                 open.toggle();
             },
+            span {
+                class: "pointer-events-none absolute inset-y-0 left-0 w-0.5 {status_rail_classes} print:hidden",
+                aria_hidden: "true",
+            }
             DiffFileCaret {}
-            DiffFilePath { path: file_summary.path.to_string_lossy().into_owned() }
             DiffFileStatusBadge { status: file_summary.status }
+            DiffFilePath { path: file_summary.path.to_string_lossy().into_owned() }
+            DiffLineStats { added: file_summary.added, removed: file_summary.removed }
+            span {
+                class: "h-5 w-px flex-none bg-line mobile:hidden",
+                aria_hidden: "true",
+            }
             DiffFileActions {
                 summary,
                 copy_popover_id,
+                onfind,
                 onopen,
                 artifact_enhancement,
             }
-            DiffLineStats { added: file_summary.added, removed: file_summary.removed }
         }
+    }
+}
+
+const fn diff_file_status_rail_classes(status: ViewerFileStatus) -> &'static str {
+    match status {
+        ViewerFileStatus::Added => "bg-add",
+        ViewerFileStatus::Deleted => "bg-del",
+        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "bg-acc",
     }
 }
 
@@ -139,31 +158,30 @@ fn copy_comment_leader(path: &RepositoryRelativePath) -> &'static str {
     }
 }
 
-const fn file_header_background(status: gtl_wire::viewer::ViewerFileStatus) -> &'static str {
-    use gtl_wire::viewer::ViewerFileStatus;
-
-    match status {
-        ViewerFileStatus::Added => "bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))]",
-        ViewerFileStatus::Deleted => "bg-[color-mix(in_srgb,var(--del-bg)_34%,var(--surface-2))]",
-        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "bg-surface-2",
-    }
-}
-
 #[component]
 fn DiffFileCaret() -> Element {
     rsx! {
         span {
-            class: "size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90",
+            class: "flex size-5 flex-none items-center justify-center text-base leading-none text-ink-3 transition-transform group-open/file:rotate-90 motion-reduce:transition-none",
             aria_hidden: "true",
+            "›"
         }
     }
 }
 
 #[component]
 fn DiffFilePath(path: String) -> Element {
+    let (directory, file_name) = path
+        .rsplit_once('/')
+        .map_or((None, path.as_str()), |(directory, file_name)| {
+            (Some(directory), file_name)
+        });
     rsx! {
-        span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink",
-            "{path}"
+        span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+            if let Some(directory) = directory {
+                span { class: "text-ink-3", "{directory}/" }
+            }
+            span { class: "font-semibold text-ink", "{file_name}" }
         }
     }
 }
@@ -171,9 +189,8 @@ fn DiffFilePath(path: String) -> Element {
 #[component]
 fn DiffLineStats(added: DiffLineCount, removed: DiffLineCount) -> Element {
     rsx! {
-        span { class: "flex-none text-sm",
+        span { class: "flex flex-none items-center gap-1.5 text-xs font-medium tabular-nums",
             DiffLineChangeText { kind: DiffLineChangeKind::Added, count: added.value() }
-            " "
             DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: removed.value() }
         }
     }
@@ -292,6 +309,10 @@ mod tests {
         assert!(artifact.contains(r#"data-gtl-absolute-path="/repo/scripts/run.SH""#));
         assert!(artifact.contains("data-gtl-comment-leader=\"#\""));
         assert!(artifact.contains(r#"data-gtl-initial-open="false""#));
+        assert!(artifact.contains("group/file border-b border-line-2 bg-bg"));
+        assert!(artifact.contains("relative sticky top-0 z-10"));
+        assert!(artifact.contains("absolute inset-y-0 left-0 w-0.5 bg-acc"));
+        assert!(!artifact.contains("mb-5 rounded-panel"));
         assert_artifact_copy_menu(&artifact);
 
         let other_artifact = render_file(test_file()?, Some(viewer_tab_id(8)?));
@@ -309,6 +330,26 @@ mod tests {
         assert!(!desktop.contains("data-gtl-file="));
         assert!(!desktop.contains("data-gtl-copy="));
         Ok(())
+    }
+
+    #[test]
+    fn file_status_rail_uses_the_file_status_tone() {
+        assert_eq!(
+            diff_file_status_rail_classes(ViewerFileStatus::Added),
+            "bg-add"
+        );
+        assert_eq!(
+            diff_file_status_rail_classes(ViewerFileStatus::Deleted),
+            "bg-del"
+        );
+        assert_eq!(
+            diff_file_status_rail_classes(ViewerFileStatus::Renamed),
+            "bg-acc"
+        );
+        assert_eq!(
+            diff_file_status_rail_classes(ViewerFileStatus::Modified),
+            "bg-acc"
+        );
     }
 
     fn assert_artifact_copy_menu(artifact: &str) {

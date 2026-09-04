@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use super::ViewerTabId;
 
 /// Describes whether a viewer tab can currently provide rendered diff content.
@@ -18,6 +20,16 @@ pub enum ViewerTabKind {
     Snapshot,
     /// Represents a view regenerated from a source recipe.
     Live,
+}
+
+/// Places a moved viewer tab relative to another tab with stable identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerTabPlacement {
+    /// Places the moved tab immediately before the target tab.
+    Before,
+    /// Places the moved tab immediately after the target tab.
+    After,
 }
 
 /// Holds one tab-strip entry whose identity and rendering state are authoritative.

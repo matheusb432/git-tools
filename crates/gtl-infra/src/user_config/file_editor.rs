@@ -7,34 +7,16 @@ use std::{
 };
 
 use anyhow::Context as _;
-use gtl_application::ports::{UserSettingsEditError, UserSettingsEditOutcome};
-use toml_edit::{DocumentMut, Item, Value};
+use gtl_application::{
+    ports::{UserSettingsEditConflict, UserSettingsEditError, UserSettingsEditOutcome},
+    settings::UserSettingsPatch,
+};
+
+use super::{document::UserSettingsDocumentEdit, settings_document};
 
 const USER_SETTINGS_LOCK_WAIT_MAX: Duration = Duration::from_secs(5);
 const USER_SETTINGS_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const USER_SETTINGS_SYMBOLIC_LINK_DEPTH_MAX: usize = 40;
-
-#[derive(Debug, Clone, Copy)]
-pub(super) enum StringEdit<'value> {
-    Set(&'value str),
-    Remove,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(super) struct StringEditOutcome {
-    pub(super) value_old: Option<String>,
-    pub(super) document_changed: bool,
-}
-
-impl From<StringEditOutcome> for UserSettingsEditOutcome {
-    fn from(outcome: StringEditOutcome) -> Self {
-        if outcome.document_changed {
-            Self::Changed
-        } else {
-            Self::Unchanged
-        }
-    }
-}
 
 fn lock_path(settings_path: &Path) -> PathBuf {
     let mut value = OsString::from(settings_path.as_os_str());
@@ -72,21 +54,22 @@ impl SettingsEditLease {
 fn lock_wait_remaining(deadline: Instant, path: &Path) -> Result<Duration, UserSettingsEditError> {
     let remaining = deadline.saturating_duration_since(Instant::now());
     if remaining.is_zero() {
-        return Err(UserSettingsEditError::LockTimeout {
+        return Err(UserSettingsEditConflict::LockTimeout {
             path: path.to_path_buf(),
             wait_seconds: USER_SETTINGS_LOCK_WAIT_MAX.as_secs(),
-        });
+        }
+        .into());
     }
     Ok(remaining)
 }
 
-fn try_lock(lock: &File, path: &Path) -> Result<bool, UserSettingsEditError> {
+fn try_lock(lock: &File, path: &Path) -> anyhow::Result<bool> {
     match lock.try_lock() {
         Ok(()) => Ok(true),
         Err(TryLockError::WouldBlock) => Ok(false),
-        Err(TryLockError::Error(error)) => Err(UserSettingsEditError::Unexpected(
-            anyhow::Error::new(error).context(format!("lock user settings {}", path.display())),
-        )),
+        Err(TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("lock user settings {}", path.display()))
+        }
     }
 }
 
@@ -117,31 +100,6 @@ fn lock_identity_path(settings_path: &Path) -> anyhow::Result<PathBuf> {
 
 fn acquire_lock(settings_path: &Path) -> Result<SettingsEditLease, UserSettingsEditError> {
     SettingsEditLease::acquire(&lock_identity_path(settings_path)?)
-}
-
-fn read_document(path: &Path) -> Result<(Vec<u8>, String, DocumentMut), UserSettingsEditError> {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => {
-            return Err(UserSettingsEditError::Unexpected(
-                anyhow::Error::new(error).context(format!("read user settings {}", path.display())),
-            ));
-        }
-    };
-    let raw = String::from_utf8(bytes.clone()).map_err(|error| {
-        UserSettingsEditError::InvalidConfiguration {
-            path: path.to_path_buf(),
-            reason: error.to_string(),
-        }
-    })?;
-    let document = raw.parse::<DocumentMut>().map_err(|error| {
-        UserSettingsEditError::InvalidConfiguration {
-            path: path.to_path_buf(),
-            reason: error.to_string(),
-        }
-    })?;
-    Ok((bytes, raw, document))
 }
 
 fn replacement_path(path: &Path) -> anyhow::Result<PathBuf> {
@@ -183,42 +141,18 @@ fn replacement_metadata_error(path: &Path, error: std::io::Error) -> anyhow::Err
     ))
 }
 
-fn value_old(document: &DocumentMut, key: &str) -> Result<Option<String>, UserSettingsEditError> {
-    match document.get(key) {
-        None | Some(Item::None) => Ok(None),
-        Some(Item::Value(value)) => value
-            .as_str()
-            .map(str::to_owned)
-            .map(Some)
-            .ok_or(UserSettingsEditError::InvalidValueShape),
-        Some(_) => Err(UserSettingsEditError::InvalidValueShape),
-    }
-}
-
-fn set_string(document: &mut DocumentMut, key: &str, value_new: &str) {
-    if let Some(Item::Value(value_old)) = document.get_mut(key) {
-        let decor = value_old.decor().clone();
-        let mut replacement = Value::from(value_new);
-        *replacement.decor_mut() = decor;
-        *value_old = replacement;
-    } else {
-        document[key] = toml_edit::value(value_new);
-    }
-}
-
 pub(super) fn edit(
-    path: &Path,
-    key: &str,
-    edit: StringEdit<'_>,
-) -> Result<StringEditOutcome, UserSettingsEditError> {
-    let lock_parent = path
+    settings_path: &Path,
+    settings_patch: UserSettingsPatch,
+) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
+    let lock_parent = settings_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(lock_parent)
         .with_context(|| format!("create user-settings directory {}", lock_parent.display()))?;
 
-    let replacement_path = replacement_path(path)?;
+    let replacement_path = replacement_path(settings_path)?;
     let replacement_parent = replacement_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -230,42 +164,23 @@ pub(super) fn edit(
         )
     })?;
     let _lease = acquire_lock(&replacement_path)?;
-    let (baseline_bytes, raw, mut document) = read_document(&replacement_path)?;
-    let value_old = value_old(&document, key)?;
-    super::validate_raw_for_edit(&replacement_path, &raw)?;
-
-    let document_changed = match edit {
-        StringEdit::Set(value_new) if value_old.as_deref() == Some(value_new) => false,
-        StringEdit::Set(value_new) => {
-            set_string(&mut document, key, value_new);
-            true
-        }
-        StringEdit::Remove if value_old.is_none() => false,
-        StringEdit::Remove => {
-            document.remove(key);
-            true
-        }
+    let baseline_bytes = read_document_bytes(&replacement_path)?;
+    let document = settings_document(&replacement_path, baseline_bytes.clone())?;
+    let UserSettingsDocumentEdit::Changed(raw_new) = document.apply(settings_patch) else {
+        return Ok(UserSettingsEditOutcome::Unchanged);
     };
-
-    if !document_changed {
-        return Ok(StringEditOutcome {
-            value_old,
-            document_changed,
-        });
-    }
 
     #[cfg(test)]
     wait_before_persist_for_test(&replacement_path);
 
     let current_bytes = read_document_bytes(&replacement_path)?;
     if current_bytes != baseline_bytes {
-        return Err(UserSettingsEditError::ConcurrentModification {
+        return Err(UserSettingsEditConflict::ConcurrentModification {
             path: replacement_path,
-        });
+        }
+        .into());
     }
 
-    let raw_new = document.to_string();
-    super::validate_raw_for_edit(&replacement_path, &raw_new)?;
     let mut temporary = tempfile::NamedTempFile::new_in(replacement_parent).with_context(|| {
         format!(
             "create temporary settings file in {}",
@@ -295,66 +210,6 @@ pub(super) fn edit(
         .map_err(|error| error.error)
         .with_context(|| format!("replace user settings {}", replacement_path.display()))?;
 
-    Ok(StringEditOutcome {
-        value_old,
-        document_changed,
-    })
-}
-
-pub(super) fn edit_document(
-    path: &Path,
-    apply: impl FnOnce(&mut DocumentMut) -> Result<(), UserSettingsEditError>,
-) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-    let lock_parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(lock_parent)
-        .with_context(|| format!("create user-settings directory {}", lock_parent.display()))?;
-    let replacement_path = replacement_path(path)?;
-    let replacement_parent = replacement_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(replacement_parent).with_context(|| {
-        format!(
-            "create user-settings replacement directory {}",
-            replacement_parent.display()
-        )
-    })?;
-    let _lease = acquire_lock(&replacement_path)?;
-    let (baseline_bytes, raw, mut document) = read_document(&replacement_path)?;
-    super::validate_raw_for_edit(&replacement_path, &raw)?;
-    apply(&mut document)?;
-    let raw_new = document.to_string();
-    super::validate_raw_for_edit(&replacement_path, &raw_new)?;
-    if raw_new == raw {
-        return Ok(UserSettingsEditOutcome::Unchanged);
-    }
-    let current_bytes = read_document_bytes(&replacement_path)?;
-    if current_bytes != baseline_bytes {
-        return Err(UserSettingsEditError::ConcurrentModification {
-            path: replacement_path,
-        });
-    }
-    let mut temporary = tempfile::NamedTempFile::new_in(replacement_parent).with_context(|| {
-        format!(
-            "create temporary settings file in {}",
-            replacement_parent.display()
-        )
-    })?;
-    temporary
-        .write_all(raw_new.as_bytes())
-        .context("write edited user settings")?;
-    temporary.flush().context("flush edited user settings")?;
-    temporary
-        .as_file()
-        .sync_all()
-        .context("synchronize edited user settings")?;
-    temporary
-        .persist(&replacement_path)
-        .map_err(|error| error.error)
-        .with_context(|| format!("replace user settings {}", replacement_path.display()))?;
     Ok(UserSettingsEditOutcome::Changed)
 }
 
@@ -407,16 +262,34 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use gtl_application::ports::UserSettingsEditError;
+    use gtl_application::{
+        ports::{
+            UserSettingsEditConflict, UserSettingsEditError, UserSettingsEditOutcome,
+            UserSettingsEditor,
+        },
+        settings::UserSettingsPatch,
+    };
+    use gtl_models::{
+        settings::{SettingKey, SettingKeyValue},
+        viewer::{DiffLayout, Theme},
+    };
 
     use super::{
-        BEFORE_PERSIST_HOOK, BeforePersistHook, StringEdit, USER_SETTINGS_LOCK_WAIT_MAX, edit,
+        BEFORE_PERSIST_HOOK, BeforePersistHook, USER_SETTINGS_LOCK_WAIT_MAX, edit,
         lock_identity_path, lock_path, replacement_path,
     };
 
     const LOCK_ATTEMPT_WAIT_TEST_MAX: Duration = Duration::from_millis(100);
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);
     const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(8);
+
+    fn set(mutation: SettingKeyValue) -> UserSettingsPatch {
+        mutation.into()
+    }
+
+    fn clear(key: SettingKey) -> UserSettingsPatch {
+        UserSettingsPatch::clear(key)
+    }
 
     #[cfg(unix)]
     fn create_file_symbolic_link(original: &Path, link: &Path) -> std::io::Result<()> {
@@ -443,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn set_returns_the_previous_string_and_preserves_unrelated_content() {
+    fn set_preserves_unrelated_content() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         std::fs::write(
@@ -452,11 +325,10 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
         let raw = std::fs::read_to_string(path).unwrap();
 
-        assert_eq!(outcome.value_old.as_deref(), Some("dark"));
-        assert!(outcome.document_changed);
+        assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(raw.contains("# viewer"));
         assert!(raw.contains("theme = \"light\""));
         assert!(raw.contains("[push]\nconfirm = false"));
@@ -474,10 +346,9 @@ mod tests {
         std::fs::write(&target, "theme = \"dark\"\n").unwrap();
         create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
 
-        assert_eq!(outcome.value_old.as_deref(), Some("dark"));
-        assert!(outcome.document_changed);
+        assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(
             std::fs::symlink_metadata(&path)
                 .unwrap()
@@ -501,10 +372,9 @@ mod tests {
         let path = config_directory.join("config.toml");
         create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, "theme", StringEdit::Set("light")).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
 
-        assert_eq!(outcome.value_old, None);
-        assert!(outcome.document_changed);
+        assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(
             std::fs::symlink_metadata(&path)
                 .unwrap()
@@ -525,7 +395,7 @@ mod tests {
         create_file_symbolic_link(Path::new("config-other.toml"), &path).unwrap();
         create_file_symbolic_link(Path::new("config.toml"), &path_other).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
 
         assert!(format!("{error:#}").contains("exceeds 40 symbolic links"));
         assert!(
@@ -549,26 +419,28 @@ mod tests {
         let raw = "theme = \"dark\"\n";
         std::fs::write(&path, raw).unwrap();
 
-        let equal = edit(&path, "theme", StringEdit::Set("dark")).unwrap();
-        let absent = edit(&path, "layout", StringEdit::Remove).unwrap();
+        let equal = edit(&path, set(SettingKeyValue::Theme(Theme::Dark))).unwrap();
+        let absent = edit(&path, clear(SettingKey::Layout)).unwrap();
 
-        assert_eq!(equal.value_old.as_deref(), Some("dark"));
-        assert!(!equal.document_changed);
-        assert_eq!(absent.value_old, None);
-        assert!(!absent.document_changed);
+        assert_eq!(equal, UserSettingsEditOutcome::Unchanged);
+        assert_eq!(absent, UserSettingsEditOutcome::Unchanged);
         assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
 
     #[test]
-    fn non_string_document_returns_the_typed_shape_error_without_writing() {
+    fn non_string_document_returns_a_configuration_error_without_writing() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = 7\n";
         std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
 
-        assert!(matches!(error, UserSettingsEditError::InvalidValueShape));
+        assert!(matches!(
+            error,
+            UserSettingsEditError::InvalidConfiguration(configuration)
+                if configuration.path() == path
+        ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
 
@@ -579,12 +451,12 @@ mod tests {
         let raw = "theme = {{{\n";
         std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, "theme", StringEdit::Set("light")).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
 
         assert!(matches!(
             error,
-            UserSettingsEditError::InvalidConfiguration { path: error_path, .. }
-                if error_path == path
+            UserSettingsEditError::InvalidConfiguration(configuration)
+                if configuration.path() == path
         ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
@@ -604,7 +476,7 @@ mod tests {
 
         let started_at = Instant::now();
         let worker = std::thread::spawn(move || {
-            let result = edit(&path_worker, "theme", StringEdit::Set("light"));
+            let result = edit(&path_worker, set(SettingKeyValue::Theme(Theme::Light)));
             result_sender.send(result).unwrap();
         });
         let result = result_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
@@ -614,10 +486,10 @@ mod tests {
 
         assert!(matches!(
             error,
-            UserSettingsEditError::LockTimeout {
+            UserSettingsEditError::Conflict(UserSettingsEditConflict::LockTimeout {
                 wait_seconds: 5,
                 ..
-            }
+            })
         ));
         assert!(
             elapsed >= USER_SETTINGS_LOCK_WAIT_MAX,
@@ -646,8 +518,9 @@ mod tests {
                 continue_receiver,
             });
         let path_worker = path.clone();
-        let worker =
-            std::thread::spawn(move || edit(&path_worker, "theme", StringEdit::Set("light")));
+        let worker = std::thread::spawn(move || {
+            edit(&path_worker, set(SettingKeyValue::Theme(Theme::Light)))
+        });
 
         ready_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
         std::fs::write(&path, changed_raw).unwrap();
@@ -655,16 +528,15 @@ mod tests {
         let error = worker.join().unwrap().unwrap_err();
         assert!(matches!(
             error,
-            UserSettingsEditError::ConcurrentModification { path: error_path }
-                if error_path == path
+            UserSettingsEditError::Conflict(
+                UserSettingsEditConflict::ConcurrentModification { path: error_path }
+            ) if error_path == path
         ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), changed_raw);
     }
 
     #[test]
     fn concurrent_changes_to_different_keys_both_survive() {
-        use gtl_application::ports::UserSettingsStore as _;
-
         use crate::user_config::TomlSettingsStore;
 
         let directory = tempfile::tempdir().unwrap();
@@ -679,9 +551,7 @@ mod tests {
         let result_sender_theme = result_sender.clone();
         let theme_worker = std::thread::spawn(move || {
             attempt_sender_theme.send("theme").unwrap();
-            let result = store_theme.set_value(gtl_models::settings::SettingKeyValue::Theme(
-                gtl_models::viewer::Theme::Light,
-            ));
+            let result = store_theme.edit(SettingKeyValue::Theme(Theme::Light).into());
             result_sender_theme.send(("theme", result)).unwrap();
         });
 
@@ -690,9 +560,7 @@ mod tests {
         let result_sender_layout = result_sender.clone();
         let layout_worker = std::thread::spawn(move || {
             attempt_sender_layout.send("layout").unwrap();
-            let result = store_layout.set_value(gtl_models::settings::SettingKeyValue::Layout(
-                gtl_models::viewer::DiffLayout::Split,
-            ));
+            let result = store_layout.edit(SettingKeyValue::Layout(DiffLayout::Split).into());
             result_sender_layout.send(("layout", result)).unwrap();
         });
         drop(attempt_sender);
@@ -737,15 +605,14 @@ mod tests {
     }
 
     #[test]
-    fn remove_returns_the_previous_string() {
+    fn remove_deletes_the_selected_setting() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         std::fs::write(&path, "density = \"full\"\n").unwrap();
 
-        let outcome = edit(&path, "density", StringEdit::Remove).unwrap();
+        let outcome = edit(&path, clear(SettingKey::Density)).unwrap();
 
-        assert_eq!(outcome.value_old.as_deref(), Some("full"));
-        assert!(outcome.document_changed);
+        assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(!std::fs::read_to_string(path).unwrap().contains("density"));
     }
 
@@ -754,10 +621,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("nested").join("config.toml");
 
-        let outcome = edit(&path, "density", StringEdit::Remove).unwrap();
+        let outcome = edit(&path, clear(SettingKey::Density)).unwrap();
 
-        assert_eq!(outcome.value_old, None);
-        assert!(!outcome.document_changed);
+        assert_eq!(outcome, UserSettingsEditOutcome::Unchanged);
         assert!(!path.exists());
     }
 }

@@ -18,6 +18,7 @@ lucide-dioxus = { version = "3.26.0", features = [
   "account",
   "arrows",
   "development",
+  "devices",
   "files",
   "layout",
   "notifications",

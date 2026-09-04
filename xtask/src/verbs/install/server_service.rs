@@ -136,6 +136,7 @@ fn service_unit(server: &Path) -> String {
         "\
 [Unit]\n\
 Description=Git Tools local gRPC server\n\
+After=graphical-session.target\n\
 \n\
 [Service]\n\
 Type=simple\n\
@@ -145,7 +146,7 @@ RestartSec=2s\n\
 UMask=0077\n\
 \n\
 [Install]\n\
-WantedBy=default.target\n"
+WantedBy=graphical-session.target\n"
     )
 }
 
@@ -195,9 +196,10 @@ mod tests {
         let unit = service_unit(Path::new("/home/dev/.local/bin/gtl-server"));
 
         assert!(unit.contains("ExecStart=\"/home/dev/.local/bin/gtl-server\""));
+        assert!(unit.contains("After=graphical-session.target"));
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("UMask=0077"));
-        assert!(unit.contains("WantedBy=default.target"));
+        assert!(unit.contains("WantedBy=graphical-session.target"));
     }
 
     #[cfg(target_os = "linux")]

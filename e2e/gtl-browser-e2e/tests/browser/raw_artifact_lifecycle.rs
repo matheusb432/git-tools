@@ -392,31 +392,64 @@ async fn assert_path_copy_popover(page: &Page) -> anyhow::Result<()> {
     );
 
     let relative_action = popover.locator("button[data-gtl-copy='path']");
-    support::click(&relative_action, "copy the raw relative file path").await?;
-    expect(relative_action.locator("[data-gtl-copy-feedback][data-state='success']"))
+    copy_raw_path_and_expect_popover_closed(
+        &relative_action,
+        &popover,
+        "copy the raw relative file path",
+    )
+    .await?;
+    assert_raw_written_path(page, "src/alpha.rs").await?;
+
+    support::click(&trigger, "reopen the raw file path popover").await?;
+    expect(popover.clone())
         .to_be_visible()
         .await
-        .context("confirm the relative path copy")?;
-    let copied_path: String = page
-        .evaluate("() => globalThis.__gtlWrittenPath", None::<&()>)
+        .context("show the raw file path options again")?;
+    let absolute_path = file
+        .get_attribute("data-gtl-absolute-path")
         .await
-        .context("observe the copied relative path")?;
-    ensure!(
-        copied_path == "src/alpha.rs",
-        "the path menu copied an unexpected value: {copied_path:?}"
-    );
+        .context("read the raw absolute file path")?
+        .context("raw diff file has no absolute path")?;
+    let absolute_action = popover.locator("button[data-gtl-copy='absolute']");
+    copy_raw_path_and_expect_popover_closed(
+        &absolute_action,
+        &popover,
+        "copy the raw absolute file path",
+    )
+    .await?;
+    assert_raw_written_path(page, &absolute_path).await?;
 
-    page.keyboard()
-        .press("Escape", None)
-        .await
-        .context("close the raw file path popover")?;
-    expect(popover)
-        .to_be_hidden()
-        .await
-        .context("dismiss the raw file path popover")?;
     expect(page.locator("[data-gtl-diff-file][data-path='src/alpha.rs'][open]"))
         .to_have_count(1)
         .await
         .context("keep the file expanded after using its path menu")?;
+    Ok(())
+}
+
+async fn copy_raw_path_and_expect_popover_closed(
+    action: &Locator,
+    popover: &Locator,
+    description: &str,
+) -> anyhow::Result<()> {
+    support::click(action, description).await?;
+    expect(popover.clone())
+        .to_be_hidden()
+        .await
+        .with_context(|| format!("close the raw path popover after {description}"))?;
+    expect(action.locator("[data-gtl-copy-feedback][data-state='success']"))
+        .to_have_count(1)
+        .await
+        .with_context(|| format!("confirm {description}"))
+}
+
+async fn assert_raw_written_path(page: &Page, expected: &str) -> anyhow::Result<()> {
+    let copied_path: String = page
+        .evaluate("() => globalThis.__gtlWrittenPath", None::<&()>)
+        .await
+        .context("observe the copied raw file path")?;
+    ensure!(
+        copied_path == expected,
+        "the path menu copied an unexpected value: {copied_path:?}"
+    );
     Ok(())
 }

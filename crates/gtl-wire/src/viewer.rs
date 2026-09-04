@@ -7,13 +7,14 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPageNumber, HistoryPagePosition, HistoryRenderCount, RenderHistoryId,
-        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerVersion,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerTabPlacement,
+        ViewerVersion,
     },
 };
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 3;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 4;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -547,6 +548,13 @@ pub struct EditSettingsRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTabRequest {
     pub tab_id: ViewerTabId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveViewerTab {
+    pub tab_id: ViewerTabId,
+    pub target_tab_id: ViewerTabId,
+    pub placement: ViewerTabPlacement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

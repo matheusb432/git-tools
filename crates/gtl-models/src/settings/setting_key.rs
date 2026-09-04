@@ -76,16 +76,6 @@ impl SettingKeyValue {
             Self::Density(_) => SettingKey::Density,
         }
     }
-
-    /// Returns the stable TOML token for this typed mutation.
-    #[must_use]
-    pub fn value(self) -> String {
-        match self {
-            Self::Theme(value) => value.to_string(),
-            Self::Layout(value) => value.to_string(),
-            Self::Density(value) => value.to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -125,10 +115,9 @@ mod tests {
     }
 
     #[test]
-    fn mutation_exposes_only_its_matching_key_and_value() {
+    fn mutation_exposes_its_matching_key() {
         let mutation = SettingKeyValue::Theme(Theme::Light);
 
         assert_eq!(mutation.key(), SettingKey::Theme);
-        assert_eq!(mutation.value(), "light");
     }
 }

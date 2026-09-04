@@ -12,3 +12,6 @@ mod live_lifecycle;
 
 #[path = "viewer/one_shot_lifecycle.rs"]
 mod one_shot_lifecycle;
+
+#[path = "viewer/tab_overflow.rs"]
+mod tab_overflow;

@@ -7,9 +7,7 @@ use gtl_application::{
         compute_diff::{self, ComputeDiff},
         fetch_full_context_diff,
     },
-    ports::{
-        UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
-    },
+    ports::{UserSettingsLoadError, UserSettingsReader},
     viewer::session::CachedView,
 };
 use gtl_infra::git_client::HybridGitClient;
@@ -17,7 +15,7 @@ use gtl_models::{
     diffs::DiffExclusions,
     git::GitRange,
     paths::RepositoryRoot,
-    settings::{PushAllExclusions, SettingKey, SettingKeyValue, UserSettings},
+    settings::{PushAllExclusions, UserSettings},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
 use sha2::{Digest, Sha256};
@@ -36,7 +34,7 @@ const COMMAND_OUTPUT_BYTES_MAX: usize = 64 * 1_024;
 #[derive(Clone)]
 struct CompactSettingsStore;
 
-impl UserSettingsStore for CompactSettingsStore {
+impl UserSettingsReader for CompactSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
         Ok(UserSettings::new(
             None,
@@ -46,24 +44,6 @@ impl UserSettingsStore for CompactSettingsStore {
             PushAllExclusions::default(),
         ))
     }
-
-    fn set_value(
-        &mut self,
-        _mutation: SettingKeyValue,
-    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(read_only_settings_error())
-    }
-
-    fn remove_key(
-        &mut self,
-        _key: SettingKey,
-    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-        Err(read_only_settings_error())
-    }
-}
-
-fn read_only_settings_error() -> UserSettingsEditError {
-    UserSettingsEditError::Unexpected(anyhow!("benchmark settings are read-only"))
 }
 
 pub fn describe() -> Result<ViewSourceDescriptor> {

@@ -3,7 +3,6 @@
 #[cfg(feature = "grpc")]
 pub mod proto;
 
-pub mod settings;
 pub mod viewer;
 
 #[allow(

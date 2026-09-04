@@ -1,5 +1,5 @@
 use gtl_application::{
-    ports::UserSettingsStore as _,
+    ports::UserSettingsReader as _,
     projects::{
         RepoSyncResult, SyncExit, SyncStatus,
         commit_repositories::{
@@ -310,10 +310,11 @@ mod tests {
     #[test]
     fn invalid_push_settings_map_to_failed_precondition() {
         let status = push_error(PushRepositoriesError::Settings(
-            gtl_application::ports::UserSettingsLoadError::InvalidConfiguration {
-                path: "/tmp/config.toml".into(),
-                reason: "bad project settings".into(),
-            },
+            gtl_application::ports::UserSettingsConfigurationError::new(
+                "/tmp/config.toml".into(),
+                anyhow::anyhow!("bad project settings"),
+            )
+            .into(),
         ));
 
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);

@@ -6,6 +6,7 @@ mod diff_view;
 pub mod ensure_view_full_context;
 pub mod find_viewer_diff;
 pub mod initial_recipe_label;
+pub mod move_viewer_tab;
 pub mod prepare_recipe;
 mod probe_recipe;
 mod recipe_label;

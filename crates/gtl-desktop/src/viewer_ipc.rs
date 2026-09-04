@@ -3,7 +3,7 @@ use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersionStream};
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
@@ -157,6 +157,7 @@ viewer_request_command!(
     ViewerShell,
     activate_tab
 );
+viewer_request_command!(viewer_move_tab, MoveViewerTab, ViewerShell, move_tab);
 viewer_request_command!(viewer_close_tab, ViewerTabRequest, ViewerShell, close_tab);
 viewer_request_command!(
     viewer_refresh_tab,

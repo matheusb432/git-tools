@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::VecDeque};
 
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
@@ -106,6 +106,7 @@ impl ViewerClient {
 
     viewer_unary_methods! {
         activate_tab(ViewerTabRequest) -> ViewerShell => "viewer_activate_tab";
+        move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";
         close_tab(ViewerTabRequest) -> ViewerShell => "viewer_close_tab";
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
         delete_live_tab(ViewerTabRequest) -> ViewerShell => "viewer_delete_live_tab";

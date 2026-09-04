@@ -546,9 +546,9 @@
         break;
       }
       case "copy":
-        event.preventDefault();
         event.stopPropagation();
         void copy(action, action.dataset.gtlCopy !== "commit");
+        action.closest("[popover]")?.hidePopover();
         break;
       case "copy-commit":
         event.preventDefault();

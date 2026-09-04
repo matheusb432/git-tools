@@ -4,13 +4,10 @@ use gtl_wire::viewer::{
     ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerViewIdentity,
 };
 
+use super::search_bar::{DiffSearchBar, DiffSearchScope};
 use crate::{
     entities::diffs::{ClientDiffWorkspace, viewer_server},
-    shared::{
-        browser,
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant, TextInput, TextInputLabelVisibility},
-        viewer_client::ViewerClientError,
-    },
+    shared::{browser, viewer_client::ViewerClientError},
 };
 
 const FIND_INPUT_ID: &str = "viewer-diff-find-input";
@@ -159,81 +156,19 @@ pub(super) fn DiffFindBar(
     }
     let current_state = find.state.read().clone();
     let status_message = current_state.message();
-    let navigation_state = if current_state.navigation_enabled() {
-        ButtonState::Enabled
-    } else {
-        ButtonState::Disabled
-    };
 
     rsx! {
-        div {
-            class: "absolute top-3 right-5 z-20 grid w-[min(29rem,calc(100%-1.5rem))] grid-cols-[minmax(0,1fr)_auto_auto_auto] items-start gap-1.5 rounded-panel border border-line-2 bg-surface p-2 shadow-lg tablet:right-3 mobile:top-1 mobile:right-1",
-            role: "search",
-            aria_label: "Find in diff",
-            onkeydown: move |event: KeyboardEvent| {
-                match event.key() {
-                    Key::Escape => {
-                        event.prevent_default();
-                        find.close.call(());
-                    }
-                    Key::Enter => {
-                        event.prevent_default();
-                        let direction = if event.modifiers().shift() {
-                            ViewerDiffSearchDirection::Backward
-                        } else {
-                            ViewerDiffSearchDirection::Forward
-                        };
-                        find.navigate.call(direction);
-                    }
-                    _ => {}
-                }
-            },
-            div { class: "min-w-0",
-                TextInput {
-                    id: FIND_INPUT_ID,
-                    label: "Find in diff",
-                    label_visibility: TextInputLabelVisibility::Hidden,
-                    class: "h-8 py-1.5",
-                    value: (find.query)(),
-                    maxlength: VIEWER_SEARCH_QUERY_MAX_BYTES.to_string(),
-                    placeholder: "Find in diff\u{2026}",
-                    oninput: move |event: FormEvent| {
-                        find.update_query.call(event.value());
-                    },
-                }
-                p {
-                    class: "mt-1 min-h-4 px-0.5 text-xs text-ink-3",
-                    role: "status",
-                    aria_live: "polite",
-                    "{status_message}"
-                }
-            }
-            Button {
-                size: ButtonSize::IconSmall,
-                variant: ButtonVariant::Ghost,
-                state: navigation_state,
-                aria_label: "Previous match",
-                title: "Previous match (Shift+Enter)",
-                onclick: move |_| find.navigate.call(ViewerDiffSearchDirection::Backward),
-                span { aria_hidden: "true", "\u{2191}" }
-            }
-            Button {
-                size: ButtonSize::IconSmall,
-                variant: ButtonVariant::Ghost,
-                state: navigation_state,
-                aria_label: "Next match",
-                title: "Next match (Enter)",
-                onclick: move |_| find.navigate.call(ViewerDiffSearchDirection::Forward),
-                span { aria_hidden: "true", "\u{2193}" }
-            }
-            Button {
-                size: ButtonSize::IconSmall,
-                variant: ButtonVariant::Ghost,
-                aria_label: "Close find",
-                title: "Close find (Escape)",
-                onclick: move |_| find.close.call(()),
-                span { aria_hidden: "true", "\u{00d7}" }
-            }
+        DiffSearchBar {
+            input_id: FIND_INPUT_ID,
+            scope: DiffSearchScope::AllFiles,
+            query: (find.query)(),
+            status_message,
+            navigation_enabled: current_state.navigation_enabled(),
+            maxlength: VIEWER_SEARCH_QUERY_MAX_BYTES.to_string(),
+            onquerychange: move |value| find.update_query.call(value),
+            onprevious: move |()| find.navigate.call(ViewerDiffSearchDirection::Backward),
+            onnext: move |()| find.navigate.call(ViewerDiffSearchDirection::Forward),
+            onclose: move |()| find.close.call(()),
         }
     }
 }

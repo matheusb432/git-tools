@@ -11,7 +11,7 @@ use super::{
 use crate::{
     diffs::View,
     history::record_render::RecordRender,
-    ports::{GitClient, UserSettingsStore},
+    ports::{GitClient, UserSettingsReader},
     recipes::Recipe,
 };
 
@@ -52,7 +52,7 @@ pub enum PrepareRecipeError {
 #[cqrsy::query]
 pub fn execute(
     query: PrepareRecipe,
-    user_settings: &impl UserSettingsStore,
+    user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
     let PrepareRecipe { recipe, kind } = query;

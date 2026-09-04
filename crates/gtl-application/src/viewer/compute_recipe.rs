@@ -6,7 +6,7 @@ use crate::{
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
     },
-    ports::{GitClient, UserSettingsStore},
+    ports::{GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeOp, RecipeTarget},
 };
 
@@ -21,7 +21,7 @@ pub enum ComputeRecipeError {
 #[cqrsy::query]
 pub fn execute(
     recipe: Recipe,
-    user_settings: &impl UserSettingsStore,
+    user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> Result<View, ComputeRecipeError> {
     let cwd = recipe.cwd();

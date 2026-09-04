@@ -13,4 +13,4 @@ pub use pagination::{
     HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
     InvalidHistoryPage,
 };
-pub use tabs::{ViewerTab, ViewerTabKind, ViewerTabState};
+pub use tabs::{ViewerTab, ViewerTabKind, ViewerTabPlacement, ViewerTabState};

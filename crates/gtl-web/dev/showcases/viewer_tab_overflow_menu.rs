@@ -3,9 +3,12 @@ use std::error::Error;
 use dioxus::prelude::*;
 use dx_preview::{preview, showcase};
 use gtl_models::viewer::ViewerTabId;
-use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
+use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 
-use crate::shared::ui::{Button, ButtonSize, ButtonVariant, ViewerTabOverflowMenu};
+use crate::shared::ui::{
+    Button, ButtonSize, ButtonVariant, ScrollArea, ScrollAreaVariant, ViewerTabItem,
+    ViewerTabOverflowMenu, use_viewer_tab_drag,
+};
 
 type PreviewResult<T> = Result<T, Box<dyn Error>>;
 
@@ -17,13 +20,14 @@ fn thumbnail() -> Element {
     };
 
     rsx! {
-        div { class: "pointer-events-none flex min-h-24 items-start overflow-hidden border-b border-line bg-surface pt-3",
+        div { class: "pointer-events-none flex min-h-24 items-start overflow-hidden border-b border-line bg-surface",
             ViewerTabOverflowMenu {
                 id: "preview-tab-overflow-thumbnail",
                 tabs,
                 active_tab,
                 onactivate: move |_| {},
                 onclose: move |_| {},
+                onmove: move |_| {},
             }
         }
     }
@@ -42,6 +46,19 @@ fn interactive() -> Element {
 fn narrow_rail() -> Element {
     rsx! {
         ViewerTabOverflowDemo { width: PreviewWidth::Narrow }
+    }
+}
+
+/// Seamless tabs with immediate selection, close actions, and drag reordering.
+#[preview(name = "Interactive tab rail")]
+fn tab_rail() -> Element {
+    let tabs = match preview_tabs() {
+        Ok(tabs) => tabs,
+        Err(error) => return preview_error(error),
+    };
+
+    rsx! {
+        ViewerTabRailDemo { tabs }
     }
 }
 
@@ -103,7 +120,7 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
     rsx! {
         section { class: width.frame_classes(), aria_label: width.frame_label(),
             nav {
-                class: "flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2",
+                class: "flex min-w-0 items-end border-b border-line bg-surface",
                 aria_label: "Viewer navigation preview",
                 if let Some(active_tab) = active_tab {
                     ViewerTabOverflowMenu {
@@ -117,6 +134,9 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
                         onclose: move |tab_id| {
                             preview_state.set(preview_state().close(tab_id));
                         },
+                        onmove: move |request| {
+                            preview_state.set(preview_state().move_tab(request));
+                        },
                     }
                 } else {
                     p { class: "mb-2 min-w-0 flex-1 px-2 text-ink-3", "No open diffs" }
@@ -128,6 +148,72 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
                             preview_state.set(PreviewTabState::new(tabs_reset.clone()));
                         },
                         "Reset"
+                    }
+                }
+            }
+            div {
+                id: "viewer-active-view",
+                class: "grid min-h-40 place-items-center px-6 py-10 text-center",
+                div {
+                    p { class: "text-xs text-ink-3", "Viewing" }
+                    p { class: "mt-1 font-semibold text-ink", "{active_label}" }
+                }
+            }
+            output { class: "sr-only", aria_live: "polite", "{state.announcement}" }
+        }
+    }
+}
+
+#[component]
+fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
+    let mut preview_state = use_signal(move || PreviewTabState::new(tabs));
+    let drag = use_viewer_tab_drag();
+    let state = preview_state();
+    let active_label = state
+        .active_tab()
+        .map_or_else(|| "No open diff".to_owned(), |tab| tab.label.clone());
+
+    rsx! {
+        section {
+            class: "mx-auto w-full max-w-4xl overflow-hidden rounded-panel border border-line bg-bg shadow-floating",
+            aria_label: "Interactive viewer tab rail",
+            nav {
+                class: "flex min-w-0 items-end border-b border-line bg-surface",
+                aria_label: "Viewer navigation preview",
+                ScrollArea {
+                    variant: ScrollAreaVariant::Rail,
+                    class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
+                    role: "tablist",
+                    aria_label: "Open diffs",
+                    for tab in &state.tabs {
+                        {
+                            let tab_id = tab.id;
+                            let active = state.active_tab_id == Some(tab_id);
+                            rsx! {
+                                ViewerTabItem {
+                                    key: "{tab.id}",
+                                    tab: tab.clone(),
+                                    active,
+                                    rows_loading: tab.state == ViewerTabState::Pending,
+                                    drag_presentation: drag.presentation(tab_id),
+                                    reorderable: true,
+                                    onactivate: move |()| {
+                                        preview_state.set(preview_state().activate(tab_id));
+                                    },
+                                    onkeydown: move |_| {},
+                                    onclose: move |_| {
+                                        preview_state.set(preview_state().close(tab_id));
+                                    },
+                                    ondragstart: move |tab_id| drag.start(tab_id),
+                                    ondragover: move |target| drag.drag_over(target),
+                                    ondrop: move |request| {
+                                        drag.cancel();
+                                        preview_state.set(preview_state().move_tab(request));
+                                    },
+                                    ondragend: move |()| drag.cancel(),
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -188,6 +274,40 @@ impl PreviewTabState {
                 .map(|tab| tab.id);
         }
         self.announcement = format!("Closed {}", closed_tab.label);
+        self
+    }
+
+    fn move_tab(mut self, request: MoveViewerTab) -> Self {
+        let Some(from) = self.tabs.iter().position(|tab| tab.id == request.tab_id) else {
+            return self;
+        };
+        let Some(target) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == request.target_tab_id)
+        else {
+            return self;
+        };
+        if from == target {
+            return self;
+        }
+        let target_slot = match request.placement {
+            gtl_models::viewer::ViewerTabPlacement::Before => target,
+            gtl_models::viewer::ViewerTabPlacement::After => target + 1,
+        };
+        let insertion_index = if from < target_slot {
+            target_slot - 1
+        } else {
+            target_slot
+        };
+        if from == insertion_index {
+            return self;
+        }
+
+        let tab = self.tabs.remove(from);
+        let label = tab.label.clone();
+        self.tabs.insert(insertion_index, tab);
+        self.announcement = format!("Moved {label} to position {}", insertion_index + 1);
         self
     }
 }
@@ -263,6 +383,9 @@ fn preview_error(error: impl std::fmt::Display) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::viewer::ViewerTabPlacement;
+    use gtl_wire::viewer::MoveViewerTab;
+
     use super::{PreviewResult, PreviewTabState, preview_tabs};
 
     #[test]
@@ -277,6 +400,31 @@ mod tests {
         assert_eq!(state.active_tab_id, Some(expected_tab_id));
         Ok(())
     }
+
+    #[test]
+    fn dragging_a_tab_reorders_the_preview_by_identity() -> PreviewResult<()> {
+        let tabs = preview_tabs()?;
+        let first = tabs[0].id;
+        let third = tabs[2].id;
+        let expected_order = [tabs[1].id, third, first, tabs[3].id];
+
+        let state = PreviewTabState::new(tabs).move_tab(MoveViewerTab {
+            tab_id: first,
+            target_tab_id: third,
+            placement: ViewerTabPlacement::After,
+        });
+
+        assert_eq!(
+            state
+                .tabs
+                .iter()
+                .take(expected_order.len())
+                .map(|tab| tab.id)
+                .collect::<Vec<_>>(),
+            expected_order
+        );
+        Ok(())
+    }
 }
 
 /// Collapsed tab rail menu.
@@ -285,4 +433,4 @@ mod tests {
     name = "Viewer tab overflow menu",
     thumbnail = thumbnail
 )]
-const VIEWER_TAB_OVERFLOW_MENU_SHOWCASE: () = &[interactive, narrow_rail];
+const VIEWER_TAB_OVERFLOW_MENU_SHOWCASE: () = &[interactive, narrow_rail, tab_rail];

@@ -23,9 +23,18 @@ use self::titlebar::PreviewViewTitlebar;
 use self::{
     commits_panel::WorkspaceCommitsPanel,
     files_panel::{FilesPanel, WorkspaceFilesModel},
-    keybar::Keybar,
     titlebar::ViewTitlebar,
 };
+#[cfg(feature = "component-preview")]
+use super::{
+    client_diff_document::search_bar::{DiffSearchBar, DiffSearchScope},
+    search_keybindings::{
+        SEARCH_FILES_KEY_BINDING, SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING,
+        SEARCH_TEXT_IN_FILE_KEY_BINDING,
+    },
+};
+#[cfg(feature = "component-preview")]
+use crate::shared::browser;
 #[cfg(feature = "artifact")]
 use crate::shared::ui::FloatingNotice;
 #[cfg(any(feature = "artifact", feature = "component-preview"))]
@@ -43,7 +52,6 @@ pub(crate) mod commits_panel;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod files_panel;
-mod keybar;
 mod titlebar;
 
 #[cfg(feature = "desktop")]
@@ -238,17 +246,44 @@ enum PreviewMobilePanel {
 }
 
 #[cfg(feature = "component-preview")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PreviewDiffSearch {
+    #[default]
+    Closed,
+    ActiveFile,
+    AllFiles,
+}
+
+#[cfg(feature = "component-preview")]
+const PREVIEW_DESKTOP_FILE_FILTER_INPUT_ID: &str = "preview-desktop-file-filter";
+#[cfg(feature = "component-preview")]
+const PREVIEW_DIFF_SEARCH_INPUT_ID: &str = "preview-diff-search";
+
+#[cfg(feature = "component-preview")]
 #[component]
 pub(crate) fn PreviewDiffWorkspace(
     mut view: ViewerActiveView,
     workspace: ClientDiffWorkspace,
     #[props(default)] mobile: bool,
+    #[props(default)] initial_search: PreviewDiffSearch,
 ) -> Element {
+    let first_file_path = view.files.first().map_or_else(
+        || "No active file".to_owned(),
+        |file| file.path.to_string_lossy().into_owned(),
+    );
     let commits = std::mem::take(&mut view.commits);
     let mut view = use_signal(move || view);
     let commits = use_store(move || commits);
     let context = use_static_diff_workspace_context(view.into(), commits.into());
     let mut mobile_panel = use_signal(|| None::<PreviewMobilePanel>);
+    let mut search_scope = use_signal(move || match initial_search {
+        PreviewDiffSearch::Closed => None,
+        PreviewDiffSearch::ActiveFile => Some(DiffSearchScope::ActiveFile {
+            path: first_file_path,
+        }),
+        PreviewDiffSearch::AllFiles => Some(DiffSearchScope::AllFiles),
+    });
+    let mut search_query = use_signal(|| "settings".to_owned());
     let (file_count, commit_count) = context
         .files
         .with(|files| (files.file_count(), files.commit_count()));
@@ -267,11 +302,43 @@ pub(crate) fn PreviewDiffWorkspace(
     let onclear_commit = use_callback(move |()| {
         view.write().commit_selection = ViewerCommitSelection::None;
     });
+    let open_all_files_search = use_callback(move |()| {
+        search_scope.set(Some(DiffSearchScope::AllFiles));
+        browser::focus_element(PREVIEW_DIFF_SEARCH_INPUT_ID.to_owned());
+    });
+    let open_active_file_search = use_callback(move |file_id: ViewerDiffFileId| {
+        let path = view.peek().files.iter().find_map(|file| {
+            (file.id == file_id).then(|| file.path.to_string_lossy().into_owned())
+        });
+        let Some(path) = path else {
+            return;
+        };
+        search_scope.set(Some(DiffSearchScope::ActiveFile { path }));
+        browser::focus_element(PREVIEW_DIFF_SEARCH_INPUT_ID.to_owned());
+    });
+    let search_overlay = search_scope().map(|scope| {
+        let status_message = preview_search_status(&scope, &search_query());
+        rsx! {
+            DiffSearchBar {
+                input_id: PREVIEW_DIFF_SEARCH_INPUT_ID,
+                scope,
+                query: search_query(),
+                status_message,
+                navigation_enabled: !search_query().is_empty(),
+                maxlength: None,
+                show_shortcut: true,
+                onquerychange: move |value| search_query.set(value),
+                onprevious: move |()| {},
+                onnext: move |()| {},
+                onclose: move |()| search_scope.set(None),
+            }
+        }
+    });
 
     rsx! {
         if mobile {
             section { class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden",
-                PreviewViewTitlebar { mobile: true }
+                PreviewViewTitlebar { mobile: true, onfindall: open_all_files_search }
                 WorkspaceMobileNavigation {
                     files_trigger_id: "preview-mobile-files-trigger",
                     files_panel_id: "preview-mobile-files-panel",
@@ -286,7 +353,11 @@ pub(crate) fn PreviewDiffWorkspace(
                     oncommits: move |_| mobile_panel.set(Some(PreviewMobilePanel::Commits)),
                 }
                 div { class: "col-span-3 row-start-3 min-h-0 overflow-hidden",
-                    StaticDiffDocument { workspace: workspace.clone() }
+                    StaticDiffDocument {
+                        workspace: workspace.clone(),
+                        overlay: search_overlay,
+                        onfind: open_active_file_search,
+                    }
                 }
             }
             Popover {
@@ -310,14 +381,40 @@ pub(crate) fn PreviewDiffWorkspace(
                 }
             }
         } else {
-            section { class: "grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden",
-                PreviewViewTitlebar {}
+            section {
+                class: "grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+                onkeydown: move |event: KeyboardEvent| {
+                    if preview_keybinding_matches(&event, &SEARCH_FILES_KEY_BINDING) {
+                        event.prevent_default();
+                        browser::focus_element(PREVIEW_DESKTOP_FILE_FILTER_INPUT_ID.to_owned());
+                    } else if preview_keybinding_matches(
+                        &event,
+                        &SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING,
+                    ) {
+                        event.prevent_default();
+                        open_all_files_search.call(());
+                    } else if preview_keybinding_matches(&event, &SEARCH_TEXT_IN_FILE_KEY_BINDING) {
+                        event.prevent_default();
+                        if let Some(file) = view.peek().files.first() {
+                            open_active_file_search.call(file.id.clone());
+                        }
+                    }
+                },
+                PreviewViewTitlebar { onfindall: open_all_files_search }
                 aside {
                     class: "col-start-1 row-start-2 min-h-0 overflow-hidden border-r border-line bg-surface",
                     aria_label: "Changed files",
-                    FilesPanel { onnavigate: move |_| {} }
+                    FilesPanel {
+                        onnavigate: move |_| {},
+                        filter_input_id: PREVIEW_DESKTOP_FILE_FILTER_INPUT_ID,
+                        show_filter_shortcut: true,
+                    }
                 }
-                StaticDiffDocument { workspace }
+                StaticDiffDocument {
+                    workspace,
+                    overlay: search_overlay,
+                    onfind: open_active_file_search,
+                }
                 aside {
                     class: "col-start-3 row-start-2 min-h-0 overflow-hidden border-l border-line bg-surface",
                     aria_label: "Commits",
@@ -327,10 +424,33 @@ pub(crate) fn PreviewDiffWorkspace(
                         onclear: onclear_commit,
                     }
                 }
-                Keybar {}
             }
         }
     }
+}
+
+#[cfg(feature = "component-preview")]
+fn preview_search_status(scope: &DiffSearchScope, query: &str) -> String {
+    if query.is_empty() {
+        return "Type to search code.".to_owned();
+    }
+    match scope {
+        DiffSearchScope::ActiveFile { .. } => "3 matches in this file".to_owned(),
+        DiffSearchScope::AllFiles => "9 matches in 3 files".to_owned(),
+    }
+}
+
+#[cfg(feature = "component-preview")]
+fn preview_keybinding_matches(event: &KeyboardEvent, binding: &[&str]) -> bool {
+    let modifiers = event.modifiers();
+    let requires_control = binding.contains(&"Ctrl");
+    let requires_shift = binding.contains(&"Shift");
+    let Some(key) = binding.last() else {
+        return false;
+    };
+    (!requires_control || modifiers.ctrl() || modifiers.meta())
+        && modifiers.shift() == requires_shift
+        && matches!(event.key(), Key::Character(value) if value.eq_ignore_ascii_case(key))
 }
 
 #[cfg(feature = "artifact")]
@@ -470,7 +590,7 @@ fn DiffWorkspaceDocument(
     );
     rsx! {
         div {
-            class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)_0] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] workspace:grid-rows-[auto_minmax(0,1fr)_auto] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
+            class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] workspace:grid-rows-[auto_minmax(0,1fr)] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
             "data-gtl-workspace": artifact_workspace,
             "data-gtl-view": artifact_view_id.clone(),
             "data-gtl-files-folded": artifact_files_folded,
@@ -504,7 +624,6 @@ fn DiffWorkspaceDocument(
                     onloadmore: onload_commits,
                 }
             }
-            Keybar {}
         }
     }
 }
@@ -625,6 +744,8 @@ mod artifact_tests {
         assert_eq!(html.matches(r#"data-gtl-action="open-dialog""#).count(), 2);
         assert!(!html.contains("toggle-copy-context"));
         assert!(!html.contains("+ context"));
+        assert!(!html.contains("<footer"));
+        assert!(!html.contains("gtl diff"));
         assert_eq!(html.matches(r#"data-gtl-file-tree="""#).count(), 2);
         assert_eq!(html.matches(r#"data-gtl-file-directory="""#).count(), 2);
         assert_eq!(html.matches(r#"data-gtl-file-leaf="""#).count(), 2);

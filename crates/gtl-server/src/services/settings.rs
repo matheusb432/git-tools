@@ -65,22 +65,18 @@ impl SettingsService for SettingsGrpcService {
 
 pub(super) fn set_setting_key_error(error: SetSettingKeyError) -> Status {
     match error {
-        SetSettingKeyError::InvalidValueShape { .. }
-        | SetSettingKeyError::Settings(
-            UserSettingsEditError::InvalidValueShape
-            | UserSettingsEditError::InvalidConfiguration { .. },
-        ) => {
-            tracing::warn!(error = ?error, "user settings cannot be edited");
-            Status::failed_precondition("user settings are invalid")
-        }
-        SetSettingKeyError::Settings(
-            UserSettingsEditError::LockTimeout { .. }
-            | UserSettingsEditError::ConcurrentModification { .. },
-        ) => {
-            tracing::warn!(error = ?error, "user settings edit was aborted");
-            Status::aborted("user settings edit conflicted with another writer")
-        }
-        error => unexpected(error, "set user setting"),
+        SetSettingKeyError::Settings(error) => match error {
+            UserSettingsEditError::InvalidConfiguration(_) => {
+                tracing::warn!(error = ?error, "user settings cannot be edited");
+                Status::failed_precondition("user settings are invalid")
+            }
+            UserSettingsEditError::Conflict(_) => {
+                tracing::warn!(error = ?error, "user settings edit was aborted");
+                Status::aborted("user settings edit conflicted with another writer")
+            }
+            UserSettingsEditError::Adapter(error) => unexpected(error, "set user setting"),
+        },
+        SetSettingKeyError::ViewerState(error) => unexpected(error, "set user setting"),
     }
 }
 
@@ -118,10 +114,11 @@ mod tests {
     #[test]
     fn maps_invalid_loaded_settings_to_failed_precondition() {
         let status = user_settings_load_error(
-            gtl_application::ports::UserSettingsLoadError::InvalidConfiguration {
-                path: "/tmp/config.toml".into(),
-                reason: "bad theme".into(),
-            },
+            gtl_application::ports::UserSettingsConfigurationError::new(
+                "/tmp/config.toml".into(),
+                anyhow::anyhow!("bad theme"),
+            )
+            .into(),
         );
 
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);
@@ -130,17 +127,19 @@ mod tests {
     #[test]
     fn maps_settings_state_and_concurrency_failures_deliberately() {
         let invalid = set_setting_key_error(SetSettingKeyError::Settings(
-            UserSettingsEditError::InvalidConfiguration {
-                path: "/tmp/config.toml".into(),
-                reason: "bad theme".into(),
-            },
+            gtl_application::ports::UserSettingsConfigurationError::new(
+                "/tmp/config.toml".into(),
+                anyhow::anyhow!("bad theme"),
+            )
+            .into(),
         ));
         assert_eq!(invalid.code(), tonic::Code::FailedPrecondition);
 
         let concurrent = set_setting_key_error(SetSettingKeyError::Settings(
-            UserSettingsEditError::ConcurrentModification {
+            gtl_application::ports::UserSettingsEditConflict::ConcurrentModification {
                 path: "/tmp/config.toml".into(),
-            },
+            }
+            .into(),
         ));
         assert_eq!(concurrent.code(), tonic::Code::Aborted);
     }

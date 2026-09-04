@@ -15,11 +15,12 @@ use lucide_dioxus::ChevronRight;
 use crate::{entities::diffs::viewer_server, shared::viewer_client::ViewerClientError};
 use crate::{
     shared::ui::{
-        Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea, TextInput,
-        TextInputLabelVisibility,
+        Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, KeyboardShortcut,
+        ScrollArea, TextInput, TextInputLabelVisibility,
     },
     views::diffs::{
         DiffFileStatusBadge, DiffFileStatusBadgeSize, DiffLineChangeBadge, DiffLineChangeKind,
+        search_keybindings::SEARCH_FILES_KEY_BINDING,
     },
 };
 
@@ -221,6 +222,8 @@ pub(super) fn FilesPanel(
     test_id: Option<String>,
     onnavigate: EventHandler<String>,
     artifact_view_id: Option<String>,
+    filter_input_id: Option<String>,
+    #[props(default)] show_filter_shortcut: bool,
 ) -> Element {
     let workspace = super::use_workspace_context();
     let model = workspace.files.read();
@@ -250,8 +253,12 @@ pub(super) fn FilesPanel(
             class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             "data-testid": test_id,
             "data-gtl-file-panel": artifact_file_panel,
-            FilesFilter { artifact_enhancement }
             FilesPanelHeading { file_count: model.file_count }
+            FilesFilter {
+                artifact_enhancement,
+                filter_input_id,
+                show_shortcut: show_filter_shortcut,
+            }
             FilesPanelSummary { commit_count: model.commit_count, totals: model.totals }
             if searching {
                 p { class: "px-1 py-3 text-ink-3", role: "status", "Searching files\u{2026}" }
@@ -274,19 +281,34 @@ pub(super) fn FilesPanel(
 }
 
 #[component]
-fn FilesFilter(artifact_enhancement: bool) -> Element {
+fn FilesFilter(
+    artifact_enhancement: bool,
+    filter_input_id: Option<String>,
+    show_shortcut: bool,
+) -> Element {
     let artifact_action = artifact_enhancement.then_some("filter-files");
     let mut workspace = super::use_workspace_context();
+    let input_classes = if show_shortcut {
+        "h-9 py-2 pr-20"
+    } else {
+        "h-9 py-2"
+    };
     rsx! {
         div { class: "relative mb-3",
             TextInput {
+                id: filter_input_id,
                 label: "Filter files",
                 label_visibility: TextInputLabelVisibility::Hidden,
-                class: "h-9 py-2",
+                class: input_classes,
                 value: (workspace.file_filter)(),
-                placeholder: "Filter files\u{2026}  /",
+                placeholder: "Filter paths...",
                 "data-gtl-action": artifact_action,
                 oninput: move |event: FormEvent| workspace.file_filter.set(event.value()),
+            }
+            if show_shortcut {
+                span { class: "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2",
+                    KeyboardShortcut { keys: SEARCH_FILES_KEY_BINDING.to_vec() }
+                }
             }
         }
     }
@@ -296,8 +318,9 @@ fn FilesFilter(artifact_enhancement: bool) -> Element {
 fn FilesPanelHeading(file_count: usize) -> Element {
     let file_label = super::file_label(file_count);
     rsx! {
-        div { class: "mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase",
-            span { "# {file_count} {file_label}" }
+        div { class: "mx-1 mb-2 flex items-baseline justify-between gap-2",
+            h2 { class: "font-semibold text-ink", "Files" }
+            span { class: "text-xs text-ink-3", "{file_count} {file_label}" }
         }
     }
 }

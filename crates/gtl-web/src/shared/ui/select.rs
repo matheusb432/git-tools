@@ -38,6 +38,7 @@ pub(crate) fn Select(
 ) -> Element {
     let has_error = error.is_some();
     let error_id = format!("{id}-error");
+    let selected_value = value.clone();
     let base = attributes!(select {
         class: SELECT_CLASSES,
         id: id.clone(),
@@ -62,7 +63,8 @@ pub(crate) fn Select(
                     for option in options {
                         option {
                             key: "{option.value}",
-                            value: option.value,
+                            value: option.value.clone(),
+                            selected: option.value == selected_value,
                             disabled: option.disabled,
                             "{option.label}"
                         }
@@ -106,5 +108,27 @@ mod tests {
         assert!(html.contains("id=\"layout-error\""));
         assert!(html.contains("role=\"alert\""));
         assert!(html.contains("h-4"));
+    }
+
+    #[test]
+    fn selected_value_marks_the_matching_option() {
+        let html = dioxus_ssr::render_element(rsx! {
+            Select {
+                id: "layout",
+                aria_label: "Layout",
+                value: "split",
+                options: vec![
+                    SelectOption::new("unified", "Unified"),
+                    SelectOption::new("split", "Side by side"),
+                ],
+                error: None,
+            }
+        });
+
+        let selected = html
+            .split("<option")
+            .find(|option| option.contains(">Side by side</option>"))
+            .unwrap_or_default();
+        assert!(selected.contains("selected"));
     }
 }

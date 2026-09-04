@@ -21,7 +21,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        UserSettingsStore,
+        UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -55,7 +55,7 @@ pub enum RenderMergeDiffError {
 #[cqrsy::command]
 pub fn execute(
     req: RenderMergeDiff,
-    app_settings: &impl UserSettingsStore,
+    app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,

@@ -1,7 +1,7 @@
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "component-preview", feature = "desktop"))]
 use std::time::Duration;
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "component-preview", feature = "desktop"))]
 use dioxus::prelude::spawn;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen::JsCast;
@@ -20,7 +20,7 @@ pub(crate) fn apply_theme(theme: &'static str) {
     let _ = root.set_attribute("data-theme", theme);
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) fn focus_element(id: String) {
     spawn(async move {
         dioxus_sdk_time::sleep(Duration::ZERO).await;

@@ -7,6 +7,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 
 const ONE_SHOT_REPOSITORY: &str = "one-shot-alpha";
+const TAB_OVERFLOW_INITIAL_COUNT: usize = 4;
+const TAB_OVERFLOW_TOTAL_COUNT: usize = 12;
 
 pub struct ViewerFixture {
     repository: PathBuf,
@@ -18,6 +20,18 @@ pub struct OneShotFixture {
     repository: PathBuf,
     cli: PathBuf,
     data_root: PathBuf,
+}
+
+pub struct TabOverflowFixture {
+    entries: Vec<TabOverflowEntry>,
+    cli: PathBuf,
+    data_root: PathBuf,
+}
+
+struct TabOverflowEntry {
+    repository: PathBuf,
+    name: String,
+    marker: String,
 }
 
 impl OneShotFixture {
@@ -40,6 +54,78 @@ impl OneShotFixture {
     pub fn forward(&self) -> Result<()> {
         command_checked_with_data_root(&self.cli, ["diff"], Some(&self.repository), &self.data_root)
             .context("forward one-shot diff")
+    }
+}
+
+impl TabOverflowFixture {
+    pub fn create(data_root: &Path) -> Result<Self> {
+        let cli = required_environment_path("GTL_E2E_CLI_BINARY")?;
+        let fixture_root = required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
+        let repositories_root = fixture_root.join("dom-repositories");
+        let entries = (1..=TAB_OVERFLOW_TOTAL_COUNT)
+            .map(|index| {
+                let name = format!("sample-set-{index:02}");
+                let marker = format!("sample-marker-{index:02}");
+                let change_message = format!("sample change {index:02}");
+                let repository =
+                    create_changed_repository(&repositories_root, &name, &marker, &change_message)?;
+                Ok(TabOverflowEntry {
+                    repository,
+                    name,
+                    marker,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            entries,
+            cli,
+            data_root: data_root.to_path_buf(),
+        })
+    }
+
+    pub fn forward_initial(&self) -> Result<()> {
+        let (initial, _) = self.entries.split_at(TAB_OVERFLOW_INITIAL_COUNT);
+        self.forward_entries(initial)
+    }
+
+    pub fn forward_remaining(&self) -> Result<()> {
+        let (_, remaining) = self.entries.split_at(TAB_OVERFLOW_INITIAL_COUNT);
+        self.forward_entries(remaining)
+    }
+
+    fn forward_entries(&self, entries: &[TabOverflowEntry]) -> Result<()> {
+        for entry in entries {
+            command_checked_with_data_root(
+                &self.cli,
+                ["diff"],
+                Some(&entry.repository),
+                &self.data_root,
+            )
+            .with_context(|| format!("forward snapshot for {}", entry.name))?;
+        }
+        Ok(())
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn first_identity(&self) -> Option<(&str, &str)> {
+        self.entries
+            .first()
+            .map(|entry| (entry.name.as_str(), entry.marker.as_str()))
+    }
+
+    pub fn initial_last_identity(&self) -> Option<(&str, &str)> {
+        self.entries
+            .get(TAB_OVERFLOW_INITIAL_COUNT - 1)
+            .map(|entry| (entry.name.as_str(), entry.marker.as_str()))
+    }
+
+    pub fn last_identity(&self) -> Option<(&str, &str)> {
+        self.entries
+            .last()
+            .map(|entry| (entry.name.as_str(), entry.marker.as_str()))
     }
 }
 

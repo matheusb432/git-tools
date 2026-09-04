@@ -2,9 +2,7 @@ use std::{cell::Cell, rc::Rc};
 
 use dioxus::{core::spawn_forever, prelude::*};
 use gtl_models::viewer::{ViewerTabId, ViewerVersion};
-use gtl_wire::viewer::{
-    SetViewerPreference, ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme,
-};
+use gtl_wire::viewer::{ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme};
 
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
@@ -65,7 +63,6 @@ impl ViewerRenderCommandTicket {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewerRenderCommand {
-    SetPreference(SetViewerPreference),
     RefreshTab(ViewerTabRequest),
 }
 
@@ -249,10 +246,6 @@ impl ViewerContext {
         ViewerShellReplacement::Accepted
     }
 
-    pub(crate) fn set_preference(self, preference: SetViewerPreference) {
-        self.schedule_render_command(ViewerRenderCommand::SetPreference(preference));
-    }
-
     pub(crate) fn refresh_tab(self, tab_id: ViewerTabId) {
         self.schedule_render_command(ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id }));
     }
@@ -363,12 +356,8 @@ async fn run_render_command(
     ticket: ViewerRenderCommandTicket,
     command: ViewerRenderCommand,
 ) {
-    let result = match command {
-        ViewerRenderCommand::SetPreference(preference) => {
-            viewer_server::set_preference(preference).await
-        }
-        ViewerRenderCommand::RefreshTab(request) => viewer_server::refresh_tab(request).await,
-    };
+    let ViewerRenderCommand::RefreshTab(request) = command;
+    let result = viewer_server::refresh_tab(request).await;
     context.complete_render_command(ticket, result);
 }
 
@@ -588,9 +577,7 @@ const fn diff_noun(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use gtl_models::viewer::ViewerVersion;
-    use gtl_wire::viewer::{
-        SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerFeedback, ViewerTabRequest,
-    };
+    use gtl_wire::viewer::{ViewerFeedback, ViewerTabRequest};
 
     use super::{
         ViewerDiffRowsLoading, ViewerFeedbackToast, ViewerRenderCommand,
@@ -604,51 +591,49 @@ mod tests {
     }
 
     #[test]
-    fn render_commands_run_the_latest_rapid_preference_after_the_active_preference() {
+    fn render_commands_run_the_queued_refresh_after_the_active_refresh() -> TestResult {
         let mut scheduler = ViewerRenderCommandScheduler::default();
-        let layout_ticket = ViewerRenderCommandTicket(1);
-        let density_ticket = ViewerRenderCommandTicket(2);
-        let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
-            ViewerDiffLayout::Split,
-        ));
-        let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
-            ViewerDiffDensity::Full,
-        ));
+        let active_ticket = ViewerRenderCommandTicket(1);
+        let queued_ticket = ViewerRenderCommandTicket(2);
+        let active = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
+            tab_id: viewer_tab_id(7)?,
+        });
+        let queued = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
+            tab_id: viewer_tab_id(11)?,
+        });
 
         assert_eq!(
-            scheduler.submit(layout),
-            ViewerRenderCommandSubmission::Started(layout_ticket)
+            scheduler.submit(active),
+            ViewerRenderCommandSubmission::Started(active_ticket)
         );
         assert_eq!(
-            scheduler.submit(density),
+            scheduler.submit(queued),
             ViewerRenderCommandSubmission::Queued
         );
         assert_eq!(
-            scheduler.complete(layout_ticket),
+            scheduler.complete(active_ticket),
             ViewerRenderCommandCompletion::Continue {
-                ticket: density_ticket,
-                command: density,
+                ticket: queued_ticket,
+                command: queued,
             }
         );
         assert!(scheduler.is_pending());
         assert_eq!(
-            scheduler.complete(density_ticket),
+            scheduler.complete(queued_ticket),
             ViewerRenderCommandCompletion::Finished
         );
         assert!(!scheduler.is_pending());
+        Ok(())
     }
 
     #[test]
-    fn refresh_commands_coalesce_to_the_latest_tab_after_the_active_preference() -> TestResult {
+    fn refresh_commands_coalesce_to_the_latest_tab_after_the_active_refresh() -> TestResult {
         let mut scheduler = ViewerRenderCommandScheduler::default();
-        let layout_ticket = ViewerRenderCommandTicket(1);
+        let active_ticket = ViewerRenderCommandTicket(1);
         let refresh_ticket = ViewerRenderCommandTicket(2);
-        let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
-            ViewerDiffLayout::Unified,
-        ));
-        let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
-            ViewerDiffDensity::Compact,
-        ));
+        let active_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
+            tab_id: viewer_tab_id(3)?,
+        });
         let first_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
             tab_id: viewer_tab_id(7)?,
         });
@@ -657,12 +642,8 @@ mod tests {
         });
 
         assert_eq!(
-            scheduler.submit(layout),
-            ViewerRenderCommandSubmission::Started(layout_ticket)
-        );
-        assert_eq!(
-            scheduler.submit(density),
-            ViewerRenderCommandSubmission::Queued
+            scheduler.submit(active_refresh),
+            ViewerRenderCommandSubmission::Started(active_ticket)
         );
         assert_eq!(
             scheduler.submit(first_refresh),
@@ -673,14 +654,14 @@ mod tests {
             ViewerRenderCommandSubmission::Queued
         );
         assert_eq!(
-            scheduler.complete(layout_ticket),
+            scheduler.complete(active_ticket),
             ViewerRenderCommandCompletion::Continue {
                 ticket: refresh_ticket,
                 command: latest_refresh,
             }
         );
         assert_eq!(
-            scheduler.complete(layout_ticket),
+            scheduler.complete(active_ticket),
             ViewerRenderCommandCompletion::Stale
         );
         assert!(scheduler.is_pending());

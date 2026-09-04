@@ -21,7 +21,7 @@ pub(super) fn DiffFileBody(
     artifact_file_id: Option<String>,
 ) -> Element {
     rsx! {
-        div { class: "overflow-hidden rounded-b-panel",
+        div { class: "overflow-hidden",
             DiffFileRows {
                 file,
                 layout,

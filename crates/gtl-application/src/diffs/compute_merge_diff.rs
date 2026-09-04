@@ -11,7 +11,7 @@ use crate::{
     diffs::{
         FetchFullContextDiff, FullContextDiffState, PinnedRange, View, fetch_full_context_diff,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
 pub const DEFAULT_BASE: &str = crate::shared::git_range_pinning::DEFAULT_MERGE_BASE;
@@ -45,7 +45,7 @@ pub enum ComputeMergeDiffError {
 #[cqrsy::query]
 pub fn execute(
     req: ComputeMergeDiff,
-    app_settings: &impl UserSettingsStore,
+    app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
     let settings = app_settings.load()?;

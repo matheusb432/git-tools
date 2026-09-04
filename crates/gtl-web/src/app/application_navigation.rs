@@ -1,10 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
-use gtl_wire::viewer::{
-    SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabRequest, ViewerTheme,
-};
-use lucide_dioxus::{Ellipsis, History, Settings};
+use gtl_wire::viewer::{MoveViewerTab, ViewerActiveState, ViewerTab, ViewerTabRequest};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -15,14 +12,16 @@ use crate::{
     shared::{
         browser,
         ui::{
-            CountBadge, IconPopover, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES,
-            MenuActionContent, ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerThemePicker,
-            use_toast, viewer_tab_element_id,
+            ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
+            ViewerTabRailMeasurementItem, use_toast, use_viewer_tab_drag, viewer_tab_element_id,
         },
     },
+    views::viewer_menu::ViewerMenu,
 };
 
 const VIEWER_MENU_ID: &str = "viewer-menu";
+const VIEWER_TAB_OVERFLOW_MENU_ID: &str = "viewer-tab-overflow-menu";
+const VIEWER_TAB_OVERFLOW_TOLERANCE_PX: f64 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ViewerTabActivation {
@@ -30,17 +29,119 @@ struct ViewerTabActivation {
     focus: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewerTabActivationPlan {
+    navigate_to_workspace: bool,
+    request: Option<ViewerTabActivation>,
+}
+
+fn viewer_tab_activation_plan(
+    active_tab_id: Option<ViewerTabId>,
+    activation: ViewerTabActivation,
+    workspace_route_active: bool,
+) -> ViewerTabActivationPlan {
+    ViewerTabActivationPlan {
+        navigate_to_workspace: !workspace_route_active,
+        request: (active_tab_id != Some(activation.tab_id)).then_some(activation),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ViewerTabRailOverflow {
+    overflowing: Memo<bool>,
+    viewport_resized: Callback<ResizeEvent>,
+    content_resized: Callback<ResizeEvent>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct ViewerTabRailMeasurements {
+    content_width: Option<f64>,
+    viewport_width: Option<f64>,
+}
+
+impl ViewerTabRailMeasurements {
+    fn with_content_width(mut self, width: f64) -> Self {
+        self.content_width = Some(width);
+        self
+    }
+
+    fn with_viewport_width(mut self, width: f64) -> Self {
+        self.viewport_width = Some(width);
+        self
+    }
+
+    fn overflowing(self) -> bool {
+        self.content_width.zip(self.viewport_width).is_some_and(
+            |(content_width, viewport_width)| {
+                viewer_tab_rail_overflows(content_width, viewport_width)
+            },
+        )
+    }
+}
+
+fn publish_viewer_tab_rail_measurements(
+    mut measurements: Signal<ViewerTabRailMeasurements>,
+    next: ViewerTabRailMeasurements,
+) {
+    if *measurements.peek() == next {
+        return;
+    }
+    measurements.set(next);
+}
+
+fn viewer_tab_resize_width(event: &ResizeEvent) -> Option<f64> {
+    let width = event.data().get_content_box_size().ok()?.width;
+    (width.is_finite() && width >= 0.0).then_some(width)
+}
+
+fn use_viewer_tab_rail_overflow() -> ViewerTabRailOverflow {
+    let measurements = use_signal(ViewerTabRailMeasurements::default);
+    let overflowing = use_memo(move || measurements.read().overflowing());
+    let viewport_resized = use_callback(move |event: ResizeEvent| {
+        let Some(width) = viewer_tab_resize_width(&event) else {
+            return;
+        };
+        let next = (*measurements.peek()).with_viewport_width(width);
+        publish_viewer_tab_rail_measurements(measurements, next);
+    });
+    let content_resized = use_callback(move |event: ResizeEvent| {
+        let Some(width) = viewer_tab_resize_width(&event) else {
+            return;
+        };
+        let next = (*measurements.peek()).with_content_width(width);
+        publish_viewer_tab_rail_measurements(measurements, next);
+    });
+
+    ViewerTabRailOverflow {
+        overflowing,
+        viewport_resized,
+        content_resized,
+    }
+}
+
+fn viewer_tab_rail_overflows(content_width: f64, viewport_width: f64) -> bool {
+    if !content_width.is_finite()
+        || !viewport_width.is_finite()
+        || content_width < 0.0
+        || viewport_width < 0.0
+    {
+        return false;
+    }
+    content_width > viewport_width + VIEWER_TAB_OVERFLOW_TOLERANCE_PX
+}
+
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
+    let workspace_route_active = matches!(use_route::<Route>(), Route::Workspace {});
     let toast = use_toast();
     let shell = viewer.shell();
     let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
-    let tab_ids = use_memo(move || match &*shell.read() {
-        ViewerShellLoad::Ready(shell) => shell.tabs.iter().map(|tab| tab.id).collect(),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => Vec::new(),
-    });
+    let tab_rail_overflow = use_viewer_tab_rail_overflow();
+    let mut pending_active_tab_id = use_signal(|| None::<ViewerTabId>);
+    let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
+    let drag = use_viewer_tab_drag();
     let mut activate_tab = use_action(move |activation: ViewerTabActivation| async move {
         match viewer_server::activate_tab(ViewerTabRequest {
             tab_id: activation.tab_id,
@@ -49,153 +150,278 @@ pub(crate) fn ApplicationNavigation() -> Element {
         {
             Ok(shell) => {
                 viewer.replace_shell(shell);
-                navigator.push(Route::Workspace {});
                 if activation.focus {
                     browser::focus_element(viewer_tab_element_id(activation.tab_id));
                 }
             }
             Err(error) => toast.error(error.message()),
         }
+        if *pending_active_tab_id.peek() == Some(activation.tab_id) {
+            pending_active_tab_id.set(None);
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let mut move_tab = use_action(move |request: MoveViewerTab| async move {
+        match viewer_server::move_tab(request).await {
+            Ok(shell) => viewer.replace_shell(shell),
+            Err(error) => toast.error(error.message()),
+        }
+        pending_tab_order.set(None);
         Ok::<(), std::convert::Infallible>(())
     });
     let shell_state = shell.read();
-    let (active_tab_id, tabs, theme, shell_ready) = match &*shell_state {
-        ViewerShellLoad::Ready(shell) => (
-            active_tab_id(&shell.active),
-            shell.tabs.as_slice(),
-            shell.preferences.theme,
-            true,
-        ),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
-            (None, &[] as &[ViewerTab], ViewerTheme::Dark, false)
-        }
+    let (active_tab_id, tabs) = match &*shell_state {
+        ViewerShellLoad::Ready(shell) => (active_tab_id(&shell.active), shell.tabs.as_slice()),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (None, &[] as &[ViewerTab]),
     };
+    let pending_order = pending_tab_order();
+    let displayed_tabs = tabs_in_order(tabs, pending_order.as_deref());
+    let displayed_tab_ids = displayed_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+    let active_tab_id = pending_active_tab_id().or(active_tab_id);
+    let overflow_active_tab = active_tab_id.and_then(|tab_id| {
+        displayed_tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| (*tab).clone())
+    });
+    let tab_rail_collapsed = (tab_rail_overflow.overflowing)() && overflow_active_tab.is_some();
+    let overflow_tabs = if tab_rail_collapsed {
+        displayed_tabs
+            .iter()
+            .map(|tab| (*tab).clone())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let tab_rail_classes = if tab_rail_collapsed {
+        "pointer-events-none invisible min-w-0 flex-1 overflow-hidden"
+    } else {
+        "min-w-0 flex-1 overflow-x-auto"
+    };
+    let overflow_close_tabs = displayed_tab_ids.clone();
+    let overflow_drop_tabs = displayed_tab_ids.clone();
+    let reorderable = pending_order.is_none();
+    let activate_viewer_tab = use_callback(move |activation: ViewerTabActivation| {
+        let plan = viewer_tab_activation_plan(active_tab_id, activation, workspace_route_active);
+        if plan.navigate_to_workspace {
+            navigator.push(Route::Workspace {});
+        }
+        if let Some(request) = plan.request {
+            pending_active_tab_id.set(Some(request.tab_id));
+            activate_tab.call(request);
+        }
+    });
 
     rsx! {
         nav {
-            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2",
+            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2",
             aria_label: "Viewer navigation",
-            ScrollArea {
-                variant: ScrollAreaVariant::Rail,
-                class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
-                role: "tablist",
-                aria_label: "Open diffs",
-                if tabs.is_empty() {
-                    p { class: "mb-2 self-center px-2 text-ink-3", "No open diffs" }
-                }
-                for tab in &tabs {
-                    {
-                        let tab_id = tab.id;
-                        let active = active_tab_id == Some(tab_id);
-                        let focus_tab_id = close_focus_target(tabs, tab_id);
-                        let key_tabs = tab_ids;
-                        rsx! {
-                            ViewerTabItem {
-                                key: "{tab.id}",
-                                tab: tab.clone(),
-                                active,
-                                rows_loading: diff_rows_loading_tab_id == Some(tab_id),
-                                onactivate: move |_| {
-                                    if active {
-                                        navigator.push(Route::Workspace {});
-                                        return;
-                                    }
-                                    activate_tab
-                                        .call(ViewerTabActivation {
-                                            tab_id,
-                                            focus: false,
-                                        });
-                                },
-                                onkeydown: move |event: KeyboardEvent| {
-                                    let movement = match event.key() {
-                                        Key::ArrowRight => Some(TabMovement::Next),
-                                        Key::ArrowLeft => Some(TabMovement::Previous),
-                                        Key::Home => Some(TabMovement::First),
-                                        Key::End => Some(TabMovement::Last),
-                                        _ => None,
-                                    };
-                                    if let Some(movement) = movement {
-                                        event.prevent_default();
-                                        if let Some(target) = tab_focus_target(&key_tabs.peek(), tab_id, movement) {
-                                            activate_tab
-                                                .call(ViewerTabActivation {
-                                                    tab_id: target,
-                                                    focus: true,
-                                                });
-                                        }
-                                    }
-                                },
-                                onclose: move |_| {
-                                    spawn(async move {
-                                        match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
-                                            Ok(shell) => {
-                                                viewer.replace_shell(shell);
-                                                if let Some(focus_id) = focus_tab_id {
-                                                    browser::focus_element(viewer_tab_element_id(focus_id));
-                                                } else {
-                                                    browser::focus_element("workspace-heading".to_owned());
-                                                }
-                                            }
-                                            Err(error) => toast.error(error.message()),
-                                        }
-                                    });
-                                },
+            div {
+                class: "relative flex min-w-0 flex-1 items-end",
+                style: "margin-left:-1px;",
+                ScrollArea {
+                    variant: ScrollAreaVariant::Rail,
+                    class: tab_rail_classes,
+                    role: "tablist",
+                    aria_label: "Open diffs",
+                    aria_hidden: tab_rail_collapsed.to_string(),
+                    "data-viewer-tab-rail-mode": if tab_rail_collapsed { "measurement" } else { "interactive" },
+                    onresize: move |event: ResizeEvent| {
+                        tab_rail_overflow.viewport_resized.call(event);
+                    },
+                    div {
+                        class: "flex shrink-0 items-end gap-0",
+                        style: "width: max-content;",
+                        "data-viewer-tab-rail-content": "true",
+                        onresize: move |event: ResizeEvent| {
+                            tab_rail_overflow.content_resized.call(event);
+                        },
+                        if tabs.is_empty() {
+                            p { class: "mb-2 self-center px-2 text-ink-3", "No open diffs" }
+                        }
+                        if tab_rail_collapsed {
+                            for tab in displayed_tabs.iter().copied() {
+                                ViewerTabRailMeasurementItem {
+                                    key: "{tab.id}",
+                                    tab: tab.clone(),
+                                    rows_loading: diff_rows_loading_tab_id == Some(tab.id),
+                                }
                             }
+                        } else {
+                            for tab in displayed_tabs.iter().copied() {
+                                {
+                                    let tab_id = tab.id;
+                                    let active = active_tab_id == Some(tab_id);
+                                    let focus_tab_id = close_focus_target(&displayed_tab_ids, tab_id);
+                                    let key_tabs = displayed_tab_ids.clone();
+                                    let drop_tabs = displayed_tab_ids.clone();
+                                    rsx! {
+                                        ViewerTabItem {
+                                            key: "{tab.id}",
+                                            tab: tab.clone(),
+                                            active,
+                                            rows_loading: diff_rows_loading_tab_id == Some(tab_id),
+                                            drag_presentation: drag.presentation(tab_id),
+                                            reorderable,
+                                            onactivate: move |()| {
+                                                activate_viewer_tab
+                                                    .call(ViewerTabActivation {
+                                                        tab_id,
+                                                        focus: false,
+                                                    });
+                                            },
+                                            onkeydown: move |event: KeyboardEvent| {
+                                                let movement = match event.key() {
+                                                    Key::ArrowRight => Some(TabMovement::Next),
+                                                    Key::ArrowLeft => Some(TabMovement::Previous),
+                                                    Key::Home => Some(TabMovement::First),
+                                                    Key::End => Some(TabMovement::Last),
+                                                    _ => None,
+                                                };
+                                                if let Some(movement) = movement {
+                                                    event.prevent_default();
+                                                    if let Some(target) = tab_focus_target(&key_tabs, tab_id, movement) {
+                                                        activate_viewer_tab
+                                                            .call(ViewerTabActivation {
+                                                                tab_id: target,
+                                                                focus: true,
+                                                            });
+                                                    }
+                                                }
+                                            },
+                                            onclose: move |_| {
+                                                spawn(async move {
+                                                    match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
+                                                        Ok(shell) => {
+                                                            viewer.replace_shell(shell);
+                                                            if let Some(focus_id) = focus_tab_id {
+                                                                browser::focus_element(viewer_tab_element_id(focus_id));
+                                                            } else {
+                                                                browser::focus_element("workspace-heading".to_owned());
+                                                            }
+                                                        }
+                                                        Err(error) => toast.error(error.message()),
+                                                    }
+                                                });
+                                            },
+                                            ondragstart: move |tab_id| drag.start(tab_id),
+                                            ondragover: move |target| drag.drag_over(target),
+                                            ondrop: move |request| {
+                                                drag.cancel();
+                                                let Some(order) = moved_tab_ids(&drop_tabs, request) else {
+                                                    return;
+                                                };
+                                                pending_tab_order.set(Some(order));
+                                                move_tab.call(request);
+                                            },
+                                            ondragend: move |()| drag.cancel(),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if tab_rail_collapsed && let Some(active_tab) = overflow_active_tab {
+                    div { class: "absolute inset-0 z-20 flex min-w-0 items-end",
+                        ViewerTabOverflowMenu {
+                            id: VIEWER_TAB_OVERFLOW_MENU_ID,
+                            tabs: overflow_tabs,
+                            active_tab,
+                            diff_rows_loading_tab_id,
+                            reorderable,
+                            onactivate: move |tab_id| {
+                                activate_viewer_tab
+                                    .call(ViewerTabActivation {
+                                        tab_id,
+                                        focus: false,
+                                    });
+                            },
+                            onclose: move |tab_id| {
+                                let focus_overflow_trigger = close_focus_target(&overflow_close_tabs, tab_id)
+                                    .is_some();
+                                browser::hide_popover(VIEWER_TAB_OVERFLOW_MENU_ID);
+                                spawn(async move {
+                                    match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
+                                        Ok(shell) => {
+                                            viewer.replace_shell(shell);
+                                            let focus_id = if focus_overflow_trigger {
+                                                format!("{VIEWER_TAB_OVERFLOW_MENU_ID}-trigger")
+                                            } else {
+                                                "workspace-heading".to_owned()
+                                            };
+                                            browser::focus_element(focus_id);
+                                        }
+                                        Err(error) => toast.error(error.message()),
+                                    }
+                                });
+                            },
+                            onmove: move |request| {
+                                let Some(order) = moved_tab_ids(&overflow_drop_tabs, request) else {
+                                    return;
+                                };
+                                pending_tab_order.set(Some(order));
+                                move_tab.call(request);
+                            },
                         }
                     }
                 }
             }
 
-            IconPopover {
+            ViewerMenu {
                 id: VIEWER_MENU_ID,
-                aria_label: "Viewer menu",
-                trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value(),
-                icon_motion: IconPopoverIconMotion::QuarterTurn,
-                icon: rsx! {
-                    Ellipsis { size: 18 }
+                history_count: tabs.len(),
+                trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value().to_owned(),
+                history_test_id: test_ids::VIEWER_HISTORY_OPEN.value().to_owned(),
+                onhistory: move |()| {
+                    navigator.push(Route::History {});
                 },
-                div { class: "grid gap-0.5 p-1.5",
-                    Link {
-                        class: MENU_ACTION_HOST_CLASSES,
-                        to: Route::History {},
-                        aria_label: "History",
-                        "data-testid": test_ids::VIEWER_HISTORY_OPEN.value(),
-                        onclick: move |_| browser::hide_popover(VIEWER_MENU_ID),
-                        MenuActionContent {
-                            icon: rsx! {
-                                History { size: 15 }
-                            },
-                            label: "History",
-                            description: "Browse saved renders",
-                            if !tabs.is_empty() {
-                                CountBadge { count: tabs.len() }
-                            }
-                        }
-                    }
-                    ViewerThemePicker {
-                        theme,
-                        disabled: !shell_ready || viewer.render_command_pending(),
-                        onthemechange: move |theme| {
-                            viewer.set_preference(SetViewerPreference::Theme(theme));
-                        },
-                    }
-                    Link {
-                        class: MENU_ACTION_HOST_CLASSES,
-                        to: Route::Settings {},
-                        aria_label: "User settings",
-                        onclick: move |_| browser::hide_popover(VIEWER_MENU_ID),
-                        MenuActionContent {
-                            icon: rsx! {
-                                Settings { size: 15 }
-                            },
-                            label: "Settings",
-                            description: "Viewer defaults",
-                        }
-                    }
-                }
+                onsettings: move |()| {
+                    navigator.push(Route::Settings {});
+                },
             }
         }
     }
+}
+
+fn tabs_in_order<'a>(tabs: &'a [ViewerTab], order: Option<&[ViewerTabId]>) -> Vec<&'a ViewerTab> {
+    let Some(order) = order.filter(|order| order.len() == tabs.len()) else {
+        return tabs.iter().collect();
+    };
+    let ordered = order
+        .iter()
+        .filter_map(|id| tabs.iter().find(|tab| tab.id == *id))
+        .collect::<Vec<_>>();
+    if ordered.len() == tabs.len() {
+        ordered
+    } else {
+        tabs.iter().collect()
+    }
+}
+
+fn moved_tab_ids(ids: &[ViewerTabId], request: MoveViewerTab) -> Option<Vec<ViewerTabId>> {
+    let from = ids.iter().position(|id| *id == request.tab_id)?;
+    let target = ids.iter().position(|id| *id == request.target_tab_id)?;
+    if from == target {
+        return None;
+    }
+    let target_slot = match request.placement {
+        gtl_models::viewer::ViewerTabPlacement::Before => target,
+        gtl_models::viewer::ViewerTabPlacement::After => target + 1,
+    };
+    let insertion_index = if from < target_slot {
+        target_slot - 1
+    } else {
+        target_slot
+    };
+    if from == insertion_index {
+        return None;
+    }
+
+    let mut moved = ids.to_vec();
+    let id = moved.remove(from);
+    moved.insert(insertion_index, id);
+    Some(moved)
 }
 
 const fn active_tab_id(active: &ViewerActiveState) -> Option<ViewerTabId> {
@@ -231,18 +457,22 @@ fn tab_focus_target(
     ids.get(target_index).copied()
 }
 
-fn close_focus_target(tabs: &[ViewerTab], closing: ViewerTabId) -> Option<ViewerTabId> {
-    let index = tabs.iter().position(|tab| tab.id == closing)?;
-    tabs.get(index + 1)
-        .or_else(|| index.checked_sub(1).and_then(|previous| tabs.get(previous)))
-        .map(|tab| tab.id)
+fn close_focus_target(ids: &[ViewerTabId], closing: ViewerTabId) -> Option<ViewerTabId> {
+    let index = ids.iter().position(|id| *id == closing)?;
+    ids.get(index + 1)
+        .or_else(|| index.checked_sub(1).and_then(|previous| ids.get(previous)))
+        .copied()
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
+    use gtl_models::viewer::ViewerTabPlacement;
+    use gtl_wire::viewer::MoveViewerTab;
 
-    use super::{TabMovement, close_focus_target, tab_focus_target};
+    use super::{
+        TabMovement, ViewerTabActivation, ViewerTabRailMeasurements, close_focus_target,
+        moved_tab_ids, tab_focus_target, viewer_tab_activation_plan, viewer_tab_rail_overflows,
+    };
     use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
@@ -270,14 +500,77 @@ mod tests {
 
     #[test]
     fn final_tab_close_targets_the_workspace_heading() -> TestResult {
-        let tabs = [ViewerTab {
-            id: viewer_tab_id(4)?,
-            label: "Only diff".to_owned(),
-            kind: ViewerTabKind::Snapshot,
-            state: ViewerTabState::Ready,
-        }];
+        let tabs = [viewer_tab_id(4)?];
 
         assert_eq!(close_focus_target(&tabs, viewer_tab_id(4)?), None);
+        Ok(())
+    }
+
+    #[test]
+    fn optimistic_tab_move_matches_the_requested_anchor() -> TestResult {
+        let first = viewer_tab_id(1)?;
+        let second = viewer_tab_id(2)?;
+        let third = viewer_tab_id(3)?;
+        let fourth = viewer_tab_id(4)?;
+
+        assert_eq!(
+            moved_tab_ids(
+                &[first, second, third, fourth],
+                MoveViewerTab {
+                    tab_id: first,
+                    target_tab_id: third,
+                    placement: ViewerTabPlacement::After,
+                },
+            ),
+            Some(vec![second, third, first, fourth])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tab_rail_collapses_only_past_its_available_width() {
+        assert!(!viewer_tab_rail_overflows(640.0, 640.0));
+        assert!(!viewer_tab_rail_overflows(640.5, 640.0));
+        assert!(viewer_tab_rail_overflows(642.0, 640.0));
+        assert!(!viewer_tab_rail_overflows(f64::NAN, 640.0));
+        assert!(!viewer_tab_rail_overflows(640.0, -1.0));
+        assert!(
+            !ViewerTabRailMeasurements::default()
+                .with_content_width(642.0)
+                .overflowing()
+        );
+        assert!(
+            ViewerTabRailMeasurements::default()
+                .with_content_width(642.0)
+                .with_viewport_width(640.0)
+                .overflowing()
+        );
+    }
+
+    #[test]
+    fn tab_activation_navigates_only_when_workspace_is_not_current() -> TestResult {
+        let current = viewer_tab_id(4)?;
+        let target = viewer_tab_id(8)?;
+        let activation = ViewerTabActivation {
+            tab_id: target,
+            focus: false,
+        };
+
+        let workspace_plan = viewer_tab_activation_plan(Some(current), activation, true);
+        assert!(!workspace_plan.navigate_to_workspace);
+        assert_eq!(workspace_plan.request, Some(activation));
+
+        let history_plan = viewer_tab_activation_plan(Some(current), activation, false);
+        assert!(history_plan.navigate_to_workspace);
+        assert_eq!(history_plan.request, Some(activation));
+
+        let current_plan = viewer_tab_activation_plan(Some(target), activation, true);
+        assert!(!current_plan.navigate_to_workspace);
+        assert_eq!(current_plan.request, None);
+
+        let current_history_plan = viewer_tab_activation_plan(Some(target), activation, false);
+        assert!(current_history_plan.navigate_to_workspace);
+        assert_eq!(current_history_plan.request, None);
         Ok(())
     }
 }

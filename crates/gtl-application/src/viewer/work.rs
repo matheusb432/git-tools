@@ -19,7 +19,7 @@ use crate::{
     diffs::compute_commit_patch::{self, ComputeCommitPatch, ComputeCommitPatchError},
     history::{RecentRenderRecord, record_render::RecordRender},
     live_views::{LiveViewRecord, recipe_for_record},
-    ports::{GitClient, UserSettingsStore},
+    ports::{GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind},
 };
 
@@ -253,7 +253,7 @@ fn reserve_refresh_in_session(
 
 pub fn compute_recipe(
     work: ReservedRecipeWork,
-    settings: &impl UserSettingsStore,
+    settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
@@ -322,7 +322,7 @@ pub fn reserve_commit(
 
 pub fn compute_commit(
     work: ReservedCommitWork,
-    settings: &impl UserSettingsStore,
+    settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> ComputedCommitWork {
     let ReservedCommitWork {

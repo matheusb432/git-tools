@@ -1,35 +1,23 @@
 pub mod ui;
 
 use dioxus::prelude::*;
-use gtl_wire::viewer::{
-    EditSettingsRequest, FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
-    ViewerUserSettings,
-};
-use lucide_dioxus::{Check, FileCog, Settings};
+use gtl_wire::viewer::{ViewerRenderOptions, ViewerTheme, ViewerUserSettings};
+use lucide_dioxus::{FileCog, Settings};
 
 use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
-        ui::{
-            Button, ButtonState, ButtonType, ButtonVariant, FieldLabel, PageNotice, ScrollArea,
-            Select, SelectOption, Skeleton, use_toast,
-        },
+        ui::{Button, ButtonVariant, PageNotice, ScrollArea, Skeleton, use_toast},
         viewer_theme::viewer_theme_label,
     },
-    views::user_settings::ui::DiffExtensionExclusions,
+    views::{
+        user_settings::ui::DiffExtensionExclusions,
+        viewer_settings_form::{
+            ViewerSettingsForm, ViewerSettingsSelection, viewer_settings_patch,
+        },
+    },
 };
-
-const LAYOUT_OPTIONS: &[(&str, &str)] = &[
-    ("", "Choose a layout"),
-    ("unified", "Unified"),
-    ("split", "Side by side"),
-];
-const DENSITY_OPTIONS: &[(&str, &str)] = &[
-    ("", "Choose a view"),
-    ("compact", "Changes only"),
-    ("full", "Full file"),
-];
 
 #[component]
 pub(crate) fn UserSettingsView() -> Element {
@@ -130,7 +118,10 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
     };
 
     rsx! {
-        SettingsEditableForm { render_options: settings.render_options }
+        SettingsEditableForm {
+            configured_theme: settings.configured_theme,
+            render_options: settings.render_options,
+        }
 
         section {
             class: "overflow-hidden rounded-panel border border-line bg-surface",
@@ -170,41 +161,33 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
 }
 
 #[component]
-fn SettingsEditableForm(render_options: ViewerRenderOptions) -> Element {
+fn SettingsEditableForm(
+    configured_theme: Option<ViewerTheme>,
+    render_options: ViewerRenderOptions,
+) -> Element {
     let toast = use_toast();
-    let mut layout = use_signal(|| render_options.layout.as_str().to_owned());
-    let mut density = use_signal(|| render_options.density.as_str().to_owned());
-    let mut saved_render_options = use_signal(|| render_options);
-    let mut submission_attempted = use_signal(|| false);
+    let initial = ViewerSettingsSelection::new(configured_theme, render_options);
+    let mut persisted = use_signal(|| initial);
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
-    let layout_value = layout();
-    let density_value = density();
-    let layout_error = layout_error(submission_attempted(), &layout_value);
-    let density_error = density_error(submission_attempted(), &density_value);
 
     rsx! {
-        form {
-            novalidate: true,
-            onsubmit: move |event: FormEvent| {
-                event.prevent_default();
+        ViewerSettingsForm {
+            initial,
+            pending: pending(),
+            saved: saved(),
+            onmodified: move |()| saved.set(false),
+            onsubmit: move |selected| {
                 if pending() {
                     return;
                 }
-                submission_attempted.set(true);
                 saved.set(false);
-                let Ok((request, selected_render_options)) = settings_patch(
-                    saved_render_options(),
-                    &layout(),
-                    &density(),
-                ) else {
-                    return;
-                };
+                let request = viewer_settings_patch(persisted(), selected);
                 pending.set(true);
                 spawn(async move {
                     match viewer_server::edit_settings(request).await {
                         Ok(()) => {
-                            saved_render_options.set(selected_render_options);
+                            persisted.set(selected);
                             saved.set(true);
                             toast.ok("Settings saved");
                         }
@@ -213,141 +196,8 @@ fn SettingsEditableForm(render_options: ViewerRenderOptions) -> Element {
                     pending.set(false);
                 });
             },
-            section {
-                class: "overflow-hidden rounded-panel border border-line bg-surface",
-                aria_label: "Editable viewer settings",
-                header { class: "border-b border-line bg-surface-2 px-4 py-3",
-                    h2 { class: "font-semibold text-ink", "Diff display" }
-                    p { class: "mt-0.5 text-xs leading-5 text-ink-3",
-                        "These defaults apply to viewer sessions and raw artifacts."
-                    }
-                }
-                div { class: "flex flex-col gap-4 p-4",
-                    div { class: "flex flex-col gap-1.5",
-                        FieldLabel {
-                            for_id: "settings-layout",
-                            label: "Layout",
-                            hint: "Choose how old and new lines share the diff canvas.",
-                        }
-                        Select {
-                            id: "settings-layout",
-                            name: "layout",
-                            aria_label: "Layout",
-                            value: layout_value,
-                            options: select_options(LAYOUT_OPTIONS),
-                            error: layout_error,
-                            disabled: pending(),
-                            required: true,
-                            onchange: move |event: FormEvent| {
-                                layout.set(event.value());
-                                saved.set(false);
-                            },
-                        }
-                    }
-                    div { class: "flex flex-col gap-1.5",
-                        FieldLabel {
-                            for_id: "settings-density",
-                            label: "View",
-                            hint: "Limit the document to changed regions or show the full file.",
-                        }
-                        Select {
-                            id: "settings-density",
-                            name: "density",
-                            aria_label: "View",
-                            value: density_value,
-                            options: select_options(DENSITY_OPTIONS),
-                            error: density_error,
-                            disabled: pending(),
-                            required: true,
-                            onchange: move |event: FormEvent| {
-                                density.set(event.value());
-                                saved.set(false);
-                            },
-                        }
-                    }
-                }
-                footer { class: "flex min-h-16 items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3",
-                    p {
-                        class: "text-xs text-add",
-                        role: "status",
-                        aria_live: "polite",
-                        if saved() {
-                            span { class: "inline-flex items-center gap-1.5",
-                                Check { size: 14 }
-                                "Settings saved"
-                            }
-                        }
-                    }
-                    Button {
-                        button_type: ButtonType::Submit,
-                        state: if pending() { ButtonState::Loading } else { ButtonState::Enabled },
-                        "Save settings"
-                    }
-                }
-            }
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettingsValidationError {
-    Layout,
-    Density,
-}
-
-fn settings_patch(
-    current: ViewerRenderOptions,
-    layout: &str,
-    density: &str,
-) -> Result<(EditSettingsRequest, ViewerRenderOptions), SettingsValidationError> {
-    let layout = parse_layout(layout).ok_or(SettingsValidationError::Layout)?;
-    let density = parse_density(density).ok_or(SettingsValidationError::Density)?;
-    let selected = ViewerRenderOptions { layout, density };
-    let request = EditSettingsRequest {
-        layout: changed_field(&current.layout, selected.layout),
-        density: changed_field(&current.density, selected.density),
-        ..EditSettingsRequest::default()
-    };
-    Ok((request, selected))
-}
-
-fn parse_layout(value: &str) -> Option<ViewerDiffLayout> {
-    match value {
-        "unified" => Some(ViewerDiffLayout::Unified),
-        "split" => Some(ViewerDiffLayout::Split),
-        _ => None,
-    }
-}
-
-fn parse_density(value: &str) -> Option<ViewerDiffDensity> {
-    match value {
-        "compact" => Some(ViewerDiffDensity::Compact),
-        "full" => Some(ViewerDiffDensity::Full),
-        _ => None,
-    }
-}
-
-fn changed_field<T: PartialEq>(current: &T, selected: T) -> FieldUpdate<T> {
-    if current == &selected {
-        FieldUpdate::Unchanged
-    } else {
-        FieldUpdate::Update(selected)
-    }
-}
-
-fn layout_error(attempted: bool, value: &str) -> Option<String> {
-    (attempted && parse_layout(value).is_none()).then(|| "Choose a diff layout.".to_owned())
-}
-
-fn density_error(attempted: bool, value: &str) -> Option<String> {
-    (attempted && parse_density(value).is_none()).then(|| "Choose a diff view.".to_owned())
-}
-
-fn select_options(options: &[(&str, &str)]) -> Vec<SelectOption> {
-    options
-        .iter()
-        .map(|(value, label)| SelectOption::new(*value, *label))
-        .collect()
 }
 
 #[component]
@@ -378,51 +228,5 @@ fn SettingsRow(term: String, children: Element) -> Element {
             dt { class: "font-semibold text-ink-2", "{term}" }
             dd { class: "m-0 min-w-0 break-words text-ink", {children} }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use gtl_wire::viewer::{FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions};
-
-    use super::{SettingsValidationError, settings_patch};
-    use crate::test_support::TestResult;
-
-    #[test]
-    fn settings_patch_updates_only_changed_fields() -> TestResult {
-        let result = settings_patch(
-            ViewerRenderOptions {
-                layout: ViewerDiffLayout::Unified,
-                density: ViewerDiffDensity::Compact,
-            },
-            "split",
-            "compact",
-        );
-        let Ok((request, selected)) = result else {
-            return Err(std::io::Error::other("valid settings were rejected").into());
-        };
-
-        assert_eq!(request.layout, FieldUpdate::Update(ViewerDiffLayout::Split));
-        assert_eq!(request.density, FieldUpdate::Unchanged);
-        assert_eq!(request.theme, FieldUpdate::Unchanged);
-        assert_eq!(selected.layout, ViewerDiffLayout::Split);
-        Ok(())
-    }
-
-    #[test]
-    fn settings_patch_rejects_unknown_control_values() {
-        let current = ViewerRenderOptions {
-            layout: ViewerDiffLayout::Unified,
-            density: ViewerDiffDensity::Compact,
-        };
-
-        assert_eq!(
-            settings_patch(current, "", "compact"),
-            Err(SettingsValidationError::Layout)
-        );
-        assert_eq!(
-            settings_patch(current, "unified", "dense"),
-            Err(SettingsValidationError::Density)
-        );
     }
 }

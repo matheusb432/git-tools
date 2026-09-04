@@ -6,6 +6,12 @@ pub mod edit_settings;
 pub mod get_user_settings;
 pub mod remove_setting_key;
 pub mod set_setting_key;
+mod user_settings_patch;
+
+pub use user_settings_patch::{
+    DuplicateProjectSettingsNameError, ProjectSettingsUpdate, ProjectSettingsUpdates,
+    UserSettingsFieldUpdate, UserSettingsPatch,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserSettingChange {
@@ -18,10 +24,11 @@ const fn setting_changes_viewer_rows(key: SettingKey) -> bool {
 
 #[cfg(test)]
 mod test_support {
-    use gtl_models::settings::{SettingKey, SettingKeyValue, UserSettings};
+    use gtl_models::settings::UserSettings;
 
     use crate::ports::{
-        UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+        UserSettingsEditError, UserSettingsEditOutcome, UserSettingsEditor, UserSettingsLoadError,
+        UserSettingsReader,
     };
 
     #[derive(Clone)]
@@ -35,21 +42,16 @@ mod test_support {
         }
     }
 
-    impl UserSettingsStore for FixedUserSettingsEditStore {
+    impl UserSettingsReader for FixedUserSettingsEditStore {
         fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
             Ok(crate::utils::default_user_settings())
         }
+    }
 
-        fn set_value(
+    impl UserSettingsEditor for FixedUserSettingsEditStore {
+        fn edit(
             &mut self,
-            _mutation: SettingKeyValue,
-        ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
-            Ok(self.outcome)
-        }
-
-        fn remove_key(
-            &mut self,
-            _key: SettingKey,
+            _patch: super::UserSettingsPatch,
         ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
             Ok(self.outcome)
         }

@@ -8,7 +8,7 @@ use gtl_models::{
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
         RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
-        ViewerVersion,
+        ViewerTabPlacement, ViewerVersion,
     },
 };
 
@@ -16,7 +16,7 @@ use crate::{
     v1,
     viewer::{
         EditSettingsRequest, FieldUpdate, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-        ListViewerHistory, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
+        ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
         SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerActiveState,
         ViewerActiveView, ViewerAppliedExclusions, ViewerCodeLine, ViewerCodeSpan,
         ViewerCommandLine, ViewerCommitCursor, ViewerCommitPage, ViewerCommitSelection,
@@ -89,9 +89,46 @@ viewer_tab_codecs! {
 
 viewer_shell_response_decoders! {
     decode_get_viewer_shell_response <= GetViewerShellResponse;
+    decode_move_viewer_tab_response <= MoveViewerTabResponse;
     decode_select_viewer_commit_response <= SelectViewerCommitResponse;
     decode_set_viewer_preference_response <= SetViewerPreferenceResponse;
     decode_open_viewer_history_response <= OpenViewerHistoryResponse;
+}
+
+#[must_use]
+pub fn encode_move_viewer_tab_request(request: MoveViewerTab) -> v1::MoveViewerTabRequest {
+    v1::MoveViewerTabRequest {
+        tab_id: request.tab_id.into(),
+        target_tab_id: request.target_tab_id.into(),
+        placement: encode_viewer_tab_placement(request.placement) as i32,
+    }
+}
+
+pub fn decode_move_viewer_tab_request(
+    request: v1::MoveViewerTabRequest,
+) -> Result<MoveViewerTab, ViewerCodecError> {
+    Ok(MoveViewerTab {
+        tab_id: ViewerTabId::try_new(request.tab_id)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        target_tab_id: ViewerTabId::try_new(request.target_tab_id)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        placement: decode_viewer_tab_placement(request.placement)?,
+    })
+}
+
+const fn encode_viewer_tab_placement(placement: ViewerTabPlacement) -> v1::ViewerTabPlacement {
+    match placement {
+        ViewerTabPlacement::Before => v1::ViewerTabPlacement::Before,
+        ViewerTabPlacement::After => v1::ViewerTabPlacement::After,
+    }
+}
+
+fn decode_viewer_tab_placement(placement: i32) -> Result<ViewerTabPlacement, ViewerCodecError> {
+    match v1::ViewerTabPlacement::try_from(placement) {
+        Ok(v1::ViewerTabPlacement::Before) => Ok(ViewerTabPlacement::Before),
+        Ok(v1::ViewerTabPlacement::After) => Ok(ViewerTabPlacement::After),
+        Ok(v1::ViewerTabPlacement::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
 }
 
 /// Encodes the complete viewer shell for a service response.

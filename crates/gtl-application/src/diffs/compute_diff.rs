@@ -5,7 +5,7 @@ use crate::{
         DiffTarget, FetchFullContextDiff, FullContextDiffState, View, diff_computation,
         fetch_full_context_diff,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
     shared::notes::Note,
 };
 
@@ -33,7 +33,7 @@ pub enum ComputeDiffError {
 #[cqrsy::query]
 pub fn execute(
     req: ComputeDiff,
-    app_settings: &impl UserSettingsStore,
+    app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { repo_root, target } = req;
