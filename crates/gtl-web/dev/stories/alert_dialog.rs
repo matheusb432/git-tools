@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::{AlertDialog, Button, ButtonState, ButtonVariant};
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "grid justify-items-start gap-3",
@@ -27,7 +27,7 @@ fn thumbnail() -> Element {
 }
 
 /// Open, cancel, confirm, and restore focus.
-#[preview]
+#[story]
 fn interactive() -> Element {
     let mut open = use_signal(|| false);
     let mut outcome = use_signal(|| "No action selected");
@@ -62,7 +62,7 @@ fn interactive() -> Element {
 }
 
 /// Disabled actions during confirmation.
-#[preview(name = "Pending confirmation")]
+#[story(name = "Pending confirmation")]
 fn pending() -> Element {
     let mut open = use_signal(|| false);
 
@@ -91,5 +91,5 @@ fn pending() -> Element {
 }
 
 /// Confirmation dialog component.
-#[showcase(id = "alert-dialog", name = "Alert dialog", thumbnail = thumbnail)]
-const ALERT_DIALOG_SHOWCASE: () = &[interactive, pending];
+#[stories(id = "alert-dialog", name = "Alert dialog", thumbnail = thumbnail)]
+const ALERT_DIALOG_STORIES: () = &[interactive, pending];

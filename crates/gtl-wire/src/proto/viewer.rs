@@ -7,7 +7,8 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
-        RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
+        RenderHistoryId, ViewerKeybinding, ViewerKeybindingAction, ViewerKeybindingPlatform,
+        ViewerKeybindings, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
         ViewerTabPlacement, ViewerVersion,
     },
 };
@@ -142,6 +143,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
             render_options: Some(encode_viewer_render_options(
                 shell.preferences.render_options,
             )),
+            keybindings: Some(encode_viewer_keybindings(shell.preferences.keybindings)),
         }),
         feedback: shell.feedback.map(encode_viewer_feedback),
     })
@@ -938,9 +940,51 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
         preferences: ViewerPreferences {
             theme: decode_viewer_theme(preferences.theme)?,
             render_options: decode_viewer_render_options(required(preferences.render_options)?)?,
+            keybindings: decode_viewer_keybindings(&required(preferences.keybindings)?)?,
         },
         feedback: shell.feedback.map(decode_viewer_feedback).transpose()?,
     })
+}
+
+fn encode_viewer_keybindings(keybindings: ViewerKeybindings) -> v1::ViewerKeybindings {
+    v1::ViewerKeybindings {
+        platform: match keybindings.platform() {
+            ViewerKeybindingPlatform::Linux => v1::ViewerKeybindingPlatform::Linux,
+            ViewerKeybindingPlatform::Windows => v1::ViewerKeybindingPlatform::Windows,
+            ViewerKeybindingPlatform::MacOs => v1::ViewerKeybindingPlatform::MacOs,
+            ViewerKeybindingPlatform::Other => v1::ViewerKeybindingPlatform::Other,
+        } as i32,
+        search_files: keybindings[ViewerKeybindingAction::SearchFiles].to_string(),
+        search_text_in_all_files: keybindings[ViewerKeybindingAction::SearchTextInAllFiles]
+            .to_string(),
+    }
+}
+
+fn decode_viewer_keybindings(
+    keybindings: &v1::ViewerKeybindings,
+) -> Result<ViewerKeybindings, ViewerCodecError> {
+    let platform = match v1::ViewerKeybindingPlatform::try_from(keybindings.platform) {
+        Ok(v1::ViewerKeybindingPlatform::Linux) => ViewerKeybindingPlatform::Linux,
+        Ok(v1::ViewerKeybindingPlatform::Windows) => ViewerKeybindingPlatform::Windows,
+        Ok(v1::ViewerKeybindingPlatform::MacOs) => ViewerKeybindingPlatform::MacOs,
+        Ok(v1::ViewerKeybindingPlatform::Other) => ViewerKeybindingPlatform::Other,
+        Ok(v1::ViewerKeybindingPlatform::Unspecified) | Err(_) => {
+            return Err(ViewerCodecError::InvalidMessage);
+        }
+    };
+    let search_files = keybindings
+        .search_files
+        .parse::<ViewerKeybinding>()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let search_text_in_all_files = keybindings
+        .search_text_in_all_files
+        .parse::<ViewerKeybinding>()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    ViewerKeybindings::try_from_fn(platform, |action| match action {
+        ViewerKeybindingAction::SearchFiles => search_files,
+        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+    })
+    .map_err(|_| ViewerCodecError::InvalidMessage)
 }
 
 fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> {

@@ -65,6 +65,7 @@ fn assemble_excludes_extensions_at_the_git_level() {
     let settings = UserSettings::new(
         None,
         RenderOptions::DEFAULT,
+        gtl_models::viewer::ViewerKeybindings::default(),
         true,
         DiffExclusions::new(
             [(ProjectName::try_new(project).unwrap(), vec!["md"])],

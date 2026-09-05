@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use dioxus::prelude::*;
-use dx_preview::catalog::{Catalog, CatalogConfig};
+use dx_story::catalog::{Catalog, CatalogConfig};
 use gtl_wire::viewer::ViewerTheme;
 
 use crate::shared::{browser, ui::ViewerThemePicker};
@@ -9,7 +9,7 @@ use crate::shared::{browser, ui::ViewerThemePicker};
 const FAVICON: Asset = asset!("/src/app/assets/app-icon.ico");
 const PREVIEW_CSS: Asset = asset!("/assets/component-preview.css");
 const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component catalog")
-    .with_showcases_per_page(match NonZeroUsize::new(15) {
+    .with_story_sets_per_page(match NonZeroUsize::new(15) {
         Some(value) => value,
         None => NonZeroUsize::MIN,
     })

@@ -10,7 +10,10 @@ use crate::{
     shared::{
         browser,
         retry_delay::RetryDelay,
-        ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
+        ui::{
+            Button, ButtonSize, ButtonVariant, OVERLAY_SCROLLBAR_CLASSES, ToastHandle, ToastHost,
+            use_toast,
+        },
         viewer_client::{ViewerClientError, discard_viewer_connection},
     },
 };
@@ -483,7 +486,7 @@ fn ApplicationLayoutContent() -> Element {
 
     rsx! {
         div {
-            class: "flex h-screen min-h-128 flex-col overflow-hidden bg-bg text-ink antialiased",
+            class: "flex h-screen min-h-128 flex-col overflow-hidden bg-bg text-ink antialiased {OVERLAY_SCROLLBAR_CLASSES}",
             "data-theme": theme.as_str(),
             div {
                 class: if connection.is_connected() { "flex min-h-0 flex-1 flex-col" } else { "flex min-h-0 flex-1 flex-col opacity-70 saturate-50" },

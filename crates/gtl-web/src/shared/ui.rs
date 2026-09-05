@@ -15,7 +15,6 @@ mod field_label;
 #[cfg(feature = "artifact")]
 mod floating_notice;
 mod icon_popover;
-mod keyboard_shortcut;
 mod loading_spinner;
 mod menu_action;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
@@ -24,6 +23,7 @@ mod page_notice;
 mod popover;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod scroll_area;
+mod search_panel;
 #[cfg(feature = "interactive-ui")]
 mod select;
 #[cfg(feature = "interactive-ui")]
@@ -54,17 +54,17 @@ pub(crate) use floating_notice::FloatingNotice;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use icon_popover::IconPopoverIconMotion;
 pub(crate) use icon_popover::{IconPopover, IconPopoverPlacement};
-pub(crate) use keyboard_shortcut::KeyboardShortcut;
 pub(crate) use loading_spinner::LoadingSpinner;
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) use page_notice::PageNotice;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use popover::Popover;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
-pub(crate) use scroll_area::ScrollArea;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) use scroll_area::ScrollAreaVariant;
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub(crate) use scroll_area::{OVERLAY_SCROLLBAR_CLASSES, ScrollArea};
+pub(crate) use search_panel::{SearchPanel, SearchPanelPlacement};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use select::{Select, SelectOption};
 #[cfg(feature = "interactive-ui")]
@@ -76,13 +76,13 @@ pub(crate) use text_input::TextInputLabelVisibility;
 pub(crate) use toast::ToastHandle;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use toast::{ToastHost, use_toast};
+#[cfg(feature = "interactive-ui")]
+pub(crate) use viewer_tab::ViewerTabItem;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) use viewer_tab::ViewerTabOverflowMenu;
 #[cfg(feature = "desktop")]
 pub(crate) use viewer_tab::ViewerTabRailMeasurementItem;
 #[cfg(feature = "desktop")]
 pub(crate) use viewer_tab::viewer_tab_element_id;
-#[cfg(feature = "interactive-ui")]
-pub(crate) use viewer_tab::{ViewerTabItem, use_viewer_tab_drag};
 #[cfg(feature = "component-preview")]
 pub(crate) use viewer_theme_picker::ViewerThemePicker;

@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::Skeleton;
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "grid w-full max-w-xs grid-cols-[2.5rem_1fr] items-center gap-3",
@@ -17,7 +17,7 @@ fn thumbnail() -> Element {
 }
 
 /// Text and control placeholders.
-#[preview(name = "Content stack")]
+#[story(name = "Content stack")]
 fn content_stack() -> Element {
     rsx! {
         div { class: "grid max-w-xl gap-3 rounded-panel border border-line bg-surface p-5",
@@ -33,5 +33,5 @@ fn content_stack() -> Element {
 }
 
 /// Loading placeholder component.
-#[showcase(id = "skeleton", name = "Skeleton", thumbnail = thumbnail)]
-const SKELETON_SHOWCASE: () = &[content_stack];
+#[stories(id = "skeleton", name = "Skeleton", thumbnail = thumbnail)]
+const SKELETON_STORIES: () = &[content_stack];

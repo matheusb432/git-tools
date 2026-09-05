@@ -16,7 +16,7 @@ use gtl_application::{
 use gtl_models::{
     diffs::DiffExclusions,
     settings::{PushAllExclusions, UserSettings},
-    viewer::RenderOptions,
+    viewer::{RenderOptions, ViewerKeybindings},
 };
 
 use self::document::UserSettingsDocument;
@@ -25,6 +25,7 @@ fn default_settings() -> UserSettings {
     UserSettings::new(
         None,
         RenderOptions::DEFAULT,
+        ViewerKeybindings::default(),
         UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT,
         DiffExclusions::default(),
         PushAllExclusions::default(),
@@ -36,7 +37,13 @@ fn settings_document(
     bytes: Vec<u8>,
 ) -> Result<UserSettingsDocument, UserSettingsConfigurationError> {
     UserSettingsDocument::parse(bytes).map_err(|source| {
-        UserSettingsConfigurationError::new(path.to_path_buf(), anyhow::Error::new(source))
+        let client_diagnostic = source.client_diagnostic();
+        let error =
+            UserSettingsConfigurationError::new(path.to_path_buf(), anyhow::Error::new(source));
+        match client_diagnostic {
+            Some(diagnostic) => error.with_client_diagnostic(diagnostic),
+            None => error,
+        }
     })
 }
 
@@ -136,7 +143,7 @@ mod tests {
     };
     use gtl_models::{
         paths::{ProjectName, RepositoryRelativePath},
-        viewer::{DiffDensity, DiffLayout, Theme},
+        viewer::{DiffDensity, DiffLayout, Theme, ViewerKeybinding, ViewerKeybindingAction},
     };
     use tempfile::NamedTempFile;
 
@@ -161,7 +168,10 @@ mod tests {
 
     #[test]
     fn load_from_none_is_default() {
-        assert_eq!(load_from(None).unwrap().theme(), None);
+        let settings = load_from(None).unwrap();
+
+        assert_eq!(settings.theme(), None);
+        assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
     }
 
     #[test]
@@ -193,6 +203,7 @@ mod tests {
             "[push]\nconfirm = \"yes\"\n",
             "[push]\nconfrm = false\n",
             "[diff]\nexclude = \"md\"\n",
+            "[keybindings]\nsearch_files = false\n",
             "[[projects]]\nexcluded_from_push_all = true\n",
             "[[projects]]\nname = \"repo\"\nexcluded_from_push_all = \"yes\"\n",
             "[[projects]]\nname = \"repo\"\ndiff = { exclude = \"md\" }\n",
@@ -203,6 +214,55 @@ mod tests {
                 Err(UserSettingsLoadError::InvalidConfiguration(_))
             ));
         }
+    }
+
+    #[test]
+    fn keybindings_are_parsed_canonically_and_missing_fields_use_defaults() {
+        let settings = parse_settings(
+            Path::new("config.toml"),
+            r#"
+[keybindings]
+search_files = " shift + alt + k "
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.viewer_keybindings()[ViewerKeybindingAction::SearchFiles],
+            "alt+shift+k".parse::<ViewerKeybinding>().unwrap()
+        );
+        assert_eq!(
+            settings.viewer_keybindings()[ViewerKeybindingAction::SearchTextInAllFiles].to_string(),
+            "ctrl+f"
+        );
+    }
+
+    #[test]
+    fn unsupported_and_conflicting_keybindings_name_the_relevant_fields() {
+        let unsupported = parse_settings(
+            Path::new("config.toml"),
+            "[keybindings]\nsearch_files = \"Cmd+P\"\n",
+        )
+        .unwrap_err();
+        assert!(
+            unsupported
+                .to_string()
+                .contains("`keybindings.search_files` is invalid: unsupported token `Cmd`")
+        );
+
+        let conflict = parse_settings(
+            Path::new("config.toml"),
+            r#"
+[keybindings]
+search_files = "Ctrl+F"
+search_text_in_all_files = "ctrl+f"
+"#,
+        )
+        .unwrap_err();
+        let message = conflict.to_string();
+        assert!(message.contains("`keybindings.search_files`"));
+        assert!(message.contains("`keybindings.search_text_in_all_files`"));
+        assert!(message.contains("conflict"));
     }
 
     #[test]
@@ -311,6 +371,7 @@ excluded_from_push_all = true
 
         assert_eq!(settings.theme(), Some(Theme::Dark));
         assert_eq!(settings.viewer_render_options(), RenderOptions::DEFAULT);
+        assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
         assert!(settings.push_confirmation_required());
         let git_tools = ProjectName::try_from("git-tools").unwrap();
         assert!(settings.push_all_exclusions().contains(&git_tools));

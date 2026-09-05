@@ -23,4 +23,4 @@ serve *args:
 # Regenerate the tracked component-preview Tailwind stylesheet.
 [group('web')]
 preview-styles:
-    cd ../.. && cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-preview-cli -- styles
+    cd ../.. && cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-story-cli -- styles

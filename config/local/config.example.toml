@@ -7,6 +7,10 @@ layout = "unified"
 # compact | full
 density = "compact"
 
+[keybindings]
+search_files = "ctrl+p"
+search_text_in_all_files = "ctrl+f"
+
 [push]
 # Plain current-repo push only; defaults to true when omitted.
 confirm = true

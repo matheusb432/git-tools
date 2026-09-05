@@ -18,7 +18,6 @@ pub(super) fn DiffFileCard(
     density: ViewerDiffDensity,
     folded: ReadSignal<Option<bool>>,
     flashing_file: ReadSignal<Option<String>>,
-    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<()>,
     retry_allowed: bool,
@@ -49,6 +48,12 @@ pub(super) fn DiffFileCard(
         });
     let artifact_file_id = artifact_tab_id.map(|tab_id| static_artifact_file_id(tab_id, &file_id));
     let anchor_id = artifact_file_id.clone().unwrap_or(original_anchor_id);
+    let navigation_anchor_id = anchor_id.clone();
+    use_effect(move || {
+        if flashing_file.read().as_deref() == Some(navigation_anchor_id.as_str()) {
+            open.set(true);
+        }
+    });
     let copy_popover_id = format!("{anchor_id}-copy-menu");
     let artifact_path = artifact_file_id.as_ref().map(|_| path.clone());
     let artifact_absolute_path = artifact_file_id.as_ref().map(|_| absolute_path);
@@ -77,7 +82,6 @@ pub(super) fn DiffFileCard(
                 summary,
                 open,
                 copy_popover_id,
-                onfind,
                 onopen,
                 artifact_enhancement,
             }
@@ -99,7 +103,6 @@ fn DiffFileHeader(
     summary: ReadSignal<gtl_wire::viewer::ViewerFileSummary>,
     mut open: Signal<bool>,
     copy_popover_id: String,
-    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
@@ -127,7 +130,6 @@ fn DiffFileHeader(
             DiffFileActions {
                 summary,
                 copy_popover_id,
-                onfind,
                 onopen,
                 artifact_enhancement,
             }

@@ -169,6 +169,7 @@ index 333..444 100644\n\
         let app_settings = FixedUserSettingsStore::new(UserSettings::new(
             None,
             RenderOptions::DEFAULT,
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             DiffExclusions::new([(project_name("repo"), vec!["md"])], None),
             gtl_models::settings::PushAllExclusions::default(),

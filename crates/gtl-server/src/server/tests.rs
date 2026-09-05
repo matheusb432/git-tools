@@ -109,6 +109,69 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
 
 #[tokio::test]
 #[serial(server_tracing)]
+async fn reports_invalid_viewer_keybinding_without_exposing_the_config_path() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("private-config.toml");
+    std::fs::write(&settings_path, "[keybindings]\nsearch_files = \"Cmd+P\"\n")?;
+    let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
+    let mut client =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+
+    let error = client
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(
+        error.message(),
+        "`keybindings.search_files` is invalid: unsupported token `Cmd`; use ctrl, alt, shift, or meta plus a-z, 0-9, f1-f12, enter, escape, space, tab, backspace, delete, insert, an arrow key, home, end, pageup, or pagedown"
+    );
+    assert!(
+        !error
+            .message()
+            .contains(&settings_path.to_string_lossy()[..])
+    );
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn projects_configured_keybindings_into_the_viewer_shell() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("config.toml");
+    std::fs::write(
+        &settings_path,
+        r#"
+[keybindings]
+search_files = "alt+k"
+search_text_in_all_files = "ctrl+shift+g"
+"#,
+    )?;
+    let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
+    let mut client =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+
+    let response = client
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await?
+        .into_inner();
+    let keybindings = response
+        .shell
+        .and_then(|shell| shell.preferences)
+        .and_then(|preferences| preferences.keybindings)
+        .ok_or("viewer shell omitted keybindings")?;
+
+    assert_eq!(keybindings.search_files, "alt+k");
+    assert_eq!(keybindings.search_text_in_all_files, "ctrl+shift+g");
+    assert_ne!(keybindings.platform, 0);
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
 async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;

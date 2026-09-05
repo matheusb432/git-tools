@@ -15,51 +15,51 @@ mod viewer_tab_overflow_menu;
 mod tests {
     use std::collections::BTreeSet;
 
-    use dx_preview::{find, showcases};
+    use dx_story::{find, story_sets};
 
     #[test]
     fn catalog_has_unique_stable_paths() {
-        let showcases = showcases().unwrap();
-        let mut showcase_ids = BTreeSet::new();
+        let story_sets = story_sets().unwrap();
+        let mut story_set_ids = BTreeSet::new();
 
-        for showcase in showcases {
-            assert!(!showcase.id().is_empty(), "showcase ID must not be empty");
+        for story_set in story_sets {
+            assert!(!story_set.id().is_empty(), "story set ID must not be empty");
             assert!(
-                !showcase.name().is_empty(),
-                "showcase name must not be empty"
+                !story_set.name().is_empty(),
+                "story set name must not be empty"
             );
             assert!(
-                showcase_ids.insert(showcase.id()),
-                "duplicate showcase ID: {}",
-                showcase.id()
+                story_set_ids.insert(story_set.id()),
+                "duplicate story set ID: {}",
+                story_set.id()
             );
             assert!(
-                !showcase.previews().is_empty(),
-                "{} must have at least one preview",
-                showcase.id()
+                !story_set.stories().is_empty(),
+                "{} must have at least one story",
+                story_set.id()
             );
             assert!(
-                showcase.thumbnail().is_some(),
+                story_set.thumbnail().is_some(),
                 "{} must define a compact catalog thumbnail",
-                showcase.id()
+                story_set.id()
             );
         }
 
-        let previews = showcases.iter().flat_map(|showcase| {
-            showcase
-                .previews()
+        let stories = story_sets.iter().flat_map(|story_set| {
+            story_set
+                .stories()
                 .iter()
                 .copied()
-                .map(move |preview| (showcase.id(), preview))
+                .map(move |story| (story_set.id(), story))
         });
         let mut paths = BTreeSet::new();
-        for (showcase_id, preview) in previews {
-            assert!(!preview.id().is_empty(), "preview ID must not be empty");
-            assert!(!preview.name().is_empty(), "preview name must not be empty");
+        for (story_set_id, story) in stories {
+            assert!(!story.id().is_empty(), "story ID must not be empty");
+            assert!(!story.name().is_empty(), "story name must not be empty");
             assert!(
-                paths.insert((showcase_id, preview.id())),
-                "duplicate showcase path: {showcase_id}/{}",
-                preview.id()
+                paths.insert((story_set_id, story.id())),
+                "duplicate story path: {story_set_id}/{}",
+                story.id()
             );
         }
     }
@@ -84,11 +84,6 @@ mod tests {
         );
         assert!(
             find("viewer-settings-redesign", "mobile-viewer")
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            find("viewer-settings-redesign", "search-active-file")
                 .unwrap()
                 .is_some()
         );

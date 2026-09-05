@@ -4,7 +4,6 @@ use gtl_models::{
     timestamps::MachineTimestamp,
 };
 use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
-use lucide_dioxus::CircleDot;
 
 use crate::shared::{
     browser,
@@ -28,7 +27,7 @@ pub fn CommitsPanel(
     let commits = std::mem::take(&mut view.commits);
     let view = use_signal(move || view);
     let commits = use_store(move || commits);
-    let _context = super::use_static_diff_workspace_context(view.into(), commits.into());
+    let _context = super::use_static_diff_workspace_context(view.into(), commits.into(), false);
 
     rsx! {
         WorkspaceCommitsPanel {
@@ -71,7 +70,7 @@ pub(super) fn WorkspaceCommitsPanel(
 
     rsx! {
         ScrollArea {
-            class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+            class: "h-full min-h-0 overflow-auto bg-surface",
             "data-testid": test_id,
             onscroll: move |event: ScrollEvent| {
                 if has_more
@@ -83,6 +82,7 @@ pub(super) fn WorkspaceCommitsPanel(
             },
             CommitsPanelHeader {
                 label: view.commits_label.clone(),
+                commit_count: view.commit_count,
                 selection_active: selected_id.is_some(),
                 selection_pending,
                 onclear,
@@ -91,7 +91,7 @@ pub(super) fn WorkspaceCommitsPanel(
                 CommitSelectionError { message: message.clone() }
             }
             if view.commit_count == 0 {
-                EmptyNotice { "no commits in range" }
+                EmptyNotice { class: "m-3 compact:m-2.5", "no commits in range" }
             }
             for (commit_index, commit) in workspace.commits.iter().enumerate() {
                 {
@@ -110,10 +110,10 @@ pub(super) fn WorkspaceCommitsPanel(
                 }
             }
             if loading {
-                p { class: "px-2 py-3 text-center text-ink-3", role: "status", "Loading commits..." }
+                p { class: "px-3 py-3 text-center text-ink-3", role: "status", "Loading commits..." }
             } else if let Some(message) = load_error {
                 div {
-                    class: "mx-1 mt-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del",
+                    class: "mx-3 mt-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del compact:mx-2.5",
                     role: "alert",
                     p { "{message}" }
                     if let Some(onloadmore) = onloadmore {
@@ -129,7 +129,7 @@ pub(super) fn WorkspaceCommitsPanel(
             } else if has_more {
                 if let Some(onloadmore) = onloadmore {
                     Button {
-                        class: "mx-auto mt-2",
+                        class: "mx-auto my-3",
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| onloadmore.call(()),
@@ -151,42 +151,49 @@ fn scroll_is_near_bottom(scroll: &ScrollData) -> bool {
 #[component]
 fn CommitsPanelHeader(
     label: String,
+    commit_count: usize,
     selection_active: bool,
     selection_pending: bool,
     onclear: Option<EventHandler<()>>,
 ) -> Element {
+    let heading = commit_panel_heading(&label);
     rsx! {
-        div { class: "flex items-start justify-between gap-2",
-            div {
-                h3 { class: "mx-0.5 mt-1.5 mb-1 font-semibold tracking-wider text-ink-3 uppercase",
-                    "{label}"
+        header { class: "border-b border-line px-3 py-2 compact:px-2.5",
+            div { class: "flex items-start justify-between gap-2",
+                div { class: "min-w-0 flex-1",
+                    h3 {
+                        class: "m-0 flex whitespace-nowrap text-sm font-semibold leading-snug text-ink",
+                        title: "{heading}: {commit_count}",
+                        span { class: "truncate first-letter:uppercase", "{heading}" }
+                        span { class: "flex-none tabular-nums", ": {commit_count}" }
+                    }
                 }
-                CommitPanelHint {}
-            }
-            if selection_active {
-                if let Some(onclear) = onclear {
-                    Button {
-                        size: ButtonSize::Small,
-                        variant: ButtonVariant::Ghost,
-                        state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
-                        onclick: move |_| onclear.call(()),
-                        "Range"
+                if selection_active {
+                    if let Some(onclear) = onclear {
+                        Button {
+                            class: "min-h-7 text-acc hover:text-acc-2 active:text-ink",
+                            size: ButtonSize::Content,
+                            variant: ButtonVariant::Bare,
+                            state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
+                            onclick: move |_| onclear.call(()),
+                            "Range"
+                        }
                     }
                 }
             }
+            CommitPanelHint {}
         }
     }
+}
+
+fn commit_panel_heading(label: &str) -> &str {
+    label.strip_prefix("# ").unwrap_or(label)
 }
 
 #[component]
 fn CommitPanelHint() -> Element {
     rsx! {
-        p { class: "mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-ink-3",
-            span { class: "flex-none text-acc", aria_hidden: "true",
-                CircleDot { size: 8, fill: "currentColor" }
-            }
-            "click ID to copy"
-        }
+        p { class: "mt-1 mb-0 text-xs text-ink-3", "click ID to copy" }
     }
 }
 
@@ -194,14 +201,15 @@ fn CommitPanelHint() -> Element {
 fn CommitSelectionError(message: String) -> Element {
     rsx! {
         p {
-            class: "mb-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del",
+            class: "m-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del compact:m-2.5",
             role: "alert",
             "{message}"
         }
     }
 }
 
-const COMMIT_CARD_CLASSES: &str = "relative ml-1.5 w-[calc(100%_-_0.375rem)] rounded-r-sm border-0 border-l-2 py-1.5 pr-2 pl-6 text-left focus-visible:outline-offset-1";
+const COMMIT_CARD_CLASSES: &str =
+    "relative w-full border-0 border-b border-line px-3 py-3 text-left compact:px-2.5";
 const COMMIT_DETAILS_HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(350);
 
 #[derive(Default)]
@@ -290,13 +298,13 @@ fn CommitCard(
                     size: ButtonSize::Content,
                     variant: ButtonVariant::Bare,
                     state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
-                    class: "absolute inset-0 z-2 size-full rounded-r-sm focus-visible:outline-offset-1",
+                    class: "absolute inset-0 z-2 size-full rounded-none focus-visible:-outline-offset-2",
                     aria_label: selection_label,
                     aria_pressed: selected.to_string(),
                     onclick: move |_| onselect.call(id.clone()),
                 }
             }
-            CommitCardContent { commit, selected, selectable }
+            CommitCardContent { commit, selectable }
             CommitDetailsPopover {
                 commit: commit.cloned(),
                 id: popover_id.clone(),
@@ -353,25 +361,22 @@ fn end_commit_details_interaction(
 }
 
 #[component]
-fn CommitCardContent(
-    commit: ReadStore<ViewerCommitSummary>,
-    selected: bool,
-    selectable: bool,
-) -> Element {
+fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selectable: bool) -> Element {
     let commit = commit.read();
     rsx! {
         span {
             class: "relative block",
             class: if selectable { "pointer-events-none" } else { "" },
-            CommitTimelineMarker { selected }
-            span { class: "mb-1 flex min-w-0 items-center gap-1.5",
+            span { class: "mb-2 block min-w-0 text-wrap font-medium leading-snug text-ink",
+                "{commit.subject}"
+            }
+            span { class: "flex min-w-0 items-center gap-1.5",
                 CommitIdButton { id: commit.id.clone() }
                 if commit.is_merge {
                     Badge { variant: BadgeVariant::Neutral, "merge" }
                 }
                 CommitDate { committed_at: commit.committed_at.clone() }
             }
-            span { class: "block min-w-0 text-wrap leading-normal text-ink-2", "{commit.subject}" }
         }
     }
 }
@@ -431,18 +436,6 @@ fn CommitDetailsPopover(commit: ViewerCommitSummary, id: String, anchor_name: St
 }
 
 #[component]
-fn CommitTimelineMarker(selected: bool) -> Element {
-    rsx! {
-        span {
-            class: "pointer-events-none absolute top-2 -left-4 flex size-5 items-center justify-center bg-surface",
-            class: if selected { "text-acc" } else { "text-line-2" },
-            aria_hidden: "true",
-            CircleDot { size: 10 }
-        }
-    }
-}
-
-#[component]
 fn CommitIdButton(id: CommitId) -> Element {
     fn copy_commit_id(id: CommitId) {
         spawn(async move {
@@ -457,8 +450,9 @@ fn CommitIdButton(id: CommitId) -> Element {
     rsx! {
         span { class: "pointer-events-auto relative z-20 flex flex-none",
             Button {
-                size: ButtonSize::Inline,
-                variant: ButtonVariant::Secondary,
+                class: "min-h-5 text-xs font-medium leading-none text-acc hover:text-acc-2 active:text-ink",
+                size: ButtonSize::Content,
+                variant: ButtonVariant::Bare,
                 title: "Copy commit ID",
                 "data-gtl-action": "copy-commit",
                 "data-gtl-copy-value": copy_value,
@@ -488,9 +482,9 @@ fn CommitDate(committed_at: MachineTimestamp) -> Element {
 
 const fn commit_card_tone_classes(selected: bool) -> &'static str {
     if selected {
-        "border-acc bg-acc-soft"
+        "bg-acc-soft"
     } else {
-        "border-line-2 bg-transparent hover:border-l-acc-line hover:bg-surface-2 active:bg-acc-soft"
+        "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
     }
 }
 
@@ -500,7 +494,39 @@ const fn commit_selection_enabled(commit_count: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::commit_selection_enabled;
+    use super::{
+        COMMIT_CARD_CLASSES, commit_card_tone_classes, commit_panel_heading,
+        commit_selection_enabled,
+    };
+
+    #[test]
+    fn commit_heading_omits_the_shell_comment_prefix() {
+        assert_eq!(
+            commit_panel_heading("# commits in range"),
+            "commits in range"
+        );
+        assert_eq!(commit_panel_heading("4 commits"), "4 commits");
+    }
+
+    #[test]
+    fn commit_rows_use_surface_tone_without_timeline_geometry() {
+        assert_eq!(commit_card_tone_classes(true), "bg-acc-soft");
+        assert_eq!(
+            commit_card_tone_classes(false),
+            "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
+        );
+        assert!(COMMIT_CARD_CLASSES.contains("border-b"));
+        assert!(
+            COMMIT_CARD_CLASSES
+                .split_ascii_whitespace()
+                .all(|class| !class.starts_with("border-l-"))
+        );
+        assert!(
+            COMMIT_CARD_CLASSES
+                .split_ascii_whitespace()
+                .all(|class| !class.starts_with("rounded"))
+        );
+    }
 
     #[test]
     fn commit_selection_requires_multiple_commits() {

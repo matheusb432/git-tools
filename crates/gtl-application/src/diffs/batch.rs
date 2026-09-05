@@ -110,6 +110,7 @@ mod tests {
         UserSettings::new(
             None,
             RenderOptions::DEFAULT,
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             exclusions,
             gtl_models::settings::PushAllExclusions::default(),

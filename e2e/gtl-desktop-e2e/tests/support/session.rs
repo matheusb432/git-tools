@@ -65,6 +65,12 @@ impl TestSession {
         &self.data_root
     }
 
+    pub fn write_user_config(&self, contents: &str) -> Result<()> {
+        let path = self.data_root.join("config.toml");
+        fs::write(&path, contents)
+            .with_context(|| format!("write E2E user settings {}", path.display()))
+    }
+
     pub async fn restart(&mut self) -> Result<()> {
         let data_root = self.data_root.clone();
         self.shutdown()
@@ -238,6 +244,7 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
     let mut command = Command::new(&server_binary);
     command
         .env("GIT_TOOLS_DATA_DIR", data_root)
+        .env("GIT_TOOLS_CONFIG", data_root.join("config.toml"))
         .stdin(Stdio::null());
     deny_external_proxies(&mut command);
     let mut child = command.group_spawn().with_context(|| {

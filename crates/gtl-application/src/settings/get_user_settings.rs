@@ -39,6 +39,7 @@ mod tests {
         let settings = UserSettings::new(
             Some(Theme::Hearth),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            gtl_models::viewer::ViewerKeybindings::default(),
             false,
             DiffExclusions::new(
                 [(crate::utils::project_name("git-tools"), vec!["js"])],

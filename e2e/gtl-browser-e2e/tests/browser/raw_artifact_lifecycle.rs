@@ -18,6 +18,7 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
         let page = &spec.session.page;
         let files = RawArtifactFiles::new(page);
         assert_initial_artifact(page, &files).await?;
+        assert_path_filter_popup(page).await?;
         assert_large_line_interaction(page, &files).await?;
         assert_collapsed_file_navigation(page, &files).await?;
         assert_mobile_file_navigation(page, &files).await?;
@@ -29,6 +30,46 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
     }
     .await;
     spec.finish(outcome).await
+}
+
+async fn assert_path_filter_popup(page: &Page) -> anyhow::Result<()> {
+    support::get_button(page, "Filter files by path")
+        .click(None)
+        .await?;
+    let input = page.get_by_placeholder("Filter files by path", true);
+    expect(page.locator("input[placeholder='Filter files by path']:focus"))
+        .to_be_visible()
+        .await?;
+    input.fill("alpha.rs", None).await?;
+    let options = page.locator("[data-gtl-path-filter] [role='listbox']");
+    expect(options.get_by_text("alpha.rs", true))
+        .to_be_visible()
+        .await?;
+    expect(options.get_by_text("beta.rs", true))
+        .to_be_hidden()
+        .await?;
+    expect(
+        page.locator(test_ids::CHANGED_FILES_PANEL.selector())
+            .get_by_text("beta.rs", true),
+    )
+    .to_be_visible()
+    .await?;
+    input.press("Enter", None).await?;
+    expect(input.clone()).to_be_hidden().await?;
+    expect(page.locator("details[data-path='src/alpha.rs'][open]"))
+        .to_be_visible()
+        .await?;
+    page.keyboard().press("Control+p", None).await?;
+    input.fill("beta.rs", None).await?;
+    options.get_by_text("beta.rs", true).click(None).await?;
+    expect(input.clone()).to_be_hidden().await?;
+    expect(page.locator("details[data-path='src/beta.rs'][open]"))
+        .to_be_visible()
+        .await?;
+    page.keyboard().press("Control+p", None).await?;
+    input.press("Escape", None).await?;
+    expect(input).to_be_hidden().await?;
+    Ok(())
 }
 
 struct RawArtifactFiles {

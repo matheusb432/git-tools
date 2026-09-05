@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant};
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "grid grid-cols-2 gap-3",
@@ -16,7 +16,7 @@ fn thumbnail() -> Element {
 }
 
 /// All visual variants.
-#[preview]
+#[story]
 fn variants() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
@@ -33,7 +33,7 @@ fn variants() -> Element {
 }
 
 /// Enabled, disabled, and loading states.
-#[preview]
+#[story]
 fn states() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
@@ -45,7 +45,7 @@ fn states() -> Element {
 }
 
 /// Sizes and layout modes.
-#[preview(name = "Sizes and layout")]
+#[story(name = "Sizes and layout")]
 fn sizes() -> Element {
     rsx! {
         div { class: "grid gap-5",
@@ -80,7 +80,7 @@ fn sizes() -> Element {
 }
 
 /// Local click state and reset behavior.
-#[preview]
+#[story]
 fn interactive() -> Element {
     let mut clicks = use_signal(|| 0_u32);
     let click_count = clicks();
@@ -99,5 +99,5 @@ fn interactive() -> Element {
 }
 
 /// Button component.
-#[showcase(id = "button", name = "Button", thumbnail = thumbnail)]
-const BUTTON_SHOWCASE: () = &[variants, states, sizes, interactive];
+#[stories(id = "button", name = "Button", thumbnail = thumbnail)]
+const BUTTON_STORIES: () = &[variants, states, sizes, interactive];

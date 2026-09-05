@@ -312,6 +312,7 @@ index 333..444 100644\n\
         UserSettings::new(
             None,
             RenderOptions::DEFAULT,
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             exclusions,
             gtl_models::settings::PushAllExclusions::default(),
@@ -322,6 +323,7 @@ index 333..444 100644\n\
         UserSettings::new(
             None,
             RenderOptions::new(DiffLayout::Unified, density),
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             DiffExclusions::default(),
             gtl_models::settings::PushAllExclusions::default(),

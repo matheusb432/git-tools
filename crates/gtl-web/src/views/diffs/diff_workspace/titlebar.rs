@@ -7,15 +7,12 @@ use lucide_dioxus::{Ellipsis, RefreshCw, Search, Trash2};
 
 #[cfg(feature = "component-preview")]
 use crate::shared::ui::{
-    IconPopover, IconPopoverPlacement, KeyboardShortcut, MENU_ACTION_HOST_CLASSES,
-    MenuActionContent,
+    IconPopover, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES, MenuActionContent,
 };
 use crate::shared::{
     browser,
     ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant},
 };
-#[cfg(feature = "component-preview")]
-use crate::views::diffs::search_keybindings::SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING;
 
 #[component]
 pub(super) fn ViewTitlebar(
@@ -38,6 +35,9 @@ pub(super) fn ViewTitlebar(
             div { class: "flex-1 mobile:hidden" }
             if let Some(live_actions) = live_actions {
                 {live_actions}
+            }
+            div { class: "workspace:hidden",
+                super::path_filter::PathFilterTrigger { artifact_view_id: artifact_view_id.clone() }
             }
             CollapseFilesButton { artifact_view_id }
         }
@@ -77,6 +77,9 @@ pub(super) fn PreviewViewTitlebar(
                 div { class: "flex-1" }
                 FindAllFilesButton { onfindall }
             }
+            if mobile {
+                super::path_filter::PathFilterTrigger {}
+            }
             PreviewLiveViewActions { mobile }
             CollapseFilesButton { preview_mobile: mobile }
         }
@@ -97,7 +100,6 @@ fn FindAllFilesButton(onfindall: EventHandler<()>) -> Element {
                 Search { size: 15 }
             }
             span { "All files" }
-            KeyboardShortcut { keys: SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING.to_vec() }
         }
     }
 }

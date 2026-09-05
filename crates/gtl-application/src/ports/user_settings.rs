@@ -11,19 +11,39 @@ pub struct UserSettingsConfigurationError {
     path: PathBuf,
     #[source]
     source: anyhow::Error,
+    client_diagnostic: Option<String>,
 }
 
 impl UserSettingsConfigurationError {
     /// Associates a concrete document failure with its settings path.
     #[must_use]
     pub fn new(path: PathBuf, source: anyhow::Error) -> Self {
-        Self { path, source }
+        Self {
+            path,
+            source,
+            client_diagnostic: None,
+        }
+    }
+
+    /// Adds a path-free diagnostic that is safe to return across a client boundary.
+    #[must_use]
+    pub fn with_client_diagnostic(mut self, diagnostic: String) -> Self {
+        self.client_diagnostic = Some(diagnostic);
+        self
     }
 
     /// Returns the invalid settings path.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Returns a safe diagnostic without the private configuration path.
+    #[must_use]
+    pub fn client_message(&self) -> &str {
+        self.client_diagnostic
+            .as_deref()
+            .unwrap_or("user settings are invalid")
     }
 }
 

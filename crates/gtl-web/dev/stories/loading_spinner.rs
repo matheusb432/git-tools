@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::LoadingSpinner;
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "grid size-12 place-items-center rounded-panel border border-acc-line bg-acc-soft text-acc",
@@ -13,7 +13,7 @@ fn thumbnail() -> Element {
 }
 
 /// Accent and inverse color contexts.
-#[preview(name = "Color contexts")]
+#[story(name = "Color contexts")]
 fn color_contexts() -> Element {
     rsx! {
         div {
@@ -31,5 +31,5 @@ fn color_contexts() -> Element {
 }
 
 /// Loading spinner component.
-#[showcase(id = "loading-spinner", name = "Loading spinner", thumbnail = thumbnail)]
-const LOADING_SPINNER_SHOWCASE: () = &[color_contexts];
+#[stories(id = "loading-spinner", name = "Loading spinner", thumbnail = thumbnail)]
+const LOADING_SPINNER_STORIES: () = &[color_contexts];

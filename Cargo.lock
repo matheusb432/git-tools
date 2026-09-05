@@ -2198,19 +2198,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "dx-preview"
+name = "dx-story"
 version = "0.1.0"
 dependencies = [
  "const_format",
  "dioxus",
- "dx-preview-macros",
+ "dx-story-macros",
  "inventory",
  "pulldown-cmark",
  "web-sys",
 ]
 
 [[package]]
-name = "dx-preview-macros"
+name = "dx-story-macros"
 version = "0.1.0"
 dependencies = [
  "prettyplease 0.3.0",
@@ -3842,7 +3842,7 @@ dependencies = [
  "anyhow",
  "clap",
  "criterion",
- "dx-preview",
+ "dx-story",
  "gtl-application",
  "gtl-artifacts",
  "gtl-client",
@@ -4078,7 +4078,7 @@ dependencies = [
  "dioxus-primitives",
  "dioxus-sdk-time",
  "dioxus-ssr",
- "dx-preview",
+ "dx-story",
  "gtl-client",
  "gtl-models",
  "gtl-web-contracts",

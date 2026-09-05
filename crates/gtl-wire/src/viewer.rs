@@ -7,14 +7,14 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPageNumber, HistoryPagePosition, HistoryRenderCount, RenderHistoryId,
-        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerTabPlacement,
-        ViewerVersion,
+        ViewerKeybindings, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
+        ViewerTabPlacement, ViewerVersion,
     },
 };
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 4;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 5;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -427,6 +427,7 @@ pub enum ViewerActiveState {
 pub struct ViewerPreferences {
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
+    pub keybindings: ViewerKeybindings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

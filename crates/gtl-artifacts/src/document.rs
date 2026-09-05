@@ -293,8 +293,8 @@ mod tests {
         );
         assert_eq!(evidence.files, 1);
         assert_eq!(evidence.rows, 12);
-        assert!(evidence.html <= 110_000, "{evidence:?}");
-        assert!(evidence.gzip <= 20_000, "{evidence:?}");
+        assert!(evidence.html <= 120_000, "{evidence:?}");
+        assert!(evidence.gzip <= 22_000, "{evidence:?}");
     }
 
     #[test]

@@ -5,7 +5,7 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows, Viewe
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{Button, ButtonSize, ButtonVariant},
+    shared::ui::{Button, ButtonSize, ButtonVariant, OVERLAY_SCROLLBAR_CLASSES},
     views::diffs::ArtifactDiffWorkspace,
 };
 
@@ -121,7 +121,7 @@ fn StaticArtifactDocument(views: Vec<StaticArtifactView>) -> Element {
     let has_tabs = views.len() > 1;
     rsx! {
         main {
-            class: "flex h-screen min-h-0 flex-col overflow-hidden bg-bg text-ink",
+            class: "flex h-screen min-h-0 flex-col overflow-hidden bg-bg text-ink {OVERLAY_SCROLLBAR_CLASSES}",
             "data-gtl-artifact-ready": "true",
             if has_tabs {
                 nav {
@@ -206,7 +206,7 @@ mod tests {
     fn enhancement_script_only_mutates_existing_document_state() {
         let script = static_artifact_enhancement_script();
 
-        assert_eq!(script.matches("addEventListener").count(), 8);
+        assert_eq!(script.matches("addEventListener").count(), 11);
         assert!(script.contains("root.addEventListener(\"copy\""));
         assert!(script.contains("root.addEventListener(\"mouseover\""));
         assert!(script.contains("data-gtl-hover-popover-target"));

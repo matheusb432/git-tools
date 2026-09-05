@@ -51,7 +51,7 @@ mod tests {
         let classified = CheckPaths::classify(&paths(&[
             "crates/gtl-models/src/lib.rs",
             "crates/gtl-web/src/app.rs",
-            "crates/gtl-web/dev/showcases/button.rs",
+            "crates/gtl-web/dev/stories/button.rs",
             "Cargo.toml",
             "docs/Guide Name.md",
             "crates/gtl-artifacts/src/styles/base.css",
@@ -63,14 +63,14 @@ mod tests {
             paths(&[
                 "crates/gtl-models/src/lib.rs",
                 "crates/gtl-web/src/app.rs",
-                "crates/gtl-web/dev/showcases/button.rs",
+                "crates/gtl-web/dev/stories/button.rs",
             ])
         );
         assert_eq!(
             classified.dioxus,
             paths(&[
                 "crates/gtl-web/src/app.rs",
-                "crates/gtl-web/dev/showcases/button.rs",
+                "crates/gtl-web/dev/stories/button.rs",
             ])
         );
         assert_eq!(classified.toml, paths(&["Cargo.toml"]));

@@ -236,6 +236,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         preferences: ViewerPreferences {
             theme: ViewerTheme::Dark,
             render_options: identity.render_options,
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
         },
         feedback: None,
     };
@@ -264,6 +265,14 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     );
     assert!(value.pointer("/active/view/files/0/lines").is_none());
     assert!(value.pointer("/active/view/repository_root").is_none());
+    assert_eq!(
+        value["preferences"]["keybindings"]["search_files"],
+        "ctrl+p"
+    );
+    assert_eq!(
+        value["preferences"]["keybindings"]["search_text_in_all_files"],
+        "ctrl+f"
+    );
     assert_eq!(serde_json::from_value::<ViewerShell>(value).unwrap(), shell);
 
     Ok(())

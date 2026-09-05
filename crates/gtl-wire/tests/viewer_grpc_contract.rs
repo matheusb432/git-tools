@@ -4,8 +4,9 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
-        RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
-        ViewerTabPlacement, ViewerVersion,
+        RenderHistoryId, ViewerKeybindingAction, ViewerKeybindingPlatform, ViewerKeybindings,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerTabPlacement,
+        ViewerVersion,
     },
 };
 use gtl_wire::{
@@ -99,6 +100,14 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
                 layout: ViewerDiffLayout::Split,
                 density: ViewerDiffDensity::Full,
             },
+            keybindings: ViewerKeybindings::try_from_fn(
+                ViewerKeybindingPlatform::Linux,
+                |action| match action {
+                    ViewerKeybindingAction::SearchFiles => "alt+p".parse().unwrap(),
+                    ViewerKeybindingAction::SearchTextInAllFiles => "ctrl+shift+f".parse().unwrap(),
+                },
+            )
+            .unwrap(),
         },
         feedback: Some(ViewerFeedback::TabClosed),
     };
@@ -110,6 +119,39 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
     .unwrap();
 
     assert_eq!(decoded, shell);
+}
+
+#[test]
+fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
+    for (search_files, search_text_in_all_files) in [("Shift+P", "Ctrl+F"), ("Ctrl+F", "ctrl+f")] {
+        let response = v1::GetViewerShellResponse {
+            shell: Some(v1::ViewerShell {
+                version: 1,
+                tabs: Vec::new(),
+                active: Some(v1::ViewerActiveState {
+                    state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
+                }),
+                preferences: Some(v1::ViewerPreferences {
+                    theme: v1::ViewerTheme::Dark as i32,
+                    render_options: Some(v1::ViewerRenderOptions {
+                        layout: v1::ViewerDiffLayout::Unified as i32,
+                        density: v1::ViewerDiffDensity::Compact as i32,
+                    }),
+                    keybindings: Some(v1::ViewerKeybindings {
+                        platform: v1::ViewerKeybindingPlatform::Linux as i32,
+                        search_files: search_files.to_owned(),
+                        search_text_in_all_files: search_text_in_all_files.to_owned(),
+                    }),
+                }),
+                feedback: None,
+            }),
+        };
+
+        assert_eq!(
+            decode_get_viewer_shell_response(response),
+            Err(ViewerCodecError::InvalidMessage)
+        );
+    }
 }
 
 #[test]

@@ -14,10 +14,22 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
 }
 
 async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> Result<()> {
+    session.write_user_config(
+        r#"
+[keybindings]
+search_files = "alt+p"
+search_text_in_all_files = "alt+f"
+"#,
+    )?;
+    session
+        .restart()
+        .await
+        .context("restart the viewer with custom search shortcuts")?;
     let fixture = OneShotFixture::create(session.data_root())?;
     fixture.forward()?;
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker")
         .await?;
+    assert_menu_covers_active_scrollbar(session.driver()).await?;
     assert_server_owned_searches(session.driver()).await?;
     let copied =
         support::copy_selected_diff_line(session.driver(), "work.txt", "alpha-one-shot-marker")
@@ -86,6 +98,50 @@ async fn run_one_shot_lifecycle(session: &mut support::session::TestSession) -> 
         .context("reopen the snapshot from history")?;
 
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
+}
+
+async fn assert_menu_covers_active_scrollbar(driver: &WebDriver) -> Result<()> {
+    let trigger = support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER).await?;
+    let document = driver.find(By::Css("[data-gtl-diff-document]")).await?;
+    let document_rect = document.rect().await?;
+    for _ in 0..2 {
+        trigger.click().await?;
+        let menu = driver
+            .find(By::Css("[popover][aria-label='Viewer menu']"))
+            .await?;
+        let menu_rect = menu.rect().await?;
+        let scrollbar_x = document_rect.x + document_rect.width - 7.0;
+        ensure!(
+            scrollbar_x > menu_rect.x
+                && scrollbar_x < menu_rect.x + menu_rect.width
+                && document_rect.y < menu_rect.y + menu_rect.height,
+            "the viewer menu must overlap the diff scrollbar in this fixture"
+        );
+        driver
+            .action_chain()
+            .move_to_element_center(&trigger)
+            .perform()
+            .await?;
+        // Let the native scrollbar fade before recording the unobstructed menu.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let unobstructed = menu.screenshot_as_png().await?;
+        driver
+            .action_chain()
+            .move_to(
+                format!("{scrollbar_x:.0}").parse()?,
+                format!("{:.0}", menu_rect.y + menu_rect.height + 24.0).parse()?,
+            )
+            .perform()
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        ensure!(
+            menu.screenshot_as_png().await? == unobstructed,
+            "the active diff scrollbar paints through the viewer menu"
+        );
+        support::evidence::capture(driver, "viewer-menu-over-scrollbar", true).await?;
+        trigger.send_keys(Key::Escape).await?;
+    }
+    Ok(())
 }
 
 async fn assert_commit_details_hover_popover(driver: &WebDriver) -> Result<()> {
@@ -249,10 +305,39 @@ async fn assert_server_owned_searches(driver: &WebDriver) -> Result<()> {
 
 async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
     let file_panel = support::selectors::by_test_id(driver, test_ids::CHANGED_FILES_PANEL).await?;
-    let file_filter = file_panel
-        .find(By::Css("input[placeholder^='Filter paths']"))
+    ensure!(
+        file_panel.find_all(By::Css("kbd")).await?.is_empty(),
+        "changed-file filter displays a shortcut hint"
+    );
+    driver
+        .action_chain()
+        .key_down(Key::Alt)
+        .send_keys("p")
+        .key_up(Key::Alt)
+        .perform()
         .await
-        .context("find changed-file filter")?;
+        .context("focus the changed-file filter with configured Alt+P")?;
+    let file_filter = driver
+        .query(By::Css("input[placeholder='Filter files by path']"))
+        .and_displayed()
+        .wait(
+            wait::ASSERTION_TIMEOUT,
+            std::time::Duration::from_millis(100),
+        )
+        .first()
+        .await
+        .context("open changed-file filter popup")?;
+    wait::until(
+        "configured file-search shortcut focuses the filter",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(
+                (driver.active_element().await?.element_id() == file_filter.element_id())
+                    .then_some(()),
+            )
+        },
+    )
+    .await?;
     file_filter
         .send_keys("missing-file")
         .await
@@ -261,10 +346,14 @@ async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
         "server-filtered empty file list",
         wait::ASSERTION_TIMEOUT,
         || async {
-            Ok(file_panel
+            Ok(driver
+                .find(By::Css(
+                    "[role='search'][aria-label='Filter files by path']",
+                ))
+                .await?
                 .text()
                 .await?
-                .contains("no files match this filter")
+                .contains("No files match")
                 .then_some(()))
         },
     )
@@ -281,8 +370,8 @@ async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
         "server-filtered changed file",
         wait::ASSERTION_TIMEOUT,
         || async {
-            Ok(file_panel
-                .find_all(By::Css("button[title='work.txt']"))
+            Ok(driver
+                .find_all(By::Css("[role='option'][aria-label='work.txt']"))
                 .await?
                 .into_iter()
                 .next()
@@ -295,26 +384,13 @@ async fn assert_server_owned_file_search(driver: &WebDriver) -> Result<()> {
 }
 
 async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
-    let intercepted: bool = driver
-        .execute(
-            r"
-                const target = document.querySelector('[data-gtl-diff-document]');
-                const event = new KeyboardEvent('keydown', {
-                    key: 'f',
-                    ctrlKey: true,
-                    bubbles: true,
-                    cancelable: true,
-                });
-                target.dispatchEvent(event);
-                return event.defaultPrevented;
-            ",
-            Vec::new(),
-        )
+    driver
+        .find(By::Css("input[placeholder='Filter files by path']"))
         .await
-        .context("open diff search with Ctrl+F")?
-        .convert()
-        .context("decode Ctrl+F interception")?;
-    ensure!(intercepted, "the viewer did not suppress native Ctrl+F");
+        .context("find focused changed-file filter")?
+        .send_keys(Key::Alt + "f")
+        .await
+        .context("open diff search with configured Alt+F from an input")?;
     let find_input = driver
         .query(By::Id("viewer-diff-find-input"))
         .ignore_errors(true)
@@ -352,6 +428,10 @@ async fn assert_server_owned_diff_search(driver: &WebDriver) -> Result<()> {
         ))
         .await
         .context("find diff search controls")?;
+    ensure!(
+        find_region.find_all(By::Css("kbd")).await?.is_empty(),
+        "diff search displays a shortcut hint"
+    );
     ensure!(
         find_region.text().await?.contains("1 match"),
         "diff search did not report its server match count"

@@ -1,16 +1,28 @@
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+use std::rc::Rc;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use std::time::Duration;
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
+#[cfg(all(
+    any(feature = "component-preview", feature = "desktop"),
+    not(target_arch = "wasm32")
+))]
 use dioxus::prelude::spawn;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen::JsCast;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen_futures::JsFuture;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
 use web_sys::HtmlDetailsElement;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use web_sys::{HtmlDocument, HtmlElement, HtmlTextAreaElement};
+
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[derive(Clone)]
+struct WindowKeydownListener {
+    window: web_sys::Window,
+    callback: Rc<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::KeyboardEvent)>>,
+}
 
 #[cfg(feature = "interactive-ui")]
 pub(crate) fn apply_theme(theme: &'static str) {
@@ -22,7 +34,7 @@ pub(crate) fn apply_theme(theme: &'static str) {
 
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) fn focus_element(id: String) {
-    spawn(async move {
+    let focus = async move {
         dioxus_sdk_time::sleep(Duration::ZERO).await;
         let Some(element) = document()
             .and_then(|document| document.get_element_by_id(&id))
@@ -31,8 +43,47 @@ pub(crate) fn focus_element(id: String) {
             return;
         };
         let _ = element.focus();
-    });
+    };
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(focus);
+    #[cfg(not(target_arch = "wasm32"))]
+    spawn(focus);
 }
+
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
+    let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
+        || {
+            let window = web_sys::window()?;
+            let callback = Rc::new(wasm_bindgen::closure::Closure::wrap(
+                Box::new(handler) as Box<dyn FnMut(web_sys::KeyboardEvent)>
+            ));
+            window
+                .add_event_listener_with_callback_and_bool(
+                    "keydown",
+                    callback.as_ref().as_ref().unchecked_ref(),
+                    true,
+                )
+                .ok()?;
+            Some(WindowKeydownListener { window, callback })
+        },
+        |listener| {
+            let Some(listener) = listener else {
+                return;
+            };
+            let _ = listener
+                .window
+                .remove_event_listener_with_callback_and_bool(
+                    "keydown",
+                    listener.callback.as_ref().as_ref().unchecked_ref(),
+                    true,
+                );
+        },
+    );
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn use_window_keydown(_handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {}
 
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn hide_popover(id: &str) {
@@ -56,7 +107,7 @@ pub(crate) fn show_popover(id: &str) {
     let _ = element.show_popover();
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) fn scroll_to_file(id: &str) {
     let Some(details) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -66,6 +117,26 @@ pub(crate) fn scroll_to_file(id: &str) {
     };
     details.set_open(true);
     details.scroll_into_view_with_bool(true);
+}
+
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
+pub(crate) fn scroll_option_into_view(id: &str) {
+    let Some(option) = document()
+        .and_then(|document| document.get_element_by_id(id))
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+    else {
+        return;
+    };
+    let Some(list) = option.parent_element() else {
+        return;
+    };
+    let top = option.offset_top();
+    let bottom = top + option.offset_height();
+    if top < list.scroll_top() {
+        list.set_scroll_top(top);
+    } else if bottom > list.scroll_top() + list.client_height() {
+        list.set_scroll_top(bottom - list.client_height());
+    }
 }
 
 #[cfg(any(feature = "artifact", feature = "desktop"))]

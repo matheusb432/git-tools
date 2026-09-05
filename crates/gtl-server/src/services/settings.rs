@@ -9,7 +9,9 @@ use gtl_models::{settings::SettingKeyValue, viewer::Theme};
 use gtl_wire::v1::{self, settings_service_server::SettingsService};
 use tonic::{Request, Response, Status};
 
-use super::{run_blocking, unexpected, user_settings_load_error};
+use super::{
+    invalid_user_settings_configuration, run_blocking, unexpected, user_settings_load_error,
+};
 use crate::state::AppState;
 
 pub(crate) struct SettingsGrpcService {
@@ -66,9 +68,8 @@ impl SettingsService for SettingsGrpcService {
 pub(super) fn set_setting_key_error(error: SetSettingKeyError) -> Status {
     match error {
         SetSettingKeyError::Settings(error) => match error {
-            UserSettingsEditError::InvalidConfiguration(_) => {
-                tracing::warn!(error = ?error, "user settings cannot be edited");
-                Status::failed_precondition("user settings are invalid")
+            UserSettingsEditError::InvalidConfiguration(error) => {
+                invalid_user_settings_configuration(&error, "set user setting")
             }
             UserSettingsEditError::Conflict(_) => {
                 tracing::warn!(error = ?error, "user settings edit was aborted");

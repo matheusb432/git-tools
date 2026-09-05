@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use gtl_models::diffs::CommitId;
+use gtl_models::{
+    diffs::CommitId,
+    viewer::{ViewerKeybindingAction, ViewerKeybindings},
+};
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView, ViewerTabKind,
@@ -22,7 +25,7 @@ use crate::{
             Skeleton, use_toast,
         },
     },
-    views::diffs::ClientDiffDocument,
+    views::diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
 };
 
 const LIVE_VIEW_ACTIONS_POPOVER_ID: &str = "live-view-actions";
@@ -169,21 +172,48 @@ fn ReadyWorkspace(
     let mut delete_pending = use_signal(|| false);
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
     let file_filter = use_signal(String::new);
+    let mut path_filter_open = use_signal(|| false);
     let files_folded = use_signal(|| None::<bool>);
-    let mut flashing_file = use_signal(|| None::<String>);
+    let flashing_file = use_signal(|| None::<String>);
     let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
+    let keybindings = shell.with(|shell| match shell {
+        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerKeybindings::default(),
+    });
     let workspace = super::use_diff_workspace_context(
         view,
         commit_pages.commits(),
         super::DiffWorkspaceSignals {
             file_filter,
+            path_filter_open,
             files_folded,
             flashing_file,
             find_open,
         },
         true,
     );
+    browser::use_window_keydown(move |event| {
+        if native_keyboard_event_matches(&event, keybindings, ViewerKeybindingAction::SearchFiles) {
+            event.prevent_default();
+            super::path_filter::open_path_filter(workspace);
+        } else if native_keyboard_event_matches(
+            &event,
+            keybindings,
+            ViewerKeybindingAction::SearchTextInAllFiles,
+        ) {
+            event.prevent_default();
+            path_filter_open.set(false);
+            find_open.set(true);
+            browser::focus_element("viewer-diff-find-input".to_owned());
+        }
+    });
+    use_effect(move || {
+        if path_filter_open() {
+            mobile_panel.set(None);
+            find_open.set(false);
+        }
+    });
     let (tab_id, identity) = view.with(|view| (view.identity.tab_id, view.identity));
     let ready_shell = shell.with(|shell| {
         let ViewerShellLoad::Ready(shell) = shell else {
@@ -234,16 +264,7 @@ fn ReadyWorkspace(
         }
     });
 
-    let mut clear_file_flash = use_action(move || async move {
-        dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
-        flashing_file.set(None);
-        Ok::<(), std::convert::Infallible>(())
-    });
-    let onnavigate = move |anchor_id: String| {
-        browser::scroll_to_file(&anchor_id);
-        flashing_file.set(Some(anchor_id));
-        clear_file_flash.call();
-    };
+    let onnavigate = super::use_file_navigation(flashing_file);
     let onopen = move |file: gtl_wire::viewer::ViewerDiffFileId| {
         spawn(async move {
             if let Err(error) =
@@ -286,15 +307,7 @@ fn ReadyWorkspace(
         }
     });
     rsx! {
-        section {
-            class: "h-full min-h-0 overflow-hidden",
-            onkeydown: move |event: KeyboardEvent| {
-                if is_diff_find_shortcut(&event) {
-                    event.prevent_default();
-                    find_open.set(true);
-                    browser::focus_element("viewer-diff-find-input".to_owned());
-                }
-            },
+        section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
                 diff_document: rsx! {
                     ClientDiffDocument { onopen }
@@ -368,12 +381,6 @@ fn ReadyWorkspace(
             },
         }
     }
-}
-
-fn is_diff_find_shortcut(event: &KeyboardEvent) -> bool {
-    let modifiers = event.modifiers();
-    (modifiers.ctrl() || modifiers.meta())
-        && matches!(event.key(), Key::Character(value) if value.eq_ignore_ascii_case("f"))
 }
 
 #[component]

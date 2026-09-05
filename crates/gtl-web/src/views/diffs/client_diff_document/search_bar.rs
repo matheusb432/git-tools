@@ -1,57 +1,26 @@
 use dioxus::prelude::*;
-#[cfg(feature = "component-preview")]
-use lucide_dioxus::FileText;
-use lucide_dioxus::{ChevronDown, ChevronUp, Files, Search, X};
+use lucide_dioxus::{ChevronDown, ChevronUp, Search, X};
 
-#[cfg(feature = "component-preview")]
-use crate::views::diffs::search_keybindings::SEARCH_TEXT_IN_FILE_KEY_BINDING;
-use crate::{
-    shared::ui::{
-        Button, ButtonSize, ButtonState, ButtonVariant, KeyboardShortcut, TextInput,
-        TextInputLabelVisibility,
-    },
-    views::diffs::search_keybindings::SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING,
+use crate::shared::ui::{
+    Button, ButtonSize, ButtonState, ButtonVariant, SearchPanel, TextInput,
+    TextInputLabelVisibility,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::views::diffs) enum DiffSearchScope {
-    #[cfg(feature = "component-preview")]
-    ActiveFile {
-        path: String,
-    },
     AllFiles,
 }
 
 impl DiffSearchScope {
     const fn label(&self) -> &'static str {
         match self {
-            #[cfg(feature = "component-preview")]
-            Self::ActiveFile { .. } => "This file",
             Self::AllFiles => "All files",
-        }
-    }
-
-    fn context(&self) -> &str {
-        match self {
-            #[cfg(feature = "component-preview")]
-            Self::ActiveFile { path } => path,
-            Self::AllFiles => "Search code across the complete diff",
         }
     }
 
     const fn placeholder(&self) -> &'static str {
         match self {
-            #[cfg(feature = "component-preview")]
-            Self::ActiveFile { .. } => "Search code in this file...",
             Self::AllFiles => "Search code in all files...",
-        }
-    }
-
-    fn shortcut(&self) -> Vec<&'static str> {
-        match self {
-            #[cfg(feature = "component-preview")]
-            Self::ActiveFile { .. } => SEARCH_TEXT_IN_FILE_KEY_BINDING.to_vec(),
-            Self::AllFiles => SEARCH_TEXT_IN_ALL_FILES_KEY_BINDING.to_vec(),
         }
     }
 }
@@ -64,7 +33,6 @@ pub(in crate::views::diffs) fn DiffSearchBar(
     status_message: String,
     navigation_enabled: bool,
     maxlength: Option<String>,
-    #[props(default)] show_shortcut: bool,
     onquerychange: EventHandler<String>,
     onprevious: EventHandler<()>,
     onnext: EventHandler<()>,
@@ -78,10 +46,8 @@ pub(in crate::views::diffs) fn DiffSearchBar(
     let aria_label = format!("Find code in {}", scope.label().to_lowercase());
 
     rsx! {
-        section {
-            class: "absolute top-3 right-5 z-20 w-[min(34rem,calc(100%-1.5rem))] overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating tablet:right-3 mobile:top-1 mobile:right-1",
-            role: "search",
-            aria_label,
+        SearchPanel {
+            label: aria_label,
             onkeydown: move |event: KeyboardEvent| {
                 match event.key() {
                     Key::Escape => {
@@ -99,28 +65,6 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                     _ => {}
                 }
             },
-            header { class: "flex min-w-0 items-center gap-2 border-b border-line bg-surface-2 px-3 py-2",
-                span {
-                    class: "flex size-6 flex-none items-center justify-center rounded-sm border border-line bg-sunk text-acc",
-                    aria_hidden: "true",
-                    match &scope {
-                        #[cfg(feature = "component-preview")]
-                        DiffSearchScope::ActiveFile { .. } => rsx! {
-                            FileText { size: 14 }
-                        },
-                        DiffSearchScope::AllFiles => rsx! {
-                            Files { size: 14 }
-                        },
-                    }
-                }
-                div { class: "min-w-0 flex-1",
-                    strong { class: "block text-xs font-semibold text-ink", "{scope.label()}" }
-                    span { class: "block truncate text-[0.6875rem] text-ink-3", "{scope.context()}" }
-                }
-                if show_shortcut {
-                    KeyboardShortcut { keys: scope.shortcut() }
-                }
-            }
             div { class: "grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1.5 p-2",
                 div { class: "relative min-w-0",
                     span {
@@ -195,14 +139,11 @@ mod tests {
         rsx! {
             DiffSearchBar {
                 input_id: "search",
-                scope: DiffSearchScope::ActiveFile {
-                    path: "src/main.rs".to_owned(),
-                },
+                scope: DiffSearchScope::AllFiles,
                 query: "needle",
                 status_message: "2 matches",
                 navigation_enabled: true,
                 maxlength: None,
-                show_shortcut: true,
                 onquerychange: move |_| {},
                 onprevious: move |()| {},
                 onnext: move |()| {},
@@ -212,14 +153,13 @@ mod tests {
     }
 
     #[test]
-    fn renders_the_scope_and_its_shortcut() {
+    fn renders_the_workspace_scope_without_a_shortcut_hint() {
         let html = dioxus_ssr::render_element(rsx! {
             SearchBarTestView {}
         });
 
-        assert!(html.contains("This file"));
-        assert!(html.contains("src/main.rs"));
-        assert!(html.contains(">Ctrl<"));
-        assert!(html.contains(">F<"));
+        assert!(html.contains("Search code in all files..."));
+        assert!(!html.contains("<header"));
+        assert!(!html.contains("<kbd"));
     }
 }

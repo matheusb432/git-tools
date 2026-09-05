@@ -180,6 +180,21 @@ message ViewerActiveState {
 message ViewerPreferences {
   ViewerTheme theme = 1;
   ViewerRenderOptions render_options = 2;
+  ViewerKeybindings keybindings = 3;
+}
+
+enum ViewerKeybindingPlatform {
+  VIEWER_KEYBINDING_PLATFORM_UNSPECIFIED = 0;
+  VIEWER_KEYBINDING_PLATFORM_LINUX = 1;
+  VIEWER_KEYBINDING_PLATFORM_WINDOWS = 2;
+  VIEWER_KEYBINDING_PLATFORM_MAC_OS = 3;
+  VIEWER_KEYBINDING_PLATFORM_OTHER = 4;
+}
+
+message ViewerKeybindings {
+  ViewerKeybindingPlatform platform = 1;
+  string search_files = 2;
+  string search_text_in_all_files = 3;
 }
 
 enum ViewerFeedbackKind {

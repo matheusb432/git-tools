@@ -7,7 +7,11 @@ use gtl_models::{
     diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
     settings::{PushAllExclusions, UserSettings},
-    viewer::{DiffDensity, DiffLayout, ParseRenderOptionError, RenderOptions},
+    viewer::{
+        DiffDensity, DiffLayout, InvalidViewerKeybindings, ParseRenderOptionError,
+        ParseViewerKeybindingError, RenderOptions, ViewerKeybinding, ViewerKeybindingAction,
+        ViewerKeybindingPlatform, ViewerKeybindings,
+    },
 };
 use serde::Deserialize;
 use thiserror::Error;
@@ -23,6 +27,10 @@ pub(super) enum UserSettingsDocumentKey {
     Density,
     #[strum(to_string = "push.confirm")]
     PushConfirmation,
+    #[strum(to_string = "keybindings.search_files")]
+    KeybindingsSearchFiles,
+    #[strum(to_string = "keybindings.search_text_in_all_files")]
+    KeybindingsSearchTextInAllFiles,
     #[strum(to_string = "diff.exclude")]
     DefaultDiffExclusions,
     #[strum(to_string = "projects")]
@@ -42,6 +50,7 @@ impl UserSettingsDocumentKey {
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
+            Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
             Self::DefaultDiffExclusions => "diff",
             Self::Projects
             | Self::ProjectName { .. }
@@ -56,6 +65,8 @@ impl UserSettingsDocumentKey {
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "confirm",
+            Self::KeybindingsSearchFiles => "search_files",
+            Self::KeybindingsSearchTextInAllFiles => "search_text_in_all_files",
             Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "exclude",
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
@@ -69,6 +80,7 @@ impl UserSettingsDocumentKey {
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
+            Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
             Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "diff",
             Self::Projects | Self::ProjectName { .. } | Self::ProjectExcludedFromPushAll { .. } => {
                 "projects"
@@ -106,6 +118,25 @@ pub(super) enum UserSettingsDocumentError {
         source: ParseRenderOptionError,
     },
     #[error("`{key}` is invalid: {source}")]
+    InvalidKeybinding {
+        key: UserSettingsDocumentKey,
+        #[source]
+        source: ParseViewerKeybindingError,
+    },
+    #[error("`{key}` is invalid on this platform: {source}")]
+    InvalidKeybindingSet {
+        key: UserSettingsDocumentKey,
+        #[source]
+        source: InvalidViewerKeybindings,
+    },
+    #[error("`{first}` conflicts with `{second}`: {source}")]
+    ConflictingKeybindings {
+        first: UserSettingsDocumentKey,
+        second: UserSettingsDocumentKey,
+        #[source]
+        source: InvalidViewerKeybindings,
+    },
+    #[error("`{key}` is invalid: {source}")]
     InvalidProjectName {
         key: UserSettingsDocumentKey,
         #[source]
@@ -116,6 +147,18 @@ pub(super) enum UserSettingsDocumentError {
         key: UserSettingsDocumentKey,
         name: ProjectName,
     },
+}
+
+impl UserSettingsDocumentError {
+    pub(super) fn client_diagnostic(&self) -> Option<String> {
+        matches!(
+            self,
+            Self::InvalidKeybinding { .. }
+                | Self::InvalidKeybindingSet { .. }
+                | Self::ConflictingKeybindings { .. }
+        )
+        .then(|| self.to_string())
+    }
 }
 
 /// A TOML document whose complete supported schema and domain values are valid.
@@ -173,6 +216,8 @@ struct RawUserSettingsDocument {
     #[serde(default)]
     push: Option<RawPushSettingsDocument>,
     #[serde(default)]
+    keybindings: Option<RawKeybindingsDocument>,
+    #[serde(default)]
     diff: Option<RawDiffSettingsDocument>,
     #[serde(default)]
     projects: Vec<RawProjectSettingsDocument>,
@@ -183,6 +228,15 @@ struct RawUserSettingsDocument {
 struct RawPushSettingsDocument {
     #[serde(default)]
     confirm: Option<RawSettingValue>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawKeybindingsDocument {
+    #[serde(default)]
+    search_files: Option<RawSettingValue>,
+    #[serde(default)]
+    search_text_in_all_files: Option<RawSettingValue>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -217,6 +271,7 @@ fn parse_settings(raw: &str) -> Result<UserSettings, UserSettingsDocumentError> 
         .map(|value| parse_render_option(UserSettingsDocumentKey::Density, &value))
         .transpose()?
         .unwrap_or(DiffDensity::Compact);
+    let keybindings = parse_keybindings(document.keybindings.unwrap_or_default())?;
     let push_confirmation_required = optional_bool(
         UserSettingsDocumentKey::PushConfirmation,
         document.push.and_then(|push| push.confirm),
@@ -231,10 +286,70 @@ fn parse_settings(raw: &str) -> Result<UserSettings, UserSettingsDocumentError> 
     Ok(UserSettings::new(
         theme,
         RenderOptions::new(layout, density),
+        keybindings,
         push_confirmation_required,
         DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default),
         push_all_exclusions,
     ))
+}
+
+fn parse_keybindings(
+    document: RawKeybindingsDocument,
+) -> Result<ViewerKeybindings, UserSettingsDocumentError> {
+    let platform = ViewerKeybindingPlatform::current();
+    let defaults = ViewerKeybindings::for_platform(platform);
+    let search_files = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsSearchFiles,
+        document.search_files,
+    )?
+    .unwrap_or(defaults[ViewerKeybindingAction::SearchFiles]);
+    let search_text_in_all_files = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsSearchTextInAllFiles,
+        document.search_text_in_all_files,
+    )?
+    .unwrap_or(defaults[ViewerKeybindingAction::SearchTextInAllFiles]);
+
+    ViewerKeybindings::try_from_fn(platform, |action| match action {
+        ViewerKeybindingAction::SearchFiles => search_files,
+        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+    })
+    .map_err(|source| match source {
+        InvalidViewerKeybindings::AmbiguousMacOsModifiers { action } => {
+            UserSettingsDocumentError::InvalidKeybindingSet {
+                key: keybinding_document_key(action),
+                source,
+            }
+        }
+        InvalidViewerKeybindings::Conflict { first, second, .. } => {
+            UserSettingsDocumentError::ConflictingKeybindings {
+                first: keybinding_document_key(first),
+                second: keybinding_document_key(second),
+                source,
+            }
+        }
+    })
+}
+
+const fn keybinding_document_key(action: ViewerKeybindingAction) -> UserSettingsDocumentKey {
+    match action {
+        ViewerKeybindingAction::SearchFiles => UserSettingsDocumentKey::KeybindingsSearchFiles,
+        ViewerKeybindingAction::SearchTextInAllFiles => {
+            UserSettingsDocumentKey::KeybindingsSearchTextInAllFiles
+        }
+    }
+}
+
+fn optional_keybinding(
+    key: UserSettingsDocumentKey,
+    value: Option<RawSettingValue>,
+) -> Result<Option<ViewerKeybinding>, UserSettingsDocumentError> {
+    optional_string(key, value)?
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|source| UserSettingsDocumentError::InvalidKeybinding { key, source })
+        })
+        .transpose()
 }
 
 fn parse_render_option<T>(

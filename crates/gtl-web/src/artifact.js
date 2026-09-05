@@ -164,35 +164,60 @@
     }
   }
 
+  function pathFilterOptions(filter) {
+    return Array.from(filter.querySelectorAll("[role='option']:not([hidden])"));
+  }
+
+  function selectPathFilterOption(filter, selected) {
+    for (const option of filter.querySelectorAll("[role='option']")) {
+      option.setAttribute("aria-selected", String(option === selected));
+    }
+    const input = filter.querySelector("input");
+    if (selected === undefined) input?.removeAttribute("aria-activedescendant");
+    else {
+      input?.setAttribute("aria-activedescendant", selected.id);
+      selected.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   function filterFiles(panel, value) {
+    const filter = panel.querySelector("[data-gtl-path-filter]");
+    if (filter === null) return;
+    const input = filter.querySelector("input");
+    if (input !== null && input.value !== value) input.value = value;
     const normalized = value.toLowerCase();
+    for (const option of filter.querySelectorAll("[role='option']")) {
+      option.hidden = !(option.dataset.gtlFilterKey ?? "").includes(normalized);
+    }
+    const options = pathFilterOptions(filter);
+    selectPathFilterOption(filter, options[0]);
+    const empty = filter.querySelector("[data-gtl-path-filter-empty]");
+    if (empty !== null) empty.hidden = options.length > 0;
+  }
+
+  function setPathFilterOpen(panel, open, restoreFocus = true) {
+    const filter = panel.querySelector("[data-gtl-path-filter]");
+    if (filter === null) return;
+    filter.hidden = !open;
+    const input = filter.querySelector("input");
+    input?.setAttribute("aria-expanded", String(open));
     for (
-      const input of panel.querySelectorAll(
-        "input[data-gtl-action='filter-files']",
+      const control of panel.querySelectorAll(
+        "[data-gtl-action='open-path-filter']",
       )
     ) {
-      if (input.value !== value) input.value = value;
+      control.setAttribute("aria-expanded", String(open));
     }
-    for (
-      const filePanel of panel.querySelectorAll("[data-gtl-file-panel]")
-    ) {
-      const leaves = Array.from(
-        filePanel.querySelectorAll("[data-gtl-file-leaf]"),
-      );
-      for (const leaf of leaves) {
-        leaf.hidden = !(leaf.dataset.gtlFilterKey ?? "").includes(normalized);
+    if (open) {
+      for (const dialog of panel.querySelectorAll("dialog[open]")) {
+        closeDialog(dialog, false);
       }
-      const directories = Array.from(
-        filePanel.querySelectorAll("[data-gtl-file-directory]"),
-      ).reverse();
-      for (const directory of directories) {
-        directory.hidden = !Array.from(
-          directory.querySelectorAll("[data-gtl-file-leaf]"),
-        ).some((leaf) => !leaf.hidden);
-      }
-      const empty = filePanel.querySelector("[data-gtl-files-empty]");
-      if (empty !== null) {
-        empty.hidden = !leaves.every((leaf) => leaf.hidden);
+      input?.focus();
+    } else if (restoreFocus) {
+      const workspace = panelWorkspace(panel);
+      if (workspace !== null) {
+        workspace.setAttribute("tabindex", "-1");
+        workspace.focus();
       }
     }
   }
@@ -243,6 +268,7 @@
     setFilesFolded(panel, false);
     setCopyContext(panel, true);
     filterFiles(panel, "");
+    setPathFilterOpen(panel, false, false);
     const workspace = panelWorkspace(panel);
     if (workspace !== null) {
       for (
@@ -531,6 +557,16 @@
         }
         break;
       }
+      case "open-path-filter":
+      case "select-path-filter-file": {
+        event.preventDefault();
+        const panel = artifactPanel(action);
+        if (panel !== null) {
+          setPathFilterOpen(panel, name === "open-path-filter");
+          if (name === "select-path-filter-file") navigateFile(action);
+        }
+        break;
+      }
       case "navigate-file":
         event.preventDefault();
         navigateFile(action);
@@ -560,6 +596,62 @@
         event.preventDefault();
         toggleLongLine(action);
         break;
+    }
+  });
+
+  root.addEventListener("mousedown", (event) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest("[data-gtl-path-filter] [role='option']")
+    ) event.preventDefault();
+  });
+
+  root.addEventListener("focusout", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const filter = event.target.closest("[data-gtl-path-filter]");
+    const panel = artifactPanel(event.target);
+    if (
+      panel !== null && filter !== null && !filter.hidden &&
+      !filter.contains(event.relatedTarget)
+    ) setPathFilterOpen(panel, false, false);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!(event.target instanceof Element) || event.isComposing) return;
+    const panel = artifactPanel(event.target) ??
+      root.querySelector("[data-gtl-view-panel]:not([hidden])");
+    if (panel === null) return;
+    const filter = event.target.closest("[data-gtl-path-filter]");
+    if (
+      filter !== null &&
+      ["Escape", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)
+    ) {
+      event.preventDefault();
+      if (event.key === "Escape") setPathFilterOpen(panel, false);
+      else {
+        const options = pathFilterOptions(filter);
+        const selected = options.findIndex((option) =>
+          option.getAttribute("aria-selected") === "true"
+        );
+        if (event.key === "Enter" && options[selected] !== undefined) {
+          setPathFilterOpen(panel, false);
+          navigateFile(options[selected]);
+        } else if (options.length > 0 && event.key !== "Enter") {
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          selectPathFilterOption(
+            filter,
+            options[
+              (Math.max(selected, 0) + step + options.length) % options.length
+            ],
+          );
+        }
+      }
+    } else if (
+      event.key.toLowerCase() === "p" && event.ctrlKey && !event.altKey &&
+      !event.shiftKey && !event.metaKey
+    ) {
+      event.preventDefault();
+      setPathFilterOpen(panel, true);
     }
   });
 

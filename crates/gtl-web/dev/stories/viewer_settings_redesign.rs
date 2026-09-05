@@ -1,13 +1,16 @@
 use std::{convert::Infallible, error::Error, path::PathBuf, time::Duration};
 
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 use gtl_models::{
     diffs::{CommitId, DiffLineCount},
     git::{BranchName, GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
-    viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
+    viewer::{
+        ViewerKeybindingAction, ViewerKeybindingPlatform, ViewerKeybindings, ViewerRangeGeneration,
+        ViewerSelectionGeneration, ViewerTabId,
+    },
 };
 use gtl_wire::viewer::{
     ViewerActiveView, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine, ViewerCommitSelection,
@@ -27,7 +30,7 @@ use crate::{
     },
 };
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "overflow-hidden rounded-panel border border-line bg-bg",
@@ -48,31 +51,62 @@ fn thumbnail() -> Element {
 }
 
 /// Wide viewer composed from production viewer components.
-#[preview(name = "Desktop viewer")]
+#[story(name = "Desktop viewer")]
 fn desktop_viewer() -> Element {
     rsx! {
         ViewerPreview {}
     }
 }
 
-/// File-scoped code search attached to the active file context.
-#[preview(name = "Search active file")]
-fn search_active_file() -> Element {
+/// Quiet commit stack with a selected commit expressed through surface tone alone.
+#[story(name = "Commits panel")]
+fn commits_panel() -> Element {
     rsx! {
-        ViewerPreview { initial_search: PreviewDiffSearch::ActiveFile }
+        ViewerPreview { initial_selected_commit_index: Some(1) }
     }
 }
 
-/// Repository-wide code search with its distinct scope and shortcut.
-#[preview(name = "Search all files")]
+/// Repository-wide code search with a synthetic configured shortcut.
+#[story(name = "Search all files")]
 fn search_all_files() -> Element {
     rsx! {
-        ViewerPreview { initial_search: PreviewDiffSearch::AllFiles }
+        ViewerPreview {
+            initial_search: PreviewDiffSearch::AllFiles,
+            keybindings: alternate_preview_keybindings(),
+        }
     }
+}
+
+#[story(name = "Filter files by path")]
+fn filter_paths() -> Element {
+    rsx! {
+        ViewerPreview { initial_search: PreviewDiffSearch::Paths }
+    }
+}
+
+#[story(name = "Filter files by path on mobile")]
+fn filter_paths_mobile() -> Element {
+    rsx! {
+        ViewerPreview { mobile: true, initial_search: PreviewDiffSearch::Paths }
+    }
+}
+
+fn default_preview_keybindings() -> ViewerKeybindings {
+    ViewerKeybindings::for_platform(ViewerKeybindingPlatform::Linux)
+}
+
+fn alternate_preview_keybindings() -> Option<ViewerKeybindings> {
+    let search_files = "alt+k".parse().ok()?;
+    let search_text_in_all_files = "ctrl+shift+g".parse().ok()?;
+    ViewerKeybindings::try_from_fn(ViewerKeybindingPlatform::Linux, |action| match action {
+        ViewerKeybindingAction::SearchFiles => search_files,
+        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+    })
+    .ok()
 }
 
 /// Phone viewer with a lean titlebar and dedicated Files and Commits navigation.
-#[preview(name = "Mobile viewer")]
+#[story(name = "Mobile viewer")]
 fn mobile_viewer() -> Element {
     rsx! {
         ViewerPreview { mobile: true }
@@ -80,7 +114,7 @@ fn mobile_viewer() -> Element {
 }
 
 /// Editable staged settings with stable inline validation.
-#[preview(name = "Settings form")]
+#[story(name = "Settings form")]
 fn settings_form() -> Element {
     rsx! {
         SettingsMock {}
@@ -91,8 +125,11 @@ fn settings_form() -> Element {
 fn ViewerPreview(
     #[props(default)] mobile: bool,
     #[props(default)] initial_search: PreviewDiffSearch,
+    #[props(default)] initial_selected_commit_index: Option<usize>,
+    #[props(default)] keybindings: Option<ViewerKeybindings>,
 ) -> Element {
-    let fixture = match preview_fixture() {
+    let keybindings = keybindings.unwrap_or_else(default_preview_keybindings);
+    let mut fixture = match preview_fixture() {
         Ok(fixture) => fixture,
         Err(error) => {
             return rsx! {
@@ -100,6 +137,13 @@ fn ViewerPreview(
             };
         }
     };
+    if let Some(commit_index) = initial_selected_commit_index
+        && let Some(commit) = fixture.view.commits.get(commit_index)
+    {
+        fixture.view.commit_selection = ViewerCommitSelection::Ready {
+            id: commit.id.clone(),
+        };
+    }
     let shell_classes = if mobile {
         "mx-auto flex h-[844px] w-[390px] max-w-full flex-col overflow-hidden rounded-panel border border-line bg-bg shadow-floating"
     } else {
@@ -117,6 +161,7 @@ fn ViewerPreview(
                     workspace: fixture.workspace,
                     mobile,
                     initial_search,
+                    keybindings,
                 }
             }
         }
@@ -204,7 +249,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             trail: String::new(),
         },
         files,
-        commits_label: "4 commits".to_owned(),
+        commits_label: "# commits in range".to_owned(),
         commit_count: commits.len(),
         commits,
         commit_selection: ViewerCommitSelection::None,
@@ -539,15 +584,17 @@ fn SettingsRow(term: String, value: String) -> Element {
 }
 
 /// Viewer and settings redesign proposal.
-#[showcase(
+#[stories(
     id = "viewer-settings-redesign",
     name = "Viewer settings redesign",
     thumbnail = thumbnail
 )]
-const VIEWER_SETTINGS_REDESIGN_SHOWCASE: () = &[
+const VIEWER_SETTINGS_REDESIGN_STORIES: () = &[
     desktop_viewer,
-    search_active_file,
+    commits_panel,
     search_all_files,
+    filter_paths,
+    filter_paths_mobile,
     mobile_viewer,
     settings_form,
 ];
@@ -556,7 +603,7 @@ const VIEWER_SETTINGS_REDESIGN_SHOWCASE: () = &[
 mod tests {
     use dioxus::prelude::*;
 
-    use super::{SettingsMock, ViewerPreview};
+    use super::{SettingsMock, ViewerPreview, alternate_preview_keybindings};
     use crate::views::diffs::diff_workspace::PreviewDiffSearch;
 
     #[test]
@@ -585,8 +632,8 @@ mod tests {
         assert!(html.contains(r#"aria-pressed="false""#));
         assert!(html.contains("Collapse all"));
         assert!(html.contains("Search code in all files"));
-        assert!(html.contains("Search code in this file"));
-        assert!(html.contains(">Ctrl<"));
+        assert!(!html.contains("Search code in this file"));
+        assert!(!html.contains("<kbd"));
         assert!(!html.contains(">+ context<"));
         assert!(!html.contains(">Display<"));
         assert!(!html.contains(">j<"));
@@ -596,19 +643,30 @@ mod tests {
     }
 
     #[test]
-    fn search_previews_distinguish_file_and_workspace_scope() {
-        let active_file = dioxus_ssr::render_element(rsx! {
-            ViewerPreview { initial_search: PreviewDiffSearch::ActiveFile }
-        });
-        let all_files = dioxus_ssr::render_element(rsx! {
-            ViewerPreview { initial_search: PreviewDiffSearch::AllFiles }
+    fn commits_preview_exposes_the_quiet_selected_state() {
+        let html = dioxus_ssr::render_element(rsx! {
+            ViewerPreview { initial_selected_commit_index: Some(1) }
         });
 
-        assert!(active_file.contains("This file"));
-        assert!(active_file.contains("crates/gtl-web/src/views/user_settings.rs"));
-        assert!(active_file.contains("3 matches in this file"));
-        assert!(all_files.contains("All files"));
+        assert!(html.contains("commits in range"));
+        assert!(html.contains(r#"aria-pressed="true""#));
+        assert!(html.contains("bg-acc-soft"));
+        assert!(html.contains("mb-2 block min-w-0 text-wrap font-medium"));
+        assert!(!html.contains("border-l-2 py-1.5 pr-2 pl-6"));
+    }
+
+    #[test]
+    fn search_preview_omits_shortcut_hints() {
+        let all_files = dioxus_ssr::render_element(rsx! {
+            ViewerPreview {
+                initial_search: PreviewDiffSearch::AllFiles,
+                keybindings: alternate_preview_keybindings(),
+            }
+        });
+
+        assert!(all_files.contains("Search code in all files..."));
         assert!(all_files.contains("9 matches in 3 files"));
+        assert!(!all_files.contains("<kbd"));
     }
 
     #[test]

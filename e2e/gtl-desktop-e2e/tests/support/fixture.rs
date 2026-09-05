@@ -41,7 +41,10 @@ impl OneShotFixture {
         let repository = create_changed_repository(
             &fixture_root.join("dom-repositories"),
             ONE_SHOT_REPOSITORY,
-            "alpha-one-shot-marker",
+            &format!(
+                "alpha-one-shot-marker\n{}",
+                "scrollbar fixture\n".repeat(120)
+            ),
             "one-shot change",
         )?;
         Ok(Self {

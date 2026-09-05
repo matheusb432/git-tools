@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 use lucide_dioxus::EllipsisVertical;
 
 use crate::shared::ui::{
@@ -7,7 +7,7 @@ use crate::shared::ui::{
     MenuActionContent,
 };
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "flex min-h-24 items-start justify-end",
@@ -28,7 +28,7 @@ fn thumbnail() -> Element {
 }
 
 /// Popover aligned to its trigger.
-#[preview(name = "Trigger aligned")]
+#[story(name = "Trigger aligned")]
 fn trigger_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
@@ -56,7 +56,7 @@ fn trigger_end() -> Element {
 }
 
 /// Popover aligned to the viewport.
-#[preview(name = "Viewport aligned")]
+#[story(name = "Viewport aligned")]
 fn viewport_end() -> Element {
     rsx! {
         div { class: "flex min-h-48 items-start justify-end rounded-panel border border-line bg-surface p-4",
@@ -98,5 +98,5 @@ fn MenuItem(label: String, description: String) -> Element {
 }
 
 /// Icon-triggered popover component.
-#[showcase(id = "icon-popover", name = "Icon popover", thumbnail = thumbnail)]
-const ICON_POPOVER_SHOWCASE: () = &[trigger_end, viewport_end];
+#[stories(id = "icon-popover", name = "Icon popover", thumbnail = thumbnail)]
+const ICON_POPOVER_STORIES: () = &[trigger_end, viewport_end];

@@ -251,6 +251,7 @@ mod tests {
         FixedUserSettingsStore::new(UserSettings::new(
             None,
             RenderOptions::DEFAULT,
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             DiffExclusions::default(),
             PushAllExclusions::new(

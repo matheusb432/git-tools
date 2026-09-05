@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gtl_models::{
     diffs::Commit,
     paths::RepositoryRelativePath,
-    viewer::{self, RenderOptions, Theme},
+    viewer::{self, RenderOptions, Theme, ViewerKeybindings},
 };
 use gtl_wire::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerDiffFileId,
@@ -42,6 +42,7 @@ pub fn project(
     session: &mut ViewerSession,
     options: RenderOptions,
     theme: Theme,
+    keybindings: ViewerKeybindings,
     feedback: Option<ViewerFeedback>,
 ) -> Result<ViewerShell, ProjectViewerShellError> {
     let tabs = session
@@ -75,6 +76,7 @@ pub fn project(
         preferences: ViewerPreferences {
             theme: project_theme(theme),
             render_options: project_render_options(options),
+            keybindings,
         },
         feedback,
     })

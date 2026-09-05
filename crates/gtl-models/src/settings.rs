@@ -9,7 +9,7 @@ pub use setting_key::*;
 use crate::{
     diffs::DiffExclusions,
     paths::ProjectName,
-    viewer::{RenderOptions, Theme},
+    viewer::{RenderOptions, Theme, ViewerKeybindings},
 };
 
 /// Exact, case-sensitive sample_project project names omitted from `push --all` before Git inspection.
@@ -43,6 +43,7 @@ impl PushAllExclusions {
 pub struct UserSettings {
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
+    viewer_keybindings: ViewerKeybindings,
     push_confirmation_required: bool,
     diff_exclusions: DiffExclusions,
     push_all_exclusions: PushAllExclusions,
@@ -56,6 +57,7 @@ impl UserSettings {
     pub fn new(
         theme: Option<Theme>,
         viewer_render_options: RenderOptions,
+        viewer_keybindings: ViewerKeybindings,
         push_confirmation_required: bool,
         diff_exclusions: DiffExclusions,
         push_all_exclusions: PushAllExclusions,
@@ -63,6 +65,7 @@ impl UserSettings {
         Self {
             theme,
             viewer_render_options,
+            viewer_keybindings,
             push_confirmation_required,
             diff_exclusions,
             push_all_exclusions,
@@ -79,6 +82,12 @@ impl UserSettings {
     #[must_use]
     pub const fn viewer_render_options(&self) -> RenderOptions {
         self.viewer_render_options
+    }
+
+    /// Returns the validated viewer search keyboard shortcuts.
+    #[must_use]
+    pub const fn viewer_keybindings(&self) -> ViewerKeybindings {
+        self.viewer_keybindings
     }
 
     /// Returns whether a plain current-repository push requires confirmation.
@@ -106,7 +115,7 @@ mod tests {
     use crate::{
         diffs::DiffExclusions,
         paths::{ProjectName, RepositoryRelativePath},
-        viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybindings},
     };
 
     fn project(value: &str) -> ProjectName {
@@ -122,6 +131,7 @@ mod tests {
         let settings = UserSettings::new(
             Some(Theme::Hearth),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            ViewerKeybindings::default(),
             false,
             DiffExclusions::new([(project("git-tools"), vec!["md", "lock"])], None),
             PushAllExclusions::new([project("sample_project")]),
@@ -132,6 +142,7 @@ mod tests {
             settings.viewer_render_options(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)
         );
+        assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
         assert!(!settings.push_confirmation_required());
         assert!(settings.push_all_exclusions().contains(&project("sample_project")));
         assert!(
@@ -158,6 +169,7 @@ mod tests {
         let settings = UserSettings::new(
             None,
             RenderOptions::DEFAULT,
+            ViewerKeybindings::default(),
             true,
             DiffExclusions::default(),
             PushAllExclusions::default(),

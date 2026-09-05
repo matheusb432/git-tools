@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::TextInput;
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         div { class: "max-w-sm",
@@ -19,7 +19,7 @@ fn thumbnail() -> Element {
 }
 
 /// Label, placeholder, and helper text.
-#[preview]
+#[story]
 fn default() -> Element {
     rsx! {
         div { class: "max-w-md",
@@ -35,7 +35,7 @@ fn default() -> Element {
 }
 
 /// Invalid state with a text error.
-#[preview]
+#[story]
 fn validation() -> Element {
     rsx! {
         div { class: "max-w-md",
@@ -53,7 +53,7 @@ fn validation() -> Element {
 }
 
 /// Labeled disabled state.
-#[preview]
+#[story]
 fn disabled() -> Element {
     rsx! {
         div { class: "max-w-md",
@@ -70,7 +70,7 @@ fn disabled() -> Element {
 }
 
 /// Local input state.
-#[preview]
+#[story]
 fn controlled() -> Element {
     let mut value = use_signal(String::new);
     let visible_value = value();
@@ -95,5 +95,5 @@ fn controlled() -> Element {
 }
 
 /// Text input component.
-#[showcase(id = "text-input", name = "Text input", thumbnail = thumbnail)]
-const TEXT_INPUT_SHOWCASE: () = &[default, validation, disabled, controlled];
+#[stories(id = "text-input", name = "Text input", thumbnail = thumbnail)]
+const TEXT_INPUT_STORIES: () = &[default, validation, disabled, controlled];

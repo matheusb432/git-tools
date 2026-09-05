@@ -13,7 +13,7 @@ use crate::{
         browser,
         ui::{
             ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
-            ViewerTabRailMeasurementItem, use_toast, use_viewer_tab_drag, viewer_tab_element_id,
+            ViewerTabRailMeasurementItem, use_toast, viewer_tab_element_id,
         },
     },
     views::viewer_menu::ViewerMenu,
@@ -141,7 +141,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let tab_rail_overflow = use_viewer_tab_rail_overflow();
     let mut pending_active_tab_id = use_signal(|| None::<ViewerTabId>);
     let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
-    let drag = use_viewer_tab_drag();
     let mut activate_tab = use_action(move |activation: ViewerTabActivation| async move {
         match viewer_server::activate_tab(ViewerTabRequest {
             tab_id: activation.tab_id,
@@ -261,7 +260,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             tab: tab.clone(),
                                             active,
                                             rows_loading: diff_rows_loading_tab_id == Some(tab_id),
-                                            drag_presentation: drag.presentation(tab_id),
                                             reorderable,
                                             onactivate: move |()| {
                                                 activate_viewer_tab
@@ -304,17 +302,13 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                     }
                                                 });
                                             },
-                                            ondragstart: move |tab_id| drag.start(tab_id),
-                                            ondragover: move |target| drag.drag_over(target),
-                                            ondrop: move |request| {
-                                                drag.cancel();
+                                            onmove: move |request| {
                                                 let Some(order) = moved_tab_ids(&drop_tabs, request) else {
                                                     return;
                                                 };
                                                 pending_tab_order.set(Some(order));
                                                 move_tab.call(request);
                                             },
-                                            ondragend: move |()| drag.cancel(),
                                         }
                                     }
                                 }

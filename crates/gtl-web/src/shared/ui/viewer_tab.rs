@@ -1,5 +1,5 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
-use gtl_models::viewer::{ViewerTabId, ViewerTabPlacement};
+use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use lucide_dioxus::{Check, ChevronDown};
@@ -12,27 +12,7 @@ use super::{CountBadge, ScrollArea};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 const VIEWER_TAB_OVERFLOW_PANEL_CLASSES: &str = "fixed inset-auto z-70 m-0 mt-1 mb-2 max-h-[min(28rem,calc(100%-0.75rem))] w-[min(26rem,calc(100vw-1rem))] origin-top-right grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-floating [position-area:bottom_span-left] open:grid open:animate-popover-enter motion-reduce:animate-none";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ViewerTabDragPresentation {
-    #[default]
-    Idle,
-    Dragging,
-    DropTarget,
-    DropBefore,
-    DropAfter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ViewerTabDropTarget {
-    pub(crate) tab_id: ViewerTabId,
-    pub(crate) placement: ViewerTabPlacement,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ViewerTabDragSession {
-    dragged_tab_id: Option<ViewerTabId>,
-    drop_target: Option<ViewerTabDropTarget>,
-}
+mod pointer_drag;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ViewerTabActivationGesture {
@@ -57,255 +37,42 @@ impl ViewerTabActivationGesture {
     }
 }
 
-impl ViewerTabDragSession {
-    #[must_use]
-    pub(crate) fn started(mut self, tab_id: ViewerTabId) -> Self {
-        self.dragged_tab_id = Some(tab_id);
-        self.drop_target = None;
-        self
-    }
-
-    #[must_use]
-    pub(crate) fn dragged_over(mut self, target: ViewerTabDropTarget) -> Self {
-        self.drop_target = self
-            .dragged_tab_id
-            .filter(|dragged_tab_id| *dragged_tab_id != target.tab_id)
-            .map(|_| target);
-        self
-    }
-
-    #[must_use]
-    pub(crate) fn cancelled(mut self) -> Self {
-        self.dragged_tab_id = None;
-        self.drop_target = None;
-        self
-    }
-
-    pub(crate) fn presentation(self, tab_id: ViewerTabId) -> ViewerTabDragPresentation {
-        if self.dragged_tab_id == Some(tab_id) {
-            return ViewerTabDragPresentation::Dragging;
-        }
-        match self.drop_target.filter(|target| target.tab_id == tab_id) {
-            Some(ViewerTabDropTarget {
-                placement: ViewerTabPlacement::Before,
-                ..
-            }) => ViewerTabDragPresentation::DropBefore,
-            Some(ViewerTabDropTarget {
-                placement: ViewerTabPlacement::After,
-                ..
-            }) => ViewerTabDragPresentation::DropAfter,
-            None if self.dragged_tab_id.is_some() => ViewerTabDragPresentation::DropTarget,
-            None => ViewerTabDragPresentation::Idle,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct ViewerTabDragController {
-    session: Signal<ViewerTabDragSession>,
-}
-
-impl ViewerTabDragController {
-    pub(crate) fn presentation(self, tab_id: ViewerTabId) -> ViewerTabDragPresentation {
-        (self.session)().presentation(tab_id)
-    }
-
-    pub(crate) fn start(self, tab_id: ViewerTabId) {
-        let current = *self.session.peek();
-        self.publish(current.started(tab_id));
-    }
-
-    pub(crate) fn drag_over(self, target: ViewerTabDropTarget) {
-        let current = *self.session.peek();
-        self.publish(current.dragged_over(target));
-    }
-
-    pub(crate) fn cancel(self) {
-        let current = *self.session.peek();
-        self.publish(current.cancelled());
-    }
-
-    fn publish(mut self, next: ViewerTabDragSession) {
-        let changed = *self.session.peek() != next;
-        if changed {
-            self.session.set(next);
-        }
-    }
-}
-
-pub(crate) fn use_viewer_tab_drag() -> ViewerTabDragController {
-    ViewerTabDragController {
-        session: use_signal(ViewerTabDragSession::default),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ViewerTabDropZoneAxis {
-    Horizontal,
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
-    Vertical,
-}
-
-fn viewer_tab_dragged_id(event: &DragEvent) -> Option<ViewerTabId> {
-    event
-        .data_transfer()
-        .get_data("text/plain")?
-        .parse()
-        .ok()
-        .and_then(|value| ViewerTabId::try_new(value).ok())
-}
-
-fn viewer_tab_move_request(
-    tab_id: ViewerTabId,
-    target: ViewerTabDropTarget,
-) -> Option<MoveViewerTab> {
-    (tab_id != target.tab_id).then_some(MoveViewerTab {
-        tab_id,
-        target_tab_id: target.tab_id,
-        placement: target.placement,
-    })
-}
-
-impl ViewerTabDropZoneAxis {
-    const fn style(self, placement: ViewerTabPlacement) -> &'static str {
-        match (self, placement) {
-            (Self::Horizontal, ViewerTabPlacement::Before) => {
-                "position:absolute;inset-block:0;left:0;width:50%;z-index:10;"
-            }
-            (Self::Horizontal, ViewerTabPlacement::After) => {
-                "position:absolute;inset-block:0;right:0;width:50%;z-index:10;"
-            }
-            #[cfg(any(feature = "component-preview", feature = "desktop"))]
-            (Self::Vertical, ViewerTabPlacement::Before) => {
-                "position:absolute;inset-inline:0;top:0;height:50%;z-index:10;"
-            }
-            #[cfg(any(feature = "component-preview", feature = "desktop"))]
-            (Self::Vertical, ViewerTabPlacement::After) => {
-                "position:absolute;inset-inline:0;bottom:0;height:50%;z-index:10;"
-            }
-        }
-    }
-}
-
-#[component]
-fn ViewerTabDropZones(
-    tab_id: ViewerTabId,
-    axis: ViewerTabDropZoneAxis,
-    ondragover: Option<EventHandler<ViewerTabDropTarget>>,
-    ondrop: Option<EventHandler<MoveViewerTab>>,
-) -> Element {
-    rsx! {
-        for placement in [ViewerTabPlacement::Before, ViewerTabPlacement::After] {
-            span {
-                key: "{placement:?}",
-                style: axis.style(placement),
-                "data-viewer-tab-drop-placement": match placement {
-                    ViewerTabPlacement::Before => "before",
-                    ViewerTabPlacement::After => "after",
-                },
-                aria_hidden: "true",
-                ondragover: move |event: DragEvent| {
-                    let Some(handler) = ondragover else {
-                        return;
-                    };
-                    event.prevent_default();
-                    event.data_transfer().set_drop_effect("move");
-                    handler
-                        .call(ViewerTabDropTarget {
-                            tab_id,
-                            placement,
-                        });
-                },
-                ondrop: move |event: DragEvent| {
-                    let Some(handler) = ondrop else {
-                        return;
-                    };
-                    event.prevent_default();
-                    if let Some(dragged_tab_id) = viewer_tab_dragged_id(&event)
-                        && let Some(request) = viewer_tab_move_request(
-                            dragged_tab_id,
-                            ViewerTabDropTarget {
-                                tab_id,
-                                placement,
-                            },
-                        )
-                    {
-                        handler.call(request);
-                    }
-                },
-            }
-        }
-    }
-}
-
 #[component]
 pub(crate) fn ViewerTabItem(
     tab: ViewerTab,
     active: bool,
     #[props(default)] rows_loading: bool,
-    #[props(default)] drag_presentation: ViewerTabDragPresentation,
     #[props(default)] reorderable: bool,
     onactivate: EventHandler<()>,
     onkeydown: EventHandler<KeyboardEvent>,
     onclose: EventHandler<MouseEvent>,
-    #[props(default)] ondragstart: Option<EventHandler<ViewerTabId>>,
-    #[props(default)] ondragover: Option<EventHandler<ViewerTabDropTarget>>,
-    #[props(default)] ondrop: Option<EventHandler<MoveViewerTab>>,
-    #[props(default)] ondragend: Option<EventHandler<()>>,
+    #[props(default)] onmove: Option<EventHandler<MoveViewerTab>>,
 ) -> Element {
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
+    let drag = pointer_drag::use_pointer_drag(onmove);
     let surface_classes = if active {
         "bg-surface-2 text-ink"
     } else {
-        "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink"
-    };
-    let drag_classes = match drag_presentation {
-        ViewerTabDragPresentation::Dragging => "opacity-50",
-        ViewerTabDragPresentation::Idle
-        | ViewerTabDragPresentation::DropTarget
-        | ViewerTabDragPresentation::DropBefore
-        | ViewerTabDragPresentation::DropAfter => "opacity-100",
+        "bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink"
     };
     let activation_classes = if reorderable {
-        "cursor-grab active:cursor-grabbing"
+        "touch-none cursor-grab active:cursor-grabbing"
     } else {
         "cursor-pointer"
     };
 
     rsx! {
         div {
-            class: "group/viewer-tab relative flex h-9 min-w-24 max-w-72 shrink-0 select-none items-center {surface_classes} {drag_classes}",
-            "data-drag-state": match drag_presentation {
-                ViewerTabDragPresentation::Idle => "idle",
-                ViewerTabDragPresentation::Dragging => "dragging",
-                ViewerTabDragPresentation::DropTarget => "drop-target",
-                ViewerTabDragPresentation::DropBefore => "drop-before",
-                ViewerTabDragPresentation::DropAfter => "drop-after",
-            },
-            ondragstart: move |event: DragEvent| {
-                activation_gesture.write().cancel();
-                let Some(handler) = ondragstart else {
-                    return;
-                };
-                event.data_transfer().set_effect_allowed("move");
-                event.data_transfer().set_drop_effect("move");
-                let _ = event
-                    .data_transfer()
-                    .set_data("text/plain", &tab_id.to_string());
-                handler.call(tab_id);
-            },
-            ondragend: move |_| {
-                if let Some(handler) = ondragend {
-                    handler.call(());
-                }
-            },
+            class: "group/viewer-tab relative flex h-9 min-w-24 max-w-72 shrink-0 select-none items-center {surface_classes} duration-[160ms] ease-out data-[drag-state=shifting]:transition-transform motion-reduce:transition-none data-[drag-state=dragging]:opacity-0 data-[drag-state=shifting]:will-change-transform",
+            "data-viewer-tab-id": "{tab_id}",
+            "data-viewer-tab-axis": "horizontal",
             button {
                 id: viewer_tab_element_id(tab_id),
                 class: "flex h-full min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent pr-1 pl-2 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc {activation_classes}",
                 r#type: "button",
-                draggable: if reorderable { "true" } else { "false" },
+                draggable: "false",
                 role: "tab",
                 aria_roledescription: reorderable.then_some("sortable tab"),
                 aria_selected: active.to_string(),
@@ -314,6 +81,9 @@ pub(crate) fn ViewerTabItem(
                 tabindex: if active { "0" } else { "-1" },
                 title: tab.label.clone(),
                 onpointerdown: move |event: PointerEvent| {
+                    if reorderable {
+                        drag.start.call(event.clone());
+                    }
                     if activation_gesture
                         .write()
                         .pointer_down(event.trigger_button())
@@ -321,17 +91,30 @@ pub(crate) fn ViewerTabItem(
                         onactivate.call(());
                     }
                 },
-                onclick: move |_| {
+                onpointermove: move |event| drag.move_pointer.call(event),
+                onpointerup: move |event| drag.release.call(event),
+                onlostpointercapture: move |_| drag.cancel.call(()),
+                onclick: move |event| {
+                    if drag.suppress_click.call(()) {
+                        event.prevent_default();
+                        return;
+                    }
                     if activation_gesture.write().click() {
                         onactivate.call(());
                     }
                 },
                 onkeydown: move |event| {
                     activation_gesture.write().cancel();
+                    if event.key() == Key::Escape {
+                        drag.cancel.call(());
+                    }
                     onkeydown.call(event);
                 },
                 onblur: move |_| activation_gesture.write().cancel(),
-                onpointercancel: move |_| activation_gesture.write().cancel(),
+                onpointercancel: move |_| {
+                    activation_gesture.write().cancel();
+                    drag.cancel.call(());
+                },
                 {viewer_tab_rail_content(&tab, presentation_state)}
             }
             ViewerTabCloseButton {
@@ -344,39 +127,6 @@ pub(crate) fn ViewerTabItem(
                 style: active.then_some("transition-duration:75ms;"),
                 "data-viewer-tab-selection-indicator": "true",
                 aria_hidden: "true",
-            }
-            match drag_presentation {
-                ViewerTabDragPresentation::DropBefore => rsx! {
-                    span {
-                        class: "pointer-events-none absolute inset-y-1 left-0 w-0.5 bg-acc",
-                        aria_hidden: "true",
-                    }
-                },
-                ViewerTabDragPresentation::DropAfter => rsx! {
-                    span {
-                        class: "pointer-events-none absolute inset-y-1 right-0 w-0.5 bg-acc",
-                        aria_hidden: "true",
-                    }
-                },
-                ViewerTabDragPresentation::Idle
-                | ViewerTabDragPresentation::Dragging
-                | ViewerTabDragPresentation::DropTarget => {
-                    rsx! {}
-                }
-            }
-            if matches!(
-                drag_presentation,
-                ViewerTabDragPresentation::DropTarget
-                | ViewerTabDragPresentation::DropBefore
-                | ViewerTabDragPresentation::DropAfter
-            )
-            {
-                ViewerTabDropZones {
-                    tab_id,
-                    axis: ViewerTabDropZoneAxis::Horizontal,
-                    ondragover,
-                    ondrop,
-                }
             }
         }
     }
@@ -469,7 +219,6 @@ pub(crate) fn ViewerTabOverflowMenu(
     onclose: EventHandler<ViewerTabId>,
     onmove: EventHandler<MoveViewerTab>,
 ) -> Element {
-    let drag = use_viewer_tab_drag();
     let active_tab_state = tab_presentation_state(
         &active_tab.state,
         diff_rows_loading_tab_id == Some(active_tab.id),
@@ -549,17 +298,10 @@ pub(crate) fn ViewerTabOverflowMenu(
                                         tab: tab.clone(),
                                         active,
                                         presentation_state,
-                                        drag_presentation: drag.presentation(tab_id),
                                         reorderable,
                                         onactivate,
                                         onclose,
-                                        ondragstart: move |tab_id| drag.start(tab_id),
-                                        ondragover: move |target| drag.drag_over(target),
-                                        ondrop: move |request| {
-                                            drag.cancel();
-                                            onmove.call(request);
-                                        },
-                                        ondragend: move |()| drag.cancel(),
+                                        onmove,
                                     }
                                 }
                             }
@@ -578,58 +320,43 @@ fn ViewerTabOverflowMenuItem(
     tab: ViewerTab,
     active: bool,
     presentation_state: TabPresentationState,
-    drag_presentation: ViewerTabDragPresentation,
     reorderable: bool,
     onactivate: EventHandler<ViewerTabId>,
     onclose: EventHandler<ViewerTabId>,
-    ondragstart: EventHandler<ViewerTabId>,
-    ondragover: EventHandler<ViewerTabDropTarget>,
-    ondrop: EventHandler<MoveViewerTab>,
-    ondragend: EventHandler<()>,
+    onmove: EventHandler<MoveViewerTab>,
 ) -> Element {
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
+    let drag = pointer_drag::use_pointer_drag(Some(onmove));
     let surface_classes = if active {
         "bg-surface-2 text-ink"
     } else {
         "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink"
     };
-    let drag_classes = match drag_presentation {
-        ViewerTabDragPresentation::Dragging => "opacity-50",
-        ViewerTabDragPresentation::Idle
-        | ViewerTabDragPresentation::DropTarget
-        | ViewerTabDragPresentation::DropBefore
-        | ViewerTabDragPresentation::DropAfter => "opacity-100",
-    };
     let activation_classes = if reorderable {
-        "cursor-grab active:cursor-grabbing"
+        "touch-none cursor-grab active:cursor-grabbing"
     } else {
         "cursor-pointer"
     };
 
     rsx! {
         li {
-            class: "group/viewer-tab-menu relative flex min-w-0 select-none items-center rounded-sm {surface_classes} {drag_classes}",
-            ondragstart: move |event: DragEvent| {
-                activation_gesture.write().cancel();
-                event.data_transfer().set_effect_allowed("move");
-                event.data_transfer().set_drop_effect("move");
-                let _ = event
-                    .data_transfer()
-                    .set_data("text/plain", &tab_id.to_string());
-                ondragstart.call(tab_id);
-            },
-            ondragend: move |_| ondragend.call(()),
+            class: "group/viewer-tab-menu relative flex min-w-0 select-none items-center rounded-sm {surface_classes} duration-[160ms] ease-out data-[drag-state=shifting]:transition-transform motion-reduce:transition-none data-[drag-state=dragging]:opacity-0 data-[drag-state=shifting]:will-change-transform",
+            "data-viewer-tab-id": "{tab_id}",
+            "data-viewer-tab-axis": "vertical",
             button {
                 class: "flex min-h-10 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-2 py-1 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc {activation_classes}",
                 r#type: "button",
-                draggable: if reorderable { "true" } else { "false" },
+                draggable: "false",
                 popovertarget: popover_id,
                 popovertargetaction: "hide",
                 aria_roledescription: reorderable.then_some("sortable tab"),
                 aria_current: active.then_some("page"),
                 aria_controls: "viewer-active-view",
                 onpointerdown: move |event: PointerEvent| {
+                    if reorderable {
+                        drag.start.call(event.clone());
+                    }
                     if activation_gesture
                         .write()
                         .pointer_down(event.trigger_button())
@@ -637,14 +364,30 @@ fn ViewerTabOverflowMenuItem(
                         onactivate.call(tab_id);
                     }
                 },
-                onclick: move |_| {
+                onpointermove: move |event| drag.move_pointer.call(event),
+                onpointerup: move |event| drag.release.call(event),
+                onlostpointercapture: move |_| drag.cancel.call(()),
+                onclick: move |event| {
+                    if drag.suppress_click.call(()) {
+                        event.prevent_default();
+                        return;
+                    }
                     if activation_gesture.write().click() {
                         onactivate.call(tab_id);
                     }
                 },
-                onkeydown: move |_| activation_gesture.write().cancel(),
+                onkeydown: move |event| {
+                    activation_gesture.write().cancel();
+                    if event.key() == Key::Escape {
+                        event.prevent_default();
+                        drag.cancel.call(());
+                    }
+                },
                 onblur: move |_| activation_gesture.write().cancel(),
-                onpointercancel: move |_| activation_gesture.write().cancel(),
+                onpointercancel: move |_| {
+                    activation_gesture.write().cancel();
+                    drag.cancel.call(());
+                },
                 ViewerTabKindIndicator { kind: tab.kind }
                 strong { class: "min-w-0 flex-1 truncate text-xs font-semibold text-inherit",
                     "{tab.label}"
@@ -666,39 +409,6 @@ fn ViewerTabOverflowMenuItem(
             ViewerTabCloseButton {
                 label: tab.label.clone(),
                 onclick: move |_| onclose.call(tab_id),
-            }
-            match drag_presentation {
-                ViewerTabDragPresentation::DropBefore => rsx! {
-                    span {
-                        class: "pointer-events-none absolute inset-x-1 top-0 h-0.5 bg-acc",
-                        aria_hidden: "true",
-                    }
-                },
-                ViewerTabDragPresentation::DropAfter => rsx! {
-                    span {
-                        class: "pointer-events-none absolute inset-x-1 bottom-0 h-0.5 bg-acc",
-                        aria_hidden: "true",
-                    }
-                },
-                ViewerTabDragPresentation::Idle
-                | ViewerTabDragPresentation::Dragging
-                | ViewerTabDragPresentation::DropTarget => {
-                    rsx! {}
-                }
-            }
-            if matches!(
-                drag_presentation,
-                ViewerTabDragPresentation::DropTarget
-                | ViewerTabDragPresentation::DropBefore
-                | ViewerTabDragPresentation::DropAfter
-            )
-            {
-                ViewerTabDropZones {
-                    tab_id,
-                    axis: ViewerTabDropZoneAxis::Vertical,
-                    ondragover: Some(ondragover),
-                    ondrop: Some(ondrop),
-                }
             }
         }
     }
@@ -779,14 +489,11 @@ fn TabStateMarker(state: TabPresentationState) -> Element {
 #[cfg(test)]
 mod tests {
     use dioxus::prelude::*;
-    use gtl_models::viewer::ViewerTabPlacement;
-    use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
+    use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
 
     use super::{
         MouseButton, TabPresentationState, TabStateMarker, ViewerTabActivationGesture,
-        ViewerTabDragPresentation, ViewerTabDragSession, ViewerTabDropTarget,
-        ViewerTabDropZoneAxis, ViewerTabDropZones, ViewerTabItem, ViewerTabItemProps,
-        ViewerTabRailMeasurementItem, tab_presentation_state, viewer_tab_move_request,
+        ViewerTabItem, ViewerTabItemProps, ViewerTabRailMeasurementItem, tab_presentation_state,
     };
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
     use super::{
@@ -847,15 +554,11 @@ mod tests {
             },
             active: true,
             rows_loading: false,
-            drag_presentation: ViewerTabDragPresentation::Idle,
             reorderable: false,
             onactivate: EventHandler::new(|()| {}),
             onkeydown: EventHandler::new(|_| {}),
             onclose: EventHandler::new(|_| {}),
-            ondragstart: None,
-            ondragover: None,
-            ondrop: None,
-            ondragend: None,
+            onmove: None,
         });
         let mut tab = VirtualDom::new_with_props(ViewerTabItem, props);
         tab.rebuild_in_place();
@@ -880,6 +583,35 @@ mod tests {
     }
 
     #[test]
+    fn inactive_tab_uses_the_sunk_surface() -> TestResult {
+        let tab_id = viewer_tab_id(1)?;
+        let event_handler_owner = VirtualDom::new(VNode::empty);
+        let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            tab: ViewerTab {
+                id: tab_id,
+                label: "Working tree".to_owned(),
+                kind: ViewerTabKind::Live,
+                state: ViewerTabState::Ready,
+            },
+            active: false,
+            rows_loading: false,
+            reorderable: false,
+            onactivate: EventHandler::new(|()| {}),
+            onkeydown: EventHandler::new(|_| {}),
+            onclose: EventHandler::new(|_| {}),
+            onmove: None,
+        });
+        let mut tab = VirtualDom::new_with_props(ViewerTabItem, props);
+        tab.rebuild_in_place();
+        let html = dioxus_ssr::render(&tab);
+
+        assert!(html.contains("bg-sunk text-ink-2"));
+        assert!(html.contains("hover:bg-surface-2 hover:text-ink"));
+        assert!(!html.contains("bg-transparent text-ink-2"));
+        Ok(())
+    }
+
+    #[test]
     fn primary_pointer_activation_precedes_and_suppresses_its_click() {
         let mut gesture = ViewerTabActivationGesture::default();
 
@@ -889,63 +621,6 @@ mod tests {
         assert!(!gesture.pointer_down(Some(MouseButton::Secondary)));
         gesture.cancel();
         assert!(gesture.click());
-    }
-
-    #[test]
-    fn drag_session_emits_one_identity_based_move() -> TestResult {
-        let first = viewer_tab_id(1)?;
-        let second = viewer_tab_id(2)?;
-        let target = ViewerTabDropTarget {
-            tab_id: second,
-            placement: ViewerTabPlacement::After,
-        };
-        let session = ViewerTabDragSession::default().started(first);
-        let targeted = session.dragged_over(target);
-        assert_eq!(
-            session.presentation(second),
-            ViewerTabDragPresentation::DropTarget
-        );
-        assert_eq!(
-            targeted.presentation(second),
-            ViewerTabDragPresentation::DropAfter
-        );
-        assert_eq!(targeted.dragged_over(target), targeted);
-        assert_eq!(
-            viewer_tab_move_request(first, target),
-            Some(MoveViewerTab {
-                tab_id: first,
-                target_tab_id: second,
-                placement: ViewerTabPlacement::After,
-            })
-        );
-        let cancelled = targeted.cancelled();
-        assert_eq!(
-            cancelled.presentation(second),
-            ViewerTabDragPresentation::Idle
-        );
-        assert_eq!(
-            cancelled.dragged_over(target).presentation(second),
-            ViewerTabDragPresentation::Idle
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn drop_zones_encode_placement_without_measuring_layout() -> TestResult {
-        let tab_id = viewer_tab_id(1)?;
-        let html = dioxus_ssr::render_element(rsx! {
-            ViewerTabDropZones {
-                tab_id,
-                axis: ViewerTabDropZoneAxis::Horizontal,
-                ondragover: None,
-                ondrop: None,
-            }
-        });
-
-        assert_eq!(html.matches("data-viewer-tab-drop-placement").count(), 2);
-        assert!(html.contains("data-viewer-tab-drop-placement=\"before\""));
-        assert!(html.contains("data-viewer-tab-drop-placement=\"after\""));
-        Ok(())
     }
 
     #[test]
@@ -1020,7 +695,7 @@ mod tests {
         assert!(html.contains("Close Working tree"));
         assert!(html.contains("Close Saved comparison"));
         assert!(html.contains("Rendering"));
-        assert_eq!(html.matches("draggable=\"true\"").count(), 2);
+        assert_eq!(html.matches("draggable=\"false\"").count(), 2);
         assert_eq!(
             html.matches("aria-roledescription=\"sortable tab\"")
                 .count(),

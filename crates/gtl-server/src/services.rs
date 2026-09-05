@@ -11,7 +11,9 @@ use std::path::PathBuf;
 
 pub(crate) use diff::DiffGrpcService;
 use gtl_application::{
-    ports::{PlacedArtifact, ProjectClientError, UserSettingsLoadError},
+    ports::{
+        PlacedArtifact, ProjectClientError, UserSettingsConfigurationError, UserSettingsLoadError,
+    },
     repositories::resolve_repository_root::ResolveRepositoryRootError,
     shared::notes,
 };
@@ -92,12 +94,20 @@ fn project_client_failure(error: &ProjectClientError, code: Code) -> Status {
 
 pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
     match error {
-        UserSettingsLoadError::InvalidConfiguration(_) => {
-            tracing::warn!(error = ?error, "user settings are invalid");
-            Status::failed_precondition("user settings are invalid")
+        UserSettingsLoadError::InvalidConfiguration(error) => {
+            invalid_user_settings_configuration(&error, "load user settings")
         }
         error @ UserSettingsLoadError::Adapter(_) => unexpected(error, "load user settings"),
     }
+}
+
+pub(crate) fn invalid_user_settings_configuration(
+    error: &UserSettingsConfigurationError,
+    operation: &'static str,
+) -> Status {
+    let message = error.client_message().to_owned();
+    tracing::warn!(error = ?error, operation, "user settings are invalid");
+    Status::failed_precondition(message)
 }
 
 pub(crate) fn repository_resolution_error(error: ResolveRepositoryRootError) -> Status {

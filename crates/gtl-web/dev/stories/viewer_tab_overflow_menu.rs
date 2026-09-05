@@ -1,18 +1,18 @@
 use std::error::Error;
 
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 
 use crate::shared::ui::{
     Button, ButtonSize, ButtonVariant, ScrollArea, ScrollAreaVariant, ViewerTabItem,
-    ViewerTabOverflowMenu, use_viewer_tab_drag,
+    ViewerTabOverflowMenu,
 };
 
 type PreviewResult<T> = Result<T, Box<dyn Error>>;
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     let (tabs, active_tab) = match preview_tabs_with_active() {
         Ok(fixture) => fixture,
@@ -34,7 +34,7 @@ fn thumbnail() -> Element {
 }
 
 /// Interactive collapsed rail with enough tabs to exercise selection and close behavior.
-#[preview]
+#[story]
 fn interactive() -> Element {
     rsx! {
         ViewerTabOverflowDemo { width: PreviewWidth::Desktop }
@@ -42,7 +42,7 @@ fn interactive() -> Element {
 }
 
 /// The same control constrained to a phone-width viewer rail.
-#[preview(name = "Narrow rail")]
+#[story(name = "Narrow rail")]
 fn narrow_rail() -> Element {
     rsx! {
         ViewerTabOverflowDemo { width: PreviewWidth::Narrow }
@@ -50,7 +50,7 @@ fn narrow_rail() -> Element {
 }
 
 /// Seamless tabs with immediate selection, close actions, and drag reordering.
-#[preview(name = "Interactive tab rail")]
+#[story(name = "Interactive tab rail")]
 fn tab_rail() -> Element {
     let tabs = match preview_tabs() {
         Ok(tabs) => tabs,
@@ -167,7 +167,6 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
 #[component]
 fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
     let mut preview_state = use_signal(move || PreviewTabState::new(tabs));
-    let drag = use_viewer_tab_drag();
     let state = preview_state();
     let active_label = state
         .active_tab()
@@ -195,7 +194,6 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
                                     tab: tab.clone(),
                                     active,
                                     rows_loading: tab.state == ViewerTabState::Pending,
-                                    drag_presentation: drag.presentation(tab_id),
                                     reorderable: true,
                                     onactivate: move |()| {
                                         preview_state.set(preview_state().activate(tab_id));
@@ -204,13 +202,9 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
                                     onclose: move |_| {
                                         preview_state.set(preview_state().close(tab_id));
                                     },
-                                    ondragstart: move |tab_id| drag.start(tab_id),
-                                    ondragover: move |target| drag.drag_over(target),
-                                    ondrop: move |request| {
-                                        drag.cancel();
+                                    onmove: move |request| {
                                         preview_state.set(preview_state().move_tab(request));
                                     },
-                                    ondragend: move |()| drag.cancel(),
                                 }
                             }
                         }
@@ -428,9 +422,9 @@ mod tests {
 }
 
 /// Collapsed tab rail menu.
-#[showcase(
+#[stories(
     id = "viewer-tab-overflow-menu",
     name = "Viewer tab overflow menu",
     thumbnail = thumbnail
 )]
-const VIEWER_TAB_OVERFLOW_MENU_SHOWCASE: () = &[interactive, narrow_rail, tab_rail];
+const VIEWER_TAB_OVERFLOW_MENU_STORIES: () = &[interactive, narrow_rail, tab_rail];

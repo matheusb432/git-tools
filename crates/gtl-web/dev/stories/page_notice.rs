@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 use lucide_dioxus::FileDiff;
 
 use crate::shared::ui::{Button, ButtonVariant, PageNotice};
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         PageNotice {
@@ -19,7 +19,7 @@ fn thumbnail() -> Element {
 }
 
 /// Empty state with a leading icon.
-#[preview]
+#[story]
 fn empty() -> Element {
     rsx! {
         PageNotice {
@@ -34,7 +34,7 @@ fn empty() -> Element {
 }
 
 /// Recoverable error state.
-#[preview]
+#[story]
 fn error() -> Element {
     rsx! {
         PageNotice {
@@ -48,5 +48,5 @@ fn error() -> Element {
 }
 
 /// Page notice component.
-#[showcase(id = "page-notice", name = "Page notice", thumbnail = thumbnail)]
-const PAGE_NOTICE_SHOWCASE: () = &[empty, error];
+#[stories(id = "page-notice", name = "Page notice", thumbnail = thumbnail)]
+const PAGE_NOTICE_STORIES: () = &[empty, error];

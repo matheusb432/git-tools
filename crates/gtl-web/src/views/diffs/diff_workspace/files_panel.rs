@@ -1,26 +1,13 @@
-#[cfg(feature = "desktop")]
-use std::collections::HashSet;
-
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use gtl_models::diffs::DiffLineCount;
-#[cfg(feature = "desktop")]
-use gtl_wire::viewer::ViewerViewIdentity;
-#[cfg(feature = "desktop")]
-use gtl_wire::viewer::{SearchViewerFiles, ViewerDiffFileId, ViewerFileSearchResult};
 use gtl_wire::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
-#[cfg(feature = "desktop")]
-use crate::{entities::diffs::viewer_server, shared::viewer_client::ViewerClientError};
 use crate::{
-    shared::ui::{
-        Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, KeyboardShortcut,
-        ScrollArea, TextInput, TextInputLabelVisibility,
-    },
+    shared::ui::{Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
     views::diffs::{
         DiffFileStatusBadge, DiffFileStatusBadgeSize, DiffLineChangeBadge, DiffLineChangeKind,
-        search_keybindings::SEARCH_FILES_KEY_BINDING,
     },
 };
 
@@ -68,47 +55,19 @@ impl WorkspaceFileTree {
 pub(super) struct WorkspaceFilesModel {
     totals: WorkspaceLineTotals,
     tree: WorkspaceFileTree,
-    matching_count: usize,
     file_count: usize,
     commit_count: usize,
 }
 
 impl WorkspaceFilesModel {
-    pub(super) fn new(view: &ViewerActiveView, filter: &str) -> Self {
-        let filter = filter.to_lowercase();
-        Self::matching(view, |file| file_path_matches(file, &filter))
-    }
-
-    #[cfg(feature = "desktop")]
-    pub(super) fn from_file_ids(
-        view: &ViewerActiveView,
-        matches: &HashSet<ViewerDiffFileId>,
-    ) -> Self {
-        Self::matching(view, |file| matches.contains(&file.id))
-    }
-
-    #[cfg(feature = "desktop")]
-    pub(super) fn empty(view: &ViewerActiveView) -> Self {
-        Self::matching(view, |_| false)
-    }
-
-    fn matching(view: &ViewerActiveView, matches: impl Fn(&ViewerFileSummary) -> bool) -> Self {
+    pub(super) fn new(view: &ViewerActiveView) -> Self {
         let mut tree = WorkspaceFileTree::default();
-        let mut matching_count = 0;
-        for (file_index, file) in view
-            .files
-            .iter()
-            .enumerate()
-            .filter(|(_, file)| matches(file))
-        {
-            let path = file.path.to_string_lossy();
-            tree.insert(path.as_ref(), file_index);
-            matching_count += 1;
+        for (file_index, file) in view.files.iter().enumerate() {
+            tree.insert(file.path.to_string_lossy().as_ref(), file_index);
         }
         Self {
             totals: WorkspaceLineTotals::from_files(&view.files),
             tree,
-            matching_count,
             file_count: view.files.len(),
             commit_count: view.commit_count,
         }
@@ -123,204 +82,41 @@ impl WorkspaceFilesModel {
     }
 }
 
-#[cfg(feature = "desktop")]
-pub(super) type WorkspaceFileSearch = Resource<Option<WorkspaceFileSearchOutcome>>;
-
-#[cfg(feature = "desktop")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct WorkspaceFileSearchOutcome {
-    identity: ViewerViewIdentity,
-    query: String,
-    result: Result<HashSet<ViewerDiffFileId>, ViewerClientError>,
-}
-
-#[cfg(feature = "desktop")]
-impl WorkspaceFileSearchOutcome {
-    pub(super) fn files_for(
-        &self,
-        identity: ViewerViewIdentity,
-        query: &str,
-    ) -> Option<&HashSet<ViewerDiffFileId>> {
-        if self.identity != identity || self.query != query {
-            return None;
-        }
-        self.result.as_ref().ok()
-    }
-
-    fn error_for(&self, identity: ViewerViewIdentity, query: &str) -> Option<&ViewerClientError> {
-        if self.identity != identity || self.query != query {
-            return None;
-        }
-        self.result.as_ref().err()
-    }
-}
-
-#[cfg(feature = "desktop")]
-pub(super) fn use_workspace_file_search(
-    view: ReadSignal<ViewerActiveView>,
-    file_filter: ReadSignal<String>,
-    server_owned: bool,
-) -> WorkspaceFileSearch {
-    use_resource(move || {
-        let identity = view.read().identity;
-        let query = file_filter.read().clone();
-        request_workspace_files(view, server_owned, identity, query)
-    })
-}
-
-#[cfg(feature = "desktop")]
-async fn request_workspace_files(
-    view: ReadSignal<ViewerActiveView>,
-    server_owned: bool,
-    identity: ViewerViewIdentity,
-    query: String,
-) -> Option<WorkspaceFileSearchOutcome> {
-    if !server_owned || query.is_empty() {
-        return None;
-    }
-    dioxus_sdk_time::sleep(std::time::Duration::from_millis(150)).await;
-    let result = viewer_server::search_files(SearchViewerFiles {
-        identity,
-        query: query.clone(),
-    })
-    .await
-    .and_then(|result| validate_file_search_result(&view.peek(), identity, result));
-    Some(WorkspaceFileSearchOutcome {
-        identity,
-        query,
-        result,
-    })
-}
-
-#[cfg(feature = "desktop")]
-fn validate_file_search_result(
-    view: &ViewerActiveView,
-    identity: ViewerViewIdentity,
-    result: ViewerFileSearchResult,
-) -> Result<HashSet<ViewerDiffFileId>, ViewerClientError> {
-    if result.identity != identity {
-        return Err(ViewerClientError::Internal);
-    }
-    let result_count = result.files.len();
-    let files = result.files.into_iter().collect::<HashSet<_>>();
-    if files.len() != result_count
-        || files
-            .iter()
-            .any(|file_id| !view.files.iter().any(|file| &file.id == file_id))
-    {
-        return Err(ViewerClientError::Internal);
-    }
-    Ok(files)
-}
-
-fn file_path_matches(file: &ViewerFileSummary, filter: &str) -> bool {
-    file.path.to_string_lossy().to_lowercase().contains(filter)
-}
-
 #[component]
 pub(super) fn FilesPanel(
     test_id: Option<String>,
     onnavigate: EventHandler<String>,
     artifact_view_id: Option<String>,
-    filter_input_id: Option<String>,
-    #[props(default)] show_filter_shortcut: bool,
 ) -> Element {
     let workspace = super::use_workspace_context();
     let model = workspace.files.read();
     let artifact_enhancement = artifact_view_id.is_some();
-    let artifact_file_panel = artifact_enhancement.then_some("");
-    #[cfg(feature = "desktop")]
-    let (searching, search_error) = if artifact_enhancement {
-        (false, None)
-    } else {
-        let identity = workspace.view.peek().identity;
-        let filter = workspace.file_filter.peek();
-        let searching = !filter.is_empty()
-            && workspace.file_search.state().cloned() == UseResourceState::Pending;
-        let search = workspace.file_search.read();
-        let error = search
-            .as_ref()
-            .and_then(Option::as_ref)
-            .and_then(|outcome| outcome.error_for(identity, &filter))
-            .map(|error| error.message().to_owned());
-        (searching, error)
-    };
-    #[cfg(not(feature = "desktop"))]
-    let (searching, search_error) = (false, None::<String>);
 
     rsx! {
         ScrollArea {
             class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             "data-testid": test_id,
-            "data-gtl-file-panel": artifact_file_panel,
-            FilesPanelHeading { file_count: model.file_count }
-            FilesFilter {
-                artifact_enhancement,
-                filter_input_id,
-                show_shortcut: show_filter_shortcut,
-            }
+            FilesPanelHeading { file_count: model.file_count, artifact_view_id }
             FilesPanelSummary { commit_count: model.commit_count, totals: model.totals }
-            if searching {
-                p { class: "px-1 py-3 text-ink-3", role: "status", "Searching files\u{2026}" }
-            } else if let Some(error) = search_error {
-                p { class: "px-1 py-3 text-del", role: "alert", "{error}" }
-            } else if artifact_enhancement {
-                {render_file_tree(&model.tree, false, onnavigate, true)}
-                EmptyNotice {
-                    hidden: model.matching_count > 0,
-                    "data-gtl-files-empty": "",
-                    "no files match this filter"
-                }
-            } else if model.matching_count == 0 {
-                EmptyNotice { "no files match this filter" }
+            if model.file_count == 0 {
+                EmptyNotice { "No changed files" }
             } else {
-                {render_file_tree(&model.tree, false, onnavigate, false)}
+                {render_file_tree(&model.tree, false, onnavigate, artifact_enhancement)}
             }
         }
     }
 }
 
 #[component]
-fn FilesFilter(
-    artifact_enhancement: bool,
-    filter_input_id: Option<String>,
-    show_shortcut: bool,
-) -> Element {
-    let artifact_action = artifact_enhancement.then_some("filter-files");
-    let mut workspace = super::use_workspace_context();
-    let input_classes = if show_shortcut {
-        "h-9 py-2 pr-20"
-    } else {
-        "h-9 py-2"
-    };
-    rsx! {
-        div { class: "relative mb-3",
-            TextInput {
-                id: filter_input_id,
-                label: "Filter files",
-                label_visibility: TextInputLabelVisibility::Hidden,
-                class: input_classes,
-                value: (workspace.file_filter)(),
-                placeholder: "Filter paths...",
-                "data-gtl-action": artifact_action,
-                oninput: move |event: FormEvent| workspace.file_filter.set(event.value()),
-            }
-            if show_shortcut {
-                span { class: "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2",
-                    KeyboardShortcut { keys: SEARCH_FILES_KEY_BINDING.to_vec() }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn FilesPanelHeading(file_count: usize) -> Element {
+fn FilesPanelHeading(file_count: usize, artifact_view_id: Option<String>) -> Element {
     let file_label = super::file_label(file_count);
     rsx! {
         div { class: "mx-1 mb-2 flex items-baseline justify-between gap-2",
             h2 { class: "font-semibold text-ink", "Files" }
-            span { class: "text-xs text-ink-3", "{file_count} {file_label}" }
+            div { class: "flex items-center gap-1",
+                span { class: "text-xs text-ink-3", "{file_count} {file_label}" }
+                super::path_filter::PathFilterTrigger { artifact_view_id }
+            }
         }
     }
 }
@@ -356,15 +152,10 @@ fn render_file_tree(
     onnavigate: EventHandler<String>,
     artifact_enhancement: bool,
 ) -> Element {
-    let artifact_tree = (!nested && artifact_enhancement).then_some("");
     rsx! {
-        ul {
-            class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
-            "data-gtl-file-tree": artifact_tree,
+        ul { class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
             for (directory_name, directory) in &tree.directories {
-                li {
-                    class: "min-w-0",
-                    "data-gtl-file-directory": artifact_enhancement.then_some(""),
+                li { class: "min-w-0",
                     details { class: "group", open: true,
                         summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
                             WorkspaceDirectoryCaret {}
@@ -415,9 +206,7 @@ fn WorkspaceFileItem(
         |name| name.to_string_lossy(),
     );
     let anchor_id = file.anchor_id.clone();
-    let filter_key = file.path.to_string_lossy().to_lowercase();
     let tone_classes = file_item_tone_classes(file.status);
-    let artifact_file = artifact_enhancement.then_some("");
     let artifact_action = artifact_enhancement.then_some("navigate-file");
     let item_attributes = merge_attributes(vec![
         attributes!(div {
@@ -429,10 +218,7 @@ fn WorkspaceFileItem(
     ]);
 
     rsx! {
-        li {
-            class: "min-w-0",
-            "data-gtl-file-leaf": artifact_file,
-            "data-gtl-filter-key": artifact_enhancement.then_some(filter_key),
+        li { class: "min-w-0",
             Button {
                 layout: ButtonLayout::FullWidthStart,
                 size: ButtonSize::Content,
@@ -466,23 +252,10 @@ const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "desktop")]
-    use std::collections::HashSet;
-
     use gtl_models::diffs::DiffLineCount;
-    #[cfg(feature = "desktop")]
-    use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration};
-    #[cfg(feature = "desktop")]
-    use gtl_wire::viewer::{
-        ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerViewIdentity,
-    };
     use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
 
-    #[cfg(feature = "desktop")]
-    use super::WorkspaceFileSearchOutcome;
     use super::{WorkspaceFileTree, WorkspaceLineTotals};
-    #[cfg(feature = "desktop")]
-    use crate::test_support::viewer_tab_id;
     use crate::test_support::{TestResult, absolute_file_path, repository_relative_path};
 
     fn file(path: &str, added: u64, removed: u64) -> TestResult<ViewerFileSummary> {
@@ -532,43 +305,6 @@ mod tests {
                 .1
                 .files[0],
             0
-        );
-        Ok(())
-    }
-
-    #[cfg(feature = "desktop")]
-    #[test]
-    fn completed_search_applies_only_to_its_identity_and_query() -> TestResult {
-        let identity = ViewerViewIdentity {
-            tab_id: viewer_tab_id(4)?,
-            range_generation: ViewerRangeGeneration::new(2),
-            selection_generation: ViewerSelectionGeneration::new(1),
-            render_options: ViewerRenderOptions {
-                layout: ViewerDiffLayout::Unified,
-                density: ViewerDiffDensity::Compact,
-            },
-        };
-        let file_id = ViewerDiffFileId::for_index(3);
-        let outcome = WorkspaceFileSearchOutcome {
-            identity,
-            query: "src".to_owned(),
-            result: Ok(HashSet::from([file_id.clone()])),
-        };
-
-        assert_eq!(
-            outcome.files_for(identity, "src"),
-            Some(&HashSet::from([file_id]))
-        );
-        assert_eq!(outcome.files_for(identity, "tests"), None);
-        assert_eq!(
-            outcome.files_for(
-                ViewerViewIdentity {
-                    selection_generation: ViewerSelectionGeneration::new(2),
-                    ..identity
-                },
-                "src",
-            ),
-            None
         );
         Ok(())
     }

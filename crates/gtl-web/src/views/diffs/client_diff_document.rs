@@ -65,7 +65,6 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
                 flashing_file: diff.flashing_file,
                 is_loading,
                 retry_allowed,
-                onfind: None,
                 onopen,
                 onretry: move |file_id| workspace.retry_file(file_id),
                 artifact_tab_id: None,
@@ -101,7 +100,6 @@ fn use_diff_rows_loading_tab(tab_id: ViewerTabId, loading: bool) {
 pub(crate) fn StaticDiffDocument(
     workspace: ClientDiffWorkspace,
     overlay: Option<Element>,
-    onfind: Option<EventHandler<ViewerDiffFileId>>,
 ) -> Element {
     let diff = super::diff_workspace::use_workspace_context();
     let workspace = use_store(move || workspace);
@@ -123,7 +121,6 @@ pub(crate) fn StaticDiffDocument(
                 flashing_file: diff.flashing_file,
                 is_loading: false,
                 retry_allowed: false,
-                onfind,
                 onopen: None,
                 onretry: move |_file_id| {},
                 artifact_tab_id: Some(identity.tab_id),
@@ -141,7 +138,6 @@ fn DiffDocumentBody(
     flashing_file: ReadSignal<Option<String>>,
     is_loading: bool,
     retry_allowed: bool,
-    onfind: Option<EventHandler<ViewerDiffFileId>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<ViewerDiffFileId>,
     artifact_tab_id: Option<ViewerTabId>,
@@ -158,7 +154,7 @@ fn DiffDocumentBody(
     );
     rsx! {
         div {
-            class: "h-full min-h-0 overflow-auto bg-bg pt-0 pr-0 pb-[60px] pl-[22px] text-ink wide-screen:pl-7 compact-desktop:pl-4 tablet:pb-12 tablet:pl-3 mobile:pl-1 print:overflow-visible print:p-0",
+            class: "h-full min-h-0 overflow-auto bg-bg pb-[60px] text-ink tablet:pb-12 print:overflow-visible print:p-0",
             role: "region",
             aria_label: "Rendered diff for {title}",
             aria_busy: is_loading.to_string(),
@@ -182,7 +178,6 @@ fn DiffDocumentBody(
                             density,
                             folded,
                             flashing_file,
-                            onfind,
                             onopen,
                             onretry: move |()| onretry.call(file_id.clone()),
                             retry_allowed,

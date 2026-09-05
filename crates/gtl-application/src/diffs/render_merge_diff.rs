@@ -226,6 +226,7 @@ mod tests {
         let app_settings = FixedUserSettingsStore::new(UserSettings::new(
             Some(Theme::Noir),
             RenderOptions::DEFAULT,
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
             gtl_models::settings::PushAllExclusions::default(),

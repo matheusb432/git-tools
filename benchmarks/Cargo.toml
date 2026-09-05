@@ -28,7 +28,7 @@ name = "grpc_requests"
 harness = false
 
 [[bench]]
-name = "showcase_registry"
+name = "story_set_registry"
 harness = false
 
 [[bin]]
@@ -66,7 +66,7 @@ tonic = { workspace = true, features = ["transport"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
-dx-preview = { workspace = true, features = ["benchmark-support"] }
+dx-story = { workspace = true, features = ["benchmark-support"] }
 gtl-server = { workspace = true, features = ["benchmark-support"] }
 gtl-artifacts.workspace = true
 gtl-parser = { workspace = true, features = ["syntax"] }

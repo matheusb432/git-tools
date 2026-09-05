@@ -1,7 +1,9 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
 use serde::Deserialize;
-use thirtyfour::{By, WebDriver, WebElement};
+use thirtyfour::{By, Key, WebDriver, WebElement};
 
 use crate::support::{self, fixture::TabOverflowFixture, wait};
 
@@ -34,6 +36,45 @@ struct OverflowMenuMotion {
     animation_duration: String,
     animation_name: String,
     keyframes: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TabDragAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TabDragVisual {
+    tabs: Vec<TabDragItemVisual>,
+    floating: Vec<TabFloatingVisual>,
+    reduced_motion: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TabDragItemVisual {
+    id: String,
+    x: f64,
+    y: f64,
+    center_x: i32,
+    center_y: i32,
+    dragging: bool,
+    transform_x: f64,
+    transform_y: f64,
+    transition_property: String,
+    transition_duration: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TabFloatingVisual {
+    x: f64,
+    y: f64,
+    inert: bool,
+    popover_manual: bool,
+    popover_open: bool,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -286,170 +327,289 @@ async fn read_tab_selection_motion(
 }
 
 async fn assert_drag_reordering(driver: &WebDriver) -> Result<()> {
-    let tabs = driver
-        .find_all(By::Css("button[role='tab']"))
+    let rail = driver
+        .find(By::Css("[data-viewer-tab-rail-content='true']"))
         .await
-        .context("list viewer tabs before reordering")?;
-    let source = tabs.first().context("viewer has a drag source tab")?;
-    let target = tabs.get(2).context("viewer has a drag target tab")?;
-    let titles = tab_titles(&tabs).await?;
-    let expected = vec![
-        titles[1].clone(),
-        titles[2].clone(),
-        titles[0].clone(),
-        titles[3].clone(),
-    ];
-    driver
-        .action_chain()
-        .move_to_element_center(source)
-        .click_and_hold()
-        .perform()
-        .await
-        .context("hold the first viewer tab for dragging")?;
-    driver
-        .action_chain()
-        .move_by_offset(12, 0)
-        .perform()
-        .await
-        .context("start dragging the first viewer tab")?;
-    wait::until(
-        "started viewer tab drag",
-        wait::ASSERTION_TIMEOUT,
-        || async {
-            let source_state = source
-                .find(By::XPath(".."))
-                .await?
-                .attr("data-drag-state")
-                .await?;
-            Ok((source_state.as_deref() == Some("dragging")).then_some(()))
-        },
-    )
-    .await?;
-    // WebKit's driver starts the native drag but does not carry its transfer data through
-    // target-directed pointer moves. Exercise the target half with an equivalent transfer.
-    dispatch_tab_drag_over(driver, source, target).await?;
-    wait::until(
-        "viewer tab drop target",
-        wait::ASSERTION_TIMEOUT,
-        || async {
-            let target_state = target
-                .find(By::XPath(".."))
-                .await?
-                .attr("data-drag-state")
-                .await?;
-            Ok((target_state.as_deref() == Some("drop-after")).then_some(()))
-        },
-    )
-    .await?;
-    driver
-        .action_chain()
-        .move_by_offset(0, 80)
-        .perform()
-        .await
-        .context("move the native drag away from the tab controls")?;
+        .context("find the tab rail for pointer reordering")?;
+    assert_pointer_drag_reordering(driver, &rail, TabDragAxis::Horizontal, 0).await
+}
+
+async fn assert_pointer_drag_reordering(
+    driver: &WebDriver,
+    container: &WebElement,
+    axis: TabDragAxis,
+    source_index: usize,
+) -> Result<()> {
+    let initial = read_tab_drag_visual(driver, container).await?;
+    let source = initial
+        .tabs
+        .get(source_index)
+        .context("viewer has a pointer drag source")?;
+    let target = initial
+        .tabs
+        .get(source_index + 2)
+        .context("viewer has two following tabs for pointer reordering")?;
+    let destination = match axis {
+        TabDragAxis::Horizontal => (target.center_x + 8, source.center_y + 80),
+        TabDragAxis::Vertical => (source.center_x + 16, target.center_y + 8),
+    };
+    let original_order: Vec<_> = initial.tabs.iter().map(|tab| tab.id.as_str()).collect();
+    let mut expected_order = original_order.clone();
+    expected_order[source_index..=source_index + 2].rotate_left(1);
+
+    drag_tab_to_proposed_position(driver, container, &initial, source_index, axis, destination)
+        .await?;
+    let evidence_name = match axis {
+        TabDragAxis::Horizontal => "viewer-tab-drag-lifted",
+        TabDragAxis::Vertical => "viewer-tab-overflow-drag-lifted",
+    };
+    support::evidence::capture(driver, evidence_name, true).await?;
+    if matches!(axis, TabDragAxis::Horizontal) {
+        driver
+            .action_chain()
+            .send_keys(Key::Escape)
+            .perform()
+            .await
+            .context("cancel the tab drag with Escape while holding the pointer")?;
+        wait_for_tab_drag_cleanup(driver, container, &original_order).await?;
+        driver
+            .action_chain()
+            .move_by_offset(16, 12)
+            .release()
+            .perform()
+            .await
+            .context("move and release the pointer after cancelling the tab drag")?;
+        wait_for_tab_drag_cleanup(driver, container, &original_order).await?;
+        drag_tab_to_proposed_position(driver, container, &initial, source_index, axis, destination)
+            .await?;
+    }
     driver
         .action_chain()
         .release()
         .perform()
         .await
-        .context("end the native viewer tab drag")?;
-    dispatch_tab_drop(driver, source, target).await?;
-    wait::until("reordered viewer tabs", wait::ASSERTION_TIMEOUT, || async {
-        let tabs = driver.find_all(By::Css("button[role='tab']")).await?;
-        Ok((tab_titles(&tabs).await? == expected).then_some(()))
-    })
+        .context("drop the viewer tab at the proposed position")?;
+    wait_for_tab_drag_cleanup(driver, container, &expected_order).await
+}
+
+async fn drag_tab_to_proposed_position(
+    driver: &WebDriver,
+    container: &WebElement,
+    initial: &TabDragVisual,
+    source_index: usize,
+    axis: TabDragAxis,
+    destination: (i32, i32),
+) -> Result<()> {
+    let source = &initial.tabs[source_index];
+    driver
+        .action_chain()
+        .move_to(i64::from(source.center_x), i64::from(source.center_y))
+        .click_and_hold()
+        .perform()
+        .await
+        .context("press the viewer tab for pointer dragging")?;
+    let start = match axis {
+        TabDragAxis::Horizontal => (source.center_x + 12, source.center_y + 80),
+        TabDragAxis::Vertical => (source.center_x + 16, source.center_y + 12),
+    };
+    driver
+        .action_chain()
+        .move_to(i64::from(start.0), i64::from(start.1))
+        .perform()
+        .await
+        .context("pull the held viewer tab away from its initial position")?;
+    wait_for_floating_tab(driver, container, source, start).await?;
+    driver
+        .action_chain()
+        .move_to(i64::from(destination.0), i64::from(destination.1))
+        .perform()
+        .await
+        .context("move the held viewer tab past the next two siblings")?;
+    wait_for_floating_tab(driver, container, source, destination).await?;
+    wait_for_tab_drag_preview(driver, container, initial, source_index, axis).await
+}
+
+async fn wait_for_floating_tab(
+    driver: &WebDriver,
+    container: &WebElement,
+    source: &TabDragItemVisual,
+    pointer: (i32, i32),
+) -> Result<()> {
+    let expected_x = source.x + f64::from(pointer.0 - source.center_x);
+    let expected_y = source.y + f64::from(pointer.1 - source.center_y);
+    let visual = wait::until(
+        "floating viewer tab following both pointer coordinates",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let visual = read_tab_drag_visual(driver, container).await?;
+            let [floating] = visual.floating.as_slice() else {
+                return Ok(None);
+            };
+            let follows_pointer =
+                (floating.x - expected_x).abs() <= 1.0 && (floating.y - expected_y).abs() <= 1.0;
+            Ok(follows_pointer.then_some(visual))
+        },
+    )
+    .await?;
+    ensure!(
+        visual.tabs.iter().filter(|tab| tab.dragging).count() == 1
+            && visual
+                .tabs
+                .iter()
+                .any(|tab| tab.id == source.id && tab.dragging),
+        "only the source wrapper should be marked as dragging: {visual:?}"
+    );
+    let floating = &visual.floating[0];
+    ensure!(
+        floating.inert && floating.popover_manual && floating.popover_open,
+        "the floating viewer tab is not an inert manual popover in the top layer: {floating:?}"
+    );
+    Ok(())
+}
+
+async fn wait_for_tab_drag_preview(
+    driver: &WebDriver,
+    container: &WebElement,
+    initial: &TabDragVisual,
+    source_index: usize,
+    axis: TabDragAxis,
+) -> Result<()> {
+    let source = &initial.tabs[source_index];
+    let next = &initial.tabs[source_index + 1];
+    let displacement = match axis {
+        TabDragAxis::Horizontal => source.x - next.x,
+        TabDragAxis::Vertical => source.y - next.y,
+    };
+    let visual = wait::until(
+        "sibling transforms opening the proposed tab position before drop",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let visual = read_tab_drag_visual(driver, container).await?;
+            ensure!(
+                visual
+                    .tabs
+                    .iter()
+                    .map(|tab| &tab.id)
+                    .eq(initial.tabs.iter().map(|tab| &tab.id)),
+                "the tab order changed before pointer release: {visual:?}"
+            );
+            let preview_ready = visual.tabs.iter().enumerate().all(|(index, tab)| {
+                let offset = if index > source_index && index <= source_index + 2 {
+                    displacement
+                } else {
+                    0.0
+                };
+                let (expected_x, expected_y) = match axis {
+                    TabDragAxis::Horizontal => (offset, 0.0),
+                    TabDragAxis::Vertical => (0.0, offset),
+                };
+                (tab.transform_x - expected_x).abs() <= 1.0
+                    && (tab.transform_y - expected_y).abs() <= 1.0
+            });
+            Ok(preview_ready.then_some(visual))
+        },
+    )
+    .await?;
+    for tab in visual.tabs.iter().filter(|tab| tab.id != source.id) {
+        let expected_motion = if visual.reduced_motion {
+            tab.transition_property == "none"
+        } else {
+            tab.transition_property
+                .split(',')
+                .any(|property| property.trim() == "transform")
+                && tab.transition_duration == "0.16s"
+        };
+        ensure!(
+            expected_motion,
+            "sibling {} must transition transforms for 160 ms or disable transitions under reduced motion: {tab:?}",
+            tab.id
+        );
+    }
+    Ok(())
+}
+
+async fn wait_for_tab_drag_cleanup(
+    driver: &WebDriver,
+    container: &WebElement,
+    expected_order: &[&str],
+) -> Result<()> {
+    let settling_started = Instant::now();
+    wait::until(
+        "expected tab order with no floating tab or drag transforms",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            if settling_started.elapsed() < Duration::from_millis(200) {
+                return Ok(None);
+            }
+            let visual = read_tab_drag_visual(driver, container).await?;
+            let order_matches = visual
+                .tabs
+                .iter()
+                .map(|tab| tab.id.as_str())
+                .eq(expected_order.iter().copied());
+            let clean = visual.floating.is_empty()
+                && visual.tabs.iter().all(|tab| {
+                    !tab.dragging && tab.transform_x.abs() <= 1.0 && tab.transform_y.abs() <= 1.0
+                });
+            Ok((order_matches && clean).then_some(()))
+        },
+    )
     .await
 }
 
-async fn dispatch_tab_drag_over(
-    driver: &WebDriver,
-    source: &WebElement,
-    target: &WebElement,
-) -> Result<()> {
-    let accepted: bool = driver
+async fn read_tab_drag_visual(driver: &WebDriver, container: &WebElement) -> Result<TabDragVisual> {
+    driver
         .execute(
             r#"
-                const [source, target] = arguments;
-                const transfer = new DataTransfer();
-                transfer.effectAllowed = "move";
-                transfer.dropEffect = "move";
-                transfer.setData(
-                    "text/plain",
-                    source.id.slice("viewer-tab-".length),
-                );
-                window.__gtlViewerTabDragTransfer = transfer;
-                const dropZone = target.parentElement.querySelector(
-                    '[data-viewer-tab-drop-placement="after"]',
-                );
-                if (!dropZone) {
-                    return false;
-                }
-                const box = dropZone.getBoundingClientRect();
-                const event = new DragEvent("dragover", {
-                    bubbles: true,
-                    cancelable: true,
-                    clientX: box.right - 2,
-                    clientY: box.top + box.height / 2,
-                    dataTransfer: transfer,
-                });
-                return dropZone.dispatchEvent(event) === false;
+                const floatingSelector = "[data-viewer-tab-floating='true']";
+                const tabs = [...arguments[0].querySelectorAll("[data-viewer-tab-id]")]
+                    .filter((tab) => !tab.closest(floatingSelector))
+                    .map((tab) => {
+                        const box = tab.getBoundingClientRect();
+                        const style = getComputedStyle(tab);
+                        const transform = style.transform === "none"
+                            ? new DOMMatrixReadOnly()
+                            : new DOMMatrixReadOnly(style.transform);
+                        return {
+                            id: tab.dataset.viewerTabId,
+                            x: box.x,
+                            y: box.y,
+                            centerX: Math.floor(box.x + box.width / 2),
+                            centerY: Math.floor(box.y + box.height / 2),
+                            dragging: tab.dataset.dragState === "dragging",
+                            transformX: transform.m41,
+                            transformY: transform.m42,
+                            transitionProperty: style.transitionProperty,
+                            transitionDuration: style.transitionDuration,
+                        };
+                    });
+                const floating = [...document.querySelectorAll(floatingSelector)]
+                    .map((tab) => {
+                        const box = tab.getBoundingClientRect();
+                        return {
+                            x: box.x,
+                            y: box.y,
+                            inert: tab.inert,
+                            popoverManual: tab.getAttribute("popover") === "manual",
+                            popoverOpen: tab.matches(":popover-open"),
+                        };
+                    });
+                return {
+                    tabs,
+                    floating,
+                    reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+                };
             "#,
             vec![
-                source.to_json().context("encode viewer tab drag source")?,
-                target.to_json().context("encode viewer tab drag target")?,
+                container
+                    .to_json()
+                    .context("encode the viewer tab container")?,
             ],
         )
         .await
-        .context("drag the first viewer tab over the third")?
+        .context("inspect pointer drag geometry and presentation")?
         .convert()
-        .context("decode whether the viewer accepted the drag")?;
-    ensure!(accepted, "the viewer tab rail did not accept the drag");
-    Ok(())
-}
-
-async fn dispatch_tab_drop(
-    driver: &WebDriver,
-    source: &WebElement,
-    target: &WebElement,
-) -> Result<()> {
-    let accepted: bool = driver
-        .execute(
-            r#"
-                const [source, target] = arguments;
-                const transfer = window.__gtlViewerTabDragTransfer;
-                const dropZone = target.parentElement.querySelector(
-                    '[data-viewer-tab-drop-placement="after"]',
-                );
-                if (!dropZone) {
-                    return false;
-                }
-                const box = dropZone.getBoundingClientRect();
-                const event = new DragEvent("drop", {
-                    bubbles: true,
-                    cancelable: true,
-                    clientX: box.right - 2,
-                    clientY: box.top + box.height / 2,
-                    dataTransfer: transfer,
-                });
-                const accepted = dropZone.dispatchEvent(event) === false;
-                source.parentElement.dispatchEvent(new DragEvent("dragend", {
-                    bubbles: true,
-                    dataTransfer: transfer,
-                }));
-                delete window.__gtlViewerTabDragTransfer;
-                return accepted;
-            "#,
-            vec![
-                source.to_json().context("encode viewer tab drag source")?,
-                target.to_json().context("encode viewer tab drop target")?,
-            ],
-        )
-        .await
-        .context("drop the first viewer tab after the third")?
-        .convert()
-        .context("decode whether the viewer accepted the drop")?;
-    ensure!(accepted, "the viewer tab rail did not accept the drop");
-    Ok(())
+        .context("decode pointer drag geometry and presentation")
 }
 
 async fn tab_for_repository(driver: &WebDriver, repository: &str) -> Result<WebElement> {
@@ -467,18 +627,6 @@ async fn tab_for_repository(driver: &WebDriver, repository: &str) -> Result<WebE
         }
     }
     anyhow::bail!("viewer tab for {repository} is unavailable")
-}
-
-async fn tab_titles(tabs: &[WebElement]) -> Result<Vec<String>> {
-    let mut titles = Vec::with_capacity(tabs.len());
-    for tab in tabs {
-        titles.push(
-            tab.attr("title")
-                .await?
-                .context("viewer tab is missing its label title")?,
-        );
-    }
-    Ok(titles)
 }
 
 async fn read_tab_close_visual(driver: &WebDriver, close: &WebElement) -> Result<TabCloseVisual> {
@@ -540,8 +688,10 @@ async fn verify_overflow_menu(driver: &WebDriver, fixture: &TabOverflowFixture) 
             && !motion.keyframes.contains("scale"),
         "the overflow menu does not use the optimized translation-only motion: {motion:?}"
     );
-    let menu_tabs = assert_menu_contents(&menu, fixture.len()).await?;
+    assert_menu_contents(&menu, fixture.len()).await?;
     support::evidence::capture(driver, "viewer-tab-overflow-menu", true).await?;
+    assert_pointer_drag_reordering(driver, &menu, TabDragAxis::Vertical, 3).await?;
+    let menu_tabs = assert_menu_contents(&menu, fixture.len()).await?;
 
     let (first_repository, first_marker) = fixture
         .first_identity()

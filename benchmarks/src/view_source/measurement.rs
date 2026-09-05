@@ -39,6 +39,7 @@ impl UserSettingsReader for CompactSettingsStore {
         Ok(UserSettings::new(
             None,
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
+            gtl_models::viewer::ViewerKeybindings::default(),
             true,
             DiffExclusions::default(),
             PushAllExclusions::default(),

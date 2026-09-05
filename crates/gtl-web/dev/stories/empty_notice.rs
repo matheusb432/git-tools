@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use dx_preview::{preview, showcase};
+use dx_story::{stories, story};
 
 use crate::shared::ui::EmptyNotice;
 
-#[preview(name = "Catalog thumbnail")]
+#[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
         EmptyNotice { "No items found." }
@@ -11,7 +11,7 @@ fn thumbnail() -> Element {
 }
 
 /// Default empty state.
-#[preview]
+#[story]
 fn default() -> Element {
     rsx! {
         EmptyNotice { "No changed files match the current filter." }
@@ -19,7 +19,7 @@ fn default() -> Element {
 }
 
 /// Narrow container.
-#[preview]
+#[story]
 fn constrained() -> Element {
     rsx! {
         div { class: "w-56",
@@ -29,5 +29,5 @@ fn constrained() -> Element {
 }
 
 /// Empty notice component.
-#[showcase(id = "empty-notice", name = "Empty notice", thumbnail = thumbnail)]
-const EMPTY_NOTICE_SHOWCASE: () = &[default, constrained];
+#[stories(id = "empty-notice", name = "Empty notice", thumbnail = thumbnail)]
+const EMPTY_NOTICE_STORIES: () = &[default, constrained];

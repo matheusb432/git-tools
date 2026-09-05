@@ -49,7 +49,10 @@ use prost::Message as _;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 
-use super::{run_blocking, settings::set_setting_key_error, unexpected, user_settings_load_error};
+use super::{
+    invalid_user_settings_configuration, run_blocking, settings::set_setting_key_error, unexpected,
+    user_settings_load_error,
+};
 use crate::{state::AppState, viewer_runtime};
 
 pub(crate) struct ViewerGrpcService {
@@ -579,8 +582,8 @@ fn application_settings_request(request: EditSettingsRequest) -> Result<UserSett
 fn edit_settings_error(error: EditSettingsError) -> Status {
     match error {
         EditSettingsError::Settings(error) => match error {
-            UserSettingsEditError::InvalidConfiguration(_) => {
-                Status::failed_precondition("user settings are invalid")
+            UserSettingsEditError::InvalidConfiguration(error) => {
+                invalid_user_settings_configuration(&error, "edit settings")
             }
             UserSettingsEditError::Conflict(_) => {
                 Status::aborted("user settings edit conflicted with another writer")
@@ -609,6 +612,7 @@ fn project_shell(
                 session,
                 settings.viewer_render_options(),
                 settings.theme().unwrap_or(Theme::Dark),
+                settings.viewer_keybindings(),
                 feedback,
             )
         })
