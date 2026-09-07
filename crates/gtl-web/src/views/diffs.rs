@@ -5,6 +5,8 @@ mod diff_rows;
 pub(crate) mod diff_workspace;
 mod file_status_badge;
 mod line_changes;
+#[cfg(feature = "desktop")]
+mod project_diff;
 mod search_keybindings;
 
 #[cfg(feature = "desktop")]
@@ -20,3 +22,5 @@ pub(crate) use diff_workspace::ArtifactDiffWorkspace;
 pub(crate) use diff_workspace::DiffWorkspaceView;
 pub(crate) use file_status_badge::{DiffFileStatusBadge, DiffFileStatusBadgeSize};
 pub(crate) use line_changes::{DiffLineChangeBadge, DiffLineChangeKind, DiffLineChangeText};
+#[cfg(feature = "desktop")]
+pub(crate) use project_diff::ProjectDiffView;

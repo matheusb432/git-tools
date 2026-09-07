@@ -1,3 +1,6 @@
+mod live_views;
+mod projects;
+
 use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
@@ -273,7 +276,7 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
     let mut viewer =
         ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
     let mut viewer_updates = viewer
-        .watch_viewer(WatchViewerRequest {})
+        .watch_viewer(WatchViewerRequest::default())
         .await?
         .into_inner();
     let initial_version = viewer_updates
@@ -312,6 +315,11 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
 
     viewer
         .edit_settings(EditSettingsRequest {
+            projects_view: Some(gtl_wire::v1::ProjectsViewFieldUpdate {
+                operation: Some(gtl_wire::v1::projects_view_field_update::Operation::Update(
+                    gtl_wire::v1::ProjectsViewMode::Table as i32,
+                )),
+            }),
             push_confirmation_required: Some(BoolFieldUpdate {
                 operation: Some(bool_field_update::Operation::Update(false)),
             }),
@@ -329,6 +337,10 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
         .get_viewer_settings(GetViewerSettingsRequest {})
         .await?
         .into_inner();
+    assert_eq!(
+        settings.projects_view,
+        gtl_wire::v1::ProjectsViewMode::Table as i32
+    );
     assert!(!settings.push_confirmation_required);
     assert!(
         settings

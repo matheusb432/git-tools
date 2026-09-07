@@ -150,6 +150,19 @@ impl ButtonState {
     }
 }
 
+pub(crate) fn button_classes(
+    layout: ButtonLayout,
+    variant: ButtonVariant,
+    size: ButtonSize,
+) -> String {
+    format!(
+        "{BUTTON_CLASSES} {} {} {}",
+        layout.classes(),
+        variant.classes(),
+        size.classes()
+    )
+}
+
 #[component]
 pub(crate) fn Button(
     #[props(default)] button_type: ButtonType,
@@ -165,12 +178,7 @@ pub(crate) fn Button(
     children: Element,
 ) -> Element {
     let base = attributes!(button {
-        class: format!(
-            "{BUTTON_CLASSES} {} {} {}",
-            layout.classes(),
-            variant.classes(),
-            size.classes()
-        ),
+        class: button_classes(layout, variant, size),
         r#type: button_type.as_html_type(),
         disabled: state.is_disabled(),
         aria_busy: state.is_loading().then_some("true"),

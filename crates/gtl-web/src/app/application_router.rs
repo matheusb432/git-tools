@@ -1,5 +1,9 @@
 use dioxus::{prelude::*, router::Navigator};
-use gtl_models::viewer::{ViewerTabId, ViewerVersion};
+use gtl_models::{
+    live_views::LiveComparison,
+    paths::RepositoryRoot,
+    viewer::{ViewerTabId, ViewerVersion},
+};
 use gtl_wire::viewer::{ViewerActiveState, ViewerShell, ViewerTabRequest};
 
 use crate::{
@@ -19,6 +23,10 @@ pub(crate) enum Route {
         #[redirect("/", || Route::Projects {})]
         #[route("/projects")]
         Projects {},
+        #[route("/projects/local?:..query")]
+        ProjectLocalDiff { query: ProjectDiffQuery },
+        #[route("/projects/unpushed?:..query")]
+        ProjectUnpushedDiff { query: ProjectDiffQuery },
         #[route("/diffs")]
         CurrentDiff {},
         #[route("/diffs/:tab_id")]
@@ -29,7 +37,43 @@ pub(crate) enum Route {
         Settings {},
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectDiffQuery(Option<RepositoryRoot>);
+
+impl std::fmt::Display for ProjectDiffQuery {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use dioxus::router::exports::percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+        if let Some(path) = &self.0 {
+            write!(
+                formatter,
+                "path={}",
+                utf8_percent_encode(&path.to_string(), NON_ALPHANUMERIC)
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl From<&str> for ProjectDiffQuery {
+    fn from(query: &str) -> Self {
+        // Dioxus decodes the entire query before invoking this parser.
+        Self(
+            query
+                .strip_prefix("path=")
+                .and_then(|path| RepositoryRoot::try_new(path.into()).ok()),
+        )
+    }
+}
+
 impl Route {
+    pub(crate) fn project_diff(path: &RepositoryRoot, comparison: LiveComparison) -> Self {
+        let query = ProjectDiffQuery(Some(path.clone()));
+        match comparison {
+            LiveComparison::LocalChanges => Self::ProjectLocalDiff { query },
+            LiveComparison::UnpushedCommits => Self::ProjectUnpushedDiff { query },
+        }
+    }
+
     fn for_active(active: &ViewerActiveState) -> Self {
         active_tab_id(active).map_or(Self::Projects {}, |tab_id| Self::Diff { tab_id })
     }
@@ -37,7 +81,12 @@ impl Route {
     pub(super) const fn tab_id(&self) -> Option<ViewerTabId> {
         match self {
             Self::Diff { tab_id } => Some(*tab_id),
-            Self::Projects {} | Self::CurrentDiff {} | Self::History {} | Self::Settings {} => None,
+            Self::Projects {}
+            | Self::CurrentDiff {}
+            | Self::History {}
+            | Self::Settings {}
+            | Self::ProjectLocalDiff { .. }
+            | Self::ProjectUnpushedDiff { .. } => None,
         }
     }
 }
@@ -88,6 +137,13 @@ impl ViewerRouteObservation {
             focus_request_version: shell.focus_request_version,
         };
         let active_route = Route::for_active(&shell.active);
+        // The project route resolves its own open response into the canonical tab URL.
+        if matches!(
+            route,
+            Route::ProjectLocalDiff { .. } | Route::ProjectUnpushedDiff { .. }
+        ) {
+            return (next, ViewerRouteAction::None);
+        }
         if focus_requested {
             return (next, ViewerRouteAction::Focus(active_route));
         }
@@ -102,9 +158,12 @@ impl ViewerRouteObservation {
                 tab_id: *tab_id,
                 fallback: active_route,
             },
-            Route::Projects {} | Route::Diff { .. } | Route::History {} | Route::Settings {} => {
-                ViewerRouteAction::None
-            }
+            Route::Projects {}
+            | Route::Diff { .. }
+            | Route::History {}
+            | Route::Settings {}
+            | Route::ProjectLocalDiff { .. }
+            | Route::ProjectUnpushedDiff { .. } => ViewerRouteAction::None,
         };
         (next, action)
     }
@@ -183,6 +242,20 @@ async fn apply_viewer_route(
 fn Projects() -> Element {
     rsx! {
         crate::views::projects::ProjectsView {}
+    }
+}
+
+#[component]
+fn ProjectLocalDiff(query: ProjectDiffQuery) -> Element {
+    rsx! {
+        crate::views::diffs::ProjectDiffView { path: query.0, comparison: LiveComparison::LocalChanges }
+    }
+}
+
+#[component]
+fn ProjectUnpushedDiff(query: ProjectDiffQuery) -> Element {
+    rsx! {
+        crate::views::diffs::ProjectDiffView { path: query.0, comparison: LiveComparison::UnpushedCommits }
     }
 }
 
@@ -302,6 +375,32 @@ mod tests {
         assert_eq!("/diffs/7".parse::<Route>().ok(), Some(route));
         assert!("/diffs/0".parse::<Route>().is_err());
         assert!("/diffs/invalid".parse::<Route>().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn project_links_round_trip_paths_and_resolve_their_own_open() -> TestResult {
+        let path = RepositoryRoot::try_new("/tmp/project with spaces & # + %20 ?/repo".into())?;
+        let tab_id = viewer_tab_id(7)?;
+        let initial = shell(Some(tab_id), None);
+        let (observed, _) = ViewerRouteObservation::default().next(
+            "server".to_owned(),
+            &Route::Projects {},
+            &initial,
+        );
+        for comparison in [
+            LiveComparison::LocalChanges,
+            LiveComparison::UnpushedCommits,
+        ] {
+            let route = Route::project_diff(&path, comparison);
+            assert_eq!(route.to_string().parse::<Route>().ok(), Some(route.clone()));
+            let (_, action) = observed.next(
+                "server".to_owned(),
+                &route,
+                &shell(Some(tab_id), Some(ViewerVersion::new(1))),
+            );
+            assert_eq!(action, ViewerRouteAction::None);
+        }
         Ok(())
     }
 

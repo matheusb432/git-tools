@@ -60,6 +60,7 @@ impl ReservedCommitWork {
 pub struct ComputedRecipeWork {
     ticket: ComputeTicket,
     result: Result<PrepareRecipeOk, PrepareRecipeError>,
+    head: Option<gtl_models::git::GitHeadState>,
 }
 
 /// Contains completed commit work ready for one publication attempt.
@@ -268,8 +269,17 @@ pub fn compute_recipe(
         kind,
         ticket,
     } = work;
+    let head_before = (kind == ViewerTabKind::Live)
+        .then(|| git.head_state(&recipe.cwd()).ok())
+        .flatten();
+    let path = recipe.cwd();
     let result = prepare_recipe::execute(PrepareRecipe { recipe, kind }, settings, git);
-    ComputedRecipeWork { ticket, result }
+    let head = head_before.filter(|before| git.head_state(&path).as_ref().ok() == Some(before));
+    ComputedRecipeWork {
+        ticket,
+        result,
+        head,
+    }
 }
 
 /// Consumes completed work so one computation cannot be published twice.
@@ -277,7 +287,11 @@ pub fn publish_recipe(
     state: &ViewerState,
     work: ComputedRecipeWork,
 ) -> Result<RecipePublication, ViewerStateError> {
-    let ComputedRecipeWork { ticket, result } = work;
+    let ComputedRecipeWork {
+        ticket,
+        result,
+        head,
+    } = work;
     state.update(|session| match result {
         Ok(PrepareRecipeOk::Broken { state }) => {
             match session.set_state_if_current(ticket, state) {
@@ -294,7 +308,10 @@ pub fn publish_recipe(
             view,
             history,
         }) => match session.publish_labeled_if_current(ticket, CachedView::new(view), label) {
-            PublishOutcome::Published => RecipePublication::Published { history },
+            PublishOutcome::Published => {
+                session.set_live_head(ticket, head);
+                RecipePublication::Published { history }
+            }
             PublishOutcome::Stale => RecipePublication::Stale,
         },
         Err(error) => {

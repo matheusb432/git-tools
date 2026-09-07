@@ -383,6 +383,7 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 #[test]
 fn settings_codec_round_trips_exclusions_and_effective_values() {
     let settings = ViewerUserSettings {
+        projects_view: gtl_models::settings::ProjectsViewMode::Table,
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
         configured_theme: Some(ViewerTheme::Hearth),
         effective_theme: ViewerTheme::Hearth,
@@ -410,6 +411,7 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
 #[test]
 fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
     let request = EditSettingsRequest {
+        projects_view: FieldUpdate::Update(gtl_models::settings::ProjectsViewMode::Table),
         theme: FieldUpdate::Clear,
         layout: FieldUpdate::Unchanged,
         density: FieldUpdate::Update(ViewerDiffDensity::Compact),

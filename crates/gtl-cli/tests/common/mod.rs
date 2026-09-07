@@ -7,19 +7,12 @@ pub struct ServerHarness {
 }
 
 impl ServerHarness {
-    pub fn start(
-        settings_path: Option<&Path>,
-        project_catalogue_data_root: Option<&Path>,
-    ) -> Result<Self> {
+    pub fn start(settings_path: Option<&Path>, project_repository: Option<&Path>) -> Result<Self> {
         let data_root = tempfile::tempdir().context("create gtl-server data root")?;
-        let isolated_project_catalogue = data_root.path().join("sample_project");
-        let project_catalogue_data_root =
-            project_catalogue_data_root.unwrap_or(&isolated_project_catalogue);
         // Each integration-test file is a separate process with one server test, so these
         // process-wide variables are established before either the server thread or CLI child.
         unsafe {
             std::env::set_var("GIT_TOOLS_DATA_DIR", data_root.path());
-            std::env::set_var("sample_project_DATA_DIR", project_catalogue_data_root);
             if let Some(settings_path) = settings_path {
                 std::env::set_var("GIT_TOOLS_CONFIG", settings_path);
             } else {
@@ -30,6 +23,9 @@ impl ServerHarness {
         std::thread::spawn(move || report_server_failure(&failure_tx));
 
         wait_for_server_endpoint(data_root.path(), &failure_rx)?;
+        if let Some(repository) = project_repository {
+            create_fixture_project(repository)?;
+        }
         Ok(Self {
             _data_root: data_root,
         })
@@ -78,4 +74,39 @@ fn check_server_failure(failure: &std::sync::mpsc::Receiver<String>) -> Result<(
         }
         Err(std::sync::mpsc::TryRecvError::Empty) => Ok(()),
     }
+}
+
+fn create_fixture_project(repository: &Path) -> Result<()> {
+    use gtl_wire::v1;
+
+    let home = std::env::var_os("HOME").context("fixture home")?;
+    let relative = repository
+        .strip_prefix(home)
+        .context("fixture repository under home")?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let client = gtl_client::GtlClient::connect_local().await?;
+        client
+            .create_project(v1::CreateProjectRequest {
+                project_id: "RP".into(),
+                project: Some(v1::ProjectCreation {
+                    title: "repo".into(),
+                    source: Some(v1::ProjectSource {
+                        source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
+                            path: format!("~/{}", relative.to_string_lossy().replace('\\', "/")),
+                        })),
+                    }),
+                    git_remote: None,
+                    mux_session_name: "repo".into(),
+                    affiliation: v1::ProjectAffiliation::Personal.into(),
+                    color: None,
+                    groups: Vec::new(),
+                    include_in_full_export: None,
+                }),
+            })
+            .await?;
+        Ok(())
+    })
 }

@@ -21,12 +21,10 @@ use crate::viewer::session::{
     ViewerSession,
 };
 
-const SOURCE_DIRECTORY_NOT_FOUND_MESSAGE: &str =
-    "The configured Git repository directory was not found. Restore it and refresh.";
-const SOURCE_NOT_GIT_REPOSITORY_MESSAGE: &str =
-    "The configured directory is not a Git repository. Restore the repository and refresh.";
+const SOURCE_DIRECTORY_NOT_FOUND_MESSAGE: &str = "The configured Git repository directory was not found. Updates resume automatically when it is restored.";
+const SOURCE_NOT_GIT_REPOSITORY_MESSAGE: &str = "The configured directory is not a Git repository. Updates resume automatically when the repository is restored.";
 const SOURCE_UNAVAILABLE_MESSAGE: &str =
-    "The live view source is unavailable. Restore it and refresh.";
+    "The live view source is unavailable. Updates resume automatically when it is restored.";
 const RENDER_FAILED_MESSAGE: &str = "The diff could not be rendered. Please retry.";
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -50,7 +48,18 @@ pub fn project(
         .map(|entry| ViewerTab {
             id: entry.tab.id(),
             label: entry.tab.label().to_owned(),
-            kind: to_tab_kind(entry.tab.kind()),
+            kind: match session
+                .live_source(entry.tab.id())
+                .map(|(_, comparison)| comparison)
+            {
+                Some(gtl_models::live_views::LiveComparison::LocalChanges) => {
+                    ViewerTabKind::LiveLocalChanges
+                }
+                Some(gtl_models::live_views::LiveComparison::UnpushedCommits) => {
+                    ViewerTabKind::LiveUnpushedCommits
+                }
+                None => to_tab_kind(entry.tab.kind()),
+            },
             state: to_tab_state(entry.tab.state()),
         })
         .collect();

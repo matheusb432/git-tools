@@ -48,7 +48,7 @@ fn record_render(
     // used it; created_at keeps the first sighting.
     let source_id: i64 = transaction
         .prepare_cached(
-            "INSERT INTO project_sources (kind, value, created_at)
+            "INSERT INTO render_sources (kind, value, created_at)
              VALUES (?1, ?2, ?3)
              ON CONFLICT (kind, value) DO UPDATE SET updated_at = excluded.created_at
              RETURNING id",
@@ -97,9 +97,9 @@ fn record_render(
     }
     {
         // Pruning can orphan a source; collect it in the same transaction so
-        // project_sources never grows past what recent_renders references.
+        // render_sources never grows past what recent_renders references.
         let mut statement = transaction.prepare_cached(
-            "DELETE FROM project_sources WHERE id NOT IN
+            "DELETE FROM render_sources WHERE id NOT IN
              (SELECT source_id FROM recent_renders)",
         )?;
         statement.execute([])?;
@@ -179,9 +179,9 @@ mod tests {
         .entries
     }
 
-    fn project_sources(connection: &Connection) -> Vec<(String, Option<String>)> {
+    fn render_sources(connection: &Connection) -> Vec<(String, Option<String>)> {
         connection
-            .prepare("SELECT value, updated_at FROM project_sources ORDER BY value")
+            .prepare("SELECT value, updated_at FROM render_sources ORDER BY value")
             .unwrap()
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap()
@@ -230,7 +230,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            project_sources(&connection),
+            render_sources(&connection),
             vec![("/repos/gt".into(), Some("2026-07-08T00:00:00Z".into()))]
         );
     }
@@ -298,7 +298,7 @@ mod tests {
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
 
         // The first five renders come from a repo no later render references,
-        // so pruning them must also collect its project_sources row.
+        // so pruning them must also collect its render_sources row.
         for index in 0..5 {
             record_render::execute(
                 &command_for_recipe(
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(newest_title, "render 504");
         assert_eq!(oldest_title, "render 5");
         assert_eq!(
-            project_sources(&connection)
+            render_sources(&connection)
                 .into_iter()
                 .map(|(value, _)| value)
                 .collect::<Vec<_>>(),

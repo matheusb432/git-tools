@@ -346,6 +346,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         has_older: false,
     };
     let settings = ViewerUserSettings {
+        projects_view: gtl_models::settings::ProjectsViewMode::Table,
         configuration_path: Some("/home/user/.config/git-tools/config.toml".into()),
         configured_theme: None,
         effective_theme: ViewerTheme::Dark,

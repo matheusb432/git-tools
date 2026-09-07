@@ -3,7 +3,7 @@ use gtl_models::git::{GitHead, GitRevision};
 use gtl_wire::viewer::ViewerAppliedExclusions;
 use lucide_dioxus::ChevronsDownUp;
 #[cfg(feature = "component-preview")]
-use lucide_dioxus::{Ellipsis, RefreshCw, Search, Trash2};
+use lucide_dioxus::{Ellipsis, Search, Trash2};
 
 #[cfg(feature = "component-preview")]
 use crate::shared::ui::{
@@ -112,22 +112,9 @@ fn PreviewLiveViewActions(mobile: bool) -> Element {
     } else {
         ButtonSize::Small
     };
-    let icon_size = if mobile { 18 } else { 14 };
 
     rsx! {
         div { class: "flex flex-none items-center gap-1",
-            Button {
-                size: action_size,
-                variant: ButtonVariant::Ghost,
-                aria_label: "Refresh diff",
-                title: "Refresh diff",
-                span { aria_hidden: "true",
-                    RefreshCw { size: icon_size }
-                }
-                if !mobile {
-                    "Refresh"
-                }
-            }
             IconPopover {
                 id: if mobile { "preview-mobile-live-actions" } else { "preview-desktop-live-actions" },
                 aria_label: "Live view actions",

@@ -149,6 +149,7 @@ impl ViewerRenderCommandScheduler {
         self.generation
     }
 
+    #[cfg(test)]
     const fn is_pending(self) -> bool {
         self.active.is_some()
     }
@@ -214,18 +215,36 @@ pub(crate) enum ViewerShellReplacement {
 #[derive(Clone, Copy)]
 pub(crate) struct ViewerContext {
     shell: Signal<ViewerShellLoad>,
-    shell_reader: ReadSignal<ViewerShellLoad>,
     connection: Signal<ViewerConnection>,
     shell_order: Signal<ViewerShellOrder>,
     reconnect_generation: Signal<u64>,
     server_instance_id: Signal<Option<String>>,
     render_state: Signal<ViewerRenderState>,
     toast: ToastHandle,
+    live_errors: Signal<
+        std::collections::HashMap<ViewerTabId, crate::entities::diffs::live_errors::LiveErrors>,
+    >,
 }
 
 impl ViewerContext {
+    pub(crate) fn live_errors(
+        self,
+    ) -> ReadSignal<
+        std::collections::HashMap<ViewerTabId, crate::entities::diffs::live_errors::LiveErrors>,
+    > {
+        self.live_errors.into()
+    }
+
+    fn observe_live_check(mut self, check: gtl_wire::viewer::ViewerLiveCheck) {
+        self.live_errors
+            .write()
+            .entry(check.tab_id)
+            .or_default()
+            .observe(check.result, check.elapsed_ms);
+    }
+
     pub(crate) fn shell(self) -> ReadSignal<ViewerShellLoad> {
-        self.shell_reader
+        self.shell.into()
     }
 
     pub(crate) fn server_instance_id(self) -> Option<String> {
@@ -294,10 +313,6 @@ impl ViewerContext {
         }
     }
 
-    pub(crate) fn render_command_pending(self) -> bool {
-        (self.render_state)().commands.is_pending()
-    }
-
     pub(crate) fn diff_rows_loading_tab_id(self) -> Option<ViewerTabId> {
         (self.render_state)().diff_rows_loading.tab_id()
     }
@@ -319,6 +334,7 @@ impl ViewerContext {
             self.shell_order.set(ViewerShellOrder::default());
             self.shell.set(ViewerShellLoad::Loading);
             self.render_state.set(ViewerRenderState::default());
+            self.live_errors.write().clear();
         }
         self.server_instance_id.set(Some(server_instance_id));
         self.connection.set(ViewerConnection::Connected);
@@ -411,7 +427,6 @@ pub(crate) fn ApplicationLayout() -> Element {
 #[component]
 fn ApplicationLayoutContent() -> Element {
     let shell = use_signal(|| ViewerShellLoad::Loading);
-    let shell_reader = use_hook(move || shell.into());
     let connection = use_signal(|| ViewerConnection::Connecting);
     let shell_order = use_signal(ViewerShellOrder::default);
     let reconnect_generation = use_signal(|| 0_u64);
@@ -419,52 +434,101 @@ fn ApplicationLayoutContent() -> Element {
     let render_state = use_signal(ViewerRenderState::default);
     let state_change_version = use_signal(|| None::<ViewerVersion>);
     let toast = use_toast();
+    let mut live_errors = use_signal(std::collections::HashMap::new);
     let context = ViewerContext {
         shell,
-        shell_reader,
         connection,
         shell_order,
         reconnect_generation,
         server_instance_id,
         render_state,
         toast,
+        live_errors,
     };
     use_context_provider(|| context);
     use_viewer_routes(context);
 
-    let mut state_changes = use_future(move || async move {
-        let mut retry_delay = RetryDelay::default();
-        loop {
-            let received_event = Rc::new(Cell::new(false));
-            let event_received = Rc::clone(&received_event);
-            let result = viewer_server::listen_for_state_changes(
-                move |server_instance_id| {
-                    if context.connected_to(server_instance_id) {
+    let visible = browser::use_document_visible();
+    let route = use_route::<Route>();
+    let request = use_memo(use_reactive((&route,), move |(route,)| {
+        let live_tab_id = if visible() {
+            match &*shell.read() {
+                ViewerShellLoad::Ready(shell) => {
+                    let active = crate::app::application_router::active_tab_id(&shell.active);
+                    let displayed =
+                        matches!(route, Route::CurrentDiff {}) || route.tab_id() == active;
+                    active.filter(|id| {
+                        displayed
+                            && shell
+                                .tabs
+                                .iter()
+                                .any(|tab| tab.id == *id && tab.kind.is_live())
+                    })
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        gtl_wire::viewer::WatchViewer { live_tab_id }
+    }));
+    use_effect(move || {
+        if let ViewerShellLoad::Ready(shell) = &*shell.read() {
+            live_errors
+                .write()
+                .retain(|id, _| shell.tabs.iter().any(|tab| tab.id == *id));
+        }
+    });
+    let mut state_changes = use_resource(move || {
+        let request = request();
+        for errors in live_errors.write().values_mut() {
+            errors.interrupt();
+        }
+        async move {
+            let mut retry_delay = RetryDelay::default();
+            loop {
+                let received_event = Rc::new(Cell::new(false));
+                let event_received = Rc::clone(&received_event);
+                let result = viewer_server::listen_for_state_changes(
+                    request,
+                    move |server_instance_id| {
+                        if context.connected_to(server_instance_id) {
+                            let mut version = state_change_version;
+                            version.set(None);
+                        }
+                    },
+                    move |event| {
+                        event_received.set(true);
+                        if let Some(check) = event.live_check {
+                            context.observe_live_check(check);
+                        }
                         let mut version = state_change_version;
-                        version.set(None);
-                    }
-                },
-                move |event| {
-                    event_received.set(true);
-                    let mut version = state_change_version;
-                    version.with_mut(|version| {
-                        *version = Some(
-                            version.map_or(event.version, |current| current.max(event.version)),
-                        );
-                    });
-                },
-            )
-            .await;
-            let error = result.err().unwrap_or(ViewerClientError::Unavailable);
-            discard_viewer_connection();
-            context.disconnected(error);
-            if error == ViewerClientError::ProtocolMismatch {
-                return;
+                        version.with_mut(|version| {
+                            *version = Some(
+                                version.map_or(event.version, |current| current.max(event.version)),
+                            );
+                        });
+                    },
+                )
+                .await;
+                let error = result.err().unwrap_or(ViewerClientError::Unavailable);
+                discard_viewer_connection();
+                context.disconnected(error);
+                if let Some(tab_id) = request.live_tab_id {
+                    live_errors
+                        .write()
+                        .entry(tab_id)
+                        .or_default()
+                        .observe(Err(error.message().to_owned()), 0);
+                }
+                if error == ViewerClientError::ProtocolMismatch {
+                    return;
+                }
+                if received_event.get() {
+                    retry_delay.reset();
+                }
+                dioxus_sdk_time::sleep(retry_delay.take_and_advance()).await;
             }
-            if received_event.get() {
-                retry_delay.reset();
-            }
-            dioxus_sdk_time::sleep(retry_delay.take_and_advance()).await;
         }
     });
     use_effect(move || {

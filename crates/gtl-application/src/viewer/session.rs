@@ -159,6 +159,7 @@ pub struct SessionTab {
     generation: ViewerRangeGeneration,
     selection_generation: ViewerSelectionGeneration,
     selection: CommitSelection,
+    live_head: Option<gtl_models::git::GitHeadState>,
 }
 
 /// Authoritative recipe tabs plus their separately bounded computed views.
@@ -247,6 +248,7 @@ impl ViewerSession {
             generation: ViewerRangeGeneration::default(),
             selection_generation: ViewerSelectionGeneration::default(),
             selection: CommitSelection::None,
+            live_head: None,
         });
         self.active = Some(id);
         self.bump_version();
@@ -256,6 +258,7 @@ impl ViewerSession {
     pub fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
         let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
         self.cache.remove(id);
+        tab.live_head = None;
         // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
         // one ticket remains in flight before an old ticket could compare equal again.
         tab.generation = tab.generation.next();
@@ -317,6 +320,96 @@ impl ViewerSession {
         }
         let label = tab.tab.label().into();
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), state);
+        self.bump_version();
+        PublishOutcome::Published
+    }
+
+    pub(super) fn live_refresh_request(
+        &self,
+        id: ViewerTabId,
+    ) -> Option<super::refresh_live_view::LiveViewRefresh> {
+        let tab = self.tab(id)?;
+        if self.active != Some(id)
+            || tab.tab.kind() != ViewerTabKind::Live
+            || matches!(tab.tab.state(), ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON)
+        {
+            return None;
+        }
+        Some(super::refresh_live_view::LiveViewRefresh {
+            ticket: ComputeTicket {
+                tab_id: id,
+                generation: tab.generation,
+            },
+            recipe: tab.recipe.clone(),
+            head: tab.live_head.clone(),
+        })
+    }
+
+    pub(super) fn set_live_head(
+        &mut self,
+        ticket: ComputeTicket,
+        head: Option<gtl_models::git::GitHeadState>,
+    ) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id && tab.generation == ticket.generation)
+        {
+            tab.live_head = head;
+        }
+    }
+
+    pub(super) fn publish_live_if_current(
+        &mut self,
+        ticket: ComputeTicket,
+        head: gtl_models::git::GitHeadState,
+        mut value: CachedView,
+        label: String,
+    ) -> PublishOutcome {
+        if self.active != Some(ticket.tab_id) || self.current_ticket(ticket.tab_id) != Some(ticket)
+        {
+            return PublishOutcome::Stale;
+        }
+        let selection = self.commit_selection_snapshot(ticket.tab_id);
+        if matches!(selection, CommitSelectionSnapshot::Pending { .. }) {
+            return PublishOutcome::Stale;
+        }
+        let preserved = match selection {
+            CommitSelectionSnapshot::Ready { id, view } => value
+                .view
+                .commits
+                .iter()
+                .find(|commit| commit.id == id)
+                .cloned()
+                .map(|commit| (commit, view)),
+            _ => None,
+        };
+        let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id)
+        else {
+            return PublishOutcome::Stale;
+        };
+        tab.generation = tab.generation.next();
+        tab.selection_generation = tab.selection_generation.next();
+        tab.live_head = Some(head);
+        tab.selection = if let Some((commit, selected)) = preserved {
+            value = value.with_selected(Arc::clone(&selected));
+            CommitSelection::Ready {
+                commit,
+                transient: Some(selected),
+            }
+        } else {
+            CommitSelection::None
+        };
+        tab.tab = ViewerTab::new(
+            ticket.tab_id,
+            label,
+            ViewerTabKind::Live,
+            ViewerTabState::Ready,
+        );
+        self.cache.insert(ticket.tab_id, value);
         self.bump_version();
         PublishOutcome::Published
     }
@@ -883,6 +976,83 @@ mod tests {
             "ready".into(),
         );
         (session, id, ids)
+    }
+
+    #[test]
+    fn live_publication_preserves_a_selected_commit_until_it_leaves_the_range() {
+        let (mut session, id, ids) = ready_session_with_commits();
+        let (selection, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
+        let selected = view("selected patch");
+        session.publish_commit_patch_if_current(selection, selected.clone());
+        let ticket = session.current_ticket(id).unwrap();
+        let original_identity = session.active_content_identity().unwrap();
+        let range = session.cached_view_snapshot(id).unwrap();
+        let head = gtl_models::git::GitHeadState::Commit {
+            head: git_head("feature"),
+            id: ids[1].clone(),
+        };
+        assert_eq!(
+            session.publish_live_if_current(
+                ticket,
+                head.clone(),
+                CachedView::new(range.view),
+                "updated".into()
+            ),
+            PublishOutcome::Published
+        );
+        assert!(
+            matches!(session.commit_selection_snapshot(id), CommitSelectionSnapshot::Ready { id: selected_id, view } if selected_id == ids[0] && Arc::ptr_eq(&view, &selected))
+        );
+        assert_ne!(
+            session.active_content_identity().unwrap(),
+            original_identity
+        );
+        let ticket = session.current_ticket(id).unwrap();
+        session.publish_live_if_current(
+            ticket,
+            head,
+            CachedView::new(view("empty range")),
+            "updated".into(),
+        );
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::None
+        ));
+    }
+
+    #[test]
+    fn live_publication_rejects_work_after_a_newer_render_or_tab_switch() {
+        let (mut session, id) = ready_session();
+        let stale = session.current_ticket(id).unwrap();
+        let head = gtl_models::git::GitHeadState::Commit {
+            head: git_head("feature"),
+            id: crate::utils::commit_id_fixture("a"),
+        };
+        session.begin_compute(id).unwrap();
+        assert_eq!(
+            session.publish_live_if_current(
+                stale,
+                head.clone(),
+                CachedView::new(view("stale")),
+                "stale".into()
+            ),
+            PublishOutcome::Stale
+        );
+        let ticket = session.current_ticket(id).unwrap();
+        let mut other_recipe = recipe();
+        other_recipe.name = Some(project_name("another"));
+        session
+            .open(other_recipe, batch_id(2), ViewerTabKind::Snapshot)
+            .unwrap();
+        assert_eq!(
+            session.publish_live_if_current(
+                ticket,
+                head,
+                CachedView::new(view("stale")),
+                "stale".into()
+            ),
+            PublishOutcome::Stale
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub mod move_viewer_tab;
 pub mod prepare_recipe;
 mod probe_recipe;
 mod recipe_label;
+pub mod refresh_live_view;
 pub mod rows;
 pub mod search_viewer_files;
 pub mod session;

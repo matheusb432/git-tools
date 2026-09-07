@@ -235,10 +235,15 @@ impl ViewerClient {
         Ok(ViewerRowStream { stream })
     }
 
-    pub async fn watch(&mut self) -> Result<ViewerVersionStream, ViewerClientError> {
+    pub async fn watch(
+        &mut self,
+        request: gtl_wire::viewer::WatchViewer,
+    ) -> Result<ViewerVersionStream, ViewerClientError> {
         let stream = self
             .client
-            .watch_viewer(v1::WatchViewerRequest {})
+            .watch_viewer(v1::WatchViewerRequest {
+                live_tab_id: request.live_tab_id.map(Into::into),
+            })
             .await
             .map(tonic::Response::into_inner)
             .map_err(|status| decode_status(&status))?;
@@ -271,8 +276,10 @@ impl ViewerVersionStream {
         self.stream
             .message()
             .await
-            .map_err(|status| decode_status(&status))
-            .map(|response| response.map(proto::viewer::decode_watch_viewer_response))
+            .map_err(|status| decode_status(&status))?
+            .map(proto::viewer::decode_watch_viewer_response)
+            .transpose()
+            .map_err(Into::into)
     }
 }
 

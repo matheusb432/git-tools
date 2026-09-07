@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 7;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 9;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -110,6 +110,15 @@ pub struct ViewerViewIdentity {
 pub enum ViewerTabKind {
     Snapshot,
     Live,
+    LiveLocalChanges,
+    LiveUnpushedCommits,
+}
+
+impl ViewerTabKind {
+    #[must_use]
+    pub const fn is_live(self) -> bool {
+        !matches!(self, Self::Snapshot)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -517,6 +526,7 @@ pub struct ViewerDiffExclusions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
+    pub projects_view: gtl_models::settings::ProjectsViewMode,
     pub configuration_path: Option<String>,
     pub configured_theme: Option<ViewerTheme>,
     pub effective_theme: ViewerTheme,
@@ -542,6 +552,7 @@ pub struct ViewerProjectSettingsUpdate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EditSettingsRequest {
+    pub projects_view: FieldUpdate<gtl_models::settings::ProjectsViewMode>,
     pub theme: FieldUpdate<ViewerTheme>,
     pub layout: FieldUpdate<ViewerDiffLayout>,
     pub density: FieldUpdate<ViewerDiffDensity>,
@@ -764,7 +775,20 @@ pub enum SetViewerPreference {
     Theme(ViewerTheme),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WatchViewer {
+    pub live_tab_id: Option<ViewerTabId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerLiveCheck {
+    pub tab_id: ViewerTabId,
+    pub elapsed_ms: u64,
+    pub result: Result<(), String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerStateChanged {
     pub version: ViewerVersion,
+    pub live_check: Option<ViewerLiveCheck>,
 }

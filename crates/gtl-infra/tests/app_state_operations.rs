@@ -284,7 +284,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
         .connection_lock()
         .unwrap()
         .execute_batch(
-            "INSERT INTO project_sources (id, kind, value, created_at)
+            "INSERT INTO render_sources (id, kind, value, created_at)
              VALUES (1, 'directory', '/repos/fixture', '2026-07-18T00:00:00Z');
              WITH RECURSIVE render_number(value) AS (
                SELECT 1
@@ -544,5 +544,18 @@ fn projects_sort_by_review_status_before_render_recency() -> anyhow::Result<()> 
             .collect::<Vec<_>>(),
         ["Alpha", "Gamma", "Beta"]
     );
+    Ok(())
+}
+
+#[test]
+fn app_state_schema_matches_the_committed_snapshot() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = SqliteAppState::open(directory.path())?;
+    let connection = database.connection_lock()?;
+    let schema = connection.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY name")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter().map(|sql| format!("{sql};")).collect::<Vec<_>>().join("\n\n") + "\n";
+    assert_eq!(schema, include_str!("../db/schema.sql"));
     Ok(())
 }

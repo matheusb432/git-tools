@@ -12,7 +12,18 @@ use crate::{
     viewer::{RenderOptions, Theme, ViewerKeybindings},
 };
 
-/// Exact, case-sensitive sample_project project names omitted from `push --all` before Git inspection.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ProjectsViewMode {
+    #[default]
+    Grid,
+    Table,
+}
+
+/// Exact, case-sensitive Git Tools project names omitted from `push --all` before Git inspection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushAllExclusions(BTreeSet<ProjectName>);
 

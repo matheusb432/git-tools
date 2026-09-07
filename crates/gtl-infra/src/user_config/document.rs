@@ -6,7 +6,7 @@ use gtl_application::settings::{
 use gtl_models::{
     diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
-    settings::{PushAllExclusions, UserSettings},
+    settings::{ProjectsViewMode, PushAllExclusions, UserSettings},
     viewer::{
         DiffDensity, DiffLayout, InvalidViewerKeybindings, ParseRenderOptionError,
         ParseViewerKeybindingError, RenderOptions, ViewerKeybinding, ViewerKeybindingAction,
@@ -19,6 +19,8 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub(super) enum UserSettingsDocumentKey {
+    #[strum(to_string = "projects_view")]
+    ProjectsView,
     #[strum(to_string = "theme")]
     Theme,
     #[strum(to_string = "layout")]
@@ -47,6 +49,7 @@ impl UserSettingsDocumentKey {
     const fn root(self) -> &'static str {
         match self {
             Self::Theme => "theme",
+            Self::ProjectsView => "projects_view",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
@@ -62,6 +65,7 @@ impl UserSettingsDocumentKey {
     const fn leaf(self) -> &'static str {
         match self {
             Self::Theme => "theme",
+            Self::ProjectsView => "projects_view",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "confirm",
@@ -77,6 +81,7 @@ impl UserSettingsDocumentKey {
     const fn container(self) -> &'static str {
         match self {
             Self::Theme => "theme",
+            Self::ProjectsView => "projects_view",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
@@ -166,6 +171,7 @@ pub(super) struct UserSettingsDocument {
     raw: String,
     editable: DocumentMut,
     settings: UserSettings,
+    projects_view: ProjectsViewMode,
 }
 
 impl UserSettingsDocument {
@@ -174,16 +180,21 @@ impl UserSettingsDocument {
         let editable = raw
             .parse::<DocumentMut>()
             .map_err(UserSettingsDocumentError::TomlSyntax)?;
-        let settings = parse_settings(&raw)?;
+        let (settings, projects_view) = parse_settings(&raw)?;
         Ok(Self {
             raw,
             editable,
             settings,
+            projects_view,
         })
     }
 
     pub(super) fn into_settings(self) -> UserSettings {
         self.settings
+    }
+
+    pub(super) fn into_viewer_settings(self) -> (UserSettings, ProjectsViewMode) {
+        (self.settings, self.projects_view)
     }
 
     pub(super) fn apply(mut self, patch: UserSettingsPatch) -> UserSettingsDocumentEdit {
@@ -207,6 +218,8 @@ type RawSettingValue = toml::Value;
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawUserSettingsDocument {
+    #[serde(default)]
+    projects_view: ProjectsViewMode,
     #[serde(default)]
     theme: Option<RawSettingValue>,
     #[serde(default)]
@@ -257,7 +270,9 @@ struct RawProjectSettingsDocument {
     diff: Option<RawDiffSettingsDocument>,
 }
 
-fn parse_settings(raw: &str) -> Result<UserSettings, UserSettingsDocumentError> {
+fn parse_settings(
+    raw: &str,
+) -> Result<(UserSettings, ProjectsViewMode), UserSettingsDocumentError> {
     let document = toml::from_str::<RawUserSettingsDocument>(raw)
         .map_err(UserSettingsDocumentError::TomlSchema)?;
     let theme = optional_string(UserSettingsDocumentKey::Theme, document.theme)?
@@ -283,13 +298,16 @@ fn parse_settings(raw: &str) -> Result<UserSettings, UserSettingsDocumentError> 
     )?;
     let (diff_exclusions_projects, push_all_exclusions) = project_settings(document.projects)?;
 
-    Ok(UserSettings::new(
-        theme,
-        RenderOptions::new(layout, density),
-        keybindings,
-        push_confirmation_required,
-        DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default),
-        push_all_exclusions,
+    Ok((
+        UserSettings::new(
+            theme,
+            RenderOptions::new(layout, density),
+            keybindings,
+            push_confirmation_required,
+            DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default),
+            push_all_exclusions,
+        ),
+        document.projects_view,
     ))
 }
 
@@ -460,6 +478,11 @@ fn project_settings(
 }
 
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
+    apply_root_string(
+        document,
+        UserSettingsDocumentKey::ProjectsView,
+        patch.projects_view,
+    );
     apply_root_string(document, UserSettingsDocumentKey::Theme, patch.theme);
     apply_root_string(document, UserSettingsDocumentKey::Layout, patch.layout);
     apply_root_string(document, UserSettingsDocumentKey::Density, patch.density);

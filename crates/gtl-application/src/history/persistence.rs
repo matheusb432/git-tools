@@ -1,6 +1,6 @@
 //! The persisted recent-render row shape and its [`Recipe`] codec: the single
 //! place that maps the recipe model onto the relational columns of
-//! `recent_renders` and its `project_sources` / `render_operations` /
+//! `recent_renders` and its `render_sources` / `render_operations` /
 //! `render_targets` vocabulary tables.
 
 use std::num::NonZeroU32;
@@ -11,7 +11,7 @@ use rusqlite::Connection;
 
 use crate::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
-/// The `project_sources.kind` value for a repository addressed by directory.
+/// The `render_sources.kind` value for a repository addressed by directory.
 pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
 
 /// One persisted render recipe with its stable row identity.
@@ -99,7 +99,7 @@ SELECT r.id, s.kind, s.value, o.name, t.name, r.argument,
        r.pinned_base, r.pinned_head, r.recipe_name,
        r.title, r.repo_name, r.range_label, r.rendered_at
 FROM recent_renders r
-JOIN project_sources s ON s.id = r.source_id
+JOIN render_sources s ON s.id = r.source_id
 JOIN render_operations o ON o.id = r.operation_id
 LEFT JOIN render_targets t ON t.id = r.target_id";
 
@@ -262,7 +262,7 @@ pub(super) fn store_test() -> Connection {
     connection
         .execute_batch(
             "CREATE TABLE project_render_recency (source_value TEXT PRIMARY KEY, rendered_at TEXT NOT NULL) STRICT;
-        CREATE TABLE project_sources (
+        CREATE TABLE render_sources (
           id         INTEGER PRIMARY KEY AUTOINCREMENT,
           kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote')),
           value      TEXT NOT NULL,
@@ -284,7 +284,7 @@ pub(super) fn store_test() -> Connection {
           (1, 'unpushed'), (2, 'base'), (3, 'range'), (4, 'merge'), (5, 'last');
         CREATE TABLE recent_renders (
           id           INTEGER PRIMARY KEY,
-          source_id    INTEGER NOT NULL REFERENCES project_sources (id),
+          source_id    INTEGER NOT NULL REFERENCES render_sources (id),
           operation_id INTEGER NOT NULL REFERENCES render_operations (id),
           target_id    INTEGER REFERENCES render_targets (id),
           argument     TEXT,
@@ -307,8 +307,8 @@ pub(super) fn store_test() -> Connection {
         );
         CREATE INDEX recent_renders_repo_name_idx
         ON recent_renders (repo_name);
-        CREATE INDEX project_sources_value_idx
-        ON project_sources (value);",
+        CREATE INDEX render_sources_value_idx
+        ON render_sources (value);",
         )
         .unwrap();
     connection
@@ -322,7 +322,7 @@ pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) 
     let pinned_head = format!("{:040x}", id + 1_000);
     connection
         .execute_batch(&format!(
-            "INSERT OR IGNORE INTO project_sources (id, kind, value, created_at) \
+            "INSERT OR IGNORE INTO render_sources (id, kind, value, created_at) \
              VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
              INSERT INTO recent_renders \
              (id, source_id, operation_id, target_id, pinned_base, pinned_head, \

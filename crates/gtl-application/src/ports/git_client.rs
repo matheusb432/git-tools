@@ -133,6 +133,16 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     /// The current branch name (`HEAD`'s `--abbrev-ref`).
     fn current_branch(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitHead>;
 
+    fn head_state(
+        &self,
+        repo_path: &RepositoryRoot,
+    ) -> anyhow::Result<gtl_models::git::GitHeadState> {
+        Ok(gtl_models::git::GitHeadState::Commit {
+            head: self.current_branch(repo_path)?,
+            id: self.resolve_commit_id(repo_path, &GitRevision::head())?,
+        })
+    }
+
     /// The configured upstream tracking ref.
     fn upstream(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<GitRefName>>;
 

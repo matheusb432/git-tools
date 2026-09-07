@@ -9,7 +9,7 @@ use thirtyfour::{
 use crate::support;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn user_refreshes_toggles_commit_and_restores_a_saved_live_diff() -> Result<()> {
+async fn live_diff_updates_automatically_and_restores_after_reconnect() -> Result<()> {
     support::run_test("viewer-live-lifecycle", |session| {
         Box::pin(run_live_lifecycle(session))
     })
@@ -24,11 +24,14 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .context("show the forwarded live diff")?;
 
     fixture.commit_alpha_v2()?;
-    support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_REFRESH)
-        .await?
-        .click()
-        .await
-        .context("refresh the live diff")?;
+    ensure!(
+        session
+            .driver()
+            .find_all(By::Css("[aria-label='Refresh diff']"))
+            .await?
+            .is_empty(),
+        "manual refresh remained visible"
+    );
     support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2")
         .await
         .context("show the refreshed live diff")?;
@@ -39,6 +42,9 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .click()
         .await
         .context("select the live view v2 commit")?;
+    wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
+    fixture.commit_extra()?;
+    wait_for_commit_card_selection(session.driver(), "live view extra", false).await?;
     let commit_card =
         wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
     commit_card
@@ -46,6 +52,8 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .await
         .context("toggle off the live view v2 commit")?;
     wait_for_commit_card_selection(session.driver(), "live view v2", false).await?;
+
+    exercise_warning_recovery(session, &fixture).await?;
 
     session
         .restart_server()
@@ -80,6 +88,97 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .context("restore the refreshed live diff")?;
 
     delete_live_view_and_assert_toast(session.driver()).await
+}
+
+async fn exercise_warning_recovery(
+    session: &support::session::TestSession,
+    fixture: &support::fixture::ViewerFixture,
+) -> Result<()> {
+    fixture.make_git_unavailable()?;
+    let warning =
+        support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_WARNING).await?;
+    session
+        .driver()
+        .action_chain()
+        .move_to_element_center(&warning)
+        .perform()
+        .await?;
+    session
+        .driver()
+        .query(By::Css(
+            "[role='tooltip'][aria-label='Live diff update warnings']",
+        ))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2").await?;
+    support::evidence::capture(session.driver(), "viewer-live-warning", true).await?;
+    session.driver().set_window_rect(0, 0, 390, 800).await?;
+    let warning =
+        support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_WARNING).await?;
+    session
+        .driver()
+        .action_chain()
+        .move_to_element_center(&warning)
+        .perform()
+        .await?;
+    session
+        .driver()
+        .query(By::Css(
+            "[role='tooltip'][aria-label='Live diff update warnings']",
+        ))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    support::evidence::capture(session.driver(), "viewer-live-warning-narrow", true).await?;
+    session.driver().set_window_rect(0, 0, 1200, 800).await?;
+    let warning =
+        support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_WARNING).await?;
+    session
+        .driver()
+        .action_chain()
+        .move_to_element_center(&warning)
+        .perform()
+        .await?;
+    fixture.restore_git()?;
+    support::wait::until(
+        "live warnings clear after successful recovery",
+        Duration::from_secs(75),
+        || async {
+            Ok(session
+                .driver()
+                .find_all(By::Css(test_ids::LIVE_VIEW_WARNING.selector()))
+                .await?
+                .is_empty()
+                .then_some(()))
+        },
+    )
+    .await?;
+
+    fixture.make_git_unavailable()?;
+    let warning =
+        support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_WARNING).await?;
+    session
+        .driver()
+        .action_chain()
+        .move_to(0, 0)
+        .move_to_element_center(&warning)
+        .perform()
+        .await?;
+    session
+        .driver()
+        .query(By::Css(
+            "[role='tooltip'][aria-label='Live diff update warnings']",
+        ))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    fixture.restore_git()?;
+
+    Ok(())
 }
 
 async fn delete_live_view_and_assert_toast(driver: &WebDriver) -> Result<()> {

@@ -3,6 +3,8 @@ mod client_diff;
 mod commit_pages;
 #[cfg(feature = "desktop")]
 mod diff_history;
+#[cfg(feature = "desktop")]
+pub(crate) mod live_errors;
 mod rows;
 #[cfg(feature = "desktop")]
 pub(crate) mod viewer_server;

@@ -1,6 +1,7 @@
 mod alert_dialog;
 mod badge;
 mod button;
+mod data_table;
 mod empty_notice;
 mod icon_popover;
 mod loading_spinner;

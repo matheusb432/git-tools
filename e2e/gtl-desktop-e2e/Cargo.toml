@@ -9,11 +9,8 @@ autotests = false
 e2e = []
 
 [dev-dependencies]
-sample_project-local-auth.workspace = true
-sample_project-wire.workspace = true
-tokio-stream.workspace = true
-tonic = { workspace = true, features = ["router", "transport"] }
-tonic-health.workspace = true
+gtl-infra.workspace = true
+rusqlite.workspace = true
 anyhow.workspace = true
 command-group.workspace = true
 futures-util.workspace = true

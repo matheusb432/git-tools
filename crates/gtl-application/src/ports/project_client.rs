@@ -20,8 +20,6 @@ pub enum ProjectClientError {
 pub enum ProjectCatalogueConfigurationError {
     #[error("project catalogue home directory is unavailable")]
     HomeDirectoryUnavailable,
-    #[error("project catalogue dependency is not configured")]
-    Dependency(#[source] anyhow::Error),
 }
 
 #[derive(Debug, thiserror::Error)]

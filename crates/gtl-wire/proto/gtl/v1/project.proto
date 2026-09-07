@@ -5,6 +5,26 @@ package gtl.v1;
 import "gtl/v1/repository.proto";
 
 service ProjectService {
+  // Creates one active managed project and returns its ID.
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+
+  // Gets a managed project, including a paused project.
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+
+  // Lists active projects in ascending project ID order.
+  rpc ListActiveProjects(ListActiveProjectsRequest) returns (ListActiveProjectsResponse);
+
+  // Pauses one managed project.
+  rpc PauseProject(PauseProjectRequest) returns (PauseProjectResponse);
+
+  // Resumes one managed project.
+  rpc ResumeProject(ResumeProjectRequest) returns (ResumeProjectResponse);
+
+  // Restores projects to the managed catalogue.
+  rpc ManageProjects(ManageProjectsRequest) returns (ManageProjectsResponse);
+
+  // Removes projects from the managed catalogue without changing their trees.
+  rpc UnmanageProjects(UnmanageProjectsRequest) returns (UnmanageProjectsResponse);
   rpc PushProjectRepositories(PushProjectRepositoriesRequest) returns (PushProjectRepositoriesResponse);
   rpc PullProjectRepositories(PullProjectRepositoriesRequest) returns (PullProjectRepositoriesResponse);
   rpc CommitProjectRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
@@ -103,4 +123,136 @@ message GetProjectRepositoryStatusesRequest {}
 
 message GetProjectRepositoryStatusesResponse {
   repeated RepositoryStatusResult results = 1;
+}
+
+message CreateProjectRequest {
+  // The caller-generated canonical 2 to 4 character uppercase project ID.
+  string project_id = 1;
+  ProjectCreation project = 2;
+}
+
+message CreateProjectResponse {
+  string project_id = 1;
+}
+
+message ProjectCreation {
+  string title = 1;
+  ProjectSource source = 2;
+  optional string git_remote = 3;
+  string mux_session_name = 4;
+  ProjectAffiliation affiliation = 5;
+  optional string color = 6;
+  repeated string groups = 7;
+  // Defaults to true when omitted.
+  optional bool include_in_full_export = 8;
+}
+
+message GetProjectRequest {
+  // The canonical 2 to 4 character uppercase project ID.
+  string project_id = 1;
+}
+
+message GetProjectResponse {
+  string id = 1;
+  string title = 2;
+  ProjectSource source = 3;
+  optional string git_remote = 4;
+  string mux_session_name = 5;
+  ProjectStatus status = 6;
+  ProjectAffiliation affiliation = 7;
+  optional string color = 8;
+  repeated string groups = 9;
+}
+
+message ListActiveProjectsRequest {}
+
+message ListActiveProjectsResponse {
+  repeated Project projects = 1;
+}
+
+enum ProjectOperationMode {
+  PROJECT_OPERATION_MODE_UNSPECIFIED = 0;
+  PROJECT_OPERATION_MODE_PREVIEW = 1;
+  PROJECT_OPERATION_MODE_APPLY = 2;
+}
+
+enum ProjectMutationOutcome {
+  PROJECT_MUTATION_OUTCOME_UNSPECIFIED = 0;
+  PROJECT_MUTATION_OUTCOME_CHANGED = 1;
+  PROJECT_MUTATION_OUTCOME_UNCHANGED = 2;
+}
+
+message PauseProjectRequest {
+  string project_id = 1;
+  ProjectOperationMode mode = 2;
+}
+
+message PauseProjectResponse {
+  ProjectMutationOutcome outcome = 1;
+}
+
+message ResumeProjectRequest {
+  string project_id = 1;
+  ProjectOperationMode mode = 2;
+}
+
+message ResumeProjectResponse {
+  ProjectMutationOutcome outcome = 1;
+}
+
+message ManageProjectsRequest {
+  repeated string project_ids = 1;
+  ProjectOperationMode mode = 2;
+}
+
+message ManageProjectsResponse {
+  repeated ProjectMutation mutations = 1;
+}
+
+message UnmanageProjectsRequest {
+  repeated string project_ids = 1;
+  ProjectOperationMode mode = 2;
+}
+
+message UnmanageProjectsResponse {
+  repeated ProjectMutation mutations = 1;
+}
+
+message ProjectMutation {
+  string project_id = 1;
+  ProjectMutationOutcome outcome = 2;
+}
+
+message Project {
+  string id = 1;
+  string title = 2;
+  ProjectSource source = 3;
+  optional string git_remote = 4;
+  string mux_session_name = 5;
+  ProjectStatus status = 6;
+  ProjectAffiliation affiliation = 7;
+  optional string color = 8;
+  repeated string groups = 9;
+}
+
+message ProjectSource {
+  oneof source {
+    DirectorySource directory = 1;
+  }
+}
+
+message DirectorySource {
+  string path = 1;
+}
+
+enum ProjectStatus {
+  PROJECT_STATUS_UNSPECIFIED = 0;
+  PROJECT_STATUS_ACTIVE = 1;
+  PROJECT_STATUS_PAUSED = 2;
+}
+
+enum ProjectAffiliation {
+  PROJECT_AFFILIATION_UNSPECIFIED = 0;
+  PROJECT_AFFILIATION_PERSONAL = 1;
+  PROJECT_AFFILIATION_WORK = 2;
 }

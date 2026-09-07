@@ -36,18 +36,13 @@ pub struct TestSession {
 impl TestSession {
     pub async fn start(name: &str) -> Result<Self> {
         let data_root = suite_data_root(name)?;
-        Self::start_with_data_root(data_root, super::catalogue::CatalogueState::default()).await
+        Self::start_with_data_root(data_root).await
     }
 
-    async fn start_with_data_root(
-        data_root: PathBuf,
-        catalogue_state: super::catalogue::CatalogueState,
-    ) -> Result<Self> {
+    async fn start_with_data_root(data_root: PathBuf) -> Result<Self> {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
-        let catalogue =
-            super::catalogue::ProjectCatalogue::start(&data_root.join("sample_project"), catalogue_state)
-                .await?;
+        let catalogue = super::catalogue::ProjectCatalogue::open(&data_root)?;
         let mut server_child = start_server(&data_root).await?;
         match start_driver_with_retries(&data_root, &viewer_binary).await {
             Ok((driver, driver_child)) => Ok(Self {
@@ -59,6 +54,27 @@ impl TestSession {
             }),
             Err(error) => Err(cleanup_start_failure("gtl-server", &mut server_child, error).await),
         }
+    }
+
+    pub fn project_requests(&self) -> Result<usize> {
+        let log = fs::read_to_string(self.data_root.join("server.stderr.log"))?;
+        Ok(log
+            .lines()
+            .filter(|line| {
+                line.contains("/gtl.v1.ViewerService/ListViewerProjects")
+                    && line.contains("finished processing request")
+            })
+            .count())
+    }
+
+    #[cfg(unix)]
+    pub fn pause_server(&self) -> Result<ServerPause<'_>> {
+        let child = self
+            .server_child
+            .as_ref()
+            .context("running fixture server")?;
+        child.signal(Signal::SIGSTOP)?;
+        Ok(ServerPause(child))
     }
 
     pub fn driver(&self) -> &WebDriver {
@@ -84,7 +100,7 @@ impl TestSession {
         self.shutdown()
             .await
             .context("stop viewer before restart")?;
-        let replacement = Self::start_with_data_root(data_root, self.catalogue.state.clone())
+        let replacement = Self::start_with_data_root(data_root)
             .await
             .context("start viewer after restart")?;
         *self = replacement;
@@ -238,6 +254,16 @@ impl Drop for TestSession {
     }
 }
 
+#[cfg(unix)]
+pub struct ServerPause<'child>(&'child GroupChild);
+
+#[cfg(unix)]
+impl Drop for ServerPause<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.signal(Signal::SIGCONT);
+    }
+}
+
 async fn start_server(data_root: &Path) -> Result<GroupChild> {
     let server_binary = required_binary("GTL_E2E_SERVER_BINARY", "gtl-server")?;
     let endpoint = data_root.join("server").join("endpoint.json");
@@ -253,7 +279,10 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
     command
         .env("GIT_TOOLS_DATA_DIR", data_root)
         .env("GIT_TOOLS_CONFIG", data_root.join("config.toml"))
-        .env("sample_project_DATA_DIR", data_root.join("sample_project"))
+        .env("RUST_LOG", "info")
+        .stderr(Stdio::from(fs::File::create(
+            data_root.join("server.stderr.log"),
+        )?))
         .stdin(Stdio::null());
     deny_external_proxies(&mut command);
     let mut child = command.group_spawn().with_context(|| {

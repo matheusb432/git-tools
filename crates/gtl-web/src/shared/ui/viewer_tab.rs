@@ -1,9 +1,9 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
+use lucide_dioxus::{ArrowUp, FileDiff, Radio, TriangleAlert, X};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use lucide_dioxus::{Check, ChevronDown};
-use lucide_dioxus::{Radio, TriangleAlert, X};
 
 use super::{Button, ButtonSize, ButtonVariant, LoadingSpinner};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
@@ -58,9 +58,9 @@ pub(crate) fn ViewerTabItem(
         "bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink"
     };
     let activation_classes = if reorderable {
-        "touch-none cursor-grab active:cursor-grabbing"
+        "touch-none cursor-default"
     } else {
-        "cursor-pointer"
+        "cursor-default"
     };
 
     rsx! {
@@ -79,7 +79,7 @@ pub(crate) fn ViewerTabItem(
                 aria_busy: presentation_state.is_loading().to_string(),
                 aria_controls: "viewer-active-view",
                 tabindex: if active { "0" } else { "-1" },
-                title: tab.label.clone(),
+                title: tab_description(&tab),
                 onpointerdown: move |event: PointerEvent| {
                     if reorderable {
                         drag.start.call(event.clone());
@@ -152,13 +152,22 @@ pub(crate) fn ViewerTabRailMeasurementItem(
     }
 }
 
+fn tab_description(tab: &ViewerTab) -> String {
+    match tab.kind {
+        ViewerTabKind::LiveLocalChanges => format!("{} - Local changes", tab.label),
+        ViewerTabKind::LiveUnpushedCommits => format!("{} - Unpushed commits", tab.label),
+        ViewerTabKind::Snapshot | ViewerTabKind::Live => tab.label.clone(),
+    }
+}
+
 fn viewer_tab_rail_content(tab: &ViewerTab, presentation_state: TabPresentationState) -> Element {
     rsx! {
-        ViewerTabKindIndicator { kind: tab.kind }
-        span { class: "flex min-w-0 flex-1 items-center gap-1.5",
-            span { class: "min-w-0 flex-1 truncate", "{tab.label}" }
+        if presentation_state == TabPresentationState::Ready {
+            ViewerTabKindIndicator { kind: tab.kind }
+        } else {
             TabStateMarker { state: presentation_state }
         }
+        span { class: "min-w-0 truncate", "{tab.label}" }
     }
 }
 
@@ -193,17 +202,32 @@ fn ViewerTabCloseButton(
 
 #[component]
 fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
-    if kind == ViewerTabKind::Snapshot {
-        return rsx! {};
-    }
-
+    let label = match kind {
+        ViewerTabKind::Snapshot => "",
+        ViewerTabKind::Live => ", Live",
+        ViewerTabKind::LiveLocalChanges => ", Live, Local changes",
+        ViewerTabKind::LiveUnpushedCommits => ", Live, Unpushed commits",
+    };
     rsx! {
         span {
-            class: "inline-flex size-4 flex-none items-center justify-center text-add",
+            class: "inline-flex size-3.5 flex-none items-center justify-center text-add",
             aria_hidden: "true",
-            Radio { size: 13, stroke_width: 2 }
+            match kind {
+                ViewerTabKind::Snapshot => rsx! {},
+                ViewerTabKind::Live => rsx! {
+                    Radio { size: 13 }
+                },
+                ViewerTabKind::LiveLocalChanges => rsx! {
+                    FileDiff { size: 13 }
+                },
+                ViewerTabKind::LiveUnpushedCommits => rsx! {
+                    ArrowUp { size: 13 }
+                },
+            }
         }
-        span { class: "sr-only", ", Live" }
+        if !label.is_empty() {
+            span { class: "sr-only", "{label}" }
+        }
     }
 }
 
@@ -235,7 +259,7 @@ pub(crate) fn ViewerTabOverflowMenu(
         div { class: "group/viewer-tab-overflow flex min-w-0 flex-1 items-end",
             button {
                 id: trigger_id,
-                class: "relative flex h-9 w-full min-w-0 max-w-[30rem] cursor-pointer select-none items-center gap-1.5 border-0 bg-surface-2 px-2.5 text-left text-ink hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-has-[:popover-open]/viewer-tab-overflow:bg-line",
+                class: "relative flex h-9 w-full min-w-0 max-w-[30rem] cursor-default select-none items-center gap-1.5 border-0 bg-surface-2 px-2.5 text-left text-ink hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-has-[:popover-open]/viewer-tab-overflow:bg-line",
                 r#type: "button",
                 popovertarget: id.clone(),
                 popovertargetaction: "toggle",
@@ -334,9 +358,9 @@ fn ViewerTabOverflowMenuItem(
         "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink"
     };
     let activation_classes = if reorderable {
-        "touch-none cursor-grab active:cursor-grabbing"
+        "touch-none cursor-default"
     } else {
-        "cursor-pointer"
+        "cursor-default"
     };
 
     rsx! {

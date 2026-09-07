@@ -153,34 +153,31 @@ mod tests {
 
     #[test]
     fn maps_project_catalogue_failures_by_caller_relevant_semantics() {
-        let cases: [(ProjectClientError, Code, &str); 3] =
-            [
-                (
-                    ProjectCatalogueConfigurationError::Dependency(anyhow::Error::new(
-                        io::Error::new(io::ErrorKind::NotFound, "private missing dependency"),
-                    ))
-                    .into(),
-                    Code::FailedPrecondition,
-                    "project catalogue dependency is not configured",
-                ),
-                (
-                    ProjectCatalogueUnavailableError::Dependency(anyhow::Error::new(
-                        io::Error::new(io::ErrorKind::TimedOut, "private timeout"),
-                    ))
-                    .into(),
-                    Code::Unavailable,
-                    "project catalogue is temporarily unavailable",
-                ),
-                (
-                    ProjectCatalogueDataError::Dependency(anyhow::Error::new(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "private record contents",
-                    )))
-                    .into(),
-                    Code::DataLoss,
-                    "project catalogue returned invalid data",
-                ),
-            ];
+        let cases: [(ProjectClientError, Code, &str); 3] = [
+            (
+                ProjectCatalogueConfigurationError::HomeDirectoryUnavailable.into(),
+                Code::FailedPrecondition,
+                "project catalogue home directory is unavailable",
+            ),
+            (
+                ProjectCatalogueUnavailableError::Dependency(anyhow::Error::new(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "private timeout",
+                )))
+                .into(),
+                Code::Unavailable,
+                "project catalogue is temporarily unavailable",
+            ),
+            (
+                ProjectCatalogueDataError::Dependency(anyhow::Error::new(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "private record contents",
+                )))
+                .into(),
+                Code::DataLoss,
+                "project catalogue returned invalid data",
+            ),
+        ];
 
         for (error, code, message) in cases {
             let status = project_client_error(&error);

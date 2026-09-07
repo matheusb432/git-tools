@@ -28,6 +28,7 @@ pub(crate) struct AppState {
     pub(crate) text_editor: GitTextEditorClient,
     pub(crate) viewer: gtl_application::viewer::ViewerState,
     pub(crate) viewer_row_streams: ViewerRowStreams,
+    pub(crate) live_refresh_permits: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -39,19 +40,21 @@ impl AppState {
         data_root: &Path,
         user_settings: TomlSettingsStore,
     ) -> anyhow::Result<Self> {
+        let database = SqliteAppState::open(data_root)
+            .with_context(|| format!("opening application state at {}", data_root.display()))?;
         Ok(Self {
             git: HybridGitClient,
             artifacts: StoreArtifacts,
             renderer: ArtifactRenderer,
             clock: SystemClock,
-            projects: ProjectRepositoryClient::from_environment(),
-            database: SqliteAppState::open(data_root)
-                .with_context(|| format!("opening application state at {}", data_root.display()))?,
+            projects: ProjectRepositoryClient::new(database.clone()),
+            database,
             user_settings,
             file_system: LocalFileSystemClient,
             text_editor: GitTextEditorClient,
             viewer: gtl_application::viewer::ViewerState::new(),
             viewer_row_streams: ViewerRowStreams::default(),
+            live_refresh_permits: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 }

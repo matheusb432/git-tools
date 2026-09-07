@@ -1,7 +1,14 @@
+mod catalogue;
+
 use gtl_application::{
     ports::UserSettingsReader as _,
     projects::{
         RepoSyncResult, SyncExit, SyncStatus,
+        catalogue::{
+            create_project, get_project, list_active_projects,
+            set_project_membership::{self, ProjectMembership, SetProjectMembership},
+            set_project_status::{self, SetProjectStatus},
+        },
         commit_repositories::{
             self, CommitAction, CommitExit, CommitRepositories, CommitRepositoriesError,
             CommitRepositoriesMode, CommitRepositoriesOk, CommitRepositoriesScope, CommitResult,
@@ -11,7 +18,12 @@ use gtl_application::{
     },
     repositories::get_repository_statuses,
 };
-use gtl_models::{git::GitEffectMode, paths::ProjectName, repository::traversal::RepositoryTarget};
+use gtl_models::{
+    git::GitEffectMode,
+    paths::ProjectName,
+    projects::catalogue::{ProjectIds, ProjectStatus},
+    repository::traversal::RepositoryTarget,
+};
 use gtl_wire::v1::{self, project_service_server::ProjectService};
 use tonic::{Request, Response, Status};
 
@@ -33,6 +45,172 @@ impl ProjectGrpcService {
 
 #[tonic::async_trait]
 impl ProjectService for ProjectGrpcService {
+    async fn create_project(
+        &self,
+        request: Request<v1::CreateProjectRequest>,
+    ) -> Result<Response<v1::CreateProjectResponse>, Status> {
+        let request = catalogue::create_request(request.into_inner())?;
+        let state = self.state.clone();
+        let id = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            create_project::execute(&request, &mut connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::CreateProjectResponse {
+            project_id: id.to_string(),
+        }))
+    }
+
+    async fn get_project(
+        &self,
+        request: Request<v1::GetProjectRequest>,
+    ) -> Result<Response<v1::GetProjectResponse>, Status> {
+        let id = request
+            .into_inner()
+            .project_id
+            .try_into()
+            .map_err(catalogue::invalid)?;
+        let state = self.state.clone();
+        let project = run_blocking(move || {
+            let connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            get_project::execute(&id, &connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(catalogue::get_response(project)))
+    }
+
+    async fn list_active_projects(
+        &self,
+        _: Request<v1::ListActiveProjectsRequest>,
+    ) -> Result<Response<v1::ListActiveProjectsResponse>, Status> {
+        let state = self.state.clone();
+        let projects = run_blocking(move || {
+            let connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            list_active_projects::execute((), &connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::ListActiveProjectsResponse {
+            projects: projects.into_iter().map(catalogue::project).collect(),
+        }))
+    }
+
+    async fn pause_project(
+        &self,
+        request: Request<v1::PauseProjectRequest>,
+    ) -> Result<Response<v1::PauseProjectResponse>, Status> {
+        let request = request.into_inner();
+        let request = SetProjectStatus {
+            id: request.project_id.try_into().map_err(catalogue::invalid)?,
+            status: ProjectStatus::Paused,
+            mode: catalogue::mode(request.mode)?,
+        };
+        let state = self.state.clone();
+        let outcome = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            set_project_status::execute(&request, &mut connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::PauseProjectResponse {
+            outcome: catalogue::outcome(outcome),
+        }))
+    }
+
+    async fn resume_project(
+        &self,
+        request: Request<v1::ResumeProjectRequest>,
+    ) -> Result<Response<v1::ResumeProjectResponse>, Status> {
+        let request = request.into_inner();
+        let request = SetProjectStatus {
+            id: request.project_id.try_into().map_err(catalogue::invalid)?,
+            status: ProjectStatus::Active,
+            mode: catalogue::mode(request.mode)?,
+        };
+        let state = self.state.clone();
+        let outcome = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            set_project_status::execute(&request, &mut connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::ResumeProjectResponse {
+            outcome: catalogue::outcome(outcome),
+        }))
+    }
+
+    async fn manage_projects(
+        &self,
+        request: Request<v1::ManageProjectsRequest>,
+    ) -> Result<Response<v1::ManageProjectsResponse>, Status> {
+        let request = request.into_inner();
+        let ids = request
+            .project_ids
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(catalogue::invalid)?;
+        let request = SetProjectMembership {
+            ids: ProjectIds::try_new(ids).map_err(catalogue::invalid)?,
+            membership: ProjectMembership::Managed,
+            mode: catalogue::mode(request.mode)?,
+        };
+        let state = self.state.clone();
+        let mutations = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            set_project_membership::execute(&request, &mut connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::ManageProjectsResponse {
+            mutations: catalogue::mutations(mutations),
+        }))
+    }
+
+    async fn unmanage_projects(
+        &self,
+        request: Request<v1::UnmanageProjectsRequest>,
+    ) -> Result<Response<v1::UnmanageProjectsResponse>, Status> {
+        let request = request.into_inner();
+        let ids = request
+            .project_ids
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(catalogue::invalid)?;
+        let request = SetProjectMembership {
+            ids: ProjectIds::try_new(ids).map_err(catalogue::invalid)?,
+            membership: ProjectMembership::Unmanaged,
+            mode: catalogue::mode(request.mode)?,
+        };
+        let state = self.state.clone();
+        let mutations = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            set_project_membership::execute(&request, &mut connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::UnmanageProjectsResponse {
+            mutations: catalogue::mutations(mutations),
+        }))
+    }
+
     async fn push_project_repositories(
         &self,
         request: Request<v1::PushProjectRepositoriesRequest>,

@@ -163,6 +163,31 @@ impl ViewerFixture {
         .context("forward live view through release CLI")
     }
 
+    pub fn commit_extra(&self) -> Result<()> {
+        fs::write(
+            self.repository.join("extra.txt"),
+            "additional-live-marker\n",
+        )?;
+        git(&self.repository, ["add", "extra.txt"])?;
+        git(&self.repository, ["commit", "-q", "-m", "live view extra"])
+    }
+
+    pub fn make_git_unavailable(&self) -> Result<()> {
+        fs::rename(
+            self.repository.join(".git"),
+            self.repository.join("git-unavailable"),
+        )?;
+        Ok(())
+    }
+
+    pub fn restore_git(&self) -> Result<()> {
+        fs::rename(
+            self.repository.join("git-unavailable"),
+            self.repository.join(".git"),
+        )?;
+        Ok(())
+    }
+
     pub fn commit_alpha_v2(&self) -> Result<()> {
         fs::write(self.repository.join("work.txt"), "base\nalpha-v2\n")
             .context("write alpha-v2 worktree")?;
@@ -303,6 +328,16 @@ impl ProjectsFixture {
 
     pub fn change_untracked(&self) -> Result<()> {
         fs::write(self.alpha.join("new.txt"), "refreshed-project-marker\n")
-            .context("update untracked fixture")
+            .context("update untracked fixture")?;
+        git(
+            &self.alpha,
+            [
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                "update local comparison HEAD",
+            ],
+        )
     }
 }

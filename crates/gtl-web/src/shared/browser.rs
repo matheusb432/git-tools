@@ -252,3 +252,40 @@ fn exec_copy(text: &str) -> bool {
 fn document() -> Option<web_sys::Document> {
     web_sys::window()?.document()
 }
+
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
+    use dioxus::prelude::*;
+    let mut visible = use_signal(|| document().is_some_and(|document| !document.hidden()));
+    let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
+        || {
+            let document = document()?;
+            let observed = document.clone();
+            let callback = Rc::new(wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                visible.set(!observed.hidden());
+            })
+                as Box<dyn FnMut()>));
+            document
+                .add_event_listener_with_callback(
+                    "visibilitychange",
+                    callback.as_ref().as_ref().unchecked_ref(),
+                )
+                .ok()?;
+            Some((document, callback))
+        },
+        |listener| {
+            if let Some((document, callback)) = listener {
+                let _ = document.remove_event_listener_with_callback(
+                    "visibilitychange",
+                    callback.as_ref().as_ref().unchecked_ref(),
+                );
+            }
+        },
+    );
+    visible.into()
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
+    dioxus::prelude::use_signal(|| true).into()
+}

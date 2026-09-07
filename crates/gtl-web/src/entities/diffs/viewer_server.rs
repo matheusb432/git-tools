@@ -112,6 +112,7 @@ viewer_request!(edit_settings, EditSettingsRequest, (), edit_settings);
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) async fn listen_for_state_changes<Ready, Handler>(
+    request: gtl_wire::viewer::WatchViewer,
     on_ready: Ready,
     on_event: Handler,
 ) -> Result<(), ViewerClientError>
@@ -121,7 +122,7 @@ where
 {
     let mut viewer = connect_viewer().await?;
     let server_instance_id = viewer.server_instance_id;
-    let mut stream = viewer.client.watch().await?;
+    let mut stream = viewer.client.watch(request).await?;
     on_ready(server_instance_id);
     while let Some(event) = stream.message().await? {
         on_event(event);
@@ -131,6 +132,7 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn listen_for_state_changes<Ready, Handler>(
+    _request: gtl_wire::viewer::WatchViewer,
     _on_ready: Ready,
     _on_event: Handler,
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>>

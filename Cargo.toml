@@ -55,9 +55,6 @@ gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 dx-story = { path = "../../shared-libs/dx-story/crates/dx-story" }
 
 anyhow = "1"
-sample_project-client = { version = "0.2.0", features = ["grpc"] }
-sample_project-local-auth = { path = "../.sample_project-workspace/crates/sample_project-local-auth" }
-sample_project-wire = { path = "../.sample_project-workspace/crates/sample_project-wire" }
 assert_cmd = "2"
 base64 = "0.22.1"
 cargo_metadata = "0.23.1"
@@ -164,9 +161,6 @@ web-sys = "0.3.102"
 walkdir = "2.5.0"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-
-[patch.crates-io]
-sample_project-client = { path = "../.sample_project-workspace/crates/sample_project-client" }
 
 [profile.dev.package."*"]
 debug = false

@@ -55,7 +55,7 @@ pub enum Command {
     /// Push existing commits, or stage all changes, commit with MESSAGE, and push.
     #[command(visible_alias = "p")]
     Push(PushArgs),
-    /// Pull every active project listed by sample_project.
+    /// Pull every active project managed in Git Tools.
     Pull(PullArgs),
     /// Stage all changes and commit them, without pushing.
     Commit(CommitArgs),
@@ -132,7 +132,7 @@ pub struct PushArgs {
     /// Commit message. When present, changes are staged and committed before pushing.
     #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
     pub message: Option<String>,
-    /// Operate on active sample_project projects except config entries with
+    /// Operate on active Git Tools projects except config entries with
     /// `excluded_from_push_all = true`.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
@@ -151,7 +151,7 @@ pub struct CommitArgs {
     /// Commit message.
     #[arg(allow_hyphen_values = true, required_unless_present = "all")]
     pub message: Option<String>,
-    /// Operate on every active project listed by sample_project.
+    /// Operate on every active project managed in Git Tools.
     #[arg(long)]
     pub all: bool,
     #[command(flatten)]
@@ -163,7 +163,7 @@ pub struct CommitArgs {
 
 #[derive(Debug, Args)]
 pub struct PullArgs {
-    /// Pull every active project listed by sample_project.
+    /// Pull every active project managed in Git Tools.
     #[arg(long, required = true)]
     pub all: bool,
     #[command(flatten)]
@@ -320,7 +320,7 @@ impl From<Theme> for gtl_models::viewer::Theme {
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Report every active project listed by sample_project.
+    /// Report every active project managed in Git Tools.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
     /// Report the current repo plus any nested subrepos under the current directory (linked

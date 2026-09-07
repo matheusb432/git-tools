@@ -277,10 +277,14 @@ mod stream_commands {
     #[tauri::command]
     pub(crate) async fn viewer_watch_start(
         state: State<'_, ViewerIpcState>,
+        request: gtl_wire::viewer::WatchViewer,
     ) -> Result<u32, ViewerClientError> {
         let mut client = state.client().await?;
         let instance_id = client.server_instance_id().to_owned();
-        let result = state.version_streams.start_with(client.watch()).await;
+        let result = state
+            .version_streams
+            .start_with(client.watch(request))
+            .await;
         state.observe_result(&instance_id, &result).await;
         result
     }

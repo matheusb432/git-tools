@@ -93,7 +93,7 @@ mod tests {
                     target: RecipeTarget::Unpushed { pinned: None },
                 },
                 1,
-                "project: Unpushed commits",
+                "project",
             ),
             (
                 RecipeOp::Diff {

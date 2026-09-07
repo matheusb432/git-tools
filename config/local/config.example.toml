@@ -20,8 +20,8 @@ confirm = true
 [diff]
 exclude = ["md", "lock"]
 
-# Named project settings use one array entry per exact, case-sensitive sample_project project name.
-# Unknown project names are valid and remain inactive until sample_project lists them.
+# Named project settings use one array entry per exact, case-sensitive Git Tools project name.
+# Unknown project names are valid and remain inactive until Git Tools manages them.
 [[projects]]
 name = "git-tools"
 # Omit this repository from gtl push --all before any Git operation.

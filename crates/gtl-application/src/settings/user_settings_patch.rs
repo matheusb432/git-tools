@@ -83,6 +83,7 @@ impl IntoIterator for ProjectSettingsUpdates {
 /// A complete typed mutation accepted by the user-settings editor port.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UserSettingsPatch {
+    pub projects_view: UserSettingsFieldUpdate<gtl_models::settings::ProjectsViewMode>,
     /// Changes the configured viewer theme.
     pub theme: UserSettingsFieldUpdate<Theme>,
     /// Changes the configured diff layout.

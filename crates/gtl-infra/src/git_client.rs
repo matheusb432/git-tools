@@ -74,6 +74,27 @@ impl GitClient for HybridGitClient {
         let repository = gix::discover(repo_path)?;
         repository_head(&repository)
     }
+    fn head_state(
+        &self,
+        repo_path: &RepositoryRoot,
+    ) -> anyhow::Result<gtl_models::git::GitHeadState> {
+        use gtl_models::git::GitHeadState;
+        let repository = gix::open(repo_path.as_ref())?;
+        let head = repository.head()?;
+        let branch = head
+            .referent_name()
+            .map(|name| BranchName::try_new(name.shorten().to_str_lossy().into_owned()))
+            .transpose()?;
+        match head.id() {
+            Some(id) => Ok(GitHeadState::Commit {
+                head: branch.map_or(GitHead::Detached, GitHead::Branch),
+                id: CommitId::try_new(id.to_string())?,
+            }),
+            None => Ok(GitHeadState::Unborn {
+                branch: branch.ok_or_else(|| anyhow::anyhow!("unborn HEAD has no branch"))?,
+            }),
+        }
+    }
     fn upstream(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<GitRefName>> {
         let repository = gix::open(repo_path.as_ref())?;
         let Some(upstream) = repository_upstream(&repository, repo_path)? else {

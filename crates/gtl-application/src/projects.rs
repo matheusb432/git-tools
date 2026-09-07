@@ -1,8 +1,9 @@
-//! Git operations whose repository scope is the active sample_project project catalog.
+//! Git operations whose repository scope is the active GTL project catalog.
 
 use gtl_models::{paths::ProjectName, projects::ProjectRepository, settings::PushAllExclusions};
 
 pub mod build_recipes;
+pub mod catalogue;
 pub mod commit_repositories;
 pub mod list_viewer_projects;
 pub mod open_viewer_project;

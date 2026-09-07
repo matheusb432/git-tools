@@ -1,3 +1,4 @@
+mod live_watch;
 mod rows;
 
 use std::pin::Pin;
@@ -160,22 +161,30 @@ impl ViewerService for ViewerGrpcService {
 
     async fn watch_viewer(
         &self,
-        _request: Request<v1::WatchViewerRequest>,
+        request: Request<v1::WatchViewerRequest>,
     ) -> Result<Response<Self::WatchViewerStream>, Status> {
+        let live_tab_id = request.into_inner().live_tab_id.map(tab_id).transpose()?;
         let mut versions = self.state.viewer.subscribe();
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
+        if let Some(tab_id) = live_tab_id {
+            live_watch::spawn(self.state.clone(), tab_id, sender.clone());
+        }
         tokio::spawn(async move {
             loop {
                 let version = versions.borrow_and_update().value();
                 if sender
-                    .send(Ok(v1::WatchViewerResponse { version }))
+                    .send(Ok(v1::WatchViewerResponse {
+                        version,
+                        live_check: None,
+                    }))
                     .await
                     .is_err()
                 {
                     break;
                 }
-                if versions.changed().await.is_err() {
-                    break;
+                tokio::select! {
+                    () = sender.closed() => break,
+                    changed = versions.changed() => if changed.is_err() { break; },
                 }
             }
         });
@@ -442,9 +451,14 @@ impl ViewerService for ViewerGrpcService {
         &self,
         _request: Request<v1::GetViewerSettingsRequest>,
     ) -> Result<Response<v1::GetViewerSettingsResponse>, Status> {
-        let settings = load_user_settings(&self.state)?;
+        let (settings, projects_view) = self
+            .state
+            .user_settings
+            .load_viewer_settings()
+            .map_err(user_settings_load_error)?;
         Ok(Response::new(project_settings(
             &settings,
+            projects_view,
             self.state
                 .user_settings
                 .path()
@@ -628,6 +642,7 @@ fn application_settings_request(request: EditSettingsRequest) -> Result<UserSett
         FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     };
     Ok(UserSettingsPatch {
+        projects_view: application_field_update(request.projects_view, |value| value),
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Light => Theme::Light,
             ViewerTheme::Dark => Theme::Dark,
@@ -819,11 +834,13 @@ async fn history_record(state: &AppState, raw_id: u64) -> Result<RecentRenderRec
 
 fn project_settings(
     settings: &UserSettings,
+    projects_view: gtl_models::settings::ProjectsViewMode,
     configuration_path: Option<String>,
 ) -> v1::GetViewerSettingsResponse {
     let configured_theme = settings.theme().map(viewer::project_theme);
     let exclusions = settings.diff_exclusions();
     proto::viewer::encode_get_viewer_settings_response(ViewerUserSettings {
+        projects_view,
         configuration_path,
         configured_theme,
         effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),

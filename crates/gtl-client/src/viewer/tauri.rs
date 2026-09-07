@@ -143,8 +143,11 @@ impl ViewerClient {
         })
     }
 
-    pub async fn watch(&mut self) -> Result<ViewerVersionStream, ViewerClientError> {
-        let stream_id = invoke_without_arguments(WATCH_START_COMMAND).await?;
+    pub async fn watch(
+        &mut self,
+        request: gtl_wire::viewer::WatchViewer,
+    ) -> Result<ViewerVersionStream, ViewerClientError> {
+        let stream_id = invoke_with_request(WATCH_START_COMMAND, request).await?;
         Ok(ViewerVersionStream {
             stream: IpcPullStream::new(stream_id, WATCH_NEXT_BATCH_COMMAND, WATCH_CANCEL_COMMAND),
         })

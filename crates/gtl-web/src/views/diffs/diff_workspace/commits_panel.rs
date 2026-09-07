@@ -1,4 +1,4 @@
-use dioxus::{dioxus_core::Task, prelude::*};
+use dioxus::prelude::*;
 use gtl_models::{
     diffs::{CommitId, CommitIdAbbreviation},
     timestamps::MachineTimestamp,
@@ -9,7 +9,7 @@ use crate::shared::{
     browser,
     ui::{
         Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
-        EmptyNotice, ScrollArea,
+        EmptyNotice, HoverPopover, ScrollArea, use_hover_popover,
     },
 };
 
@@ -210,21 +210,6 @@ fn CommitSelectionError(message: String) -> Element {
 
 const COMMIT_CARD_CLASSES: &str =
     "relative w-full border-0 border-b border-line px-3 py-3 text-left compact:px-2.5";
-const COMMIT_DETAILS_HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(350);
-
-#[derive(Default)]
-struct CommitDetailsHoverState {
-    pointer_inside: bool,
-    focus_inside: bool,
-    reveal_task: Option<Task>,
-}
-
-#[derive(Clone, Copy)]
-enum CommitDetailsInteraction {
-    Pointer,
-    Focus,
-}
-
 #[component]
 fn CommitCard(
     commit_index: usize,
@@ -248,7 +233,7 @@ fn CommitCard(
     });
     let tone_classes = commit_card_tone_classes(selected);
     let selectable = onselect.is_some();
-    let hover_state = use_signal(CommitDetailsHoverState::default);
+    let hover = use_hover_popover(popover_id.clone());
     let anchor_name = format!("--{popover_id}");
     let anchor_style = format!("anchor-name: {anchor_name};");
 
@@ -260,38 +245,10 @@ fn CommitCard(
             "data-gtl-hover-popover-target": "",
             "data-gtl-hover-popover-id": popover_id.clone(),
             "data-gtl-hover-popover-delay-ms": "350",
-            onmouseenter: {
-                let popover_id = popover_id.clone();
-                move |_| begin_commit_details_interaction(
-                    hover_state,
-                    CommitDetailsInteraction::Pointer,
-                    popover_id.clone(),
-                )
-            },
-            onmouseleave: {
-                let popover_id = popover_id.clone();
-                move |_| end_commit_details_interaction(
-                    hover_state,
-                    CommitDetailsInteraction::Pointer,
-                    &popover_id,
-                )
-            },
-            onfocusin: {
-                let popover_id = popover_id.clone();
-                move |_| begin_commit_details_interaction(
-                    hover_state,
-                    CommitDetailsInteraction::Focus,
-                    popover_id.clone(),
-                )
-            },
-            onfocusout: {
-                let popover_id = popover_id.clone();
-                move |_| end_commit_details_interaction(
-                    hover_state,
-                    CommitDetailsInteraction::Focus,
-                    &popover_id,
-                )
-            },
+            onmouseenter: move |_| hover.pointer_enter.call(()),
+            onmouseleave: move |_| hover.pointer_leave.call(()),
+            onfocusin: move |_| hover.focus_enter.call(()),
+            onfocusout: move |_| hover.focus_leave.call(()),
             if let Some(onselect) = onselect {
                 Button {
                     layout: ButtonLayout::Block,
@@ -312,52 +269,6 @@ fn CommitCard(
             }
         }
     }
-}
-
-fn begin_commit_details_interaction(
-    mut state: Signal<CommitDetailsHoverState>,
-    interaction: CommitDetailsInteraction,
-    popover_id: String,
-) {
-    {
-        let mut state = state.write();
-        let already_active = state.pointer_inside || state.focus_inside;
-        match interaction {
-            CommitDetailsInteraction::Pointer => state.pointer_inside = true,
-            CommitDetailsInteraction::Focus => state.focus_inside = true,
-        }
-        if already_active {
-            return;
-        }
-        if let Some(task) = state.reveal_task.take() {
-            task.cancel();
-        }
-    }
-
-    let reveal_task = spawn(async move {
-        dioxus_sdk_time::sleep(COMMIT_DETAILS_HOVER_DELAY).await;
-        browser::show_popover(&popover_id);
-    });
-    state.write().reveal_task = Some(reveal_task);
-}
-
-fn end_commit_details_interaction(
-    mut state: Signal<CommitDetailsHoverState>,
-    interaction: CommitDetailsInteraction,
-    popover_id: &str,
-) {
-    let mut state = state.write();
-    match interaction {
-        CommitDetailsInteraction::Pointer => state.pointer_inside = false,
-        CommitDetailsInteraction::Focus => state.focus_inside = false,
-    }
-    if state.pointer_inside || state.focus_inside {
-        return;
-    }
-    if let Some(task) = state.reveal_task.take() {
-        task.cancel();
-    }
-    browser::hide_popover(popover_id);
 }
 
 #[component]
@@ -387,47 +298,37 @@ fn CommitDetailsPopover(commit: ViewerCommitSummary, id: String, anchor_name: St
     let aria_label = format!("Commit details for {abbreviated_id}");
     let committed_at_display = commit.committed_at.display_minute();
     let committed_at_iso = commit.committed_at.to_string();
-    let anchor_style = format!("position-anchor: {anchor_name};");
-
     rsx! {
-        span {
-            id,
-            class: "fixed inset-auto z-70 m-0 w-[min(19rem,calc(100vw-1rem))] -translate-x-2 border-0 bg-transparent p-0 [position-area:left_span-bottom] [position-try-fallbacks:flip-inline]",
-            style: anchor_style,
-            popover: "auto",
-            role: "tooltip",
-            aria_label,
-            div { class: "max-h-[min(18rem,calc(100vh-1rem))] overflow-x-hidden overflow-y-auto rounded-panel border border-line-2 bg-surface p-3 text-ink shadow-floating animate-commit-popover-enter motion-reduce:animate-none",
-                header { class: "flex items-center justify-between gap-2",
-                    p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
-                        "Commit details"
-                    }
-                    if commit.is_merge {
-                        Badge { variant: BadgeVariant::Neutral, "merge" }
-                    }
+        HoverPopover { id, anchor_name, aria_label,
+            header { class: "flex items-center justify-between gap-2",
+                p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
+                    "Commit details"
                 }
-                h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
-                if !commit.body.is_empty() {
-                    p { class: "mt-2 whitespace-pre-wrap break-words text-xs leading-normal text-ink-2",
-                        "{commit.body}"
-                    }
+                if commit.is_merge {
+                    Badge { variant: BadgeVariant::Neutral, "merge" }
                 }
-                dl { class: "mt-3 divide-y divide-line border-t border-line",
-                    div { class: "grid gap-1 py-2",
-                        dt { class: "text-xs font-semibold text-ink-3", "Date" }
-                        dd { class: "m-0 min-w-0",
-                            time {
-                                class: "block text-xs tabular-nums text-ink",
-                                datetime: committed_at_iso,
-                                "{committed_at_display}"
-                            }
+            }
+            h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
+            if !commit.body.is_empty() {
+                p { class: "mt-2 whitespace-pre-wrap break-words text-xs leading-normal text-ink-2",
+                    "{commit.body}"
+                }
+            }
+            dl { class: "mt-3 divide-y divide-line border-t border-line",
+                div { class: "grid gap-1 py-2",
+                    dt { class: "text-xs font-semibold text-ink-3", "Date" }
+                    dd { class: "m-0 min-w-0",
+                        time {
+                            class: "block text-xs tabular-nums text-ink",
+                            datetime: committed_at_iso,
+                            "{committed_at_display}"
                         }
                     }
-                    div { class: "grid gap-1 pt-2",
-                        dt { class: "text-xs font-semibold text-ink-3", "Commit ID" }
-                        dd { class: "m-0 min-w-0",
-                            code { class: "block break-all text-xs text-ink", "{commit.id}" }
-                        }
+                }
+                div { class: "grid gap-1 pt-2",
+                    dt { class: "text-xs font-semibold text-ink-3", "Commit ID" }
+                    dd { class: "m-0 min-w-0",
+                        code { class: "block break-all text-xs text-ink", "{commit.id}" }
                     }
                 }
             }

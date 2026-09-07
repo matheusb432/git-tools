@@ -13,8 +13,11 @@ async fn user_opens_project_comparisons_and_restores_them() -> Result<()> {
 }
 
 async fn run_projects(session: &mut support::session::TestSession) -> Result<()> {
-    let fixture_home = std::env::var_os("HOME").context("isolated fixture home")?;
-    let fixture = support::fixture::ProjectsFixture::create(std::path::Path::new(&fixture_home))?;
+    let fixture_home = std::env::var_os("HOME").context("fixture home")?;
+    let fixture_root = tempfile::Builder::new()
+        .prefix(".gtl-projects-")
+        .tempdir_in(fixture_home)?;
+    let fixture = support::fixture::ProjectsFixture::create(fixture_root.path())?;
     session.catalogue.set_projects(&[
         ("ALP", "Alpha", &fixture.alpha),
         ("BET", "Beta", &fixture.beta),
@@ -91,13 +94,16 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
             .await?,
         "missing repository action must be disabled"
     );
+    #[cfg(unix)]
     assert_refresh_dimensions(session).await?;
     support::evidence::capture(session.driver(), "projects-desktop", true).await?;
     session.driver().set_window_rect(0, 0, 390, 800).await?;
+    #[cfg(unix)]
     assert_refresh_dimensions(session).await?;
     support::evidence::capture(session.driver(), "projects-narrow", true).await?;
     session.driver().set_window_rect(0, 0, 1600, 900).await?;
 
+    exercise_table(session).await?;
     review_comparisons(session, &fixture).await?;
     restore_comparisons(session).await
 }
@@ -127,13 +133,6 @@ async fn review_comparisons(
         "local comparison omitted tracked work"
     );
     fixture.change_untracked()?;
-    support::selectors::by_test_id(
-        session.driver(),
-        gtl_web_contracts::test_ids::LIVE_VIEW_REFRESH,
-    )
-    .await?
-    .click()
-    .await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
@@ -147,7 +146,7 @@ async fn review_comparisons(
         .await?;
     support::wait_for_active_diff(
         session.driver(),
-        "projects-alpha: Unpushed commits",
+        "projects-alpha",
         "committed-project-marker",
     )
     .await?;
@@ -169,6 +168,7 @@ async fn review_comparisons(
     session
         .driver()
         .query(By::Css("main"))
+        .ignore_errors(true)
         .with_text(StringMatch::new("No changes").partial())
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()
@@ -294,7 +294,7 @@ async fn card(driver: &WebDriver, name: &str) -> Result<WebElement> {
 async fn action(driver: &WebDriver, project: &str, label: &str) -> Result<WebElement> {
     card(driver, project)
         .await?
-        .query(By::Css("button"))
+        .query(By::Css("a, button"))
         .with_text(StringMatch::new(label))
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()
@@ -306,7 +306,7 @@ async fn action(driver: &WebDriver, project: &str, label: &str) -> Result<WebEle
 async fn catalogue_failure_keeps_cli_diffs_usable() -> Result<()> {
     support::run_test("viewer-projects-offline", |session| {
         Box::pin(async move {
-            session.catalogue.stop();
+            session.catalogue.make_unavailable()?;
             session
                 .driver()
                 .find(By::Css("button[aria-label='Refresh projects']"))
@@ -347,6 +347,7 @@ async fn catalogue_failure_keeps_cli_diffs_usable() -> Result<()> {
     .await
 }
 
+#[cfg(unix)]
 fn same_bounds(before: &thirtyfour::ElementRect, after: &thirtyfour::ElementRect) -> bool {
     [
         before.x - after.x,
@@ -358,6 +359,7 @@ fn same_bounds(before: &thirtyfour::ElementRect, after: &thirtyfour::ElementRect
     .all(|difference| difference.abs() < 0.5)
 }
 
+#[cfg(unix)]
 async fn assert_refresh_dimensions(session: &support::session::TestSession) -> Result<()> {
     let refresh = session
         .driver()
@@ -367,7 +369,7 @@ async fn assert_refresh_dimensions(session: &support::session::TestSession) -> R
         .first()
         .await?;
     let before = refresh.rect().await?;
-    session.catalogue.delay_responses(1000);
+    let paused = session.pause_server()?;
     refresh.click().await?;
     session
         .driver()
@@ -383,7 +385,7 @@ async fn assert_refresh_dimensions(session: &support::session::TestSession) -> R
         "Refresh moved while loading: {before:?} -> {during:?}"
     );
     support::evidence::capture(session.driver(), "projects-refresh-loading", true).await?;
-    session.catalogue.delay_responses(0);
+    drop(paused);
     session
         .driver()
         .query(By::Css("button[aria-label='Refresh projects']"))
@@ -407,12 +409,18 @@ async fn projects_poll_every_thirty_seconds_only_on_the_active_route() -> Result
 }
 
 async fn run_polling(session: &mut support::session::TestSession) -> Result<()> {
-    let requests = session.catalogue.requests();
+    support::wait::until(
+        "initial Projects request",
+        support::wait::ASSERTION_TIMEOUT,
+        || async { Ok((session.project_requests()? > 0).then_some(())) },
+    )
+    .await?;
+    let requests = session.project_requests()?;
     let started = tokio::time::Instant::now();
     support::wait::until(
         "scheduled Projects refresh",
         Duration::from_secs(35),
-        || async { Ok((session.catalogue.requests() > requests).then_some(())) },
+        || async { Ok((session.project_requests()? > requests).then_some(())) },
     )
     .await?;
     ensure!(
@@ -423,17 +431,17 @@ async fn run_polling(session: &mut support::session::TestSession) -> Result<()> 
         support::fixture::ViewerFixture::create_named(session.data_root(), "polling-live-view")?;
     fixture.forward_live_view()?;
     support::wait_for_active_diff(session.driver(), "polling-live-view", "alpha-v1").await?;
-    let requests = session.catalogue.requests();
+    let requests = session.project_requests()?;
     tokio::time::sleep(Duration::from_secs(31)).await;
     ensure!(
-        session.catalogue.requests() == requests,
+        session.project_requests()? == requests,
         "Projects kept polling on a diff route"
     );
     home(session.driver()).await?;
     support::wait::until(
         "Projects refresh on route entry",
         support::wait::ASSERTION_TIMEOUT,
-        || async { Ok((session.catalogue.requests() > requests).then_some(())) },
+        || async { Ok((session.project_requests()? > requests).then_some(())) },
     )
     .await?;
     session.driver().back().await?;
@@ -453,6 +461,195 @@ async fn run_polling(session: &mut support::session::TestSession) -> Result<()> 
             .await?
             .is_empty(),
         "Forward to Projects selected a diff"
+    );
+    Ok(())
+}
+
+async fn select_view(driver: &WebDriver, label: &str) -> Result<()> {
+    driver
+        .query(By::Css(format!("button[aria-label='{label}']")))
+        .and_enabled()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?
+        .click()
+        .await?;
+    driver
+        .query(By::Css(format!(
+            "button[aria-label='{label}'][aria-pressed='true']"
+        )))
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    Ok(())
+}
+
+async fn table_row(driver: &WebDriver, name: &str) -> Result<WebElement> {
+    Ok(driver
+        .query(By::Css(format!(
+            "tr[data-project-row][aria-label='{name}']"
+        )))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?)
+}
+
+async fn exercise_table(session: &mut support::session::TestSession) -> Result<()> {
+    select_view(session.driver(), "List view").await?;
+    let alpha = table_row(session.driver(), "Alpha").await?;
+    ensure!(
+        alpha.text().await?.contains("[!?]"),
+        "table changed the grid status glyphs"
+    );
+    ensure!(
+        std::fs::read_to_string(session.data_root().join("config.toml"))?
+            .contains("projects_view = \"table\""),
+        "list choice was not saved in user settings"
+    );
+    ensure!(
+        !table_row(session.driver(), "Initial")
+            .await?
+            .find(By::Css("button[aria-label='Unpushed commits']"))
+            .await?
+            .is_enabled()
+            .await?,
+        "no-upstream table action must be disabled"
+    );
+    let link = alpha.find(By::Css("a[tabindex='0']")).await?;
+    let destination = link.attr("href").await?.context("row link destination")?;
+    ensure!(
+        destination.contains("/projects/unpushed?path="),
+        "row must expose a stable comparison URL"
+    );
+    ensure!(
+        link.attr("draggable").await?.as_deref() == Some("false"),
+        "row text must not drag a link"
+    );
+    support::evidence::capture(session.driver(), "projects-table-desktop", true).await?;
+    select_table_text_from_gutter(session.driver(), &alpha).await?;
+    let count = alpha.find(By::Css("td:nth-child(4)")).await?;
+    session
+        .driver()
+        .action_chain()
+        .click_and_hold_element(&count)
+        .perform()
+        .await?;
+    ensure!(
+        session.driver().current_url().await?.path() == "/projects",
+        "holding a row navigated before release"
+    );
+    session.driver().action_chain().release().perform().await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "committed-project-marker",
+    )
+    .await?;
+    session.driver().back().await?;
+    table_row(session.driver(), "Alpha").await?;
+    let destination = session.driver().current_url().await?.join(&destination)?;
+    session.driver().goto(destination.as_str()).await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "committed-project-marker",
+    )
+    .await?;
+    assert_live_tab_presentation(session.driver()).await?;
+    home(session.driver()).await?;
+    table_row(session.driver(), "Alpha")
+        .await?
+        .find(By::Css("a[aria-label='Local changes']"))
+        .await?
+        .click()
+        .await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "untracked-project-marker",
+    )
+    .await?;
+    home(session.driver()).await?;
+    table_row(session.driver(), "Alpha")
+        .await?
+        .find(By::Css("a[tabindex='0']"))
+        .await?
+        .send_keys(thirtyfour::Key::Enter)
+        .await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "committed-project-marker",
+    )
+    .await?;
+    home(session.driver()).await?;
+    restore_table_presentation(session).await
+}
+
+async fn assert_live_tab_presentation(driver: &WebDriver) -> Result<()> {
+    let tab = driver
+        .find(By::Css("button[role='tab'][aria-selected='true']"))
+        .await?;
+    ensure!(
+        tab.css_value("cursor").await? == "default",
+        "tab still shows a drag cursor"
+    );
+    ensure!(
+        !tab.text().await?.contains(": Unpushed commits"),
+        "tab retained comparison suffix"
+    );
+    ensure!(
+        tab.rect().await?.width < 200.0,
+        "live tab is excessively wide"
+    );
+    Ok(())
+}
+
+async fn restore_table_presentation(session: &mut support::session::TestSession) -> Result<()> {
+    session.driver().set_window_rect(0, 0, 390, 800).await?;
+    support::evidence::capture(session.driver(), "projects-table-narrow", true).await?;
+    session.restart().await?;
+    session.driver().set_window_rect(0, 0, 1600, 900).await?;
+    table_row(session.driver(), "Alpha").await?;
+    ensure!(
+        session
+            .driver()
+            .find(By::Css("button[aria-label='List view']"))
+            .await?
+            .attr("aria-pressed")
+            .await?
+            .as_deref()
+            == Some("true"),
+        "saved list choice was not restored"
+    );
+    select_view(session.driver(), "Grid view").await?;
+    card(session.driver(), "Alpha").await?;
+    Ok(())
+}
+
+async fn select_table_text_from_gutter(driver: &WebDriver, row: &WebElement) -> Result<()> {
+    let branch = row.find(By::Css("td:nth-child(2) span span")).await?;
+    let (_, y) = branch.rect().await?.icenter();
+    driver
+        .action_chain()
+        .move_to(8, y)
+        .click_and_hold()
+        .move_to_element_center(&branch)
+        .release()
+        .perform()
+        .await?;
+    ensure!(
+        driver.current_url().await?.path() == "/projects",
+        "selecting table text navigated"
+    );
+    let selected = driver
+        .execute("return window.getSelection().toString();", Vec::new())
+        .await?
+        .convert::<String>()?;
+    ensure!(
+        !selected.is_empty(),
+        "table text cannot be selected for copying"
     );
     Ok(())
 }

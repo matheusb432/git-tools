@@ -33,10 +33,19 @@ service ViewerService {
 
 message GetViewerShellRequest {}
 
-message WatchViewerRequest {}
+message WatchViewerRequest {
+  optional uint64 live_tab_id = 1;
+}
 
 message WatchViewerResponse {
   uint64 version = 1;
+  optional ViewerLiveCheck live_check = 2;
+}
+
+message ViewerLiveCheck {
+  uint64 tab_id = 1;
+  optional string error = 2;
+  uint64 elapsed_ms = 3;
 }
 
 enum ViewerDiffLayout {
@@ -67,6 +76,8 @@ enum ViewerTabKind {
   VIEWER_TAB_KIND_UNSPECIFIED = 0;
   VIEWER_TAB_KIND_SNAPSHOT = 1;
   VIEWER_TAB_KIND_LIVE = 2;
+  VIEWER_TAB_KIND_LIVE_LOCAL_CHANGES = 3;
+  VIEWER_TAB_KIND_LIVE_UNPUSHED_COMMITS = 4;
 }
 
 enum ViewerTabState {
@@ -547,7 +558,15 @@ message ViewerDiffExclusions {
   repeated ViewerProjectDiffExclusions projects = 2;
 }
 
+enum ProjectsViewMode {
+  PROJECTS_VIEW_MODE_UNSPECIFIED = 0;
+  PROJECTS_VIEW_MODE_GRID = 1;
+  PROJECTS_VIEW_MODE_TABLE = 2;
+}
+message ProjectsViewFieldUpdate { oneof operation { ProjectsViewMode update = 1; ClearSetting clear = 2; } }
+
 message GetViewerSettingsResponse {
+  ProjectsViewMode projects_view = 7;
   optional string configuration_path = 1;
   optional ViewerTheme configured_theme = 2;
   ViewerTheme effective_theme = 3;
@@ -573,6 +592,7 @@ message ProjectSettingsValue { repeated ViewerProjectSettingsUpdate projects = 1
 message ProjectSettingsFieldUpdate { oneof operation { ProjectSettingsValue update = 1; ClearSetting clear = 2; } }
 
 message EditSettingsRequest {
+  ProjectsViewFieldUpdate projects_view = 7;
   ThemeFieldUpdate theme = 1;
   LayoutFieldUpdate layout = 2;
   DensityFieldUpdate density = 3;

@@ -159,6 +159,8 @@ fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
         kind: match tab.kind {
             ViewerTabKind::Snapshot => v1::ViewerTabKind::Snapshot,
             ViewerTabKind::Live => v1::ViewerTabKind::Live,
+            ViewerTabKind::LiveLocalChanges => v1::ViewerTabKind::LiveLocalChanges,
+            ViewerTabKind::LiveUnpushedCommits => v1::ViewerTabKind::LiveUnpushedCommits,
         } as i32,
         state: match tab.state {
             ViewerTabState::Pending => v1::ViewerTabState::Pending,
@@ -530,6 +532,7 @@ pub fn decode_get_viewer_settings_response(
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     let exclusions = required(response.diff_exclusions)?;
     Ok(ViewerUserSettings {
+        projects_view: decode_projects_view(response.projects_view)?,
         configuration_path: response.configuration_path,
         configured_theme: response
             .configured_theme
@@ -562,6 +565,7 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        projects_view: encode_projects_view(settings.projects_view) as i32,
         configuration_path: settings.configuration_path,
         configured_theme: settings
             .configured_theme
@@ -675,6 +679,7 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
         }),
     };
     v1::EditSettingsRequest {
+        projects_view: encode_projects_view_update(&request.projects_view),
         theme,
         layout,
         density,
@@ -692,6 +697,15 @@ pub fn decode_edit_settings_request(
         project_settings_field_update, theme_field_update,
     };
     Ok(EditSettingsRequest {
+        projects_view: match request.projects_view {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                v1::projects_view_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                v1::projects_view_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(decode_projects_view(value)?)
+                }
+            },
+        },
         theme: match request.theme {
             None => FieldUpdate::Unchanged,
             Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
@@ -923,11 +937,23 @@ fn decode_viewer_diff_search_match(
     })
 }
 
-#[must_use]
-pub fn decode_watch_viewer_response(response: v1::WatchViewerResponse) -> ViewerStateChanged {
-    ViewerStateChanged {
+pub fn decode_watch_viewer_response(
+    response: v1::WatchViewerResponse,
+) -> Result<ViewerStateChanged, ViewerCodecError> {
+    Ok(ViewerStateChanged {
         version: ViewerVersion::new(response.version),
-    }
+        live_check: response
+            .live_check
+            .map(|check| {
+                Ok(crate::viewer::ViewerLiveCheck {
+                    tab_id: ViewerTabId::try_new(check.tab_id)
+                        .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                    result: check.error.map_or(Ok(()), Err),
+                    elapsed_ms: check.elapsed_ms,
+                })
+            })
+            .transpose()?,
+    })
 }
 
 fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCodecError> {
@@ -998,6 +1024,8 @@ fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> 
         kind: match v1::ViewerTabKind::try_from(tab.kind) {
             Ok(v1::ViewerTabKind::Snapshot) => ViewerTabKind::Snapshot,
             Ok(v1::ViewerTabKind::Live) => ViewerTabKind::Live,
+            Ok(v1::ViewerTabKind::LiveLocalChanges) => ViewerTabKind::LiveLocalChanges,
+            Ok(v1::ViewerTabKind::LiveUnpushedCommits) => ViewerTabKind::LiveUnpushedCommits,
             Ok(v1::ViewerTabKind::Unspecified) | Err(_) => {
                 return Err(ViewerCodecError::InvalidMessage);
             }
@@ -1644,4 +1672,41 @@ fn decode_viewer_syntax_class(
 
 fn required<T>(value: Option<T>) -> Result<T, ViewerCodecError> {
     value.ok_or(ViewerCodecError::InvalidMessage)
+}
+
+fn decode_projects_view(
+    value: i32,
+) -> Result<gtl_models::settings::ProjectsViewMode, ViewerCodecError> {
+    match v1::ProjectsViewMode::try_from(value) {
+        Ok(v1::ProjectsViewMode::Grid) => Ok(gtl_models::settings::ProjectsViewMode::Grid),
+        Ok(v1::ProjectsViewMode::Table) => Ok(gtl_models::settings::ProjectsViewMode::Table),
+        _ => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+const fn encode_projects_view(
+    value: gtl_models::settings::ProjectsViewMode,
+) -> v1::ProjectsViewMode {
+    match value {
+        gtl_models::settings::ProjectsViewMode::Grid => v1::ProjectsViewMode::Grid,
+        gtl_models::settings::ProjectsViewMode::Table => v1::ProjectsViewMode::Table,
+    }
+}
+
+fn encode_projects_view_update(
+    update: &FieldUpdate<gtl_models::settings::ProjectsViewMode>,
+) -> Option<v1::ProjectsViewFieldUpdate> {
+    match update {
+        FieldUpdate::Unchanged => None,
+        FieldUpdate::Clear => Some(v1::ProjectsViewFieldUpdate {
+            operation: Some(v1::projects_view_field_update::Operation::Clear(
+                v1::ClearSetting {},
+            )),
+        }),
+        FieldUpdate::Update(value) => Some(v1::ProjectsViewFieldUpdate {
+            operation: Some(v1::projects_view_field_update::Operation::Update(
+                encode_projects_view(*value) as i32,
+            )),
+        }),
+    }
 }

@@ -224,6 +224,7 @@ const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(SCHEMA_V4),
     M::up(SCHEMA_V5),
     M::up(SCHEMA_V6),
+    M::up(include_str!("../../db/migrations/0007_own_projects.sql")),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -370,7 +371,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 6);
+        assert_eq!(user_version, 7);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -420,7 +421,7 @@ mod tests {
         let connection = migrated_from_legacy_rows(directory.path());
         let sources: Vec<(String, String, String, Option<String>)> = connection
             .prepare(
-                "SELECT kind, value, created_at, updated_at FROM project_sources ORDER BY value",
+                "SELECT kind, value, created_at, updated_at FROM render_sources ORDER BY value",
             )
             .unwrap()
             .query_map([], |row| {
@@ -469,7 +470,7 @@ mod tests {
             .prepare(
                 "SELECT s.value, o.name, t.name, r.argument, r.pinned_base, r.pinned_head, r.recipe_name
                  FROM recent_renders r
-                 JOIN project_sources s ON s.id = r.source_id
+                 JOIN render_sources s ON s.id = r.source_id
                  JOIN render_operations o ON o.id = r.operation_id
                  LEFT JOIN render_targets t ON t.id = r.target_id
                  ORDER BY r.id",
@@ -569,7 +570,7 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let source_ids = connection
-            .prepare("SELECT id FROM project_sources ORDER BY id")
+            .prepare("SELECT id FROM render_sources ORDER BY id")
             .unwrap()
             .query_map([], |row| row.get::<_, i64>(0))
             .unwrap()
@@ -580,7 +581,7 @@ mod tests {
                 "SELECT name FROM sqlite_master
                  WHERE type = 'index'
                    AND name IN (
-                     'project_sources_value_idx',
+                     'render_sources_value_idx',
                      'recent_renders_fingerprint_idx',
                      'recent_renders_repo_name_idx'
                    )
@@ -600,12 +601,12 @@ mod tests {
         assert_eq!(
             index_names,
             vec![
-                "project_sources_value_idx".to_owned(),
                 "recent_renders_fingerprint_idx".to_owned(),
                 "recent_renders_repo_name_idx".to_owned(),
+                "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 6);
+        assert_eq!(user_version, 7);
     }
 
     /// Two processes can open a fresh database concurrently; both

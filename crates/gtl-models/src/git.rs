@@ -56,6 +56,12 @@ impl From<GitHead> for String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitHeadState {
+    Unborn { branch: BranchName },
+    Commit { head: GitHead, id: CommitId },
+}
+
 /// Selects whether a Git mutation is applied or only checked as a dry run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GitEffectMode {

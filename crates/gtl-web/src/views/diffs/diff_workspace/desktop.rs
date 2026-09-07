@@ -3,12 +3,11 @@ use gtl_models::{
     diffs::CommitId,
     viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
-use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
-    CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView, ViewerTabKind,
+    CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView,
     ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{Ellipsis, FileDiff, RefreshCw, Trash2};
+use lucide_dioxus::{Ellipsis, FileDiff, Trash2, TriangleAlert};
 
 use super::{
     DiffWorkspaceDocument, MobilePanel, WorkspaceMobileNavigation,
@@ -23,9 +22,9 @@ use crate::{
     shared::{
         browser,
         ui::{
-            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, IconPopover,
-            IconPopoverPlacement, MENU_ACTION_HOST_CLASSES, MenuActionContent, PageNotice, Popover,
-            Skeleton, use_toast,
+            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover,
+            HoverPopoverPlacement, IconPopover, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES,
+            MenuActionContent, PageNotice, Popover, Skeleton, use_hover_popover, use_toast,
         },
     },
     views::diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
@@ -250,15 +249,13 @@ fn ReadyWorkspace(
             shell
                 .tabs
                 .iter()
-                .any(|tab| tab.id == tab_id && tab.kind == ViewerTabKind::Live),
+                .any(|tab| tab.id == tab_id && tab.kind.is_live()),
         )
     });
     let commits_loading = commit_pages.is_loading();
     let commits_error = commit_pages.error().map(|error| error.message().to_owned());
     let commits_has_more = commit_pages.has_more();
     let onload_commits = use_callback(move |()| commit_pages.load_next());
-
-    let onrefresh = move |_| viewer.refresh_tab(tab_id);
 
     let mut commit_selection = use_action(move |action: CommitSelectionAction| async move {
         let result = match action {
@@ -324,8 +321,7 @@ fn ReadyWorkspace(
     let live_actions = is_live.then(|| {
         rsx! {
             LiveViewTitlebarActions {
-                pending: viewer.render_command_pending(),
-                onrefresh,
+                tab_id,
                 ondelete: move |_| {
                     browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
                     delete_open.set(true);
@@ -341,7 +337,7 @@ fn ReadyWorkspace(
                         PageNotice {
                             class: "h-full min-h-48 px-5",
                             title: "No changes",
-                            message: "This comparison is up to date. Refresh after making changes.",
+                            message: "No changes in this comparison. Updates appear automatically when HEAD changes.",
                         }
                     } else {
                         ClientDiffDocument { onopen }
@@ -419,31 +415,10 @@ fn ReadyWorkspace(
 }
 
 #[component]
-fn LiveViewTitlebarActions(
-    pending: bool,
-    onrefresh: EventHandler<MouseEvent>,
-    ondelete: EventHandler<MouseEvent>,
-) -> Element {
+fn LiveViewTitlebarActions(tab_id: ViewerTabId, ondelete: EventHandler<MouseEvent>) -> Element {
     rsx! {
         div { class: "flex flex-none items-center gap-1",
-            Button {
-                class: "mobile:size-11 mobile:p-0",
-                size: ButtonSize::Small,
-                variant: ButtonVariant::Ghost,
-                state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
-                aria_label: "Refresh diff",
-                title: "Refresh diff",
-                "data-testid": test_ids::LIVE_VIEW_REFRESH.value(),
-                onclick: onrefresh,
-                if !pending {
-                    span {
-                        class: "inline-flex flex-none mobile:[&_svg]:size-5",
-                        aria_hidden: "true",
-                        RefreshCw { size: 14 }
-                    }
-                }
-                span { class: "mobile:hidden", "Refresh" }
-            }
+            LiveViewWarning { tab_id }
             IconPopover {
                 id: LIVE_VIEW_ACTIONS_POPOVER_ID,
                 aria_label: "Live view actions",
@@ -463,6 +438,70 @@ fn LiveViewTitlebarActions(
                             },
                             label: "Delete live view",
                             description: "Remove this saved live view",
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn LiveViewWarning(tab_id: ViewerTabId) -> Element {
+    let viewer = use_context::<ViewerContext>();
+    let errors = viewer.live_errors();
+    let errors = errors.read();
+    let Some(errors) = errors
+        .get(&tab_id)
+        .filter(|errors| !errors.entries().is_empty())
+    else {
+        return rsx! {};
+    };
+    rsx! {
+        LiveViewWarningPopover { tab_id, errors: errors.entries().to_vec() }
+    }
+}
+
+#[component]
+fn LiveViewWarningPopover(
+    tab_id: ViewerTabId,
+    errors: Vec<crate::entities::diffs::live_errors::LiveError>,
+) -> Element {
+    let id = format!("live-view-{tab_id}-errors");
+    let anchor = format!("--{id}");
+    let hover = use_hover_popover(id.clone());
+    rsx! {
+        div {
+            class: "relative flex flex-none",
+            style: "anchor-name: {anchor};",
+            onmouseenter: move |_| hover.pointer_enter.call(()),
+            onmouseleave: move |_| hover.pointer_leave.call(()),
+            onfocusin: move |_| hover.focus_enter.call(()),
+            onfocusout: move |_| hover.focus_leave.call(()),
+            Button {
+                class: "mobile:size-11",
+                size: ButtonSize::IconSmall,
+                variant: ButtonVariant::Ghost,
+                aria_label: "Live diff update warnings",
+                aria_describedby: id.clone(),
+                "data-testid": gtl_web_contracts::test_ids::LIVE_VIEW_WARNING.value(),
+                span { class: "text-warn", aria_hidden: "true",
+                    TriangleAlert { size: 16 }
+                }
+            }
+            HoverPopover {
+                id,
+                anchor_name: anchor.clone(),
+                aria_label: "Live diff update warnings",
+                placement: HoverPopoverPlacement::Below,
+                p { class: "text-xs font-semibold text-ink", "Recent update errors" }
+                ul { class: "mt-2 grid gap-2 text-xs",
+                    for error in &errors {
+                        li { key: "{error.message}", class: "break-words",
+                            p { "{error.message}" }
+                            if error.occurrences > 1 {
+                                p { class: "mt-0.5 text-ink-3", "Occurred {error.occurrences} times" }
+                            }
                         }
                     }
                 }

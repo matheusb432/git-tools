@@ -1,4 +1,4 @@
-//! Fanning Git operations out across active projects listed by sample_project: `push --all`,
+//! Fanning Git operations out across active projects managed in Git Tools: `push --all`,
 //! `pull --all`, `commit --all`, and `status --all`. Managed push omits
 //! its configured project exclusions. Each concern lives in its own submodule;
 //! this facade owns the shared request/response seam (`ManagedOptions`, `ManagedRun`,

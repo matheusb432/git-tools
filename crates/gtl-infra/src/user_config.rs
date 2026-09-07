@@ -15,7 +15,7 @@ use gtl_application::{
 };
 use gtl_models::{
     diffs::DiffExclusions,
-    settings::{PushAllExclusions, UserSettings},
+    settings::{ProjectsViewMode, PushAllExclusions, UserSettings},
     viewer::{RenderOptions, ViewerKeybindings},
 };
 
@@ -47,19 +47,25 @@ fn settings_document(
     })
 }
 
-fn load_from(path: Option<&Path>) -> Result<UserSettings, UserSettingsLoadError> {
+fn load_document(
+    path: Option<&Path>,
+) -> Result<Option<UserSettingsDocument>, UserSettingsLoadError> {
     let Some(path) = path else {
-        return Ok(default_settings());
+        return Ok(None);
     };
     match std::fs::read(path) {
         Ok(bytes) => settings_document(path, bytes)
-            .map(UserSettingsDocument::into_settings)
+            .map(Some)
             .map_err(UserSettingsLoadError::from),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(default_settings()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(anyhow::Error::new(error)
             .context(format!("read user settings {}", path.display()))
             .into()),
     }
+}
+
+fn load_from(path: Option<&Path>) -> Result<UserSettings, UserSettingsLoadError> {
+    Ok(load_document(path)?.map_or_else(default_settings, UserSettingsDocument::into_settings))
 }
 
 /// TOML-backed user settings for one resolved configuration path.
@@ -85,6 +91,15 @@ impl TomlSettingsStore {
     #[must_use]
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    pub fn load_viewer_settings(
+        &self,
+    ) -> Result<(UserSettings, ProjectsViewMode), UserSettingsLoadError> {
+        Ok(load_document(self.path.as_deref())?.map_or_else(
+            || (default_settings(), ProjectsViewMode::default()),
+            UserSettingsDocument::into_viewer_settings,
+        ))
     }
 
     fn required_path(&self) -> anyhow::Result<&Path> {
@@ -449,6 +464,7 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let settings_patch = UserSettingsPatch {
+            projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
             theme: UserSettingsFieldUpdate::Clear,
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
             density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
@@ -490,6 +506,50 @@ excluded_from_push_all = true
                 .push_all_exclusions()
                 .contains(&ProjectName::try_from("git-tools").unwrap())
         );
+    }
+
+    #[test]
+    fn projects_view_round_trips_and_clear_restores_grid_without_losing_other_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"hearth\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(
+            store.load_viewer_settings().unwrap().1,
+            ProjectsViewMode::Grid
+        );
+        let application_settings = store.load().unwrap();
+        store
+            .edit(UserSettingsPatch {
+                projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store.load_viewer_settings().unwrap().1,
+            ProjectsViewMode::Table
+        );
+        assert_eq!(store.load().unwrap(), application_settings);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("# retained")
+        );
+        store
+            .edit(UserSettingsPatch {
+                projects_view: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store.load_viewer_settings().unwrap().1,
+            ProjectsViewMode::Grid
+        );
+        std::fs::write(&path, "projects_view = \"unknown\"\n").unwrap();
+        assert!(matches!(
+            store.load(),
+            Err(UserSettingsLoadError::InvalidConfiguration(_))
+        ));
     }
 
     #[test]
