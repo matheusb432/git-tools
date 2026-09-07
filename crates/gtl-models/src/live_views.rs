@@ -2,6 +2,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::{ProjectName, RepositoryRoot, RepositoryRootError};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveComparison {
+    LocalChanges,
+    UnpushedCommits,
+}
+
+impl LiveComparison {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalChanges => "local_changes",
+            Self::UnpushedCommits => "unpushed_commits",
+        }
+    }
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LocalChanges => "Local changes",
+            Self::UnpushedCommits => "Unpushed commits",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source_kind")]
 pub enum LiveSource {

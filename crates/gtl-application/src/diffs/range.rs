@@ -3,7 +3,7 @@ use gtl_models::git::{GitDiffSpec, GitRange, GitRevision};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct DiffRanges {
     pub(super) diff: GitDiffSpec,
-    pub(super) log: GitRange,
+    pub(super) log: Option<GitRange>,
 }
 
 impl DiffRanges {
@@ -14,21 +14,21 @@ impl DiffRanges {
     pub(super) fn working_tree(base: &GitRevision) -> Self {
         Self {
             diff: GitDiffSpec::AgainstWorkingTree(base.clone()),
-            log: GitRange::two_dot(base, &GitRevision::head()),
+            log: Some(GitRange::two_dot(base, &GitRevision::head())),
         }
     }
 
     pub(super) fn merge(base: &GitRevision) -> Self {
         Self {
             diff: GitDiffSpec::Range(GitRange::three_dot(base, &GitRevision::head())),
-            log: GitRange::two_dot(base, &GitRevision::head()),
+            log: Some(GitRange::two_dot(base, &GitRevision::head())),
         }
     }
 
     pub(super) fn exact(range: GitRange) -> Self {
         Self {
             diff: GitDiffSpec::Range(range.clone()),
-            log: range,
+            log: Some(range),
         }
     }
 }
@@ -59,7 +59,7 @@ mod tests {
             ),
         ] {
             assert_eq!(actual.diff.as_arg(), expected_diff);
-            assert_eq!(actual.log.as_ref(), expected_log);
+            assert_eq!(actual.log.as_ref().unwrap().as_ref(), expected_log);
         }
     }
 
@@ -67,7 +67,7 @@ mod tests {
     fn exact_range_is_used_verbatim() {
         let actual = DiffRanges::exact(GitRange::try_new("aaa..bbb").unwrap());
 
-        assert_eq!(actual.diff, GitDiffSpec::Range(actual.log.clone()));
-        assert_eq!(actual.log.as_ref(), "aaa..bbb");
+        assert_eq!(actual.diff, GitDiffSpec::Range(actual.log.clone().unwrap()));
+        assert_eq!(actual.log.as_ref().unwrap().as_ref(), "aaa..bbb");
     }
 }

@@ -1,6 +1,6 @@
 //! Closed status facts for one repository.
 
-use serde::{Serialize, ser::SerializeStruct as _};
+use serde::{Deserialize, Serialize, ser::SerializeStruct as _};
 
 use crate::{
     git::{BranchName, CommitCount, GitRefName},
@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// The configured-upstream state for an attached branch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StatusUpstream {
     Missing,
     Tracking {
@@ -19,7 +19,7 @@ pub enum StatusUpstream {
 }
 
 /// The repository's checked-out head, including unavailable reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StatusHead {
     Unavailable,
     Detached,
@@ -30,7 +30,7 @@ pub enum StatusHead {
 }
 
 /// Counts working-tree paths without conflating an unavailable status read with clean state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StatusChanges {
     Clean,
     Changed {
@@ -59,19 +59,62 @@ impl StatusChanges {
     }
 
     #[must_use]
+    pub const fn symbols(self) -> &'static str {
+        match self {
+            Self::Clean => "✓",
+            Self::Unavailable => "-",
+            Self::Changed { tracked, untracked } => {
+                match (!tracked.is_zero(), !untracked.is_zero()) {
+                    (true, true) => "!?",
+                    (true, false) => "!",
+                    (false, true) => "?",
+                    (false, false) => "",
+                }
+            }
+        }
+    }
+
+    #[must_use]
     pub const fn is_dirty(self) -> bool {
         matches!(self, Self::Changed { .. })
     }
 }
 
 /// The complete presence and status facts for one repository.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepositoryStatus {
     Absent,
     Present {
         head: StatusHead,
         changes: StatusChanges,
     },
+}
+
+impl RepositoryStatus {
+    #[must_use]
+    pub fn class(&self) -> StatusClass {
+        let RepositoryStatus::Present { head, changes } = self else {
+            return StatusClass::Absent;
+        };
+        if matches!(changes, StatusChanges::Unavailable)
+            || matches!(
+                head,
+                StatusHead::Unavailable
+                    | StatusHead::Detached
+                    | StatusHead::Branch {
+                        upstream: StatusUpstream::Missing,
+                        ..
+                    }
+            )
+        {
+            return StatusClass::Warn;
+        }
+        if changes.is_dirty() || ahead(head) != CommitCount::default() {
+            StatusClass::Pending
+        } else {
+            StatusClass::Clean
+        }
+    }
 }
 
 /// Stable high-level status classes used by JSON and terminal presentation.
@@ -155,27 +198,7 @@ impl StatusResult {
 
     #[must_use]
     pub fn class(&self) -> StatusClass {
-        let RepositoryStatus::Present { head, changes } = &self.repository else {
-            return StatusClass::Absent;
-        };
-        if matches!(changes, StatusChanges::Unavailable)
-            || matches!(
-                head,
-                StatusHead::Unavailable
-                    | StatusHead::Detached
-                    | StatusHead::Branch {
-                        upstream: StatusUpstream::Missing,
-                        ..
-                    }
-            )
-        {
-            return StatusClass::Warn;
-        }
-        if changes.is_dirty() || ahead(head) != CommitCount::default() {
-            StatusClass::Pending
-        } else {
-            StatusClass::Clean
-        }
+        self.repository.class()
     }
 
     #[must_use]
@@ -210,21 +233,10 @@ impl StatusResult {
 
 fn changes_detail(changes: &StatusChanges) -> Option<String> {
     match changes {
-        StatusChanges::Changed { tracked, untracked } => Some(change_symbols(*tracked, *untracked)),
+        StatusChanges::Changed { .. } => Some(changes.symbols().to_owned()),
         StatusChanges::Unavailable => Some("status-unavailable".into()),
         StatusChanges::Clean => None,
     }
-}
-
-fn change_symbols(tracked: PathCount, untracked: PathCount) -> String {
-    let mut symbols = String::new();
-    if !tracked.is_zero() {
-        symbols.push('!');
-    }
-    if !untracked.is_zero() {
-        symbols.push('?');
-    }
-    symbols
 }
 
 impl Serialize for StatusResult {

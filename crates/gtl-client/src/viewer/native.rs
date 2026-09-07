@@ -9,6 +9,7 @@ use gtl_wire::{
         ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
+        projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
     },
 };
 
@@ -64,6 +65,35 @@ pub struct ViewerClient {
 }
 
 impl ViewerClient {
+    pub async fn list_projects(&mut self) -> Result<Vec<ViewerProject>, ViewerClientError> {
+        let response = self
+            .client
+            .list_viewer_projects(v1::ListViewerProjectsRequest {})
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| {
+                if status.code() == tonic::Code::FailedPrecondition {
+                    ViewerClientError::ProjectsUnavailable
+                } else {
+                    decode_status(&status)
+                }
+            })?;
+        proto::viewer::projects::decode_projects(response).map_err(Into::into)
+    }
+
+    pub async fn open_project(
+        &mut self,
+        request: OpenViewerProject,
+    ) -> Result<OpenViewerProjectOk, ViewerClientError> {
+        let response = self
+            .client
+            .open_viewer_project(proto::viewer::projects::encode_open(&request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        proto::viewer::projects::decode_open_response(response).map_err(Into::into)
+    }
+
     /// Discovers the local server and connects through its authenticated native endpoint.
     pub async fn connect_local() -> Result<Self, ViewerClientError> {
         let auth = LocalAuth::from_environment().map_err(|_| ViewerClientError::Unavailable)?;

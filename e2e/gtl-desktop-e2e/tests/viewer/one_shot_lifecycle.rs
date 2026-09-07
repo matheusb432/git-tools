@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
 use serde::Deserialize;
-use thirtyfour::{By, Key, WebDriver, prelude::ElementQueryable as _};
+use thirtyfour::{By, Key, WebDriver, components::SelectElement, prelude::ElementQueryable as _};
 
 use crate::support::{self, fixture::OneShotFixture, wait};
 
@@ -29,6 +29,7 @@ search_text_in_all_files = "alt+f"
     fixture.forward()?;
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker")
         .await?;
+    assert_cli_reopen_navigates_from_settings_and_history(session.driver(), &fixture).await?;
     assert_menu_covers_active_scrollbar(session.driver()).await?;
     assert_server_owned_searches(session.driver()).await?;
     let copied =
@@ -71,7 +72,7 @@ search_text_in_all_files = "alt+f"
         .click()
         .await
         .context("close the snapshot")?;
-    wait_for_empty_workspace(session.driver()).await?;
+    wait_for_projects_home(session.driver()).await?;
     ensure!(
         session
             .driver()
@@ -98,6 +99,117 @@ search_text_in_all_files = "alt+f"
         .context("reopen the snapshot from history")?;
 
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
+}
+
+async fn assert_cli_reopen_navigates_from_settings_and_history(
+    driver: &WebDriver,
+    fixture: &OneShotFixture,
+) -> Result<()> {
+    let diff_url = driver.current_url().await?;
+    ensure!(
+        diff_url.path().starts_with("/diffs/"),
+        "the diff has no tab route: {diff_url}"
+    );
+    for (label, route) in [("User settings", "/settings"), ("History", "/history")] {
+        support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER)
+            .await?
+            .click()
+            .await?;
+        driver
+            .find(By::Css(format!("button[aria-label='{label}']")))
+            .await?
+            .click()
+            .await?;
+        wait::until(
+            "viewer secondary route",
+            wait::ASSERTION_TIMEOUT,
+            || async { Ok((driver.current_url().await?.path() == route).then_some(())) },
+        )
+        .await?;
+        if route == "/settings" {
+            assert_settings_update_preserves_route(driver).await?;
+        }
+        fixture.forward()?;
+        support::wait_for_active_diff(driver, "one-shot-alpha", "alpha-one-shot-marker").await?;
+        ensure!(
+            driver.current_url().await? == diff_url,
+            "reopening the same diff changed its tab route"
+        );
+        ensure!(
+            driver.find_all(By::Css("[role='tab']")).await?.len() == 1,
+            "reopening the diff created another tab"
+        );
+        wait::until(
+            "CLI diff keyboard focus",
+            wait::ASSERTION_TIMEOUT,
+            || async {
+                Ok((driver.active_element().await?.attr("id").await?.as_deref()
+                    == Some("workspace-heading"))
+                .then_some(()))
+            },
+        )
+        .await?;
+        driver.back().await?;
+        wait::until(
+            "Back restores the preceding page",
+            wait::ASSERTION_TIMEOUT,
+            || async { Ok((driver.current_url().await?.path() == route).then_some(())) },
+        )
+        .await?;
+        driver
+            .find(By::Css("[role='tab']"))
+            .await?
+            .send_keys(Key::Right)
+            .await?;
+        support::wait_for_active_diff(driver, "one-shot-alpha", "alpha-one-shot-marker").await?;
+        ensure!(
+            driver.current_url().await? == diff_url,
+            "keyboard tab navigation did not restore its route"
+        );
+        ensure!(
+            driver
+                .active_element()
+                .await?
+                .attr("role")
+                .await?
+                .as_deref()
+                == Some("tab"),
+            "keyboard tab navigation moved focus out of the tab rail"
+        );
+    }
+    Ok(())
+}
+
+async fn assert_settings_update_preserves_route(driver: &WebDriver) -> Result<()> {
+    let theme = driver.query(By::Id("settings-theme")).first().await?;
+    SelectElement::new(&theme)
+        .await?
+        .select_by_value("dark")
+        .await?;
+    driver
+        .find(By::Css("button[type='submit']"))
+        .await?
+        .click()
+        .await?;
+    wait::until("saved settings", wait::ASSERTION_TIMEOUT, || async {
+        let toasts = driver.find_all(By::Css(test_ids::TOAST.selector())).await?;
+        for toast in toasts {
+            if toast.text().await?.contains("Settings saved") {
+                return Ok(Some(()));
+            }
+        }
+        Ok(None)
+    })
+    .await?;
+    ensure!(
+        driver.current_url().await?.path() == "/settings",
+        "saving settings navigated to a diff"
+    );
+    support::selectors::by_test_id(driver, test_ids::TOAST_DISMISS)
+        .await?
+        .click()
+        .await?;
+    Ok(())
 }
 
 async fn assert_menu_covers_active_scrollbar(driver: &WebDriver) -> Result<()> {
@@ -580,13 +692,17 @@ async fn copy_desktop_path_and_expect_popover_closed(
     .await
 }
 
-async fn wait_for_empty_workspace(driver: &thirtyfour::WebDriver) -> Result<()> {
-    wait::until("empty diff workspace", wait::ASSERTION_TIMEOUT, || async {
-        if !driver.find_all(By::Css("[role='tab']")).await?.is_empty() {
-            return Ok(None);
-        }
-        let main = driver.find(By::Css("main")).await?;
-        Ok(main.text().await?.contains("No diff is open").then_some(()))
-    })
+async fn wait_for_projects_home(driver: &thirtyfour::WebDriver) -> Result<()> {
+    wait::until(
+        "Projects home after closing the last tab",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            if !driver.find_all(By::Css("[role='tab']")).await?.is_empty() {
+                return Ok(None);
+            }
+            let main = driver.find(By::Css("main")).await?;
+            Ok(main.text().await?.contains("Projects").then_some(()))
+        },
+    )
     .await
 }

@@ -5,16 +5,22 @@ use rusqlite::{Connection, params};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveViewRecord {
     pub source: LiveSource,
+    pub comparison: gtl_models::live_views::LiveComparison,
     pub display_name: ProjectName,
     pub created_at: MachineTimestamp,
     pub last_opened_at: Option<MachineTimestamp>,
 }
 
-pub(super) fn delete_live_view(connection: &Connection, source: &LiveSource) -> anyhow::Result<()> {
-    let mut statement = connection
-        .prepare_cached("DELETE FROM live_views WHERE source_kind = ?1 AND source_value = ?2")?;
+pub(super) fn delete_live_view(
+    connection: &Connection,
+    source: &LiveSource,
+    comparison: gtl_models::live_views::LiveComparison,
+) -> anyhow::Result<()> {
+    let mut statement = connection.prepare_cached(
+        "DELETE FROM live_views WHERE source_kind = ?1 AND source_value = ?2 AND comparison = ?3",
+    )?;
     let source_value = source.value();
-    statement.execute(params![source.kind(), source_value])?;
+    statement.execute(params![source.kind(), source_value, comparison.as_str()])?;
     Ok(())
 }
 
@@ -30,7 +36,8 @@ pub(super) fn store_test() -> Connection {
           display_name   TEXT NOT NULL,
           created_at     TEXT NOT NULL,
           last_opened_at TEXT,
-          UNIQUE (source_kind, source_value)
+          comparison TEXT NOT NULL DEFAULT 'unpushed_commits' CHECK (comparison IN ('local_changes', 'unpushed_commits')),
+          UNIQUE (source_kind, source_value, comparison)
         ) STRICT;",
         )
         .unwrap();

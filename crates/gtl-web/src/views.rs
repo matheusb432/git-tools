@@ -10,3 +10,6 @@ pub(crate) mod viewer_settings_form;
 pub(crate) use diffs::{DiffHistoryView, DiffWorkspaceView};
 #[cfg(feature = "desktop")]
 pub(crate) use user_settings::UserSettingsView;
+
+#[cfg(feature = "desktop")]
+pub(crate) mod projects;

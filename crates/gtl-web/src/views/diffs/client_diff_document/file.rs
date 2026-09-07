@@ -200,6 +200,7 @@ fn DiffLineStats(added: DiffLineCount, removed: DiffLineCount) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use dioxus::dioxus_core::NoOpMutations;
     use gtl_models::diffs::DiffLineCount;
     use gtl_wire::viewer::{
         ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
@@ -209,7 +210,8 @@ mod tests {
     use super::*;
     use crate::{
         entities::diffs::{
-            ClientDiffFileState, ClientDiffRows, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
+            ClientDiffFileState, ClientDiffRows, ClientDiffRowsStoreExt, ClientDiffWorkspace,
+            ClientDiffWorkspaceStoreExt,
         },
         test_support::{
             TestResult, absolute_file_path, repository_relative_path, unified_source_row,
@@ -298,6 +300,42 @@ mod tests {
                 artifact_tab_id,
             }
         }
+    }
+
+    #[test]
+    fn streamed_batches_keep_existing_rows_and_replace_them_on_retry() -> TestResult {
+        let mut dom = VirtualDom::new_with_props(
+            TestDiffFile,
+            TestDiffFileProps {
+                file: test_file()?,
+                artifact_tab_id: None,
+            },
+        );
+        dom.rebuild_in_place();
+        let workspace = dom
+            .runtime()
+            .consume_context::<Store<ClientDiffWorkspace>>(ScopeId::APP)
+            .unwrap();
+        let file = workspace.files().get(3).unwrap();
+        file.rows()
+            .unified()
+            .push(vec![ViewerUnifiedRow::Meta("appended batch".to_owned())]);
+        dom.render_immediate(&mut NoOpMutations);
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("echo static"));
+        assert!(html.contains("appended batch"));
+
+        file.rows().set(ClientDiffRows::default());
+        dom.render_immediate(&mut NoOpMutations);
+        file.rows()
+            .unified()
+            .push(vec![ViewerUnifiedRow::Meta("retried batch".to_owned())]);
+        dom.render_immediate(&mut NoOpMutations);
+        let html = dioxus_ssr::render(&dom);
+        assert!(html.contains("retried batch"));
+        assert!(!html.contains("echo static"));
+        assert!(!html.contains("appended batch"));
+        Ok(())
     }
 
     #[test]

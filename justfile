@@ -26,7 +26,7 @@ up:
 # Serve the development-only component story catalog in a browser.
 [group('build')]
 preview-components *args:
-    cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-story-cli -- serve {{ args }}
+    cargo run --quiet --manifest-path ../../shared-libs/dx-story/Cargo.toml -p dx-story-cli -- serve {{ args }}
 
 # Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]
@@ -221,7 +221,7 @@ fix *args:
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
 drift-check:
-    cargo run --quiet --manifest-path ../../shared-libs/dx-preview/Cargo.toml -p dx-story-cli -- styles
+    cargo run --quiet --manifest-path ../../shared-libs/dx-story/Cargo.toml -p dx-story-cli -- styles
     cargo run --quiet -p xtask -- drift-check
 
 # Report missing Mise-managed tools without changing the host.

@@ -134,11 +134,15 @@ impl TabOverflowFixture {
 
 impl ViewerFixture {
     pub fn create(data_root: &Path) -> Result<Self> {
+        Self::create_named(data_root, "live-view")
+    }
+
+    pub fn create_named(data_root: &Path, name: &str) -> Result<Self> {
         let cli = required_environment_path("GTL_E2E_CLI_BINARY")?;
         let fixture_root = required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
         let repository = create_changed_repository(
             &fixture_root.join("dom-repositories"),
-            "live-view",
+            name,
             "alpha-v1",
             "live view v1",
         )?;
@@ -252,4 +256,53 @@ fn command_checked_with_optional_data_root<const N: usize>(
 fn path_as_str(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("path is not valid UTF-8: {}", path.display()))
+}
+
+pub struct ProjectsFixture {
+    pub alpha: PathBuf,
+    pub beta: PathBuf,
+    pub initial: PathBuf,
+    pub missing: PathBuf,
+}
+
+impl ProjectsFixture {
+    pub fn create(data_root: &Path) -> Result<Self> {
+        let root = data_root.join("project-repositories");
+        fs::create_dir_all(&root)?;
+        let alpha = create_changed_repository(
+            &root,
+            "projects-alpha",
+            "committed-project-marker",
+            "committed project work",
+        )?;
+        git(&alpha, ["branch", "--set-upstream-to=main"])?;
+        fs::write(
+            alpha.join("work.txt"),
+            "base\ncommitted-project-marker\nlocal-project-marker\n",
+        )?;
+        fs::write(alpha.join("new.txt"), "untracked-project-marker\n")?;
+        let beta = create_changed_repository(
+            &root,
+            "projects-beta",
+            "clean-project-marker",
+            "clean project work",
+        )?;
+        git(&beta, ["branch", "-f", "main", "HEAD"])?;
+        git(&beta, ["branch", "--set-upstream-to=main"])?;
+        let initial = root.join("projects-initial");
+        fs::create_dir_all(&initial)?;
+        git(&initial, ["init", "-q", "-b", "main"])?;
+        fs::write(initial.join("first.txt"), "initial-project-marker\n")?;
+        Ok(Self {
+            alpha,
+            beta,
+            initial,
+            missing: root.join("missing"),
+        })
+    }
+
+    pub fn change_untracked(&self) -> Result<()> {
+        fs::write(self.alpha.join("new.txt"), "refreshed-project-marker\n")
+            .context("update untracked fixture")
+    }
 }

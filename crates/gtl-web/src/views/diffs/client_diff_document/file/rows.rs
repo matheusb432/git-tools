@@ -53,8 +53,6 @@ fn DiffFileRows(
     let rows = file.rows();
     let unified_batches = rows.unified();
     let split_batches = rows.split();
-    let unified_batch_count = unified_batches.len();
-    let split_batch_count = split_batches.len();
 
     rsx! {
         div {
@@ -65,19 +63,19 @@ fn DiffFileRows(
             "data-layout": layout_label,
             "data-density": density_label,
             if layout == ViewerDiffLayout::Unified {
-                for batch_index in 0..unified_batch_count {
+                for batch_index in 0..unified_batches.len() {
                     UnifiedDiffRowBatch {
                         key: "{file_index}:{batch_index}",
-                        file_index,
+                        file,
                         batch_index,
                         artifact_enhancement,
                     }
                 }
             } else {
-                for batch_index in 0..split_batch_count {
+                for batch_index in 0..split_batches.len() {
                     SplitDiffRowBatch {
                         key: "{file_index}:{batch_index}",
-                        file_index,
+                        file,
                         batch_index,
                         artifact_enhancement,
                     }

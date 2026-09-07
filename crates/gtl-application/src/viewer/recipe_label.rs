@@ -40,3 +40,19 @@ pub(super) fn commit_count(count: usize) -> String {
 fn source_repo_name(recipe: &Recipe) -> ProjectName {
     recipe.cwd().project_name()
 }
+pub(super) fn live(recipe: &Recipe) -> Option<String> {
+    let comparison = match &recipe.op {
+        RecipeOp::Diff {
+            target: RecipeTarget::Base { rev },
+        } if *rev == gtl_models::git::GitRevision::head() => "Local changes",
+        RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { .. },
+        } => "Unpushed commits",
+        _ => return None,
+    };
+    let name = recipe
+        .name
+        .clone()
+        .unwrap_or_else(|| source_repo_name(recipe));
+    Some(format!("{name}: {comparison}"))
+}

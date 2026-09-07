@@ -168,6 +168,7 @@ pub struct ViewerSession {
     active: Option<ViewerTabId>,
     next_id: Option<u64>,
     version: ViewerVersion,
+    focus_request_version: Option<ViewerVersion>,
 }
 
 impl ViewerSession {
@@ -179,6 +180,7 @@ impl ViewerSession {
             active: None,
             next_id: Some(1),
             version: ViewerVersion::default(),
+            focus_request_version: None,
         }
     }
 
@@ -188,7 +190,12 @@ impl ViewerSession {
         batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Option<ViewerTabId> {
-        let label = initial_recipe_label::execute(&recipe);
+        let label = if kind == ViewerTabKind::Live {
+            super::recipe_label::live(&recipe)
+                .unwrap_or_else(|| initial_recipe_label::execute(&recipe))
+        } else {
+            initial_recipe_label::execute(&recipe)
+        };
         self.open_labeled(recipe, batch_id, kind, label)
     }
 
@@ -547,13 +554,29 @@ impl ViewerSession {
     }
 
     #[must_use]
-    pub fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
+    pub fn live_source(
+        &self,
+        id: ViewerTabId,
+    ) -> Option<(LiveSource, gtl_models::live_views::LiveComparison)> {
         let tab = self.tab(id)?;
         if tab.tab.kind() != ViewerTabKind::Live {
             return None;
         }
+        let comparison = match &tab.recipe.op {
+            crate::recipes::RecipeOp::Diff {
+                target: crate::recipes::RecipeTarget::Base { rev },
+            } if *rev == gtl_models::git::GitRevision::head() => {
+                gtl_models::live_views::LiveComparison::LocalChanges
+            }
+            crate::recipes::RecipeOp::Diff {
+                target: crate::recipes::RecipeTarget::Unpushed { .. },
+            } => gtl_models::live_views::LiveComparison::UnpushedCommits,
+            _ => return None,
+        };
         match &tab.recipe.source {
-            RecipeSource::LocalRepo(path) => Some(LiveSource::local_repo(path.clone())),
+            RecipeSource::LocalRepo(path) => {
+                Some((LiveSource::local_repo(path.clone()), comparison))
+            }
         }
     }
 
@@ -708,6 +731,16 @@ impl ViewerSession {
 
     pub fn mark_shell_changed(&mut self) {
         self.bump_version();
+    }
+
+    pub(super) fn request_focus(&mut self) {
+        self.bump_version();
+        self.focus_request_version = Some(self.version);
+    }
+
+    #[must_use]
+    pub(super) const fn focus_request_version(&self) -> Option<ViewerVersion> {
+        self.focus_request_version
     }
 
     fn bump_version(&mut self) {

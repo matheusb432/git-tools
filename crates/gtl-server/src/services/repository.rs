@@ -16,7 +16,7 @@ use gtl_models::{
     repository::{
         PathCount, PendingChanges,
         recursive_push::{Dest, RepoOutcome, RepoTarget, SubreposPlan},
-        status::{RepositoryStatus, StatusChanges, StatusHead, StatusResult, StatusUpstream},
+        status::StatusResult,
         traversal::RepositoryTraversalScope,
     },
 };
@@ -423,71 +423,8 @@ fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesErro
 }
 
 pub(super) fn status_results(results: &[StatusResult]) -> Vec<v1::RepositoryStatusResult> {
-    results.iter().map(status_result).collect()
-}
-
-fn status_result(result: &StatusResult) -> v1::RepositoryStatusResult {
-    let state = match result.repository() {
-        RepositoryStatus::Absent => {
-            v1::repository_status_result::State::Absent(v1::RepositoryAbsentStatus {})
-        }
-        RepositoryStatus::Present { head, changes } => {
-            v1::repository_status_result::State::Present(v1::RepositoryPresentStatus {
-                head: Some(status_head(head)),
-                changes: Some(status_changes(*changes)),
-            })
-        }
-    };
-    v1::RepositoryStatusResult {
-        project_name: result.name().to_string(),
-        state: Some(state),
-    }
-}
-
-fn status_head(head: &StatusHead) -> v1::RepositoryStatusHead {
-    let state = match head {
-        StatusHead::Unavailable => {
-            v1::repository_status_head::State::Unavailable(v1::RepositoryStatusUnavailable {})
-        }
-        StatusHead::Detached => {
-            v1::repository_status_head::State::Detached(v1::RepositoryStatusDetached {})
-        }
-        StatusHead::Branch { name, upstream } => {
-            v1::repository_status_head::State::Branch(v1::RepositoryStatusBranch {
-                name: name.to_string(),
-                upstream: Some(match upstream {
-                    StatusUpstream::Missing => v1::repository_status_branch::Upstream::Missing(
-                        v1::RepositoryUpstreamMissing {},
-                    ),
-                    StatusUpstream::Tracking { reference, ahead } => {
-                        v1::repository_status_branch::Upstream::Tracking(
-                            v1::RepositoryUpstreamTracking {
-                                reference: reference.to_string(),
-                                commits_ahead: ahead.into_inner(),
-                            },
-                        )
-                    }
-                }),
-            })
-        }
-    };
-    v1::RepositoryStatusHead { state: Some(state) }
-}
-
-fn status_changes(changes: StatusChanges) -> v1::RepositoryStatusChanges {
-    let state = match changes {
-        StatusChanges::Clean => {
-            v1::repository_status_changes::State::Clean(v1::RepositoryChangesClean {})
-        }
-        StatusChanges::Changed { tracked, untracked } => {
-            v1::repository_status_changes::State::Changed(v1::RepositoryChangesChanged {
-                tracked_paths: tracked.value(),
-                untracked_paths: untracked.value(),
-            })
-        }
-        StatusChanges::Unavailable => {
-            v1::repository_status_changes::State::Unavailable(v1::RepositoryChangesUnavailable {})
-        }
-    };
-    v1::RepositoryStatusChanges { state: Some(state) }
+    results
+        .iter()
+        .map(gtl_wire::proto::viewer::projects::encode_status_result)
+        .collect()
 }

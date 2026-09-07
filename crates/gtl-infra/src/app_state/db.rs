@@ -194,12 +194,36 @@ DELETE FROM render_operations WHERE id = 3;
 DELETE FROM project_sources WHERE id NOT IN (SELECT source_id FROM recent_renders);
 ";
 
+const SCHEMA_V6: &str = "
+CREATE TABLE live_views_next (
+  id INTEGER PRIMARY KEY,
+  source_kind TEXT NOT NULL,
+  source_value TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_opened_at TEXT,
+  comparison TEXT NOT NULL DEFAULT 'unpushed_commits' CHECK (comparison IN ('local_changes', 'unpushed_commits')),
+  UNIQUE (source_kind, source_value, comparison)
+) STRICT;
+INSERT INTO live_views_next (id, source_kind, source_value, display_name, created_at, last_opened_at)
+SELECT id, source_kind, source_value, display_name, created_at, last_opened_at FROM live_views;
+DROP TABLE live_views;
+ALTER TABLE live_views_next RENAME TO live_views;
+CREATE TABLE project_render_recency (
+  source_value TEXT PRIMARY KEY,
+  rendered_at TEXT NOT NULL
+) STRICT;
+INSERT INTO project_render_recency (source_value, rendered_at)
+SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
+";
+
 const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(SCHEMA_V1),
     M::up(SCHEMA_V2),
     M::up(SCHEMA_V3),
     M::up(SCHEMA_V4),
     M::up(SCHEMA_V5),
+    M::up(SCHEMA_V6),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -346,7 +370,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 5);
+        assert_eq!(user_version, 6);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -581,7 +605,7 @@ mod tests {
                 "recent_renders_repo_name_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 5);
+        assert_eq!(user_version, 6);
     }
 
     /// Two processes can open a fresh database concurrently; both

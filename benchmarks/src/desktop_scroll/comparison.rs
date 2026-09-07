@@ -25,14 +25,18 @@ pub struct FrameGapComparison {
 pub struct DesktopScrollComparison {
     pub readiness_wall_time_milliseconds: MetricDelta,
     pub readiness_process_cpu_time_milliseconds: MetricDelta,
+    pub loading: PanelComparison,
     pub diff_document: PanelComparison,
     pub changed_files: PanelComparison,
     pub commits: PanelComparison,
     pub peak_rss_bytes: MetricDelta,
+    pub viewer_loading_peak_rss_bytes: MetricDelta,
     pub single_file_readiness_wall_time_milliseconds: MetricDelta,
     pub single_file_readiness_process_cpu_time_milliseconds: MetricDelta,
+    pub single_file_loading: PanelComparison,
     pub single_file_diff_document: PanelComparison,
     pub single_file_peak_rss_bytes: MetricDelta,
+    pub single_file_viewer_loading_peak_rss_bytes: MetricDelta,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,6 +87,11 @@ impl std::fmt::Display for DesktopScrollPanel {
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum DesktopScrollComparisonError {
+    #[error("{report} desktop loading launch {launch} has missing or invalid frame gaps")]
+    InvalidLoadingFrames {
+        report: DesktopScrollReportRole,
+        launch: usize,
+    },
     #[error("{report} desktop scroll report uses format version {actual}, expected {expected}")]
     UnsupportedFormat {
         report: DesktopScrollReportRole,
@@ -214,23 +223,7 @@ pub fn compare_reports(
     baseline: &DesktopScrollReport,
     current: &DesktopScrollReport,
 ) -> Result<DesktopScrollComparison, DesktopScrollComparisonError> {
-    validate_report(DesktopScrollReportRole::Baseline, baseline)?;
-    validate_report(DesktopScrollReportRole::Current, current)?;
-    if baseline.fixture_manifest != current.fixture_manifest {
-        return Err(DesktopScrollComparisonError::IncompatibleFixture);
-    }
-    if baseline.protocol != current.protocol {
-        return Err(DesktopScrollComparisonError::IncompatibleProtocol);
-    }
-    if baseline.resource_bounds != current.resource_bounds {
-        return Err(DesktopScrollComparisonError::IncompatibleResourceBounds);
-    }
-    if baseline.runner != current.runner {
-        return Err(DesktopScrollComparisonError::IncompatibleRunnerEnvironment);
-    }
-    if baseline.source.profile != current.source.profile {
-        return Err(DesktopScrollComparisonError::IncompatibleBuildProfile);
-    }
+    validate_comparison(baseline, current)?;
 
     let baseline_changed_files = panel_metrics(baseline, DesktopScrollPanel::ChangedFiles);
     let current_changed_files = panel_metrics(current, DesktopScrollPanel::ChangedFiles);
@@ -260,12 +253,27 @@ pub fn compare_reports(
             process_cpu_time_milliseconds(baseline),
             process_cpu_time_milliseconds(current),
         ),
+        loading: compare_panels(loading_metrics(baseline), loading_metrics(current)),
         diff_document: compare_panels(baseline_diff_document, current_diff_document),
         changed_files: compare_panels(baseline_changed_files, current_changed_files),
         commits: compare_panels(baseline_commits, current_commits),
         peak_rss_bytes: MetricDelta::between(
             u64_to_f64(peak_rss_bytes(baseline)),
             u64_to_f64(peak_rss_bytes(current)),
+        ),
+        viewer_loading_peak_rss_bytes: MetricDelta::between(
+            maximum_u64_as_f64(
+                baseline
+                    .launches
+                    .iter()
+                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
+            ),
+            maximum_u64_as_f64(
+                current
+                    .launches
+                    .iter()
+                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
+            ),
         ),
         single_file_readiness_wall_time_milliseconds: MetricDelta::between(
             median_u64_as_f64(
@@ -285,9 +293,27 @@ pub fn compare_reports(
             single_file_process_cpu_time_milliseconds(baseline),
             single_file_process_cpu_time_milliseconds(current),
         ),
+        single_file_loading: compare_panels(
+            single_file_loading_metrics(baseline),
+            single_file_loading_metrics(current),
+        ),
         single_file_diff_document: compare_panels(
             baseline_single_file_diff_document,
             current_single_file_diff_document,
+        ),
+        single_file_viewer_loading_peak_rss_bytes: MetricDelta::between(
+            maximum_u64_as_f64(
+                baseline
+                    .single_file_launches
+                    .iter()
+                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
+            ),
+            maximum_u64_as_f64(
+                current
+                    .single_file_launches
+                    .iter()
+                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
+            ),
         ),
         single_file_peak_rss_bytes: MetricDelta::between(
             u64_to_f64(single_file_peak_rss_bytes(baseline)),
@@ -309,6 +335,31 @@ impl MetricDelta {
             relative_change_percent,
         }
     }
+}
+
+fn validate_comparison(
+    baseline: &DesktopScrollReport,
+    current: &DesktopScrollReport,
+) -> Result<(), DesktopScrollComparisonError> {
+    validate_report(DesktopScrollReportRole::Baseline, baseline)?;
+    validate_report(DesktopScrollReportRole::Current, current)?;
+    if baseline.fixture_manifest != current.fixture_manifest {
+        return Err(DesktopScrollComparisonError::IncompatibleFixture);
+    }
+    if baseline.protocol != current.protocol {
+        return Err(DesktopScrollComparisonError::IncompatibleProtocol);
+    }
+    if baseline.resource_bounds != current.resource_bounds {
+        return Err(DesktopScrollComparisonError::IncompatibleResourceBounds);
+    }
+    if baseline.runner != current.runner {
+        return Err(DesktopScrollComparisonError::IncompatibleRunnerEnvironment);
+    }
+    if baseline.source.profile != current.source.profile {
+        return Err(DesktopScrollComparisonError::IncompatibleBuildProfile);
+    }
+
+    Ok(())
 }
 
 fn validate_report(
@@ -357,6 +408,24 @@ fn validate_report(
         );
     }
 
+    for (launch, gaps) in report
+        .launches
+        .iter()
+        .map(|launch| (launch.launch, &launch.loading_frame_gaps_ms))
+        .chain(
+            report
+                .single_file_launches
+                .iter()
+                .map(|launch| (launch.launch, &launch.loading_frame_gaps_ms)),
+        )
+    {
+        if gaps.is_empty() || gaps.iter().any(|gap| !gap.is_finite() || *gap < 0.0) {
+            return Err(DesktopScrollComparisonError::InvalidLoadingFrames {
+                report: report_role,
+                launch,
+            });
+        }
+    }
     validate_many_file_launches(report_role, report)?;
     validate_single_file_launches(report_role, report)
 }
@@ -552,6 +621,24 @@ fn single_file_panel_metrics(report: &DesktopScrollReport) -> PanelMetrics {
     )
 }
 
+fn loading_metrics(report: &DesktopScrollReport) -> PanelMetrics {
+    panel_metrics_from_gaps(
+        report
+            .launches
+            .iter()
+            .flat_map(|launch| launch.loading_frame_gaps_ms.iter().copied()),
+    )
+}
+
+fn single_file_loading_metrics(report: &DesktopScrollReport) -> PanelMetrics {
+    panel_metrics_from_gaps(
+        report
+            .single_file_launches
+            .iter()
+            .flat_map(|launch| launch.loading_frame_gaps_ms.iter().copied()),
+    )
+}
+
 fn panel_metrics_from_gaps(frame_gaps_ms: impl Iterator<Item = f64>) -> PanelMetrics {
     let mut frame_gaps_ms = frame_gaps_ms.collect::<Vec<_>>();
     frame_gaps_ms.sort_by(f64::total_cmp);
@@ -584,6 +671,10 @@ fn compare_panels(baseline: PanelMetrics, current: PanelMetrics) -> PanelCompari
             u64_to_f64(current.frames_exceeding_33_ms),
         ),
     }
+}
+
+fn maximum_u64_as_f64(values: impl Iterator<Item = u64>) -> f64 {
+    u64_to_f64(values.max().unwrap_or(0))
 }
 
 fn u64_to_f64(value: u64) -> f64 {
@@ -663,6 +754,30 @@ mod tests {
         DesktopScrollSingleFileLaunch, DesktopScrollSingleFileWorkload, DesktopScrollSource,
         DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
     };
+
+    #[test]
+    fn loading_comparison_combines_raw_launches_and_rejects_invalid_samples() {
+        let baseline = standard_report();
+        let mut current = baseline.clone();
+        current.launches[0].loading_frame_gaps_ms = vec![10.0, 12.0];
+        current.launches[1].loading_frame_gaps_ms = vec![15.0];
+        current.launches[2].loading_frame_gaps_ms = vec![50.0];
+        let comparison = compare_reports(&baseline, &current).unwrap();
+        assert_close(comparison.loading.frame_gap_ms.p50.current, 12.0);
+        assert_close(comparison.loading.frame_gap_ms.p95.current, 50.0);
+        assert_close(comparison.loading.frames_exceeding_33_ms.current, 1.0);
+
+        for gaps in [vec![], vec![-1.0], vec![f64::NAN], vec![f64::INFINITY]] {
+            current.single_file_launches[0].loading_frame_gaps_ms = gaps;
+            assert_eq!(
+                compare_reports(&baseline, &current),
+                Err(DesktopScrollComparisonError::InvalidLoadingFrames {
+                    report: DesktopScrollReportRole::Current,
+                    launch: 1,
+                })
+            );
+        }
+    }
 
     #[test]
     fn comparison_combines_launch_distributions_and_peak_memory() {
@@ -934,6 +1049,7 @@ mod tests {
                 launch: index + 1,
                 conditions_before_launch: conditions(),
                 outer_window: window(),
+                loading_frame_gaps_ms: vec![16.0, 40.0, 20.0],
                 readiness: readiness(
                     readiness_wall_time_milliseconds[index],
                     readiness_process_cpu_clock_ticks[index],
@@ -972,6 +1088,7 @@ mod tests {
                 launch: index + 1,
                 conditions_before_launch: conditions(),
                 outer_window: window(),
+                loading_frame_gaps_ms: vec![16.0, 40.0, 20.0],
                 readiness: readiness(
                     readiness_wall_time_milliseconds[index],
                     readiness_process_cpu_clock_ticks[index],
@@ -1005,6 +1122,7 @@ mod tests {
             wall_time_milliseconds,
             process_cpu_clock_ticks,
             peak_memory: memory(peak_rss_bytes),
+            viewer_peak_rss_bytes: peak_rss_bytes / 2,
         }
     }
 

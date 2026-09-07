@@ -3950,6 +3950,8 @@ name = "gtl-desktop-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "sample_project-local-auth",
+ "sample_project-wire",
  "command-group",
  "futures-util",
  "gtl-benchmarks",
@@ -3960,6 +3962,9 @@ dependencies = [
  "tempfile",
  "thirtyfour",
  "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-health",
 ]
 
 [[package]]
@@ -3972,6 +3977,7 @@ dependencies = [
  "gix",
  "gtl-application",
  "gtl-models",
+ "gtl-wire",
  "libc",
  "parking_lot",
  "rusqlite",

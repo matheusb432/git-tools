@@ -12,6 +12,7 @@ use gtl_application::{
     },
     live_views::delete_live_viewer_tab::{self, DeleteLiveViewerTabError},
     ports::UserSettingsEditError,
+    projects::list_viewer_projects,
     recipes::RecipeOp,
     settings::{
         ProjectSettingsUpdate, ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
@@ -65,10 +66,87 @@ impl ViewerGrpcService {
     }
 }
 
+fn project_catalogue_error(error: &gtl_application::ports::ProjectClientError) -> Status {
+    tracing::warn!(error = ?error, "viewer project catalogue is unavailable");
+    Status::failed_precondition("project catalogue is unavailable")
+}
+
 type WatchStream = Pin<Box<dyn Stream<Item = Result<v1::WatchViewerResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
 impl ViewerService for ViewerGrpcService {
+    async fn list_viewer_projects(
+        &self,
+        _request: Request<v1::ListViewerProjectsRequest>,
+    ) -> Result<Response<v1::ListViewerProjectsResponse>, Status> {
+        let repositories = self
+            .state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_catalogue_error(&error))?;
+        let state = self.state.clone();
+        let projects = run_blocking(move || {
+            let connection = state.database.connection_lock()?;
+            list_viewer_projects::execute(repositories, &state.git, &connection)
+        })
+        .await?
+        .map_err(|error| unexpected(error, "list viewer projects"))?;
+        Ok(Response::new(v1::ListViewerProjectsResponse {
+            projects: projects
+                .into_iter()
+                .map(proto::viewer::projects::encode_project)
+                .collect(),
+        }))
+    }
+
+    async fn open_viewer_project(
+        &self,
+        request: Request<v1::OpenViewerProjectRequest>,
+    ) -> Result<Response<v1::OpenViewerProjectResponse>, Status> {
+        use gtl_application::projects::open_viewer_project::{
+            self, OpenProjectComparison, OpenViewerProjectError,
+        };
+        let project = proto::viewer::projects::decode_open(request.into_inner())
+            .map_err(|_| Status::invalid_argument("invalid project comparison"))?;
+        let repositories = self
+            .state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_catalogue_error(&error))?;
+        let state = self.state.clone();
+        let work = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(OpenViewerProjectError::from)?;
+            open_viewer_project::execute(
+                OpenProjectComparison {
+                    project,
+                    repositories,
+                },
+                &state.git,
+                &mut connection,
+                &state.clock,
+                &state.viewer,
+            )
+        })
+        .await?
+        .map_err(|error| match error {
+            OpenViewerProjectError::NotFound => Status::not_found("project is no longer available"),
+            OpenViewerProjectError::NoUpstream => {
+                Status::failed_precondition("No upstream configured")
+            }
+            OpenViewerProjectError::Unexpected(error) => {
+                unexpected(error, "open project comparison")
+            }
+        })?;
+        let tab_id = work.ticket().tab_id.into();
+        viewer_runtime::spawn_recipe(self.state.clone(), work);
+        Ok(Response::new(v1::OpenViewerProjectResponse { tab_id }))
+    }
+
     async fn get_viewer_shell(
         &self,
         _request: Request<v1::GetViewerShellRequest>,

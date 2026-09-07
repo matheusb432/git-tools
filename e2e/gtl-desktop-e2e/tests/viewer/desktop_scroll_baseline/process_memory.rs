@@ -23,6 +23,7 @@ struct ProcessIdentity {
 #[derive(Debug)]
 struct AttributedProcessSnapshot {
     memory: DesktopScrollProcessMemory,
+    viewer_rss_bytes: u64,
     cpu_clock_ticks_by_process: BTreeMap<u32, u64>,
 }
 
@@ -61,6 +62,7 @@ pub struct ReadinessProcessSampler {
     cpu_clock_ticks_by_process_started: BTreeMap<u32, u64>,
     cpu_clock_ticks_by_process_latest: BTreeMap<u32, u64>,
     peak_memory: DesktopScrollProcessMemory,
+    viewer_peak_rss_bytes: u64,
 }
 
 impl ReadinessProcessSampler {
@@ -75,11 +77,13 @@ impl ReadinessProcessSampler {
             cpu_clock_ticks_by_process_started: snapshot.cpu_clock_ticks_by_process.clone(),
             cpu_clock_ticks_by_process_latest: snapshot.cpu_clock_ticks_by_process,
             peak_memory: snapshot.memory,
+            viewer_peak_rss_bytes: snapshot.viewer_rss_bytes,
         }))
     }
 
     pub fn observe(&mut self) -> Result<()> {
         let snapshot = readiness_attributed_process_snapshot(&self.data_root)?;
+        self.viewer_peak_rss_bytes = self.viewer_peak_rss_bytes.max(snapshot.viewer_rss_bytes);
         if snapshot.memory.rss_bytes > self.peak_memory.rss_bytes {
             self.peak_memory = snapshot.memory;
         }
@@ -102,6 +106,7 @@ impl ReadinessProcessSampler {
                 &self.cpu_clock_ticks_by_process_latest,
             )?,
             peak_memory: self.peak_memory,
+            viewer_peak_rss_bytes: self.viewer_peak_rss_bytes,
         })
     }
 }
@@ -168,12 +173,19 @@ fn attributed_process_inventory(data_root: &Path) -> Result<AttributedProcessInv
 
 impl AttributedProcessInventory {
     fn into_snapshot(self) -> Result<AttributedProcessSnapshot> {
+        let viewer_ids = descendant_processes(&self.viewer_roots, &self.identities);
+        let mut viewer_rss_bytes = 0_u64;
         let mut roots = self.viewer_roots;
         roots.extend(self.server_roots);
         let attributed_ids = descendant_processes(&roots, &self.identities);
         let mut totals = AttributedProcessTotals::default();
         for process_id in attributed_ids {
             let measurement = measure_attributed_process(process_id, &roots, &self.identities)?;
+            if viewer_ids.contains(&process_id) {
+                viewer_rss_bytes = viewer_rss_bytes
+                    .checked_add(measurement.map_or(0, |(rss_bytes, _)| rss_bytes))
+                    .context("sum viewer process-tree RSS")?;
+            }
             totals.observe(process_id, measurement)?;
         }
         ensure!(
@@ -182,6 +194,7 @@ impl AttributedProcessInventory {
         );
 
         Ok(AttributedProcessSnapshot {
+            viewer_rss_bytes,
             memory: DesktopScrollProcessMemory {
                 attribution: ATTRIBUTION.to_owned(),
                 process_count: totals.measured_process_count,

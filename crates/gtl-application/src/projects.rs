@@ -4,9 +4,12 @@ use gtl_models::{paths::ProjectName, projects::ProjectRepository, settings::Push
 
 pub mod build_recipes;
 pub mod commit_repositories;
+pub mod list_viewer_projects;
+pub mod open_viewer_project;
 pub mod plan_push;
 pub mod pull_repositories;
 pub mod push_repositories;
+pub mod record_project_render;
 mod remote_sync;
 pub mod render_project_diff;
 pub mod select_unpushed_repositories;

@@ -8,7 +8,7 @@ use gtl_wire::viewer::{
 use lucide_dioxus::{Check, ChevronLeft, ChevronRight, Copy, ExternalLink, History};
 
 use crate::{
-    app::{application_layout::ViewerContext, application_router::Route},
+    app::application_layout::ViewerContext,
     entities::diffs::{history_navigation, recipe_kind_label, viewer_server},
     shared::{
         browser,
@@ -28,7 +28,6 @@ struct HistoryActions {
 
 fn use_history_actions() -> HistoryActions {
     let viewer = use_context::<ViewerContext>();
-    let navigator = use_navigator();
     let mut error = use_signal(|| None::<ViewerClientError>);
     let mut opening_id = use_signal(|| None::<RenderHistoryId>);
     let mut copied_id = use_signal(|| None::<RenderHistoryId>);
@@ -39,7 +38,6 @@ fn use_history_actions() -> HistoryActions {
         match result {
             Ok(shell) => {
                 viewer.replace_shell(shell);
-                navigator.push(Route::Workspace {});
             }
             Err(next_error) => error.set(Some(next_error)),
         }

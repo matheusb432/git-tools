@@ -24,6 +24,8 @@ pub enum ViewerClientError {
     ResourceExhausted,
     #[error("The desktop viewer is temporarily unavailable.")]
     Unavailable,
+    #[error("The project catalogue is unavailable. Check sample_project and try Refresh.")]
+    ProjectsUnavailable,
     #[error("The viewer could not complete this action.")]
     Internal,
 }
@@ -44,6 +46,9 @@ impl ViewerClientError {
                 "The viewer has too many active streams. Close another viewer and try again."
             }
             Self::Unavailable => "The desktop viewer is temporarily unavailable.",
+            Self::ProjectsUnavailable => {
+                "The project catalogue is unavailable. Check sample_project and try Refresh."
+            }
             Self::Internal => "The viewer could not complete this action.",
         }
     }
@@ -82,6 +87,7 @@ mod tests {
             ViewerClientError::Conflict,
             ViewerClientError::ResourceExhausted,
             ViewerClientError::Unavailable,
+            ViewerClientError::ProjectsUnavailable,
             ViewerClientError::Internal,
         ] {
             let encoded = serde_json::to_string(&error).unwrap();

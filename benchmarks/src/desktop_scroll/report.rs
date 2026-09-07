@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::DesktopScrollManifest;
 
-pub const REPORT_FORMAT_VERSION: u32 = 5;
+pub const REPORT_FORMAT_VERSION: u32 = 6;
 pub const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const DISTANCE_CSS_PIXELS: u32 = 160;
 const STEP_CSS_PIXELS: u32 = 8;
@@ -114,6 +114,7 @@ pub struct DesktopScrollLaunch {
     pub conditions_before_launch: DesktopScrollSystemConditions,
     pub outer_window: DesktopScrollWindow,
     pub readiness: DesktopScrollReadinessSample,
+    pub loading_frame_gaps_ms: Vec<f64>,
     pub diff_document: ScrollSample,
     pub memory_after_diff_document: DesktopScrollProcessMemory,
     pub changed_files: ScrollSample,
@@ -128,6 +129,7 @@ pub struct DesktopScrollSingleFileLaunch {
     pub conditions_before_launch: DesktopScrollSystemConditions,
     pub outer_window: DesktopScrollWindow,
     pub readiness: DesktopScrollReadinessSample,
+    pub loading_frame_gaps_ms: Vec<f64>,
     pub diff_document: ScrollSample,
     pub memory_after_diff_document: DesktopScrollProcessMemory,
 }
@@ -137,6 +139,7 @@ pub struct DesktopScrollReadinessSample {
     pub wall_time_milliseconds: u64,
     pub process_cpu_clock_ticks: u64,
     pub peak_memory: DesktopScrollProcessMemory,
+    pub viewer_peak_rss_bytes: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
-use gtl_wire::viewer::{MoveViewerTab, ViewerActiveState, ViewerTab, ViewerTabRequest};
+use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabRequest};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -12,8 +12,8 @@ use crate::{
     shared::{
         browser,
         ui::{
-            ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
-            ViewerTabRailMeasurementItem, use_toast, viewer_tab_element_id,
+            Button, ButtonSize, ButtonVariant, ScrollArea, ScrollAreaVariant, ViewerTabItem,
+            ViewerTabOverflowMenu, ViewerTabRailMeasurementItem, use_toast, viewer_tab_element_id,
         },
     },
     views::viewer_menu::ViewerMenu,
@@ -27,23 +27,6 @@ const VIEWER_TAB_OVERFLOW_TOLERANCE_PX: f64 = 1.0;
 struct ViewerTabActivation {
     tab_id: ViewerTabId,
     focus: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewerTabActivationPlan {
-    navigate_to_workspace: bool,
-    request: Option<ViewerTabActivation>,
-}
-
-fn viewer_tab_activation_plan(
-    active_tab_id: Option<ViewerTabId>,
-    activation: ViewerTabActivation,
-    workspace_route_active: bool,
-) -> ViewerTabActivationPlan {
-    ViewerTabActivationPlan {
-        navigate_to_workspace: !workspace_route_active,
-        request: (active_tab_id != Some(activation.tab_id)).then_some(activation),
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -134,32 +117,12 @@ fn viewer_tab_rail_overflows(content_width: f64, viewport_width: f64) -> bool {
 pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
-    let workspace_route_active = matches!(use_route::<Route>(), Route::Workspace {});
+    let route = use_route::<Route>();
     let toast = use_toast();
     let shell = viewer.shell();
     let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
     let tab_rail_overflow = use_viewer_tab_rail_overflow();
-    let mut pending_active_tab_id = use_signal(|| None::<ViewerTabId>);
     let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
-    let mut activate_tab = use_action(move |activation: ViewerTabActivation| async move {
-        match viewer_server::activate_tab(ViewerTabRequest {
-            tab_id: activation.tab_id,
-        })
-        .await
-        {
-            Ok(shell) => {
-                viewer.replace_shell(shell);
-                if activation.focus {
-                    browser::focus_element(viewer_tab_element_id(activation.tab_id));
-                }
-            }
-            Err(error) => toast.error(error.message()),
-        }
-        if *pending_active_tab_id.peek() == Some(activation.tab_id) {
-            pending_active_tab_id.set(None);
-        }
-        Ok::<(), std::convert::Infallible>(())
-    });
     let mut move_tab = use_action(move |request: MoveViewerTab| async move {
         match viewer_server::move_tab(request).await {
             Ok(shell) => viewer.replace_shell(shell),
@@ -169,14 +132,14 @@ pub(crate) fn ApplicationNavigation() -> Element {
         Ok::<(), std::convert::Infallible>(())
     });
     let shell_state = shell.read();
-    let (active_tab_id, tabs) = match &*shell_state {
-        ViewerShellLoad::Ready(shell) => (active_tab_id(&shell.active), shell.tabs.as_slice()),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (None, &[] as &[ViewerTab]),
+    let tabs = match &*shell_state {
+        ViewerShellLoad::Ready(shell) => shell.tabs.as_slice(),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => &[] as &[ViewerTab],
     };
     let pending_order = pending_tab_order();
     let displayed_tabs = tabs_in_order(tabs, pending_order.as_deref());
     let displayed_tab_ids = displayed_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
-    let active_tab_id = pending_active_tab_id().or(active_tab_id);
+    let active_tab_id = route.tab_id();
     let overflow_active_tab = active_tab_id.and_then(|tab_id| {
         displayed_tabs
             .iter()
@@ -192,6 +155,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
     } else {
         Vec::new()
     };
+    let projects_active = matches!(route, Route::Projects {});
     let tab_rail_classes = if tab_rail_collapsed {
         "pointer-events-none invisible min-w-0 flex-1 overflow-hidden"
     } else {
@@ -201,20 +165,32 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let overflow_drop_tabs = displayed_tab_ids.clone();
     let reorderable = pending_order.is_none();
     let activate_viewer_tab = use_callback(move |activation: ViewerTabActivation| {
-        let plan = viewer_tab_activation_plan(active_tab_id, activation, workspace_route_active);
-        if plan.navigate_to_workspace {
-            navigator.push(Route::Workspace {});
+        let target = Route::Diff {
+            tab_id: activation.tab_id,
+        };
+        if route != target {
+            navigator.push(target);
         }
-        if let Some(request) = plan.request {
-            pending_active_tab_id.set(Some(request.tab_id));
-            activate_tab.call(request);
+        if activation.focus {
+            browser::focus_element(viewer_tab_element_id(activation.tab_id));
         }
     });
 
     rsx! {
         nav {
-            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2",
             aria_label: "Viewer navigation",
+            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2",
+            Button {
+                variant: if projects_active { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
+                size: ButtonSize::Medium,
+                class: "m-1",
+                aria_label: "Projects",
+                onclick: move |_| {
+                    navigator.push(Route::Projects {});
+                },
+                lucide_dioxus::LayoutGrid { size: 16 }
+                span { class: "hidden sm:inline", "Projects" }
+            }
             div {
                 class: "relative flex min-w-0 flex-1 items-end",
                 style: "margin-left:-1px;",
@@ -418,16 +394,6 @@ fn moved_tab_ids(ids: &[ViewerTabId], request: MoveViewerTab) -> Option<Vec<View
     Some(moved)
 }
 
-const fn active_tab_id(active: &ViewerActiveState) -> Option<ViewerTabId> {
-    match active {
-        ViewerActiveState::Empty => None,
-        ViewerActiveState::Pending { tab_id }
-        | ViewerActiveState::Broken { tab_id, .. }
-        | ViewerActiveState::Error { tab_id, .. } => Some(*tab_id),
-        ViewerActiveState::Ready { view } => Some(view.identity.tab_id),
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TabMovement {
     Next,
@@ -464,8 +430,8 @@ mod tests {
     use gtl_wire::viewer::MoveViewerTab;
 
     use super::{
-        TabMovement, ViewerTabActivation, ViewerTabRailMeasurements, close_focus_target,
-        moved_tab_ids, tab_focus_target, viewer_tab_activation_plan, viewer_tab_rail_overflows,
+        TabMovement, ViewerTabRailMeasurements, close_focus_target, moved_tab_ids,
+        tab_focus_target, viewer_tab_rail_overflows,
     };
     use crate::test_support::{TestResult, viewer_tab_id};
 
@@ -539,32 +505,5 @@ mod tests {
                 .with_viewport_width(640.0)
                 .overflowing()
         );
-    }
-
-    #[test]
-    fn tab_activation_navigates_only_when_workspace_is_not_current() -> TestResult {
-        let current = viewer_tab_id(4)?;
-        let target = viewer_tab_id(8)?;
-        let activation = ViewerTabActivation {
-            tab_id: target,
-            focus: false,
-        };
-
-        let workspace_plan = viewer_tab_activation_plan(Some(current), activation, true);
-        assert!(!workspace_plan.navigate_to_workspace);
-        assert_eq!(workspace_plan.request, Some(activation));
-
-        let history_plan = viewer_tab_activation_plan(Some(current), activation, false);
-        assert!(history_plan.navigate_to_workspace);
-        assert_eq!(history_plan.request, Some(activation));
-
-        let current_plan = viewer_tab_activation_plan(Some(target), activation, true);
-        assert!(!current_plan.navigate_to_workspace);
-        assert_eq!(current_plan.request, None);
-
-        let current_history_plan = viewer_tab_activation_plan(Some(target), activation, false);
-        assert!(current_history_plan.navigate_to_workspace);
-        assert_eq!(current_history_plan.request, None);
-        Ok(())
     }
 }

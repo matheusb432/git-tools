@@ -4,7 +4,7 @@ use anyhow::{Context as _, anyhow};
 use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
 use gtl_models::{
     diffs::{Commit, CommitId},
-    git::{GitRange, GitRevision},
+    git::{GitDiffSpec, GitRange, GitRevision},
     timestamps::MachineTimestamp,
 };
 
@@ -40,13 +40,33 @@ pub(crate) fn diff(
     repo_path: impl AsRef<Path>,
     request: &GitDiffRequest,
 ) -> anyhow::Result<String> {
+    let repo_path = repo_path.as_ref();
+    let temporary_index = match &request.spec {
+        GitDiffSpec::AgainstWorkingTree(_) => Some(working_tree_index(repo_path)?),
+        GitDiffSpec::Range(_) => None,
+    };
     let mut args = vec!["diff".to_string()];
     match request.format {
         GitDiffFormat::NamesOnly => args.push("--name-only".to_string()),
         GitDiffFormat::Unified => {}
         GitDiffFormat::FullContext => args.push("--unified=2147483647".to_string()),
     }
-    args.push(request.spec.to_string());
+    let base = match &request.spec {
+        GitDiffSpec::AgainstWorkingTree(revision)
+            if *revision == GitRevision::head()
+                && !crate::git_process::run(
+                    repo_path,
+                    &["rev-parse", "--verify", "--quiet", "HEAD"],
+                )?
+                .success() =>
+        {
+            run_git(repo_path, &["hash-object", "-t", "tree", "--stdin"])?
+                .trim()
+                .to_owned()
+        }
+        _ => request.spec.to_string(),
+    };
+    args.push(base);
     if !request.excluded_paths.is_empty() {
         args.push("--".to_string());
         args.extend(
@@ -57,7 +77,36 @@ pub(crate) fn diff(
         );
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_git(repo_path, &args)
+    let index = temporary_index
+        .as_ref()
+        .map(|directory| directory.path().join("index"));
+    let output = crate::git_process::run_with_index(repo_path, &args, index.as_deref())?;
+    anyhow::ensure!(output.success(), "{}", output.error_line());
+    Ok(output.stdout)
+}
+
+fn working_tree_index(repo_path: &Path) -> anyhow::Result<tempfile::TempDir> {
+    let directory = tempfile::tempdir()?;
+    let index = directory.path().join("index");
+    let original = run_git(
+        repo_path,
+        &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+    )?;
+    let original = Path::new(original.trim());
+    if original.exists() {
+        std::fs::copy(original, &index)?;
+    } else {
+        let output =
+            crate::git_process::run_with_index(repo_path, &["read-tree", "--empty"], Some(&index))?;
+        anyhow::ensure!(output.success(), "{}", output.error_line());
+    }
+    let output = crate::git_process::run_with_index(
+        repo_path,
+        &["add", "--intent-to-add", "--all", "--", "."],
+        Some(&index),
+    )?;
+    anyhow::ensure!(output.success(), "{}", output.error_line());
+    Ok(directory)
 }
 
 /// The repository's oldest root commit (lexicographically smallest when several

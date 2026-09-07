@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::{
     diffs::CommitId,
-    viewer::{ViewerKeybindingAction, ViewerKeybindings},
+    viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
@@ -15,7 +15,10 @@ use super::{
     commits_panel::WorkspaceCommitsPanel, files_panel::FilesPanel,
 };
 use crate::{
-    app::application_layout::{ViewerContext, ViewerShellLoad},
+    app::{
+        application_layout::{ViewerContext, ViewerShellLoad},
+        application_router::active_tab_id,
+    },
     entities::diffs::{use_viewer_commit_pages, viewer_server},
     shared::{
         browser,
@@ -32,13 +35,9 @@ const LIVE_VIEW_ACTIONS_POPOVER_ID: &str = "live-view-actions";
 const DELETE_LIVE_VIEW_TRIGGER_ID: &str = "delete-live-view-trigger";
 
 #[component]
-pub(crate) fn DiffWorkspaceView() -> Element {
+pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
     let viewer = use_context::<ViewerContext>();
     let shell = viewer.shell();
-
-    use_effect(move || {
-        browser::focus_element("workspace-heading".into());
-    });
 
     rsx! {
         document::Title { "Viewer - git-tools" }
@@ -63,6 +62,13 @@ pub(crate) fn DiffWorkspaceView() -> Element {
                                 "Try again"
                             }
                         }
+                    }
+                }
+                ViewerShellLoad::Ready(
+                    state,
+                ) if tab_id.is_some() && tab_id != active_tab_id(&state.active) => {
+                    rsx! {
+                        WorkspaceLoading {}
                     }
                 }
                 ViewerShellLoad::Ready(_) => rsx! {
@@ -100,6 +106,7 @@ fn WorkspaceLoading() -> Element {
 
 #[component]
 fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
+    let viewer = use_context::<ViewerContext>();
     let view = use_hook(move || shell.map(ready_active_view));
     let shell_state = shell.read();
     let ViewerShellLoad::Ready(shell_state) = &*shell_state else {
@@ -123,23 +130,43 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                             },
                         }
                     },
-                    ViewerActiveState::Pending { .. } => rsx! {},
-                    ViewerActiveState::Broken { code, message, .. } => rsx! {
-                        PageNotice {
-                            class: "h-full px-5",
-                            role: "alert",
-                            title: format!("Render stopped ({})", code.as_str()),
-                            message: message.clone(),
-                        }
+                    ViewerActiveState::Pending { .. } => rsx! {
+                        WorkspaceLoading {}
                     },
-                    ViewerActiveState::Error { message, .. } => rsx! {
-                        PageNotice {
-                            class: "h-full px-5",
-                            role: "alert",
-                            title: "Render failed",
-                            message: message.clone(),
+                    ViewerActiveState::Broken { tab_id, code, message } => {
+                        let tab_id = *tab_id;
+                        rsx! {
+                            PageNotice {
+                                class: "h-full px-5",
+                                role: "alert",
+                                title: format!("Render stopped ({})", code.as_str()),
+                                message: message.clone(),
+                                Button {
+                                    class: "mx-auto mt-4",
+                                    variant: ButtonVariant::Outline,
+                                    onclick: move |_| viewer.refresh_tab(tab_id),
+                                    "Try again"
+                                }
+                            }
                         }
-                    },
+                    }
+                    ViewerActiveState::Error { tab_id, message, .. } => {
+                        let tab_id = *tab_id;
+                        rsx! {
+                            PageNotice {
+                                class: "h-full px-5",
+                                role: "alert",
+                                title: "Render failed",
+                                message: message.clone(),
+                                Button {
+                                    class: "mx-auto mt-4",
+                                    variant: ButtonVariant::Outline,
+                                    onclick: move |_| viewer.refresh_tab(tab_id),
+                                    "Try again"
+                                }
+                            }
+                        }
+                    }
                     ViewerActiveState::Ready { .. } => rsx! {
                         ReadyWorkspace { view, shell }
                     },
@@ -310,7 +337,15 @@ fn ReadyWorkspace(
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
                 diff_document: rsx! {
-                    ClientDiffDocument { onopen }
+                    if file_count == 0 {
+                        PageNotice {
+                            class: "h-full min-h-48 px-5",
+                            title: "No changes",
+                            message: "This comparison is up to date. Refresh after making changes.",
+                        }
+                    } else {
+                        ClientDiffDocument { onopen }
+                    }
                 },
                 onnavigate,
                 mobile_navigation,

@@ -1,21 +1,6 @@
 [catalog]
-path = "crates/gtl-web"
 package = "gtl-web"
 example = "component-preview"
-features = ["component-preview"]
-source-directories = [
-  "../gtl-wire/src",
-  "../gtl-parser/src",
-  "../gtl-web-contracts/src",
-  "dev",
-  "src",
-  "../../../../shared-libs/dx-preview/crates/dx-story-macros/src",
-  "../../../../shared-libs/dx-preview/crates/dx-story/src",
-]
-
-[serve]
-port = 8080
-open = false
 
 [tailwind]
 input = "dev/styles/tailwind.css"

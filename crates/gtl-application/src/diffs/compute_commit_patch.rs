@@ -65,7 +65,7 @@ pub fn execute(
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, &repo_path, &diff_spec, &log_range, excluded)?;
+    } = assemble(git, &repo_path, &diff_spec, Some(&log_range), excluded)?;
     sort_files_tree_order(&mut files);
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);

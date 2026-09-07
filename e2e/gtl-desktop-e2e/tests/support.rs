@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::json;
 use thirtyfour::{By, WebDriver};
 
+pub mod catalogue;
 pub mod evidence;
 pub mod fixture;
 pub mod selectors;
@@ -74,25 +75,49 @@ pub async fn wait_for_active_diff(
         &format!("{repository} diff containing {marker}"),
         wait::ASSERTION_TIMEOUT,
         || async {
-            let active_tabs = driver
-                .find_all(By::Css("[role='tab'][aria-selected='true']"))
-                .await?;
-            let Some(active_tab) = active_tabs.into_iter().next() else {
-                return Ok(None);
-            };
-            let title = active_tab.attr("title").await?.unwrap_or_default();
-            if !active_tab.is_displayed().await? || !title.contains(repository) {
-                return Ok(None);
+            let result = probe_active_diff(driver, repository, marker).await;
+            match result {
+                Err(error)
+                    if matches!(
+                        error
+                            .downcast_ref::<thirtyfour::error::WebDriverError>()
+                            .map(thirtyfour::error::WebDriverError::as_inner),
+                        Some(thirtyfour::error::WebDriverErrorInner::StaleElementReference(_))
+                    ) =>
+                {
+                    Ok(None)
+                }
+                result => result,
             }
-
-            let main = driver.find(By::Css("main")).await?;
-            if main.is_displayed().await? && main.text().await?.contains(marker) {
-                return Ok(Some(()));
-            }
-            Ok(None)
         },
     )
     .await
+}
+
+async fn probe_active_diff(
+    driver: &WebDriver,
+    repository: &str,
+    marker: &str,
+) -> Result<Option<()>> {
+    let active_tabs = driver
+        .find_all(By::Css("[role='tab'][aria-selected='true']"))
+        .await?;
+    let Some(active_tab) = active_tabs.into_iter().next() else {
+        return Ok(None);
+    };
+    let title = active_tab.attr("title").await?.unwrap_or_default();
+    if !active_tab.is_displayed().await?
+        || !title.contains(repository)
+        || active_tab.attr("aria-busy").await?.as_deref() == Some("true")
+    {
+        return Ok(None);
+    }
+
+    let main = driver.find(By::Css("main")).await?;
+    if main.is_displayed().await? && main.text().await?.contains(marker) {
+        return Ok(Some(()));
+    }
+    Ok(None)
 }
 
 pub async fn run_test<F>(name: &str, body: F) -> Result<()>

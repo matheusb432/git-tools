@@ -254,7 +254,8 @@ pub struct DiffTargetArgs {
     /// Diff unpushed work (`@{u}..HEAD`); this is also the default when no target is supplied.
     #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
-    /// Base commit, a `<start>..<end>` range, or empty/omitted for unpushed work.
+    /// Base commit (including staged, unstaged, and untracked changes), a
+    /// `<start>..<end>` committed range, or omitted for unpushed work.
     #[arg(conflicts_with_all = ["last", "recursive"])]
     pub target: Option<String>,
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.

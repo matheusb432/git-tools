@@ -59,6 +59,22 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .restart()
         .await
         .context("restart saved live viewer")?;
+    session
+        .driver()
+        .query(By::Id("projects-heading"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    session
+        .driver()
+        .query(By::Css("[role='tab'][title*='live-view']"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?
+        .click()
+        .await?;
     support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2")
         .await
         .context("restore the refreshed live diff")?;

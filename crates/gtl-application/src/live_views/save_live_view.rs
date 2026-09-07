@@ -13,6 +13,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveLiveView {
     pub path: PathBuf,
+    pub comparison: gtl_models::live_views::LiveComparison,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,7 +59,7 @@ pub fn execute(
     connection: &mut Connection,
     clock: &impl Clock,
 ) -> Result<SaveLiveViewOk, SaveLiveViewError> {
-    let SaveLiveView { path } = req;
+    let SaveLiveView { path, comparison } = req;
     let top_level = match git.probe_repository(&path)? {
         GitRepositoryState::Repository { top_level } => top_level,
         GitRepositoryState::NotFound => {
@@ -77,6 +78,7 @@ pub fn execute(
     let display_name = source.display_name();
     let record = LiveViewRecord {
         source,
+        comparison,
         display_name,
         created_at: clock.now().map_err(anyhow::Error::from)?,
         last_opened_at: None,
@@ -114,12 +116,17 @@ fn save_live_view(
     let raw_previous_times = {
         let mut statement = transaction.prepare_cached(
             "SELECT created_at, last_opened_at
-             FROM live_views WHERE source_kind = ?1 AND source_value = ?2",
+             FROM live_views WHERE source_kind = ?1 AND source_value = ?2 AND comparison = ?3",
         )?;
         statement
-            .query_row(params![record.source.kind(), &source_value], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-            })
+            .query_row(
+                params![
+                    record.source.kind(),
+                    &source_value,
+                    record.comparison.as_str()
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
             .optional()?
     };
     let previous_times = raw_previous_times
@@ -136,9 +143,9 @@ fn save_live_view(
         .transpose()?;
     {
         let mut statement = transaction.prepare_cached(
-            "INSERT INTO live_views (source_kind, source_value, display_name, created_at, last_opened_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(source_kind, source_value) DO UPDATE SET display_name = excluded.display_name",
+            "INSERT INTO live_views (source_kind, source_value, display_name, created_at, last_opened_at, comparison)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_kind, source_value, comparison) DO UPDATE SET display_name = excluded.display_name",
         )?;
         statement.execute(params![
             record.source.kind(),
@@ -149,6 +156,7 @@ fn save_live_view(
                 .last_opened_at
                 .as_ref()
                 .map(gtl_models::timestamps::MachineTimestamp::as_ref),
+            record.comparison.as_str(),
         ])?;
     }
     transaction.commit()?;
@@ -211,6 +219,7 @@ mod tests {
         let (git, mut connection, clock) = dependencies(GitRepositoryState::NotFound);
         let response = save_live_view::execute(
             SaveLiveView {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 path: "/gone".into(),
             },
             &git,
@@ -243,6 +252,7 @@ mod tests {
         let (git, mut connection, clock) = dependencies(GitRepositoryState::NotARepository);
         let response = save_live_view::execute(
             SaveLiveView {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 path: "/plain".into(),
             },
             &git,
@@ -275,6 +285,7 @@ mod tests {
         });
         let response = save_live_view::execute(
             SaveLiveView {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 path: "/repos/gt".into(),
             },
             &git,
@@ -291,6 +302,7 @@ mod tests {
         assert_eq!(
             record,
             &LiveViewRecord {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 source: LiveSource::local_repo(crate::utils::repository_root("/repos/gt")),
                 display_name: crate::utils::project_name("gt"),
                 created_at: created_at("2026-01-01T00:00:00Z"),
@@ -320,6 +332,7 @@ mod tests {
 
         let response = save_live_view::execute(
             SaveLiveView {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 path: "/repos/gt".into(),
             },
             &git,
@@ -345,6 +358,7 @@ mod tests {
         assert_eq!(
             list_views(&connection),
             vec![LiveViewRecord {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 source: LiveSource::local_repo(crate::utils::repository_root("/repos/gt")),
                 display_name: crate::utils::project_name("gt"),
                 created_at: created_at("2025-01-01T00:00:00Z"),
@@ -369,6 +383,7 @@ mod tests {
 
         save_live_view::execute(
             SaveLiveView {
+                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                 path: "/repos/gt".into(),
             },
             &git,

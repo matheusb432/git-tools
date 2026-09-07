@@ -20,10 +20,13 @@ pub(super) fn assemble(
     git: &impl GitClient,
     repo_path: &RepositoryRoot,
     diff_spec: &GitDiffSpec,
-    log_range: &GitRange,
+    log_range: Option<&GitRange>,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
-    let commits = git.log_commits(repo_path, log_range)?;
+    let commits = log_range
+        .map(|range| git.log_commits(repo_path, range))
+        .transpose()?
+        .unwrap_or_default();
 
     let hidden_paths = hidden_paths(git, repo_path, diff_spec, excluded)?;
     let content_request = GitDiffRequest {

@@ -161,6 +161,7 @@ pub(crate) fn Button(
     #[props(extends = button)]
     attributes: Vec<Attribute>,
     onclick: Option<EventHandler<MouseEvent>>,
+    icon: Option<Element>,
     children: Element,
 ) -> Element {
     let base = attributes!(button {
@@ -184,7 +185,15 @@ pub(crate) fn Button(
                 }
             },
             ..attributes,
-            if state.is_loading() {
+            if let Some(icon) = icon {
+                span { class: "inline-flex size-3.5 shrink-0 items-center justify-center",
+                    if state.is_loading() {
+                        LoadingSpinner {}
+                    } else {
+                        {icon}
+                    }
+                }
+            } else if state.is_loading() {
                 LoadingSpinner {}
             }
             {children}

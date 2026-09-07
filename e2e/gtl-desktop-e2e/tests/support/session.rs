@@ -11,7 +11,7 @@ use command_group::{CommandGroup, GroupChild};
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
 use serde_json::json;
-use thirtyfour::{Capabilities, WebDriver};
+use thirtyfour::{By, Capabilities, WebDriver, prelude::ElementQueryable as _};
 use tokio::time::{Instant, sleep, timeout};
 
 use super::wait::{self, WEBDRIVER_OPERATION_TIMEOUT};
@@ -26,6 +26,7 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct TestSession {
+    pub catalogue: super::catalogue::ProjectCatalogue,
     driver: Option<WebDriver>,
     driver_child: Option<GroupChild>,
     server_child: Option<GroupChild>,
@@ -35,15 +36,22 @@ pub struct TestSession {
 impl TestSession {
     pub async fn start(name: &str) -> Result<Self> {
         let data_root = suite_data_root(name)?;
-        Self::start_with_data_root(data_root).await
+        Self::start_with_data_root(data_root, super::catalogue::CatalogueState::default()).await
     }
 
-    async fn start_with_data_root(data_root: PathBuf) -> Result<Self> {
+    async fn start_with_data_root(
+        data_root: PathBuf,
+        catalogue_state: super::catalogue::CatalogueState,
+    ) -> Result<Self> {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
+        let catalogue =
+            super::catalogue::ProjectCatalogue::start(&data_root.join("sample_project"), catalogue_state)
+                .await?;
         let mut server_child = start_server(&data_root).await?;
         match start_driver_with_retries(&data_root, &viewer_binary).await {
             Ok((driver, driver_child)) => Ok(Self {
+                catalogue,
                 driver: Some(driver),
                 driver_child: Some(driver_child),
                 server_child: Some(server_child),
@@ -76,7 +84,7 @@ impl TestSession {
         self.shutdown()
             .await
             .context("stop viewer before restart")?;
-        let replacement = Self::start_with_data_root(data_root)
+        let replacement = Self::start_with_data_root(data_root, self.catalogue.state.clone())
             .await
             .context("start viewer after restart")?;
         *self = replacement;
@@ -245,6 +253,7 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
     command
         .env("GIT_TOOLS_DATA_DIR", data_root)
         .env("GIT_TOOLS_CONFIG", data_root.join("config.toml"))
+        .env("sample_project_DATA_DIR", data_root.join("sample_project"))
         .stdin(Stdio::null());
     deny_external_proxies(&mut command);
     let mut child = command.group_spawn().with_context(|| {
@@ -316,9 +325,18 @@ async fn connect_driver(
         sleep(CONNECTION_RETRY_INTERVAL).await;
     }
 
-    WebDriver::new(&driver_url, capabilities)
+    let driver = WebDriver::new(&driver_url, capabilities)
         .await
-        .context("create one WebDriver session after tauri-driver became reachable")
+        .context("create one WebDriver session after tauri-driver became reachable")?;
+    driver
+        .query(By::Css("button[aria-label='Refresh projects']"))
+        .and_enabled()
+        .and_displayed()
+        .wait(wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await
+        .context("wait for the Projects home connection")?;
+    Ok(driver)
 }
 
 fn verify_runtime_environment() -> Result<()> {

@@ -37,10 +37,20 @@ impl GitProcessOutput {
 }
 
 pub(crate) fn run(repo_path: &Path, args: &[&str]) -> anyhow::Result<GitProcessOutput> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .args(args)
+    run_with_index(repo_path, args, None)
+}
+
+pub(crate) fn run_with_index(
+    repo_path: &Path,
+    args: &[&str],
+    index: Option<&Path>,
+) -> anyhow::Result<GitProcessOutput> {
+    let mut command = Command::new("git");
+    command.arg("-C").arg(repo_path).args(args);
+    if let Some(index) = index {
+        command.env("GIT_INDEX_FILE", index);
+    }
+    let output = command
         .output()
         .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
 

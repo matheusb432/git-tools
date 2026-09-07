@@ -5,7 +5,10 @@ use gtl_models::viewer::{ViewerTabId, ViewerVersion};
 use gtl_wire::viewer::{ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme};
 
 use crate::{
-    app::{application_navigation::ApplicationNavigation, application_router::Route},
+    app::{
+        application_navigation::ApplicationNavigation,
+        application_router::{Route, use_viewer_routes},
+    },
     entities::diffs::viewer_server,
     shared::{
         browser,
@@ -225,6 +228,10 @@ impl ViewerContext {
         self.shell_reader
     }
 
+    pub(crate) fn server_instance_id(self) -> Option<String> {
+        (self.server_instance_id)()
+    }
+
     pub(crate) fn replace_shell(self, shell: ViewerShell) {
         self.try_replace_shell(shell);
     }
@@ -423,6 +430,7 @@ fn ApplicationLayoutContent() -> Element {
         toast,
     };
     use_context_provider(|| context);
+    use_viewer_routes(context);
 
     let mut state_changes = use_future(move || async move {
         let mut retry_delay = RetryDelay::default();

@@ -40,7 +40,7 @@ pub fn execute(
 fn list_live_views(connection: &Connection) -> Result<Vec<LiveViewRecord>, ListLiveViewsError> {
     let mut statement = connection
         .prepare_cached(
-            "SELECT source_kind, source_value, display_name, created_at, last_opened_at
+            "SELECT source_kind, source_value, display_name, created_at, last_opened_at, comparison
              FROM live_views ORDER BY id",
         )
         .map_err(anyhow::Error::from)?;
@@ -52,11 +52,12 @@ fn list_live_views(connection: &Connection) -> Result<Vec<LiveViewRecord>, ListL
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })
         .map_err(anyhow::Error::from)?;
     rows.map(|row| {
-        let (source_kind, source_value, display_name, created_at, last_opened_at) =
+        let (source_kind, source_value, display_name, created_at, last_opened_at, comparison) =
             row.map_err(anyhow::Error::from)?;
         let created_at = MachineTimestamp::try_from(created_at).map_err(|error| {
             ListLiveViewsError::InvalidTimestamp {
@@ -73,7 +74,13 @@ fn list_live_views(connection: &Connection) -> Result<Vec<LiveViewRecord>, ListL
                 field: "last_opened_at",
                 reason: error.to_string(),
             })?;
+        let comparison = match comparison.as_str() {
+            "local_changes" => gtl_models::live_views::LiveComparison::LocalChanges,
+            "unpushed_commits" => gtl_models::live_views::LiveComparison::UnpushedCommits,
+            _ => return Err(anyhow::anyhow!("invalid saved comparison").into()),
+        };
         Ok(LiveViewRecord {
+            comparison,
             source: LiveSource::from_parts(&source_kind, &source_value)?,
             display_name: display_name.try_into()?,
             created_at,

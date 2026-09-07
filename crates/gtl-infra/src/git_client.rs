@@ -76,7 +76,7 @@ impl GitClient for HybridGitClient {
     }
     fn upstream(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<GitRefName>> {
         let repository = gix::open(repo_path.as_ref())?;
-        let Some(upstream) = repository_upstream(&repository)? else {
+        let Some(upstream) = repository_upstream(&repository, repo_path)? else {
             return Ok(GitEffect::Rejected("current branch has no upstream".into()));
         };
         Ok(GitEffect::Applied(upstream))
@@ -373,7 +373,7 @@ fn status_snapshot(
 ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
     let repository = gix::open(repo_path.as_ref()).context("open Git repository")?;
     let head = repository_head(&repository)?;
-    let upstream = repository_upstream(&repository)?
+    let upstream = repository_upstream(&repository, repo_path)?
         .map(|reference| -> anyhow::Result<GitStatusUpstream> {
             let ahead = capture(repo_path, &["rev-list", "--count", "@{u}..HEAD"])?
                 .and_then(|count| count.parse().ok())
@@ -401,14 +401,23 @@ fn repository_head(repository: &gix::Repository) -> anyhow::Result<GitHead> {
         })
 }
 
-fn repository_upstream(repository: &gix::Repository) -> anyhow::Result<Option<GitRefName>> {
+fn repository_upstream(
+    repository: &gix::Repository,
+    repo_path: &RepositoryRoot,
+) -> anyhow::Result<Option<GitRefName>> {
     let Some(branch) = repository.head_name()? else {
         return Ok(None);
     };
     let Some(upstream) =
         repository.branch_remote_tracking_ref_name(branch.as_ref(), gix::remote::Direction::Fetch)
     else {
-        return Ok(None);
+        return capture(
+            repo_path,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        )?
+        .map(GitRefName::try_new)
+        .transpose()
+        .map_err(Into::into);
     };
     Ok(Some(GitRefName::try_new(
         upstream?.shorten().to_str_lossy().into_owned(),

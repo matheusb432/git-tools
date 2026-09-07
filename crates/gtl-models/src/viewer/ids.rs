@@ -25,6 +25,7 @@ use nutype::nutype;
         TryFrom,
         Into,
         Display,
+        FromStr,
         Serialize,
         Deserialize
     )

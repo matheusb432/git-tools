@@ -44,3 +44,23 @@ fn install_stops_at_four_attempts() {
     );
     assert_eq!(calls.get(), 4);
 }
+
+#[test]
+fn preview_readiness_requires_a_complete_event_for_the_expected_url() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("ready.jsonl");
+    let address = "127.0.0.1:8091".parse()?;
+    std::fs::write(&path, "{\"event\":")?;
+    assert!(!super::component_preview_ready(&path, address)?);
+    std::fs::write(
+        &path,
+        "{\"event\":\"ready\",\"url\":\"http://127.0.0.1:8091\"}\n",
+    )?;
+    assert!(super::component_preview_ready(&path, address)?);
+    std::fs::write(
+        &path,
+        "{\"event\":\"ready\",\"url\":\"http://127.0.0.1:9000\"}\n",
+    )?;
+    assert!(super::component_preview_ready(&path, address).is_err());
+    Ok(())
+}

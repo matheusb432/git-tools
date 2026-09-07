@@ -217,6 +217,7 @@ pub(crate) mod tests {
     use crate::{
         diffs::FileDiff,
         utils::{diffs::view, repository_relative_path},
+        viewer::find_viewer_diff,
     };
 
     pub(crate) fn identity(layout: ViewerDiffLayout) -> ViewerViewIdentity {
@@ -260,7 +261,7 @@ pub(crate) mod tests {
     fn forward_search_counts_matches_and_wraps_across_files() {
         let view = search_view();
         let identity = identity(ViewerDiffLayout::Unified);
-        let first = execute(
+        let first = find_viewer_diff::execute(
             &FindViewerDiff {
                 identity,
                 query: "needle".into(),
@@ -277,7 +278,7 @@ pub(crate) mod tests {
         );
         assert!(!first.wrapped);
 
-        let wrapped = execute(
+        let wrapped = find_viewer_diff::execute(
             &FindViewerDiff {
                 identity,
                 query: "needle".into(),
@@ -297,7 +298,7 @@ pub(crate) mod tests {
     #[test]
     fn split_search_counts_a_matching_pair_as_one_logical_row() {
         let view = search_view();
-        let result = execute(
+        let result = find_viewer_diff::execute(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Split),
                 query: "needle".into(),
@@ -314,7 +315,7 @@ pub(crate) mod tests {
     #[test]
     fn backward_search_starts_at_the_last_match() {
         let view = search_view();
-        let result = execute(
+        let result = find_viewer_diff::execute(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Unified),
                 query: "needle".into(),

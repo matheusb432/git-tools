@@ -6,6 +6,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -104,7 +105,12 @@ impl ViewerClient {
         invoke_without_arguments("viewer_get_shell").await
     }
 
+    pub async fn list_projects(&mut self) -> Result<Vec<ViewerProject>, ViewerClientError> {
+        invoke_without_arguments("viewer_list_projects").await
+    }
+
     viewer_unary_methods! {
+        open_project(OpenViewerProject) -> OpenViewerProjectOk => "viewer_open_project";
         activate_tab(ViewerTabRequest) -> ViewerShell => "viewer_activate_tab";
         move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";
         close_tab(ViewerTabRequest) -> ViewerShell => "viewer_close_tab";

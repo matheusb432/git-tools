@@ -1,3 +1,5 @@
+pub mod projects;
+
 use std::path::PathBuf;
 
 use gtl_models::{
@@ -136,6 +138,7 @@ fn decode_viewer_tab_placement(placement: i32) -> Result<ViewerTabPlacement, Vie
 pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, ViewerCodecError> {
     Ok(v1::ViewerShell {
         version: shell.version.value(),
+        focus_request_version: shell.focus_request_version.map(ViewerVersion::value),
         tabs: shell.tabs.into_iter().map(encode_viewer_tab).collect(),
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
@@ -931,6 +934,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
     let preferences = required(shell.preferences)?;
     Ok(ViewerShell {
         version: ViewerVersion::new(shell.version),
+        focus_request_version: shell.focus_request_version.map(ViewerVersion::new),
         tabs: shell
             .tabs
             .into_iter()

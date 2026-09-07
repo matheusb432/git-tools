@@ -5,8 +5,7 @@ use super::{
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
-    ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWorkspace,
-    ClientDiffWorkspaceStoreExt, ViewerUnifiedRow,
+    ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerUnifiedRow,
 };
 
 const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
@@ -29,18 +28,11 @@ enum UnifiedGutterTone {
 
 #[component]
 pub(crate) fn UnifiedDiffRowBatch(
-    file_index: usize,
+    file: ReadStore<ClientDiffFile>,
     batch_index: usize,
     artifact_enhancement: bool,
 ) -> Element {
-    let workspace = use_context::<Store<ClientDiffWorkspace>>();
-    let Some(file) = workspace.files().get(file_index) else {
-        return rsx! {};
-    };
-    let Some(rows) = file.rows().unified().get(batch_index) else {
-        return rsx! {};
-    };
-    let rows: ReadStore<Vec<ViewerUnifiedRow>> = rows.into();
+    let rows = file.rows().unified().index(batch_index);
     rsx! {
         UnifiedRows { rows, artifact_enhancement }
     }

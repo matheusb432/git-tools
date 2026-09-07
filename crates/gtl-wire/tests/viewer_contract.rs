@@ -185,6 +185,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     let identity = identity()?;
     let shell = ViewerShell {
         version: ViewerVersion::new(23),
+        focus_request_version: Some(ViewerVersion::new(20)),
         tabs: vec![ViewerTab {
             id: tab_id(7)?,
             label: "git-tools".into(),
@@ -242,6 +243,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     };
 
     let value = serde_json::to_value(&shell).unwrap();
+    assert_eq!(value["focus_request_version"], 20);
     assert_eq!(value["active"]["state"], "ready");
     assert_eq!(
         value["active"]["view"]["files"][0]["anchor_id"],

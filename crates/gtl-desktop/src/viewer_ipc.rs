@@ -7,6 +7,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
 };
 use serde::Serialize;
 use tauri::State;
@@ -709,3 +710,11 @@ mod tests {
         registry.cancel_all().await;
     }
 }
+
+viewer_query_command!(viewer_list_projects, Vec<ViewerProject>, list_projects);
+viewer_request_command!(
+    viewer_open_project,
+    OpenViewerProject,
+    OpenViewerProjectOk,
+    open_project
+);

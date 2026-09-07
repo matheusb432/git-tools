@@ -4,6 +4,7 @@
 
 ## Core workflows
 
+- Browse managed projects in the desktop app, ordered by their latest render, and open saved local-change or unpushed-commit comparisons.
 - Render unpushed, range, merge, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
 - Inspect status and worktrees; commit, push, pull, and manage tags without replacing Git's underlying repository model.
 - Run status, commit, push, pull, and diff operations across active projects listed by sample_project.

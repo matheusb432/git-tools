@@ -71,10 +71,16 @@ pub struct ComputedCommitWork {
 
 #[derive(Debug)]
 pub enum RecipePublication {
-    Published { history: RecordRender },
+    Published {
+        history: RecordRender,
+    },
     Broken,
-    Skipped,
-    Failed { error: PrepareRecipeError },
+    Skipped {
+        path: gtl_models::paths::RepositoryRoot,
+    },
+    Failed {
+        error: PrepareRecipeError,
+    },
     Stale,
 }
 
@@ -116,6 +122,7 @@ pub fn reserve_open(
         let ticket = session
             .begin_compute(tab_id)
             .ok_or(ReserveRecipeError::UnknownTab)?;
+        session.request_focus();
         Ok(ReservedRecipeWork {
             recipe,
             kind,
@@ -278,8 +285,8 @@ pub fn publish_recipe(
                 PublishOutcome::Stale => RecipePublication::Stale,
             }
         }
-        Ok(PrepareRecipeOk::Skipped { .. }) => match session.close_if_current(ticket) {
-            PublishOutcome::Published => RecipePublication::Skipped,
+        Ok(PrepareRecipeOk::Skipped { path, .. }) => match session.close_if_current(ticket) {
+            PublishOutcome::Published => RecipePublication::Skipped { path },
             PublishOutcome::Stale => RecipePublication::Stale,
         },
         Ok(PrepareRecipeOk::Publish {
@@ -413,7 +420,7 @@ mod tests {
         assert!(matches!(publication, RecipePublication::Failed { .. }));
         assert_eq!(
             state.version().unwrap(),
-            gtl_models::viewer::ViewerVersion::new(3)
+            gtl_models::viewer::ViewerVersion::new(4)
         );
     }
 
@@ -450,5 +457,39 @@ mod tests {
         let refresh = close_tab(&state, first.ticket().tab_id).unwrap();
 
         assert!(refresh.is_none());
+    }
+
+    #[test]
+    fn reopening_the_same_tab_requests_focus_but_refreshing_does_not() {
+        let state = ViewerState::new();
+        let first = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
+        let focus_first = state
+            .inspect(|session| session.focus_request_version())
+            .unwrap();
+        assert!(focus_first.is_some());
+
+        reserve_refresh(&state, first.ticket().tab_id).unwrap();
+        state.mark_shell_changed().unwrap();
+        assert_eq!(
+            state
+                .inspect(|session| session.focus_request_version())
+                .unwrap(),
+            focus_first
+        );
+
+        let reopened = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
+        let focus_reopened = state
+            .inspect(|session| session.focus_request_version())
+            .unwrap();
+        assert_eq!(reopened.ticket().tab_id, first.ticket().tab_id);
+        assert!(focus_reopened > focus_first);
+
+        activate_tab(&state, first.ticket().tab_id).unwrap();
+        assert_eq!(
+            state
+                .inspect(|session| session.focus_request_version())
+                .unwrap(),
+            focus_reopened
+        );
     }
 }

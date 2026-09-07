@@ -28,10 +28,10 @@ pub fn execute(
     viewer_state: &ViewerState,
 ) -> Result<Option<ReservedRecipeWork>, DeleteLiveViewerTabError> {
     viewer_state.update(|session| {
-        let source = session
+        let (source, comparison) = session
             .live_source(tab_id)
             .ok_or(DeleteLiveViewerTabError::UnknownTab)?;
-        persistence::delete_live_view(connection, &source)?;
+        persistence::delete_live_view(connection, &source, comparison)?;
         let close = session
             .close(tab_id)
             .ok_or(DeleteLiveViewerTabError::UnknownTab)?;

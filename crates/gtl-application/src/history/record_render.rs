@@ -3,7 +3,10 @@
 use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp};
 use rusqlite::{Connection, params};
 
-use crate::{history::persistence::RecipeColumns, ports::Clock, recipes::Recipe};
+use crate::{
+    history::persistence::RecipeColumns, ports::Clock, projects::record_project_render,
+    recipes::Recipe,
+};
 
 const RECENT_RENDERS_CAP: usize = 500;
 
@@ -101,6 +104,14 @@ fn record_render(
         )?;
         statement.execute([])?;
     }
+    let crate::recipes::RecipeSource::LocalRepo(path) = &request.recipe.source;
+    record_project_render::execute(
+        &crate::projects::record_project_render::RecordProjectRender {
+            path: path.clone(),
+            rendered_at: rendered_at.clone(),
+        },
+        &transaction,
+    )?;
     transaction.commit()?;
     Ok(())
 }

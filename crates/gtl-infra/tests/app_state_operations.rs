@@ -86,6 +86,7 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
     let mut connection = state.connection_lock().unwrap();
     let response = save_live_view::execute(
         SaveLiveView {
+            comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
             path: top_level.to_path_buf(),
         },
         &git(top_level),
@@ -201,6 +202,7 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
                 let mut connection = state.connection_lock().unwrap();
                 let result = save_live_view::execute(
                     SaveLiveView {
+                        comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                         path: "/repos/concurrent".into(),
                     },
                     &git(Path::new("/repos/concurrent")),
@@ -332,4 +334,215 @@ fn prune_failure_rolls_back_the_render_insertion() {
 
     assert_eq!(render_count, 500);
     assert_eq!(failed_insertion_count, 0);
+}
+
+#[test]
+fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
+-> anyhow::Result<()> {
+    use gtl_application::{
+        projects::{
+            list_viewer_projects,
+            open_viewer_project::{self, OpenProjectComparison},
+        },
+        utils::{FixedClock, FixedUserSettingsStore},
+    };
+    use gtl_infra::git_client::HybridGitClient;
+    use gtl_models::{live_views::LiveComparison, projects::ProjectRepository};
+    use gtl_wire::viewer::projects::OpenViewerProject;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("alpha");
+    create_project_comparison_repository(&root);
+    let path = repository_root(&root);
+    let repositories = vec![ProjectRepository {
+        name: ProjectName::try_new("Alpha").unwrap(),
+        path: path.clone(),
+        remote: None,
+    }];
+    let state = SqliteAppState::open(directory.path()).unwrap();
+    let viewer = ViewerState::new();
+    let mut connection = state.connection_lock().unwrap();
+    let mut ids = Vec::new();
+    for comparison in [
+        LiveComparison::LocalChanges,
+        LiveComparison::UnpushedCommits,
+    ] {
+        let request = OpenViewerProject {
+            path: path.clone(),
+            comparison,
+        };
+        let pending = open_viewer_project::execute(
+            OpenProjectComparison {
+                project: request.clone(),
+                repositories: repositories.clone(),
+            },
+            &HybridGitClient,
+            &mut connection,
+            &ClockTest,
+            &viewer,
+        )
+        .unwrap();
+        let id = pending.ticket().tab_id;
+        ids.push(id);
+        let computed = work::compute_recipe(
+            pending,
+            &FixedUserSettingsStore::default(),
+            &HybridGitClient,
+        );
+        let work::RecipePublication::Published { history } =
+            work::publish_recipe(&viewer, computed).unwrap()
+        else {
+            anyhow::bail!("valid comparison must publish, including empty results");
+        };
+        record_render::execute(
+            &history,
+            &mut connection,
+            &FixedClock::new("2026-09-06T10:00:00Z".try_into().unwrap()),
+        )
+        .unwrap();
+        record_render::execute(
+            &history,
+            &mut connection,
+            &FixedClock::new("2026-09-06T11:00:00Z".try_into().unwrap()),
+        )
+        .unwrap();
+        let repeated = open_viewer_project::execute(
+            OpenProjectComparison {
+                project: request,
+                repositories: repositories.clone(),
+            },
+            &HybridGitClient,
+            &mut connection,
+            &ClockTest,
+            &viewer,
+        )
+        .unwrap();
+        assert_eq!(repeated.ticket().tab_id, id);
+    }
+    assert_ne!(ids[0], ids[1]);
+    let projects =
+        list_viewer_projects::execute(repositories, &HybridGitClient, &connection).unwrap();
+    assert!(matches!(
+        &projects[0].status,
+        gtl_models::repository::status::RepositoryStatus::Present {
+            head: gtl_models::repository::status::StatusHead::Branch {
+                upstream: gtl_models::repository::status::StatusUpstream::Tracking { .. },
+                ..
+            },
+            ..
+        }
+    ));
+    assert_eq!(
+        projects[0].last_rendered_at.as_ref().unwrap().as_ref(),
+        "2026-09-06T11:00:00Z"
+    );
+    assert_comparisons_restore_and_delete_independently(&connection, &viewer, ids[0]);
+    Ok(())
+}
+
+fn create_project_comparison_repository(root: &std::path::Path) {
+    std::fs::create_dir(root).unwrap();
+    let run_git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run_git(&["init", "-qb", "main"]);
+    run_git(&["config", "user.email", "test@example.test"]);
+    run_git(&["config", "user.name", "Test"]);
+    std::fs::write(root.join("file.txt"), "base\n").unwrap();
+    run_git(&["add", "."]);
+    run_git(&["commit", "-qm", "base"]);
+    run_git(&["checkout", "-qb", "feature"]);
+    run_git(&["branch", "--set-upstream-to=main"]);
+    std::fs::write(root.join("new.txt"), "new\n").unwrap();
+}
+
+fn assert_comparisons_restore_and_delete_independently(
+    connection: &rusqlite::Connection,
+    viewer: &ViewerState,
+    local_tab: gtl_models::viewer::ViewerTabId,
+) {
+    use gtl_models::live_views::LiveComparison;
+    let saved = list_live_views::execute(ListLiveViews, connection).unwrap();
+    assert_eq!(saved.len(), 2);
+    let restored = ViewerState::new();
+    work::reserve_restored_live_views(&restored, saved).unwrap();
+    assert_eq!(restored.inspect(|session| session.tabs().len()).unwrap(), 2);
+    delete_live_viewer_tab::execute(local_tab, connection, viewer).unwrap();
+    let remaining = list_live_views::execute(ListLiveViews, connection).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].comparison, LiveComparison::UnpushedCommits);
+}
+
+#[test]
+fn projects_sort_by_review_status_before_render_recency() -> anyhow::Result<()> {
+    use gtl_application::projects::{
+        list_viewer_projects,
+        record_project_render::{self, RecordProjectRender},
+    };
+    use gtl_infra::git_client::HybridGitClient;
+    use gtl_models::projects::ProjectRepository;
+
+    let directory = tempfile::tempdir()?;
+    let state = SqliteAppState::open(directory.path())?;
+    let connection = state.connection_lock()?;
+    let mut repositories = Vec::new();
+    for (name, timestamp) in [
+        ("Alpha", "2026-09-06T10:00:00Z"),
+        ("Beta", "2026-09-06T12:00:00Z"),
+        ("Gamma", "2026-09-06T11:00:00Z"),
+    ] {
+        let root = directory.path().join(name);
+        create_project_comparison_repository(&root);
+        if name == "Beta" {
+            std::fs::remove_file(root.join("new.txt"))?;
+        }
+        let path = repository_root(&root);
+        record_project_render::execute(
+            &RecordProjectRender {
+                path: path.clone(),
+                rendered_at: timestamp.try_into()?,
+            },
+            &connection,
+        )?;
+        repositories.push(ProjectRepository {
+            name: name.try_into()?,
+            path,
+            remote: None,
+        });
+    }
+    let projects =
+        list_viewer_projects::execute(repositories.clone(), &HybridGitClient, &connection)?;
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Gamma", "Alpha", "Beta"]
+    );
+    record_project_render::execute(
+        &RecordProjectRender {
+            path: repositories[0].path.clone(),
+            rendered_at: "2026-09-06T13:00:00Z".try_into()?,
+        },
+        &connection,
+    )?;
+    let projects = list_viewer_projects::execute(repositories, &HybridGitClient, &connection)?;
+    assert_eq!(
+        projects
+            .iter()
+            .map(|project| project.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Alpha", "Gamma", "Beta"]
+    );
+    Ok(())
 }

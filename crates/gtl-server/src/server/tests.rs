@@ -600,3 +600,28 @@ async fn next_reflection_response(
         .ok_or("reflection stream returned no response")??
         .message_response)
 }
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn rejects_invalid_project_comparisons_before_catalogue_access() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    for (path, comparison) in [
+        ("relative", 1),
+        ("/repos/project", 0),
+        ("/repos/project", 99),
+    ] {
+        let error = client
+            .open_viewer_project(gtl_wire::v1::OpenViewerProjectRequest {
+                path: path.into(),
+                comparison,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
+    server.stop().await?;
+    Ok(())
+}

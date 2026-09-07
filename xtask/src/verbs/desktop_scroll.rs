@@ -367,6 +367,12 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
         comparison.readiness_process_cpu_time_milliseconds,
         |value| format!("{value:.2} ms"),
     );
+    print_metric(
+        "many-file loading viewer RSS",
+        comparison.viewer_loading_peak_rss_bytes,
+        |value| format!("{:.1} MiB", value / 1024.0 / 1024.0),
+    );
+    print_panel("many-file loading", comparison.loading);
     print_panel("many-file diff document", comparison.diff_document);
     print_panel("changed files", comparison.changed_files);
     print_panel("commits", comparison.commits);
@@ -383,6 +389,12 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
         comparison.single_file_readiness_process_cpu_time_milliseconds,
         |value| format!("{value:.2} ms"),
     );
+    print_metric(
+        "single-file loading viewer RSS",
+        comparison.single_file_viewer_loading_peak_rss_bytes,
+        |value| format!("{:.1} MiB", value / 1024.0 / 1024.0),
+    );
+    print_panel("single-file loading", comparison.single_file_loading);
     print_panel(
         "single-file diff document",
         comparison.single_file_diff_document,

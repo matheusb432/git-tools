@@ -83,7 +83,7 @@ pub(super) fn build(
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, &io_ranges.log, excluded)?;
+    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), excluded)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
@@ -145,6 +145,13 @@ fn resolve_target_ranges(
                 RangePresentation::Exact,
                 false,
             )
+        }
+        DiffTarget::Base(base)
+            if *base == GitRevision::head() && !git.revision_exists(top, base)? =>
+        {
+            let mut ranges = DiffRanges::working_tree(base);
+            ranges.log = None;
+            ResolvedTarget::same_ranges(base.clone(), ranges, RangePresentation::WorkingTree, false)
         }
         DiffTarget::Base(base) => {
             git.verify_commit(top, base)?;

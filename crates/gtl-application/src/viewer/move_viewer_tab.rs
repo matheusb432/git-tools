@@ -24,8 +24,8 @@ mod tests {
     use gtl_models::viewer::{ViewerTabId, ViewerTabPlacement};
     use gtl_wire::viewer::MoveViewerTab;
 
-    use super::{MoveViewerTabError, execute};
-    use crate::viewer::ViewerState;
+    use super::MoveViewerTabError;
+    use crate::viewer::{ViewerState, move_viewer_tab};
 
     #[test]
     fn unknown_tab_is_rejected() {
@@ -36,7 +36,7 @@ mod tests {
         };
 
         assert!(matches!(
-            execute(request, &ViewerState::new()),
+            move_viewer_tab::execute(request, &ViewerState::new()),
             Err(MoveViewerTabError::UnknownTab)
         ));
     }

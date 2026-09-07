@@ -123,6 +123,89 @@ return files.length === arguments[0] && files.every((file) => file.open) &&
     diffDocument.scrollHeight - diffDocument.clientHeight >= arguments[1];
 ";
 
+const START_LOADING_FRAMES_SCRIPT: &str = r"
+const sample = { frame_gaps_ms: [], complete: false, error: null };
+window.__gtlLoadingFrames = sample;
+const deadline = performance.now() + 120000;
+let previous = null;
+let started = false;
+let completing = false;
+const observe = (timestamp) => {
+    if (timestamp > deadline || sample.frame_gaps_ms.length >= 20000) {
+        sample.error = 'loading frame sampler exceeded its bound';
+        return;
+    }
+    const diffDocument = document.querySelector('[data-gtl-diff-document]');
+    if (diffDocument !== null) started = true;
+    if (started && previous !== null) sample.frame_gaps_ms.push(timestamp - previous);
+    previous = timestamp;
+    if (completing) {
+        sample.complete = true;
+        return;
+    }
+    completing = started && diffDocument?.getAttribute('data-view-state') === 'complete';
+    requestAnimationFrame(observe);
+};
+requestAnimationFrame(observe);
+";
+
+const FINISH_LOADING_FRAMES_SCRIPT: &str = r"
+const sample = window.__gtlLoadingFrames;
+return sample?.complete || sample?.error ? sample : null;
+";
+
+#[derive(Deserialize)]
+struct LoadingFrameSample {
+    frame_gaps_ms: Vec<f64>,
+    error: Option<String>,
+}
+
+async fn start_loading_measurement(
+    driver: &WebDriver,
+    data_root: &Path,
+) -> Result<process_memory::ReadinessProcessSampler> {
+    let sampler = wait::until(
+        "one stable top-level viewer and server process tree",
+        ASSERTION_TIMEOUT,
+        || async { process_memory::ReadinessProcessSampler::try_start(data_root) },
+    )
+    .await?;
+    driver
+        .execute(START_LOADING_FRAMES_SCRIPT, Vec::new())
+        .await
+        .context("start loading animation-frame sampler")?;
+    Ok(sampler)
+}
+
+async fn finish_loading_frames(driver: &WebDriver) -> Result<Vec<f64>> {
+    let sample: LoadingFrameSample = wait::until(
+        "final loading animation frame",
+        ASSERTION_TIMEOUT,
+        || async {
+            driver
+                .execute(FINISH_LOADING_FRAMES_SCRIPT, Vec::new())
+                .await?
+                .convert::<Option<LoadingFrameSample>>()
+                .context("decode loading animation frames")
+        },
+    )
+    .await?;
+    ensure!(
+        sample.error.is_none(),
+        "loading frame sampler: {:?}",
+        sample.error
+    );
+    ensure!(
+        !sample.frame_gaps_ms.is_empty()
+            && sample
+                .frame_gaps_ms
+                .iter()
+                .all(|gap| gap.is_finite() && *gap >= 0.0),
+        "loading frame sampler returned missing or invalid frame gaps"
+    );
+    Ok(sample.frame_gaps_ms)
+}
+
 const SCROLL_SCRIPT: &str = r"
 const element = arguments[0];
 const protocol = arguments[1];
@@ -417,12 +500,8 @@ async fn measure_launch(
         .set_window_rect(20, 20, WINDOW_WIDTH, WINDOW_HEIGHT)
         .await
         .context("set fixed desktop benchmark window")?;
-    let mut readiness_process_sampler = wait::until(
-        "one stable top-level viewer and server process tree",
-        ASSERTION_TIMEOUT,
-        || async { process_memory::ReadinessProcessSampler::try_start(session.data_root()) },
-    )
-    .await?;
+    let mut readiness_process_sampler =
+        start_loading_measurement(driver, session.data_root()).await?;
     let readiness_started_at = Instant::now();
     forward_fixture(&repository, session.data_root())?;
     let expectation = ReadyViewExpectation {
@@ -433,6 +512,7 @@ async fn measure_launch(
     };
     wait_for_ready_view(driver, &mut readiness_process_sampler, expectation).await?;
     let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
+    let loading_frame_gaps_ms = finish_loading_frames(driver).await?;
     verify_diff_row_count(driver, expectation).await?;
     driver
         .set_script_timeout(SCRIPT_TIMEOUT)
@@ -503,6 +583,7 @@ async fn measure_launch(
             height: window.height,
         },
         readiness,
+        loading_frame_gaps_ms,
         diff_document,
         memory_after_diff_document,
         changed_files,
@@ -523,12 +604,8 @@ async fn measure_single_file_launch(
         .set_window_rect(20, 20, WINDOW_WIDTH, WINDOW_HEIGHT)
         .await
         .context("set fixed single-file benchmark window")?;
-    let mut readiness_process_sampler = wait::until(
-        "one stable top-level viewer and server process tree",
-        ASSERTION_TIMEOUT,
-        || async { process_memory::ReadinessProcessSampler::try_start(session.data_root()) },
-    )
-    .await?;
+    let mut readiness_process_sampler =
+        start_loading_measurement(driver, session.data_root()).await?;
     let readiness_started_at = Instant::now();
     forward_single_file_fixture(&repository, session.data_root())?;
     let expectation = ReadyViewExpectation {
@@ -539,6 +616,7 @@ async fn measure_single_file_launch(
     };
     wait_for_ready_view(driver, &mut readiness_process_sampler, expectation).await?;
     let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
+    let loading_frame_gaps_ms = finish_loading_frames(driver).await?;
     verify_diff_row_count(driver, expectation).await?;
     driver
         .set_script_timeout(SCRIPT_TIMEOUT)
@@ -575,6 +653,7 @@ async fn measure_single_file_launch(
             height: window.height,
         },
         readiness,
+        loading_frame_gaps_ms,
         diff_document,
         memory_after_diff_document,
     })
@@ -818,11 +897,8 @@ async fn visible_element(
 }
 
 fn changed_files_summary_is_ready(text: &str, expectation: ReadyViewExpectation) -> bool {
-    let normalized = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_lowercase();
+    let normalized = text.to_ascii_lowercase();
+    let words = normalized.split_whitespace().collect::<Vec<_>>();
     let file_label = if expectation.file_count == 1 {
         "file"
     } else {
@@ -833,8 +909,14 @@ fn changed_files_summary_is_ready(text: &str, expectation: ReadyViewExpectation)
     } else {
         "commits"
     };
-    normalized.contains(&format!("# {} {file_label}", expectation.file_count))
-        && normalized.contains(&format!("{} {commit_label}", expectation.commit_count))
+    let file_count = expectation.file_count.to_string();
+    let commit_count = expectation.commit_count.to_string();
+    words
+        .windows(2)
+        .any(|pair| pair == [file_count.as_str(), file_label])
+        && words
+            .windows(2)
+            .any(|pair| pair == [commit_count.as_str(), commit_label])
 }
 
 async fn scroll_element(
@@ -907,7 +989,7 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
 #[test]
 fn readiness_normalizes_rendered_changed_files_summary() {
     assert!(changed_files_summary_is_ready(
-        "# 50 FILES\n10\ncommits",
+        "Files\n50 files\n\n10\ncommits",
         ReadyViewExpectation {
             name: VIEW_NAME,
             file_count: 50,
@@ -920,7 +1002,7 @@ fn readiness_normalizes_rendered_changed_files_summary() {
 #[test]
 fn readiness_accepts_singular_file_and_commit_labels() {
     assert!(changed_files_summary_is_ready(
-        "# 1 FILE\n1\ncommit",
+        "Files\n1 file\n1\ncommit",
         ReadyViewExpectation {
             name: SINGLE_FILE_VIEW_NAME,
             file_count: 1,
@@ -944,7 +1026,7 @@ fn readiness_accepts_complete_production_dom_snapshot() {
         document_layout: Some("unified".to_owned()),
         document_density: Some("compact".to_owned()),
         diff_file_count: desktop_scroll::DISTINCT_FILE_COUNT,
-        changed_files_text: Some("# 50 FILES\n10\ncommits".to_owned()),
+        changed_files_text: Some("Files\n50 files\n\n10\ncommits".to_owned()),
         visible_changed_files_count: 1,
         commit_panel_count: 1,
         visible_commit_panel_count: 1,

@@ -31,7 +31,11 @@ pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationO
     }
 
     CompleteRecipeComputationOk::Publish {
-        label: computed_label(&recipe, &view),
+        label: if kind == ViewerTabKind::Live {
+            recipe_label::live(&recipe).unwrap_or_else(|| computed_label(&recipe, &view))
+        } else {
+            computed_label(&recipe, &view)
+        },
         view: Arc::new(view),
     }
 }
@@ -89,7 +93,7 @@ mod tests {
                     target: RecipeTarget::Unpushed { pinned: None },
                 },
                 1,
-                "project: 1 commit",
+                "project: Unpushed commits",
             ),
             (
                 RecipeOp::Diff {

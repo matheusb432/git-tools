@@ -41,7 +41,10 @@ mod tests {
     use gtl_models::git::GitDiffSpec;
 
     use super::*;
-    use crate::utils::{FakeGitClient, git_range, repository_root};
+    use crate::{
+        diffs::fetch_full_context_diff,
+        utils::{FakeGitClient, git_range, repository_root},
+    };
 
     fn source() -> FullContextDiffSource {
         FullContextDiffSource::new(GitDiffSpec::Range(git_range("a..b")), Vec::new())
@@ -58,7 +61,7 @@ mod tests {
             ..Default::default()
         };
 
-        let full_context = execute(&request, &git).unwrap();
+        let full_context = fetch_full_context_diff::execute(&request, &git).unwrap();
 
         assert_eq!(full_context.files[0].path.to_string_lossy(), "full.txt");
         assert_eq!(full_context.files[0].lines, [" retained context", ""]);
@@ -74,7 +77,7 @@ mod tests {
             ..Default::default()
         };
 
-        let error = execute(&request, &git).unwrap_err();
+        let error = fetch_full_context_diff::execute(&request, &git).unwrap_err();
 
         assert!(matches!(error, FetchFullContextDiffError::Parse(_)));
     }

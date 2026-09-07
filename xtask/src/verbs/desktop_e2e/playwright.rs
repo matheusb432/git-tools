@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
-    io::{Read as _, Write as _},
-    net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream},
+    io::Read as _,
+    net::{Ipv4Addr, SocketAddrV4, TcpListener},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -9,10 +9,10 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, bail};
-use command_group::{CommandGroup, GroupChild};
+use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
+use serde::Deserialize;
 
 use super::{HostCargoEnvironment, IsolatedEnv, Sandbox};
-use crate::verbs::dioxus_web::COMPONENT_PREVIEW_TARGET_ARGUMENTS;
 
 mod command;
 
@@ -23,7 +23,6 @@ const INSTALL_TIMEOUT: Duration = Duration::from_mins(3);
 const TEST_TIMEOUT: Duration = Duration::from_mins(2);
 const COMPONENT_PREVIEW_READY_TIMEOUT: Duration = Duration::from_mins(5);
 const COMPONENT_PREVIEW_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const COMPONENT_PREVIEW_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 const COMPONENT_PREVIEW_URL_ENVIRONMENT_VARIABLE: &str = "GTL_COMPONENT_PREVIEW_URL";
 
 struct ComponentPreviewServer {
@@ -99,41 +98,40 @@ impl ComponentPreviewServer {
         let port = available_loopback_port()?;
         let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
         let log_path = sandbox.logs.join("component-preview.log");
-        let stdout = File::create(&log_path)
+        let stderr = File::create(&log_path)
             .with_context(|| format!("create component preview log {}", log_path.display()))?;
-        let stderr = stdout
-            .try_clone()
-            .with_context(|| format!("clone component preview log {}", log_path.display()))?;
-        let mut command = Command::new("dx");
+        let ready_path = sandbox.logs.join("component-preview-ready.jsonl");
+        let stdout =
+            File::create(&ready_path).context("create component preview readiness output")?;
+        let mut command = Command::new("cargo");
         command
-            .arg("serve")
-            .args(COMPONENT_PREVIEW_TARGET_ARGUMENTS)
             .args([
-                "--addr",
-                "127.0.0.1",
+                "run",
+                "--quiet",
+                "--locked",
+                "--manifest-path",
+                "../../shared-libs/dx-story/Cargo.toml",
+                "-p",
+                "dx-story-cli",
+                "--",
+                "serve",
+                "--no-watch",
+                "--ready-json",
+                "--open",
+                "no",
                 "--port",
                 &port.to_string(),
-                "--open",
-                "false",
-                "--interactive",
-                "false",
-                "--hot-reload",
-                "false",
-                "--watch",
-                "false",
             ])
             .current_dir(".")
             .stdin(Stdio::null())
             .stdout(stdout)
-            .stderr(stderr)
-            .env("CARGO_INCREMENTAL", "0")
-            .env("RUSTC_WRAPPER", "");
+            .stderr(stderr);
         environment.apply_cargo(&mut command, host_environment);
         let child = command
             .group_spawn()
             .context("start Dioxus component preview server")?;
         let mut server = Self { child };
-        wait_for_component_preview(&mut server.child, address, &log_path)?;
+        wait_for_component_preview(&mut server.child, address, &ready_path, &log_path)?;
         Ok((server, format!("http://{address}")))
     }
 }
@@ -141,6 +139,7 @@ impl ComponentPreviewServer {
 fn wait_for_component_preview(
     child: &mut GroupChild,
     address: SocketAddrV4,
+    ready_path: &Path,
     log_path: &Path,
 ) -> Result<()> {
     let deadline = Instant::now() + COMPONENT_PREVIEW_READY_TIMEOUT;
@@ -155,7 +154,7 @@ fn wait_for_component_preview(
                 status.code().unwrap_or(-1)
             );
         }
-        if component_preview_responds(address) {
+        if component_preview_ready(ready_path, address)? {
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -171,9 +170,12 @@ fn wait_for_component_preview(
 
 impl Drop for ComponentPreviewServer {
     fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
+        let _ = self.child.signal(Signal::SIGTERM);
+        let deadline = Instant::now() + Duration::from_secs(6);
+        while self.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+            thread::sleep(COMPONENT_PREVIEW_POLL_INTERVAL);
         }
+        let _ = self.child.kill();
         let _ = self.child.wait();
     }
 }
@@ -187,32 +189,29 @@ fn available_loopback_port() -> Result<u16> {
         .context("resolve component preview loopback port")
 }
 
-fn component_preview_responds(address: SocketAddrV4) -> bool {
-    let Ok(mut connection) =
-        TcpStream::connect_timeout(&address.into(), COMPONENT_PREVIEW_POLL_INTERVAL)
-    else {
-        return false;
+#[derive(Deserialize)]
+#[serde(tag = "event", rename_all = "lowercase")]
+enum PreviewEvent {
+    Ready { url: String },
+}
+
+fn component_preview_ready(path: &Path, address: SocketAddrV4) -> Result<bool> {
+    let mut output = String::new();
+    File::open(path)?.take(4096).read_to_string(&mut output)?;
+    let Some(line) = output.lines().next() else {
+        return Ok(false);
     };
-    let _ = connection.set_read_timeout(Some(COMPONENT_PREVIEW_PROBE_TIMEOUT));
-    let _ = connection.set_write_timeout(Some(COMPONENT_PREVIEW_PROBE_TIMEOUT));
-    if connection
-        .write_all(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\nAccept: text/html\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
-    let mut response = Vec::new();
-    connection
-        .take(1024 * 1024)
-        .read_to_end(&mut response)
-        .is_ok()
-        && (response.starts_with(b"HTTP/1.1 200") || response.starts_with(b"HTTP/1.0 200"))
-        && response
-            .windows(b"</html>".len())
-            .any(|window| window == b"</html>")
-        && !response
-            .windows(b"We're building your app now".len())
-            .any(|window| window == b"We're building your app now")
+    let event = match serde_json::from_str::<PreviewEvent>(line) {
+        Ok(event) => event,
+        Err(error) if error.is_eof() => return Ok(false),
+        Err(error) => return Err(error).context("decode dx-story readiness event"),
+    };
+    let PreviewEvent::Ready { url } = event;
+    anyhow::ensure!(
+        url == format!("http://{address}"),
+        "unexpected component preview URL: {url}"
+    );
+    Ok(true)
 }
 
 fn install_browsers(

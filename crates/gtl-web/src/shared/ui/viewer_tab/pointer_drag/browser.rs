@@ -295,8 +295,8 @@ fn paint_frame(mut state: Signal<DragState>) {
 }
 
 fn cancel_on_event(state: Signal<DragState>, event: &web_sys::Event) {
-    // Descendant focus changes do not invalidate the captured layout.
-    if event.type_() != "blur"
+    // Routed content emits element resize events without changing the captured tab layout.
+    if !matches!(event.type_().as_str(), "blur" | "resize")
         || event
             .target()
             .is_some_and(|target| target.is_instance_of::<Window>())

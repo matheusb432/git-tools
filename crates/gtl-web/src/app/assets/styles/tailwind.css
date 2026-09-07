@@ -132,3 +132,16 @@
     color: var(--color-ink);
   }
 }
+
+@keyframes project-reorder {
+  from { transform: translate(var(--project-offset-x), var(--project-offset-y)); }
+  to { transform: translate(0, 0); }
+}
+
+[data-project-moving] {
+  animation: project-reorder 180ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-project-moving] { animation: none; }
+}

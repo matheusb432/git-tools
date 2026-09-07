@@ -34,6 +34,7 @@ pub struct RenderDiffSubrepos {
 /// The outcome plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiffSubreposOk {
+    pub rendered_repositories: Vec<gtl_models::paths::RepositoryRoot>,
     pub outcome: RenderDiffSubreposOutcome,
     pub notes: Vec<Note>,
 }
@@ -85,6 +86,7 @@ pub fn execute(
             repos.len()
         )));
         return Ok(RenderDiffSubreposOk {
+            rendered_repositories: batch.completed,
             outcome: RenderDiffSubreposOutcome::Empty,
             notes,
         });
@@ -121,6 +123,7 @@ pub fn execute(
     }
     notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderDiffSubreposOk {
+        rendered_repositories: batch.completed,
         outcome: RenderDiffSubreposOutcome::Rendered(placed),
         notes,
     })

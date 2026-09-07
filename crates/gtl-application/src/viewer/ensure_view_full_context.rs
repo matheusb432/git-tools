@@ -97,7 +97,7 @@ mod tests {
             repository_root,
             viewer::recipe,
         },
-        viewer::{session::CachedView, shell},
+        viewer::{ensure_view_full_context, session::CachedView, shell},
     };
 
     fn git() -> FakeGitClient {
@@ -165,7 +165,7 @@ mod tests {
             })
             .unwrap();
 
-        let loaded = execute(
+        let loaded = ensure_view_full_context::execute(
             EnsureViewFullContext::Identity {
                 identity,
                 render_options: RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
@@ -199,7 +199,7 @@ mod tests {
                 .is_some_and(|lines| lines.iter().any(|line| line == " retained context"))
         );
 
-        let cached = execute(
+        let cached = ensure_view_full_context::execute(
             EnsureViewFullContext::Identity {
                 identity,
                 render_options: RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
@@ -223,7 +223,7 @@ mod tests {
         view.full_context = FullContextDiffState::Unavailable;
         let (state, identity, expected) = ready_state(view);
 
-        let cached = execute(
+        let cached = ensure_view_full_context::execute(
             EnsureViewFullContext::Identity {
                 identity,
                 render_options: RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),

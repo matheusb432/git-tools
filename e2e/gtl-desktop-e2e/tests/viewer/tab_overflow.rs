@@ -100,11 +100,29 @@ async fn verify_rail_responsiveness(
         .initial_last_identity()
         .context("tab overflow fixture has an initial final snapshot")?;
     support::wait_for_active_diff(driver, initial_last_repository, initial_last_marker).await?;
+    let initial_url = driver.current_url().await?;
     let initial_content_width = assert_tab_rail_presentation(driver).await?;
     let (pressed_repository, pressed_marker) = fixture
         .first_identity()
         .context("tab overflow fixture has a first snapshot")?;
     assert_pointer_down_activation(driver, pressed_repository, pressed_marker).await?;
+    let pressed_url = driver.current_url().await?;
+    ensure!(
+        initial_url != pressed_url,
+        "selecting another tab did not change its route"
+    );
+    driver.back().await?;
+    support::wait_for_active_diff(driver, initial_last_repository, initial_last_marker).await?;
+    ensure!(
+        driver.current_url().await? == initial_url,
+        "Back did not select the preceding diff route"
+    );
+    driver.forward().await?;
+    support::wait_for_active_diff(driver, pressed_repository, pressed_marker).await?;
+    ensure!(
+        driver.current_url().await? == pressed_url,
+        "Forward did not select the next diff route"
+    );
     assert_drag_reordering(driver).await?;
     ensure!(
         visible_overflow_trigger(driver).await?.is_none(),
@@ -154,24 +172,21 @@ async fn verify_rail_responsiveness(
 }
 
 async fn assert_tab_rail_presentation(driver: &WebDriver) -> Result<f64> {
-    let navigation = driver
-        .find(By::Css("nav[aria-label='Viewer navigation']"))
+    let rail = driver
+        .find(By::Css("[role='tablist'][aria-label='Open diffs']"))
         .await
-        .context("find viewer navigation")?;
+        .context("find viewer rail")?;
     let tabs = driver
         .find_all(By::Css("button[role='tab']"))
         .await
         .context("list visible viewer tabs")?;
     let first_tab = tabs.first().context("viewer has a first visible tab")?;
-    let navigation_rect = navigation
-        .rect()
-        .await
-        .context("measure viewer navigation")?;
+    let rail_rect = rail.rect().await.context("measure viewer rail")?;
     let first_tab_rect = first_tab.rect().await.context("measure first viewer tab")?;
     let tab_rail_content_width = tab_rail_content_width(driver).await?;
     ensure!(
-        first_tab_rect.x < navigation_rect.x,
-        "the first viewer tab does not overlap the shell edge: navigation={navigation_rect:?}, tab={first_tab_rect:?}"
+        (first_tab_rect.x - rail_rect.x).abs() <= 1.0,
+        "the first viewer tab does not align with the diff rail: rail={rail_rect:?}, tab={first_tab_rect:?}"
     );
 
     let label = first_tab
@@ -273,8 +288,8 @@ async fn assert_pointer_down_activation(
             "the viewer tab underline does not use an enter-only 75 ms transition: {motion:?}"
         );
         ensure!(
-            browser_history_length(driver).await? == history_length,
-            "switching tabs while already in the workspace pushed a redundant history entry"
+            browser_history_length(driver).await? == history_length + 1,
+            "switching tabs did not add exactly one diff route to history"
         );
         Ok(())
     }
@@ -285,7 +300,12 @@ async fn assert_pointer_down_activation(
         .perform()
         .await
         .context("release the pressed viewer tab")?;
-    activation
+    activation?;
+    ensure!(
+        browser_history_length(driver).await? == history_length + 1,
+        "releasing the pointer added a duplicate diff route to history"
+    );
+    Ok(())
 }
 
 async fn browser_history_length(driver: &WebDriver) -> Result<u64> {

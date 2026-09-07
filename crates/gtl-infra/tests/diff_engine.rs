@@ -182,3 +182,95 @@ fn commit_patch_matches_root_and_first_parent_git_semantics() {
             .any(|line| line == "+selected")
     );
 }
+
+#[test]
+fn working_tree_diff_includes_untracked_without_mutating_the_index() {
+    let temporary = tempfile::tempdir().unwrap();
+    let directory = temporary.path();
+    git(directory, &["init", "-q"]);
+    git(directory, &["config", "user.email", "test@example.test"]);
+    git(directory, &["config", "user.name", "Test"]);
+    std::fs::write(directory.join("tracked.txt"), "original\n").unwrap();
+    std::fs::write(directory.join("deleted.txt"), "deleted\n").unwrap();
+    std::fs::write(directory.join(".gitignore"), "ignored.txt\n").unwrap();
+    git(directory, &["add", "."]);
+    git(directory, &["commit", "-qm", "initial"]);
+    std::fs::write(directory.join("tracked.txt"), "staged\n").unwrap();
+    git(directory, &["add", "tracked.txt"]);
+    std::fs::write(directory.join("tracked.txt"), "working\n").unwrap();
+    git(directory, &["rm", "-q", "deleted.txt"]);
+    std::fs::write(directory.join("new file.txt"), "untracked\n").unwrap();
+    std::fs::write(directory.join("binary.dat"), [0_u8, 1, 2]).unwrap();
+    std::fs::write(directory.join("ignored.txt"), "ignored\n").unwrap();
+    let index_before = std::fs::read(directory.join(".git/index")).unwrap();
+    let result = compute_diff::execute(
+        ComputeDiff {
+            repo_root: repository_root(directory),
+            target: DiffTarget::Base(gtl_models::git::GitRevision::head()),
+        },
+        &FixedUserSettingsStore::default(),
+        &HybridGitClient,
+    )
+    .unwrap();
+    let paths = result
+        .view
+        .files
+        .iter()
+        .map(|file| file.path.display().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        ["binary.dat", "deleted.txt", "new file.txt", "tracked.txt"]
+    );
+    assert_eq!(
+        std::fs::read(directory.join(".git/index")).unwrap(),
+        index_before
+    );
+    let committed = compute_diff::execute(
+        ComputeDiff {
+            repo_root: repository_root(directory),
+            target: DiffTarget::Range {
+                range: GitRange::try_new("HEAD..HEAD").unwrap(),
+                pinned: None,
+            },
+        },
+        &FixedUserSettingsStore::default(),
+        &HybridGitClient,
+    )
+    .unwrap();
+    assert!(committed.view.files.is_empty());
+}
+
+#[test]
+fn initial_working_tree_diff_handles_staged_and_untracked_files() {
+    let temporary = tempfile::tempdir().unwrap();
+    let directory = temporary.path();
+    git(directory, &["init", "-q"]);
+    std::fs::write(directory.join("staged.txt"), "first\n").unwrap();
+    git(directory, &["add", "staged.txt"]);
+    std::fs::write(directory.join("staged.txt"), "latest\n").unwrap();
+    std::fs::write(directory.join("untracked.txt"), "new\n").unwrap();
+    let index_before = std::fs::read(directory.join(".git/index")).unwrap();
+    let result = compute_diff::execute(
+        ComputeDiff {
+            repo_root: repository_root(directory),
+            target: DiffTarget::Base(gtl_models::git::GitRevision::head()),
+        },
+        &FixedUserSettingsStore::default(),
+        &HybridGitClient,
+    )
+    .unwrap();
+    assert!(result.view.commits.is_empty());
+    assert_eq!(result.view.files.len(), 2);
+    assert!(
+        result
+            .view
+            .files
+            .iter()
+            .all(|file| file.status() == gtl_application::diffs::FileStatus::Added)
+    );
+    assert_eq!(
+        std::fs::read(directory.join(".git/index")).unwrap(),
+        index_before
+    );
+}

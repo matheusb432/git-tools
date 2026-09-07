@@ -7,6 +7,7 @@ use std::{
 pub(super) fn spawn(program: &Path) -> std::io::Result<()> {
     let mut command = Command::new(program);
     command
+        .arg("--focus-diff")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

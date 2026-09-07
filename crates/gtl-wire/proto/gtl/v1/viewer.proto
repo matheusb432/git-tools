@@ -3,9 +3,12 @@ syntax = "proto3";
 package gtl.v1;
 
 import "gtl/v1/common.proto";
+import "gtl/v1/repository.proto";
 import "gtl/v1/settings.proto";
 
 service ViewerService {
+  rpc ListViewerProjects(ListViewerProjectsRequest) returns (ListViewerProjectsResponse);
+  rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
   rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
   rpc StreamViewerRows(StreamViewerRowsRequest) returns (stream StreamViewerRowsResponse);
@@ -215,6 +218,7 @@ message ViewerShell {
   ViewerActiveState active = 3;
   ViewerPreferences preferences = 4;
   optional ViewerFeedback feedback = 5;
+  optional uint64 focus_request_version = 6;
 }
 
 message GetViewerShellResponse {
@@ -585,3 +589,25 @@ message OpenViewerDiffFileRequest {
 }
 
 message OpenViewerDiffFileResponse {}
+
+message ListViewerProjectsRequest {}
+message ListViewerProjectsResponse {
+  repeated ViewerProject projects = 1;
+}
+message ViewerProject {
+  string path = 1;
+  RepositoryStatusResult status = 2;
+  optional string last_rendered_at = 3;
+}
+enum ViewerProjectComparison {
+  VIEWER_PROJECT_COMPARISON_UNSPECIFIED = 0;
+  VIEWER_PROJECT_COMPARISON_LOCAL_CHANGES = 1;
+  VIEWER_PROJECT_COMPARISON_UNPUSHED_COMMITS = 2;
+}
+message OpenViewerProjectRequest {
+  string path = 1;
+  ViewerProjectComparison comparison = 2;
+}
+message OpenViewerProjectResponse {
+  uint64 tab_id = 1;
+}

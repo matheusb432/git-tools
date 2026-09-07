@@ -71,6 +71,7 @@ pub fn project(
     };
     Ok(ViewerShell {
         version: session.version(),
+        focus_request_version: session.focus_request_version(),
         tabs,
         active,
         preferences: ViewerPreferences {

@@ -35,6 +35,7 @@ impl LiveViewService for LiveViewGrpcService {
         let request = request.into_inner();
         let open_viewer = request.open_viewer;
         let request = SaveLiveView {
+            comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
             path: super::absolute_path(request.path, "path")?,
         };
         let state = self.state.clone();
@@ -83,6 +84,7 @@ impl LiveViewService for LiveViewGrpcService {
                 .map(|repository| {
                     save_live_view::execute(
                         SaveLiveView {
+                            comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
                             path: repository.path.as_ref().to_path_buf(),
                         },
                         &state.git,

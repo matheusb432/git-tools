@@ -91,17 +91,6 @@ const SERVE_ARGUMENTS: &[&str] = &[
     "--watch",
     "true",
 ];
-pub(crate) const COMPONENT_PREVIEW_TARGET_ARGUMENTS: &[&str] = &[
-    "--web",
-    "--package",
-    "gtl-web",
-    "--example",
-    "component-preview",
-    "--no-default-features",
-    "--features",
-    "component-preview",
-    "--locked",
-];
 const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-wire/src",
     "crates/gtl-parser/src",

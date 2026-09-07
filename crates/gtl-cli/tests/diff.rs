@@ -78,5 +78,32 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
         .success()
         .stderr("")
         .stdout(contains("file://"));
+
+    std::fs::write(
+        repository.path().join("untracked.txt"),
+        "cli-untracked-marker\n",
+    )?;
+    let index = std::fs::read(repository.path().join(".git/index"))?;
+    let output = Command::new(env!("CARGO_BIN_EXE_git-tools"))
+        .current_dir(repository.path())
+        .args(["diff", "HEAD", "--raw"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output)?;
+    let artifact = output
+        .lines()
+        .find_map(|line| line.strip_prefix("file://"))
+        .context("working-tree render must return an artifact")?;
+    ensure!(
+        std::fs::read_to_string(artifact)?.contains("cli-untracked-marker"),
+        "CLI working-tree comparison omitted untracked content"
+    );
+    ensure!(
+        std::fs::read(repository.path().join(".git/index"))? == index,
+        "CLI diff changed the real index"
+    );
     Ok(())
 }

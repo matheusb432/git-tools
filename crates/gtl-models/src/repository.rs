@@ -10,7 +10,20 @@ use std::fmt;
 use crate::git::CommitCount;
 
 /// Counts repository-relative paths in a working-tree state.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct PathCount(u64);
 
 impl PathCount {

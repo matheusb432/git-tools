@@ -3,6 +3,7 @@
 use gtl_application::{
     history::record_render,
     live_views::list_live_views,
+    ports::Clock as _,
     recipes::RecipeBatch,
     viewer::work::{
         self, CommitPublication, RecipePublication, ReserveRecipeError, ReservedCommitWork,
@@ -40,12 +41,13 @@ pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
             Ok(RecipePublication::Published { history }) => {
                 record_history(&state, &history);
             }
+            Ok(RecipePublication::Skipped { path }) => {
+                record_project_renders(&state, &[path]);
+            }
             Ok(RecipePublication::Failed { error }) => {
                 tracing::error!(error = ?error, "viewer recipe computation failed");
             }
-            Ok(
-                RecipePublication::Broken | RecipePublication::Skipped | RecipePublication::Stale,
-            ) => {}
+            Ok(RecipePublication::Broken | RecipePublication::Stale) => {}
             Err(error) => {
                 tracing::error!(error = ?error, "viewer recipe publication failed");
             }
@@ -74,5 +76,31 @@ fn record_history(state: &AppState, history: &record_render::RecordRender) {
     });
     if let Err(error) = result {
         tracing::error!(error = ?error, "viewer history recording failed");
+    }
+}
+
+pub(crate) fn record_project_renders(
+    state: &AppState,
+    paths: &[gtl_models::paths::RepositoryRoot],
+) {
+    use gtl_application::projects::record_project_render::{self, RecordProjectRender};
+    let result = (|| -> anyhow::Result<()> {
+        let mut connection = state.database.connection_lock()?;
+        let transaction = connection.transaction()?;
+        let rendered_at = state.clock.now()?;
+        for path in paths {
+            record_project_render::execute(
+                &RecordProjectRender {
+                    path: path.clone(),
+                    rendered_at: rendered_at.clone(),
+                },
+                &transaction,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::error!(error = ?error, "project render recency recording failed");
     }
 }

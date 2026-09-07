@@ -30,7 +30,6 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     let workspace = use_client_diff_workspace(view);
     let toast = use_toast();
     let workspace_store = workspace.workspace();
-    use_context_provider(|| workspace_store);
     let rows_loading = use_memo(move || {
         workspace_store.files().iter().any(|file| {
             *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
@@ -103,7 +102,6 @@ pub(crate) fn StaticDiffDocument(
 ) -> Element {
     let diff = super::diff_workspace::use_workspace_context();
     let workspace = use_store(move || workspace);
-    use_context_provider(|| workspace);
     let title = diff.view.read().title.clone();
     let identity = workspace.identity().cloned();
     rsx! {

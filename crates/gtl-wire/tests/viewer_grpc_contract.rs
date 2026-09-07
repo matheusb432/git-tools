@@ -87,6 +87,7 @@ fn row_stream_events_carry_identity_sequence_file_and_typed_rows() {
 fn shell_codec_round_trips_the_process_neutral_contract() {
     let shell = ViewerShell {
         version: ViewerVersion::new(4),
+        focus_request_version: Some(ViewerVersion::new(3)),
         tabs: vec![ViewerTab {
             id: ViewerTabId::try_new(7).unwrap(),
             label: "git-tools".into(),
@@ -127,6 +128,7 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
         let response = v1::GetViewerShellResponse {
             shell: Some(v1::ViewerShell {
                 version: 1,
+                focus_request_version: None,
                 tabs: Vec::new(),
                 active: Some(v1::ViewerActiveState {
                     state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
@@ -424,4 +426,118 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
         request
     );
+}
+
+#[test]
+fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
+    use gtl_models::{
+        live_views::LiveComparison, paths::RepositoryRoot, repository::status::RepositoryStatus,
+    };
+    use gtl_wire::{
+        proto::viewer::projects,
+        viewer::projects::{OpenViewerProject, ViewerProject},
+    };
+    let project = ViewerProject {
+        path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
+        name: ProjectName::try_new("Alpha").unwrap(),
+        status: RepositoryStatus::Absent,
+        last_rendered_at: Some("2026-09-06T10:00:00Z".try_into().unwrap()),
+    };
+    let response = v1::ListViewerProjectsResponse {
+        projects: vec![projects::encode_project(project.clone())],
+    };
+    assert_eq!(
+        projects::decode_projects(response).unwrap(),
+        vec![project.clone()]
+    );
+    for comparison in [
+        LiveComparison::LocalChanges,
+        LiveComparison::UnpushedCommits,
+    ] {
+        let request = OpenViewerProject {
+            path: project.path.clone(),
+            comparison,
+        };
+        assert_eq!(
+            projects::decode_open(projects::encode_open(&request)).unwrap(),
+            request
+        );
+    }
+    for (path, comparison) in [("relative", 1), ("/repos/alpha", 0), ("/repos/alpha", 99)] {
+        assert!(
+            projects::decode_open(v1::OpenViewerProjectRequest {
+                path: path.into(),
+                comparison
+            })
+            .is_err()
+        );
+    }
+    assert!(
+        projects::decode_projects(v1::ListViewerProjectsResponse {
+            projects: vec![v1::ViewerProject {
+                path: "/repos/alpha".into(),
+                status: None,
+                last_rendered_at: None
+            }]
+        })
+        .is_err()
+    );
+    assert!(projects::decode_open_response(v1::OpenViewerProjectResponse { tab_id: 0 }).is_err());
+}
+
+#[test]
+fn project_statuses_round_trip_through_grpc_and_desktop_json() {
+    use gtl_models::{
+        paths::RepositoryRoot,
+        repository::{
+            PathCount,
+            status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
+        },
+    };
+    use gtl_wire::{proto::viewer::projects, viewer::projects::ViewerProject};
+    for status in [
+        RepositoryStatus::Absent,
+        RepositoryStatus::Present {
+            head: StatusHead::Unavailable,
+            changes: StatusChanges::Unavailable,
+        },
+        RepositoryStatus::Present {
+            head: StatusHead::Detached,
+            changes: StatusChanges::Clean,
+        },
+        RepositoryStatus::Present {
+            head: StatusHead::Branch {
+                name: "main".try_into().unwrap(),
+                upstream: StatusUpstream::Missing,
+            },
+            changes: StatusChanges::from_counts(PathCount::new(2), PathCount::new(3)),
+        },
+        RepositoryStatus::Present {
+            head: StatusHead::Branch {
+                name: "feature".try_into().unwrap(),
+                upstream: StatusUpstream::Tracking {
+                    reference: "origin/main".try_into().unwrap(),
+                    ahead: gtl_models::git::CommitCount::new(4),
+                },
+            },
+            changes: StatusChanges::Clean,
+        },
+    ] {
+        let project = ViewerProject {
+            path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
+            name: ProjectName::try_new("Alpha").unwrap(),
+            status,
+            last_rendered_at: None,
+        };
+        let decoded = projects::decode_projects(v1::ListViewerProjectsResponse {
+            projects: vec![projects::encode_project(project.clone())],
+        })
+        .unwrap();
+        assert_eq!(decoded, vec![project.clone()]);
+        assert_eq!(
+            serde_json::from_str::<ViewerProject>(&serde_json::to_string(&project).unwrap())
+                .unwrap(),
+            project
+        );
+    }
 }

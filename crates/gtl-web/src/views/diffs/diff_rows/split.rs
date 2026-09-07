@@ -5,8 +5,7 @@ use super::{
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
-    ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWorkspace,
-    ClientDiffWorkspaceStoreExt, ViewerSplitRow,
+    ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerSplitRow,
 };
 
 const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
@@ -27,18 +26,11 @@ enum SplitCellPresentation {
 
 #[component]
 pub(crate) fn SplitDiffRowBatch(
-    file_index: usize,
+    file: ReadStore<ClientDiffFile>,
     batch_index: usize,
     artifact_enhancement: bool,
 ) -> Element {
-    let workspace = use_context::<Store<ClientDiffWorkspace>>();
-    let Some(file) = workspace.files().get(file_index) else {
-        return rsx! {};
-    };
-    let Some(rows) = file.rows().split().get(batch_index) else {
-        return rsx! {};
-    };
-    let rows: ReadStore<Vec<ViewerSplitRow>> = rows.into();
+    let rows = file.rows().split().index(batch_index);
     rsx! {
         SplitRows { rows, artifact_enhancement }
     }

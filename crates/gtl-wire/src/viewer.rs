@@ -14,7 +14,9 @@ use gtl_models::{
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 5;
+pub mod projects;
+
+pub const VIEWER_PROTOCOL_VERSION: u32 = 7;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -441,6 +443,8 @@ pub enum ViewerFeedback {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerShell {
     pub version: ViewerVersion,
+    /// Latest explicit request to show the active diff, retained across background updates.
+    pub focus_request_version: Option<ViewerVersion>,
     pub tabs: Vec<ViewerTab>,
     pub active: ViewerActiveState,
     pub preferences: ViewerPreferences,

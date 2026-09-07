@@ -4,6 +4,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
     ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
 };
 
 use crate::shared::viewer_client::ViewerClientError;
@@ -44,6 +45,13 @@ macro_rules! viewer_query {
 }
 
 viewer_query!(get_shell, ViewerShell, get_shell);
+viewer_query!(list_projects, Vec<ViewerProject>, list_projects);
+viewer_request!(
+    open_project,
+    OpenViewerProject,
+    OpenViewerProjectOk,
+    open_project
+);
 viewer_request!(
     stream_rows,
     StreamViewerRows,

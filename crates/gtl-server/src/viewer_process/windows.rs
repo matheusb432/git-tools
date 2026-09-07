@@ -9,6 +9,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub(super) fn spawn(program: &Path) -> std::io::Result<()> {
     Command::new(program)
+        .arg("--focus-diff")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

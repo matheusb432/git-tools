@@ -37,6 +37,7 @@ mod tests {
     use crate::{
         diffs::FileDiff,
         utils::{diffs::view, repository_relative_path},
+        viewer::search_viewer_files,
     };
 
     fn identity() -> ViewerViewIdentity {
@@ -65,7 +66,7 @@ mod tests {
             })
             .collect();
 
-        let result = execute(
+        let result = search_viewer_files::execute(
             &SearchViewerFiles {
                 identity: identity(),
                 query: "RENDER".into(),

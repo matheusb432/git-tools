@@ -52,7 +52,7 @@ pub(super) fn build(
         files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, &io_ranges.log, excluded)?;
+    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), excluded)?;
 
     let view = View {
         repo_name,

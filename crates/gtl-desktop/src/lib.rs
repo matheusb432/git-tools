@@ -17,10 +17,11 @@ use viewer_ipc::{
     ViewerIpcState, viewer_activate_tab, viewer_clear_commit_selection, viewer_close_tab,
     viewer_connect, viewer_delete_live_tab, viewer_edit_settings, viewer_find_diff,
     viewer_get_history_copy, viewer_get_settings, viewer_get_shell, viewer_list_commits,
-    viewer_list_history, viewer_move_tab, viewer_open_diff_file, viewer_open_history,
-    viewer_refresh_tab, viewer_search_files, viewer_select_commit, viewer_set_preference,
-    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
-    viewer_watch_cancel, viewer_watch_next_batch, viewer_watch_start,
+    viewer_list_history, viewer_list_projects, viewer_move_tab, viewer_open_diff_file,
+    viewer_open_history, viewer_open_project, viewer_refresh_tab, viewer_search_files,
+    viewer_select_commit, viewer_set_preference, viewer_stream_rows_cancel,
+    viewer_stream_rows_next_batch, viewer_stream_rows_start, viewer_watch_cancel,
+    viewer_watch_next_batch, viewer_watch_start,
 };
 
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
@@ -110,8 +111,9 @@ fn restore_window_step(result: tauri::Result<()>, operation: &str) -> bool {
     }
 }
 
-fn main_window_url() -> WebviewUrl {
-    WebviewUrl::App("index.html".into())
+fn main_window_url(focus_diff: bool) -> WebviewUrl {
+    let entrypoint = if focus_diff { "diffs" } else { "index.html" };
+    WebviewUrl::App(entrypoint.into())
 }
 
 fn viewer_navigation_allowed(url: &Url) -> bool {
@@ -157,7 +159,8 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 }
 
 fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    WebviewWindowBuilder::new(app, "main", main_window_url())
+    let focus_diff = std::env::args_os().any(|argument| argument == "--focus-diff");
+    WebviewWindowBuilder::new(app, "main", main_window_url(focus_diff))
         .title(MAIN_WINDOW_TITLE)
         .inner_size(MAIN_WINDOW_SIZE.0, MAIN_WINDOW_SIZE.1)
         .min_inner_size(MAIN_WINDOW_MIN_SIZE.0, MAIN_WINDOW_MIN_SIZE.1)
@@ -197,6 +200,8 @@ pub fn run() -> anyhow::Result<()> {
         .invoke_handler(tauri::generate_handler![
             viewer_connect,
             viewer_get_shell,
+            viewer_list_projects,
+            viewer_open_project,
             viewer_activate_tab,
             viewer_move_tab,
             viewer_close_tab,
@@ -250,8 +255,16 @@ mod tests {
         assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
         assert_eq!(MAIN_WINDOW_MIN_SIZE, (390.0, 480.0));
         assert!(matches!(
-            main_window_url(),
+            main_window_url(false),
             WebviewUrl::App(path) if path == std::path::Path::new("index.html")
+        ));
+    }
+
+    #[test]
+    fn diff_launch_carries_explicit_navigation_intent() {
+        assert!(matches!(
+            main_window_url(true),
+            WebviewUrl::App(path) if path == std::path::Path::new("diffs")
         ));
     }
 

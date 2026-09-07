@@ -261,7 +261,8 @@ pub(super) fn store_test() -> Connection {
     let connection = Connection::open_in_memory().unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE project_sources (
+            "CREATE TABLE project_render_recency (source_value TEXT PRIMARY KEY, rendered_at TEXT NOT NULL) STRICT;
+        CREATE TABLE project_sources (
           id         INTEGER PRIMARY KEY AUTOINCREMENT,
           kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote')),
           value      TEXT NOT NULL,

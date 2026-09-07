@@ -30,6 +30,7 @@ pub enum PrepareRecipeOk {
     },
     Skipped {
         label: String,
+        path: gtl_models::paths::RepositoryRoot,
     },
     Publish {
         label: String,
@@ -74,7 +75,10 @@ pub fn execute(
         view,
     });
     match completed {
-        CompleteRecipeComputationOk::Skipped { label } => Ok(PrepareRecipeOk::Skipped { label }),
+        CompleteRecipeComputationOk::Skipped { label } => Ok(PrepareRecipeOk::Skipped {
+            label,
+            path: recipe.cwd(),
+        }),
         CompleteRecipeComputationOk::Publish { label, view } => {
             let history = RecordRender {
                 recipe,
