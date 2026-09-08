@@ -123,6 +123,79 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
 }
 
 #[test]
+fn ready_shell_content_id_survives_protobuf_and_rejects_missing_or_wrong_width()
+-> Result<(), Box<dyn std::error::Error>> {
+    use prost::Message as _;
+    let active = v1::ViewerActiveView {
+        identity: Some(encode_viewer_view_identity(viewer_identity().unwrap())),
+        content_id: Some(vec![42; 32]),
+        repository_name: "repo".into(),
+        branch: "main".into(),
+        upstream: "HEAD".into(),
+        command: Some(v1::ViewerCommandLine::default()),
+        commit_selection: Some(v1::ViewerCommitSelection {
+            state: v1::ViewerCommitSelectionState::None as i32,
+            ..Default::default()
+        }),
+        footer: Some(v1::ViewerFooter::default()),
+        ..Default::default()
+    };
+    let shell = ViewerShell {
+        version: ViewerVersion::new(1),
+        focus_request_version: None,
+        tabs: Vec::new(),
+        active: ViewerActiveState::Empty,
+        preferences: ViewerPreferences {
+            theme: ViewerTheme::Dark,
+            render_options: viewer_identity().unwrap().render_options,
+            keybindings: ViewerKeybindings::default(),
+        },
+        feedback: None,
+    };
+    let mut encoded = encode_viewer_shell(shell).unwrap();
+    encoded.active = Some(v1::ViewerActiveState {
+        state: Some(v1::viewer_active_state::State::Ready(Box::new(
+            v1::ViewerReadyState {
+                view: Some(active.clone()),
+            },
+        ))),
+    });
+    let bytes = encoded.encode_to_vec();
+    let decoded = decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+        shell: Some(v1::ViewerShell::decode(bytes.as_slice()).unwrap()),
+    })
+    .unwrap();
+    let ViewerActiveState::Ready { view } = &decoded.active else {
+        return Err("expected a ready view".into());
+    };
+    assert_eq!(
+        view.content_id,
+        viewer::ViewerRowContentId::from_digest([42; 32])
+    );
+    assert_eq!(encode_viewer_shell(decoded).unwrap(), encoded);
+    for content_id in [None, Some(vec![]), Some(vec![42; 31]), Some(vec![42; 33])] {
+        let mut invalid = encoded.clone();
+        invalid.active = Some(v1::ViewerActiveState {
+            state: Some(v1::viewer_active_state::State::Ready(Box::new(
+                v1::ViewerReadyState {
+                    view: Some(v1::ViewerActiveView {
+                        content_id,
+                        ..active.clone()
+                    }),
+                },
+            ))),
+        });
+        assert_eq!(
+            decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+                shell: Some(invalid)
+            }),
+            Err(ViewerCodecError::InvalidMessage)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
     for (search_files, search_text_in_all_files) in [("Shift+P", "Ctrl+F"), ("Ctrl+F", "ctrl+f")] {
         let response = v1::GetViewerShellResponse {

@@ -195,6 +195,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         active: ViewerActiveState::Ready {
             view: Box::new(ViewerActiveView {
                 identity,
+                content_id: ViewerRowContentId::from_digest([42; 32]),
                 title: "feature vs main".into(),
                 repository_name: project_name("git-tools")?,
                 branch: head("feature")?,
@@ -408,4 +409,24 @@ fn history_copy_payload_carries_server_formatted_json() -> TestResult {
         json!({"render_id": 31})
     );
     Ok(())
+}
+
+#[test]
+fn row_content_id_has_a_fixed_width_serde_contract() {
+    let id = ViewerRowContentId::from_digest([42; 32]);
+    let encoded = serde_json::to_value(id).unwrap();
+    assert_eq!(encoded, json!(vec![42; 32]));
+    assert_eq!(
+        serde_json::from_value::<ViewerRowContentId>(encoded).unwrap(),
+        id
+    );
+    for invalid in [
+        json!([]),
+        json!(vec![42; 31]),
+        json!(vec![42; 33]),
+        json!(vec![256; 32]),
+        json!(null),
+    ] {
+        assert!(serde_json::from_value::<ViewerRowContentId>(invalid).is_err());
+    }
 }

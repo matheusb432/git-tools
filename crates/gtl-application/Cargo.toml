@@ -21,6 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 semver.workspace = true
+sha2.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }

@@ -153,9 +153,30 @@ mod tests {
     }
 
     #[test]
-    fn full_identity_fetches_and_reweights_the_cached_view_once() {
+    fn full_identity_fetches_and_reweights_the_cached_view_once()
+    -> Result<(), Box<dyn std::error::Error>> {
         let git = git();
         let (state, identity, _) = ready_state(deferred_view(&git));
+        let project = |density| {
+            state
+                .inspect(|session| {
+                    shell::project(
+                        session,
+                        RenderOptions::new(DiffLayout::Unified, density),
+                        super::super::Theme::Dark,
+                        gtl_models::viewer::ViewerKeybindings::default(),
+                        None,
+                    )
+                    .unwrap()
+                })
+                .unwrap()
+                .active
+        };
+        let compact_before = project(DiffDensity::Compact);
+        assert!(matches!(
+            project(DiffDensity::Full),
+            gtl_wire::viewer::ViewerActiveState::Pending { .. }
+        ));
         let weight_before = state
             .inspect(|session| {
                 session
@@ -180,7 +201,7 @@ mod tests {
         };
         assert!(loaded.is_some(), "full-context request became stale");
         let Some(loaded) = loaded else {
-            return;
+            return Err("full-context request became stale".into());
         };
         let weight_after = state
             .inspect(|session| {
@@ -192,6 +213,25 @@ mod tests {
             .unwrap();
 
         assert!(weight_after > weight_before);
+        assert_eq!(compact_before, project(DiffDensity::Compact));
+        let full = project(DiffDensity::Full);
+        let gtl_wire::viewer::ViewerActiveState::Ready { view: active } = full else {
+            return Err("full source must be ready after enrichment".into());
+        };
+        assert_eq!(
+            active.content_id,
+            crate::viewer::project_diff_view(
+                &loaded,
+                &loaded,
+                identity,
+                gtl_wire::viewer::ViewerCommitSelection::None,
+            )
+            .content_id
+        );
+        let gtl_wire::viewer::ViewerActiveState::Ready { view: compact } = compact_before else {
+            return Err("compact source must be ready".into());
+        };
+        assert_ne!(active.content_id, compact.content_id);
         assert!(
             loaded.files[0]
                 .full_lines
@@ -214,6 +254,7 @@ mod tests {
         assert!(
             matches!(cached, EnsureViewFullContextOk::Ready(view) if Arc::ptr_eq(&view, &loaded))
         );
+        Ok(())
     }
 
     #[test]

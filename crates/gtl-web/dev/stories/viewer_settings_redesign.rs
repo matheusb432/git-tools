@@ -238,6 +238,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     let (files, workspace) = preview_files(identity)?;
     let commits = preview_commits()?;
     let view = ViewerActiveView {
+        content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity,
         title: "diff".to_owned(),
         repository_name: ProjectName::try_from("git-tools")?,

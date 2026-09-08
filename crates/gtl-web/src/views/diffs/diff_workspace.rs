@@ -700,6 +700,7 @@ mod artifact_tests {
             )],
         );
         let view = ViewerActiveView {
+            content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity,
             title: "diff".to_owned(),
             repository_name: project_name(&format!("repo-{tab_id}"))?,

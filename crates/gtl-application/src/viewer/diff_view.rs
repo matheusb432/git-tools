@@ -1,9 +1,12 @@
+use std::{ops::Deref, sync::Arc};
+
 use gtl_models::paths::RepositoryRelativePath;
 use gtl_wire::viewer::{
     ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection,
     ViewerCommitSummary, ViewerDiffDensity, ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary,
-    ViewerFooter, ViewerRenderOptions, ViewerTheme, ViewerViewIdentity,
+    ViewerFooter, ViewerRenderOptions, ViewerRowContentId, ViewerTheme, ViewerViewIdentity,
 };
+use sha2::{Digest as _, Sha256};
 
 use crate::{
     diffs::{FileDiff, FileStatus, View},
@@ -11,6 +14,93 @@ use crate::{
 };
 
 const GIANT_FILE_CHARACTERS: usize = 250_000;
+
+/// Immutable row sources and their digests, shared across shell and selection snapshots.
+#[derive(Debug, Clone)]
+pub struct ViewerDiffSnapshot(Arc<ViewerDiffSnapshotContent>);
+
+#[derive(Debug)]
+struct ViewerDiffSnapshotContent {
+    view: Arc<View>,
+    compact: [u8; 32],
+    full: [u8; 32],
+}
+
+impl ViewerDiffSnapshot {
+    #[must_use]
+    pub fn new(view: Arc<View>) -> Self {
+        let compact = source_digest(&view, ViewerDiffDensity::Compact);
+        let full = if view.files.iter().all(|file| file.full_lines.is_none()) {
+            compact
+        } else {
+            source_digest(&view, ViewerDiffDensity::Full)
+        };
+        Self(Arc::new(ViewerDiffSnapshotContent {
+            view,
+            compact,
+            full,
+        }))
+    }
+
+    #[must_use]
+    pub fn shared_view(&self) -> Arc<View> {
+        Arc::clone(&self.0.view)
+    }
+
+    #[must_use]
+    pub fn content_id(&self, options: ViewerRenderOptions) -> ViewerRowContentId {
+        let source = match options.density {
+            ViewerDiffDensity::Compact => self.0.compact,
+            ViewerDiffDensity::Full => self.0.full,
+        };
+        row_content_id(source, options.layout)
+    }
+}
+
+impl Deref for ViewerDiffSnapshot {
+    type Target = View;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.view
+    }
+}
+
+fn source_digest(view: &View, density: ViewerDiffDensity) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(b"gtl.viewer.row-sources.v1\0");
+    digest.update((view.files.len() as u64).to_be_bytes());
+    for file in &view.files {
+        hash_frame(
+            &mut digest,
+            file.path.as_path().as_os_str().as_encoded_bytes(),
+        );
+        let lines = selected_lines(file, density);
+        digest.update((lines.len() as u64).to_be_bytes());
+        for line in lines {
+            hash_frame(&mut digest, line.as_bytes());
+        }
+    }
+    digest.finalize().into()
+}
+
+fn hash_frame(digest: &mut Sha256, bytes: &[u8]) {
+    digest.update((bytes.len() as u64).to_be_bytes());
+    digest.update(bytes);
+}
+
+fn row_content_id(
+    source: [u8; 32],
+    layout: gtl_wire::viewer::ViewerDiffLayout,
+) -> ViewerRowContentId {
+    let mut digest = Sha256::new();
+    digest.update(b"gtl.viewer.rows.v1\0");
+    digest.update([match layout {
+        gtl_wire::viewer::ViewerDiffLayout::Unified => 0,
+        gtl_wire::viewer::ViewerDiffLayout::Split => 1,
+    }]);
+    digest.update(source);
+    ViewerRowContentId::from_digest(digest.finalize().into())
+}
 
 /// Borrowed source selected for one identity-bound viewer file.
 pub struct ViewerDiffFileSource<'view> {
@@ -77,8 +167,23 @@ pub fn project_diff_view(
     identity: ViewerViewIdentity,
     commit_selection: ViewerCommitSelection,
 ) -> ViewerActiveView {
+    let content_id = row_content_id(
+        source_digest(view, identity.render_options.density),
+        identity.render_options.layout,
+    );
+    project_diff_view_with_content_id(view, range_view, identity, commit_selection, content_id)
+}
+
+pub(super) fn project_diff_view_with_content_id(
+    view: &View,
+    range_view: &View,
+    identity: ViewerViewIdentity,
+    commit_selection: ViewerCommitSelection,
+    content_id: ViewerRowContentId,
+) -> ViewerActiveView {
     ViewerActiveView {
         identity,
+        content_id,
         title: view.title.clone(),
         repository_name: view.repo_name.clone(),
         branch: view.branch.clone(),
@@ -262,6 +367,139 @@ mod tests {
         assert_eq!(
             diff_file_anchor_id(&utils::repository_relative_path("---")),
             "f-"
+        );
+    }
+
+    fn content_id(view: &View, density: ViewerDiffDensity) -> gtl_wire::viewer::ViewerRowContentId {
+        project_diff_view(view, view, identity(density), ViewerCommitSelection::None).content_id
+    }
+
+    #[test]
+    fn row_content_is_equal_across_tab_metadata_and_snapshot_projection() {
+        let original = view();
+        let mut renamed = original.clone();
+        renamed.title = "Live unpushed commits".into();
+        renamed.cmd.lead = "gtl live ".into();
+        renamed.cmd.range = "0123456..abcdef0".into();
+        renamed.foot.cmd = "different command".into();
+        renamed.repo_root = utils::repository_root("/another-checkout");
+        renamed.commits.clear();
+        let mut other_identity = identity(ViewerDiffDensity::Compact);
+        other_identity.tab_id = ViewerTabId::try_new(99).unwrap();
+        other_identity.range_generation = ViewerRangeGeneration::new(100);
+        other_identity.selection_generation = ViewerSelectionGeneration::new(101);
+        let static_view = project_diff_view(
+            &original,
+            &original,
+            identity(ViewerDiffDensity::Compact),
+            ViewerCommitSelection::None,
+        );
+        let snapshot = super::ViewerDiffSnapshot::new(std::sync::Arc::new(renamed));
+        let live_view = super::project_diff_view_with_content_id(
+            &snapshot,
+            &original,
+            other_identity,
+            ViewerCommitSelection::None,
+            snapshot.content_id(other_identity.render_options),
+        );
+
+        assert_ne!(static_view.identity, live_view.identity);
+        assert_eq!(static_view.content_id, live_view.content_id);
+        assert_ne!(static_view.title, live_view.title);
+    }
+
+    #[test]
+    fn same_stats_source_edits_paths_and_file_order_invalidate_row_content() {
+        let original = view();
+        let expected = content_id(&original, ViewerDiffDensity::Compact);
+        let mut edited = original.clone();
+        edited.files[0].lines[1] = "+changed".into();
+        assert_eq!(original.files[0].added, edited.files[0].added);
+        assert_eq!(original.files[0].removed, edited.files[0].removed);
+        assert_eq!(
+            original.files[0].lines[1].len(),
+            edited.files[0].lines[1].len()
+        );
+        assert_ne!(expected, content_id(&edited, ViewerDiffDensity::Compact));
+
+        let mut renamed = original.clone();
+        renamed.files[0].path = utils::repository_relative_path("src/other.rs");
+        assert_ne!(expected, content_id(&renamed, ViewerDiffDensity::Compact));
+        let mut reordered = original.clone();
+        reordered.files.swap(0, 1);
+        assert_ne!(expected, content_id(&reordered, ViewerDiffDensity::Compact));
+    }
+
+    #[test]
+    fn row_content_frames_paths_files_and_ordered_lines_without_ambiguity() {
+        let mut first = view();
+        first.files.truncate(1);
+        let mut second = first.clone();
+        for (left, right) in [
+            (vec!["+ab", "c"], vec!["+a", "bc"]),
+            (vec!["+a", "+b"], vec!["+b", "+a"]),
+            (vec!["+a\n+b"], vec!["+a", "+b"]),
+            (vec!["+a\0+b"], vec!["+a", "\0+b"]),
+        ] {
+            first.files[0].lines = left.into_iter().map(str::to_owned).collect();
+            second.files[0].lines = right.into_iter().map(str::to_owned).collect();
+            assert_ne!(
+                content_id(&first, ViewerDiffDensity::Compact),
+                content_id(&second, ViewerDiffDensity::Compact)
+            );
+        }
+        first.files[0].path = utils::repository_relative_path("ab");
+        first.files[0].lines = vec!["c".into()];
+        second.files[0].path = utils::repository_relative_path("a");
+        second.files[0].lines = vec!["bc".into()];
+        assert_ne!(
+            content_id(&first, ViewerDiffDensity::Compact),
+            content_id(&second, ViewerDiffDensity::Compact)
+        );
+    }
+
+    #[test]
+    fn row_content_covers_layout_and_only_the_density_selected_source() {
+        let original = view();
+        let compact = content_id(&original, ViewerDiffDensity::Compact);
+        let full = content_id(&original, ViewerDiffDensity::Full);
+        assert_ne!(compact, full);
+        let mut changed = original.clone();
+        changed.files[0].full_lines.as_mut().unwrap()[1] = "+more".into();
+        assert_eq!(compact, content_id(&changed, ViewerDiffDensity::Compact));
+        assert_ne!(full, content_id(&changed, ViewerDiffDensity::Full));
+        changed.files[0].full_lines = Some(changed.files[0].lines.clone());
+        assert_eq!(compact, content_id(&changed, ViewerDiffDensity::Full));
+        changed.files[0].full_lines = None;
+        assert_eq!(compact, content_id(&changed, ViewerDiffDensity::Full));
+        let snapshot = super::ViewerDiffSnapshot::new(std::sync::Arc::new(original));
+        assert_eq!(
+            compact,
+            snapshot.content_id(identity(ViewerDiffDensity::Compact).render_options)
+        );
+        assert_eq!(
+            full,
+            snapshot.content_id(identity(ViewerDiffDensity::Full).render_options)
+        );
+        let split = ViewerRenderOptions {
+            layout: ViewerDiffLayout::Split,
+            density: ViewerDiffDensity::Compact,
+        };
+        assert_ne!(compact, snapshot.content_id(split));
+    }
+
+    #[test]
+    fn snapshot_keeps_source_and_digest_together_when_the_producer_edits_its_view() {
+        let mut source = std::sync::Arc::new(view());
+        let snapshot = super::ViewerDiffSnapshot::new(std::sync::Arc::clone(&source));
+        let options = identity(ViewerDiffDensity::Compact).render_options;
+        let expected = snapshot.content_id(options);
+        std::sync::Arc::make_mut(&mut source).files[0].lines[1] = "+changed".into();
+        assert_eq!(snapshot.files[0].lines[1], "+compact");
+        assert_eq!(snapshot.clone().content_id(options), expected);
+        assert_ne!(
+            super::ViewerDiffSnapshot::new(source).content_id(options),
+            expected
         );
     }
 

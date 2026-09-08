@@ -153,7 +153,7 @@ impl ViewerService for ViewerGrpcService {
         _request: Request<v1::GetViewerShellRequest>,
     ) -> Result<Response<v1::GetViewerShellResponse>, Status> {
         Ok(Response::new(v1::GetViewerShellResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -214,7 +214,7 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::ActivateViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -226,7 +226,7 @@ impl ViewerService for ViewerGrpcService {
             .map_err(|_| Status::invalid_argument("move viewer tab request is invalid"))?;
         move_viewer_tab::execute(request, &self.state.viewer).map_err(move_viewer_tab_error)?;
         Ok(Response::new(v1::MoveViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -241,7 +241,7 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -254,7 +254,7 @@ impl ViewerService for ViewerGrpcService {
             .map_err(|error| map_reserve_recipe(error, "refresh viewer tab"))?;
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::RefreshViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -278,10 +278,7 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::DeleteLiveViewerTabResponse {
-            shell: Some(project_shell(
-                &self.state,
-                Some(ViewerFeedback::LiveViewDeleted),
-            )?),
+            shell: Some(project_shell(&self.state, Some(ViewerFeedback::LiveViewDeleted)).await?),
         }))
     }
 
@@ -297,7 +294,7 @@ impl ViewerService for ViewerGrpcService {
             .map_err(map_reserve_commit)?;
         viewer_runtime::spawn_commit(self.state.clone(), work);
         Ok(Response::new(v1::SelectViewerCommitResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -312,7 +309,7 @@ impl ViewerService for ViewerGrpcService {
             return Err(Status::not_found("viewer tab is not available"));
         }
         Ok(Response::new(v1::ClearViewerCommitSelectionResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -349,7 +346,7 @@ impl ViewerService for ViewerGrpcService {
             }
         }
         Ok(Response::new(v1::SetViewerPreferenceResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -433,7 +430,7 @@ impl ViewerService for ViewerGrpcService {
             .map_err(|error| map_reserve_recipe(error, "open viewer history"))?;
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::OpenViewerHistoryResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state, None).await?),
         }))
     }
 
@@ -693,11 +690,23 @@ pub(super) fn load_user_settings(state: &AppState) -> Result<UserSettings, Statu
     })
 }
 
-fn project_shell(
+async fn project_shell(
     state: &AppState,
     feedback: Option<ViewerFeedback>,
 ) -> Result<v1::ViewerShell, Status> {
     let settings = load_user_settings(state)?;
+    if settings.viewer_render_options().density() == DiffDensity::Full {
+        let state = state.clone();
+        run_blocking(move || {
+            ensure_view_full_context::execute(
+                EnsureViewFullContext::Active,
+                &state.viewer,
+                &state.git,
+            )
+        })
+        .await?
+        .map_err(|error| unexpected_viewer(error, "load full-context viewer shell"))?;
+    }
     let shell = state
         .viewer
         .inspect(|session| {

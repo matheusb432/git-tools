@@ -149,7 +149,9 @@ pub(crate) fn ProjectsView() -> Element {
                     }
                 }
             }
-            ScrollArea { class: "min-h-0 flex-1 overflow-auto px-5 py-5 sm:px-8 sm:py-6",
+            ScrollArea {
+                class: "min-h-0 flex-1 overflow-auto px-5 py-5 sm:px-8 sm:py-6",
+                "data-testid": "projects-content",
                 div { class: "mx-auto max-w-7xl",
                     if let Some(error) = load.error.or((presentation.error)()) {
                         div {
@@ -569,10 +571,14 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
         .map(gtl_models::timestamps::MachineTimestamp::display_minute);
     rsx! {
         DataTableRow {
+            "data-testid": "project-table-row",
             "data-project-row": "{project.path}",
             aria_label: "{project.name}",
             TableColumn {
-                ProjectTableLink { destination: destination.clone(), tabindex: "0",
+                ProjectTableLink {
+                    destination: destination.clone(),
+                    tabindex: "0",
+                    test_id: "project-table-name",
                     div { class: "min-w-36 max-w-64",
                         span {
                             class: "block truncate font-semibold text-ink",
@@ -586,11 +592,18 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn {
-                ProjectTableLink { destination: destination.clone(),
+                ProjectTableLink {
+                    destination: destination.clone(),
+                    test_id: "project-table-branch",
                     span { class: "flex max-w-48 items-center gap-1.5 font-mono text-xs",
                         if let Some(branch) = status.branch {
                             GitBranch { size: 13, class: "shrink-0 text-ink-3" }
-                            span { class: "truncate select-text", title: branch, "{branch}" }
+                            span {
+                                class: "truncate select-text",
+                                title: branch,
+                                "data-testid": "project-table-branch-text",
+                                "{branch}"
+                            }
                         } else {
                             NoData {}
                         }
@@ -598,7 +611,9 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn {
-                ProjectTableLink { destination: destination.clone(),
+                ProjectTableLink {
+                    destination: destination.clone(),
+                    test_id: "project-table-changes",
                     if status.local_available {
                         span {
                             class: "font-mono text-xs {status.status_color}",
@@ -613,7 +628,9 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn {
-                ProjectTableLink { destination: destination.clone(),
+                ProjectTableLink {
+                    destination: destination.clone(),
+                    test_id: "project-table-unpushed",
                     span { class: "w-full text-right font-mono text-sm tabular-nums text-ink",
                         if let Some(count) = status.ahead {
                             "{count}"
@@ -624,7 +641,9 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn {
-                ProjectTableLink { destination: destination.clone(),
+                ProjectTableLink {
+                    destination: destination.clone(),
+                    test_id: "project-table-rendered",
                     span { class: "whitespace-nowrap font-mono text-[10px] text-ink-3",
                         if let Some(rendered) = rendered {
                             "{rendered}"
@@ -658,6 +677,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
 #[component]
 fn ProjectTableLink(
     destination: Option<Route>,
+    test_id: &'static str,
     #[props(default = "-1")] tabindex: &'static str,
     children: Element,
 ) -> Element {
@@ -666,13 +686,14 @@ fn ProjectTableLink(
         if let Some(destination) = destination {
             Link {
                 to: destination,
+                "data-testid": test_id,
                 draggable: "false",
                 tabindex,
                 class,
                 {children}
             }
         } else {
-            div { class, {children} }
+            div { class, "data-testid": test_id, {children} }
         }
     }
 }

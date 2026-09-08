@@ -478,9 +478,10 @@ const fn tab_presentation_state(
     diff_rows_loading: bool,
 ) -> TabPresentationState {
     match state {
-        ViewerTabState::Ready if diff_rows_loading => TabPresentationState::Loading,
-        ViewerTabState::Ready => TabPresentationState::Ready,
-        ViewerTabState::Pending => TabPresentationState::Loading,
+        ViewerTabState::Ready | ViewerTabState::Pending if diff_rows_loading => {
+            TabPresentationState::Loading
+        }
+        ViewerTabState::Ready | ViewerTabState::Pending => TabPresentationState::Ready,
         ViewerTabState::Broken => TabPresentationState::Broken,
         ViewerTabState::Error => TabPresentationState::Error,
     }
@@ -527,18 +528,26 @@ mod tests {
 
     #[test]
     fn row_stream_loading_uses_the_tab_loading_state() {
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Ready, true),
-            TabPresentationState::Loading
-        );
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Ready, false),
-            TabPresentationState::Ready
-        );
-        assert_eq!(
-            tab_presentation_state(&ViewerTabState::Error, true),
-            TabPresentationState::Error
-        );
+        for state in [ViewerTabState::Ready, ViewerTabState::Pending] {
+            assert_eq!(
+                tab_presentation_state(&state, true),
+                TabPresentationState::Loading
+            );
+            assert_eq!(
+                tab_presentation_state(&state, false),
+                TabPresentationState::Ready
+            );
+        }
+        for rows_loading in [false, true] {
+            assert_eq!(
+                tab_presentation_state(&ViewerTabState::Error, rows_loading),
+                TabPresentationState::Error
+            );
+            assert_eq!(
+                tab_presentation_state(&ViewerTabState::Broken, rows_loading),
+                TabPresentationState::Broken
+            );
+        }
     }
 
     #[test]
@@ -607,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_tab_uses_the_sunk_surface() -> TestResult {
+    fn inactive_pending_tab_uses_the_sunk_surface_without_loading() -> TestResult {
         let tab_id = viewer_tab_id(1)?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
@@ -615,7 +624,7 @@ mod tests {
                 id: tab_id,
                 label: "Working tree".to_owned(),
                 kind: ViewerTabKind::Live,
-                state: ViewerTabState::Ready,
+                state: ViewerTabState::Pending,
             },
             active: false,
             rows_loading: false,
@@ -632,6 +641,10 @@ mod tests {
         assert!(html.contains("bg-sunk text-ink-2"));
         assert!(html.contains("hover:bg-surface-2 hover:text-ink"));
         assert!(!html.contains("bg-transparent text-ink-2"));
+        assert!(html.contains("aria-busy=\"false\""));
+        assert!(html.contains(", Live"));
+        assert!(!html.contains("animate-spin"));
+        assert!(!html.contains("Rendering"));
         Ok(())
     }
 
@@ -718,7 +731,8 @@ mod tests {
         assert!(html.contains("aria-current=\"page\""));
         assert!(html.contains("Close Working tree"));
         assert!(html.contains("Close Saved comparison"));
-        assert!(html.contains("Rendering"));
+        assert!(!html.contains("Rendering"));
+        assert!(!html.contains("animate-spin"));
         assert_eq!(html.matches("draggable=\"false\"").count(), 2);
         assert_eq!(
             html.matches("aria-roledescription=\"sortable tab\"")

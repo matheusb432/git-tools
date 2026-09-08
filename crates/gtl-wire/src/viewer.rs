@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 9;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 10;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -103,6 +103,23 @@ pub struct ViewerViewIdentity {
     pub range_generation: ViewerRangeGeneration,
     pub selection_generation: ViewerSelectionGeneration,
     pub render_options: ViewerRenderOptions,
+}
+
+/// SHA-256 identity of row sources and format, independent of stream authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ViewerRowContentId([u8; 32]);
+
+impl ViewerRowContentId {
+    #[must_use]
+    pub const fn from_digest(digest: [u8; 32]) -> Self {
+        Self(digest)
+    }
+
+    #[must_use]
+    pub const fn into_digest(self) -> [u8; 32] {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -362,6 +379,7 @@ pub enum ViewerCommitSelection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerActiveView {
     pub identity: ViewerViewIdentity,
+    pub content_id: ViewerRowContentId,
     pub title: String,
     pub repository_name: ProjectName,
     pub branch: GitHead,

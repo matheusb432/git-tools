@@ -8,7 +8,7 @@ use lru::LruCache;
 
 use crate::{
     diffs::{FileDiff, FullContextDiffState, View},
-    viewer::ViewerTabId,
+    viewer::{ViewerDiffSnapshot, ViewerTabId},
 };
 
 /// Estimated retained bytes used to bound the semantic viewer cache.
@@ -60,8 +60,8 @@ impl Sum for ViewCacheWeight {
 /// A computed semantic view retained independently from rendered responses.
 #[derive(Debug, Clone)]
 pub struct CachedView {
-    pub view: Arc<View>,
-    pub selected: Option<Arc<View>>,
+    pub view: ViewerDiffSnapshot,
+    pub selected: Option<ViewerDiffSnapshot>,
     weight: ViewCacheWeight,
 }
 
@@ -70,24 +70,28 @@ impl CachedView {
     pub fn new(view: Arc<View>) -> Self {
         let weight = view_weight(&view);
         Self {
-            view,
+            view: ViewerDiffSnapshot::new(view),
             selected: None,
             weight,
         }
     }
 
     #[must_use]
-    pub fn with_selected(&self, selected: Arc<View>) -> Self {
+    pub fn with_selected(&self, selected: ViewerDiffSnapshot) -> Self {
         Self {
             weight: self.weight + view_weight(&selected),
-            view: Arc::clone(&self.view),
+            view: self.view.clone(),
             selected: Some(selected),
         }
     }
 
     #[must_use]
     pub fn without_selected(&self) -> Self {
-        Self::new(Arc::clone(&self.view))
+        Self {
+            view: self.view.clone(),
+            selected: None,
+            weight: view_weight(&self.view),
+        }
     }
 
     #[must_use]

@@ -16,7 +16,7 @@ use gtl_models::{
 use crate::{
     diffs::View,
     recipes::{Recipe, RecipeSource},
-    viewer::initial_recipe_label,
+    viewer::{ViewerDiffSnapshot, initial_recipe_label},
 };
 
 pub const DEFAULT_VIEW_CACHE_WEIGHT: ViewCacheWeight = ViewCacheWeight::new(128 * 1024 * 1024);
@@ -93,7 +93,7 @@ enum CommitSelection {
     },
     Ready {
         commit: Commit,
-        transient: Option<Arc<View>>,
+        transient: Option<ViewerDiffSnapshot>,
     },
     Error {
         commit: Commit,
@@ -104,8 +104,8 @@ enum CommitSelection {
 fn selected_view(
     cache: &mut WeightedViewCache,
     id: ViewerTabId,
-    transient: Option<&Arc<View>>,
-) -> Option<Arc<View>> {
+    transient: Option<&ViewerDiffSnapshot>,
+) -> Option<ViewerDiffSnapshot> {
     transient
         .cloned()
         .or_else(|| cache.get(id).and_then(|cached| cached.selected.clone()))
@@ -114,9 +114,17 @@ fn selected_view(
 #[derive(Debug, Clone)]
 pub enum CommitSelectionSnapshot {
     None,
-    Pending { id: CommitId },
-    Ready { id: CommitId, view: Arc<View> },
-    Error { id: CommitId, reason: String },
+    Pending {
+        id: CommitId,
+    },
+    Ready {
+        id: CommitId,
+        view: ViewerDiffSnapshot,
+    },
+    Error {
+        id: CommitId,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -170,6 +178,7 @@ pub struct ViewerSession {
     next_id: Option<u64>,
     version: ViewerVersion,
     focus_request_version: Option<ViewerVersion>,
+    full_context_transient: Option<(ActiveContentIdentity, ViewerDiffSnapshot)>,
 }
 
 impl ViewerSession {
@@ -182,6 +191,7 @@ impl ViewerSession {
             next_id: Some(1),
             version: ViewerVersion::default(),
             focus_request_version: None,
+            full_context_transient: None,
         }
     }
 
@@ -395,7 +405,7 @@ impl ViewerSession {
         tab.selection_generation = tab.selection_generation.next();
         tab.live_head = Some(head);
         tab.selection = if let Some((commit, selected)) = preserved {
-            value = value.with_selected(Arc::clone(&selected));
+            value = value.with_selected(selected.clone());
             CommitSelection::Ready {
                 commit,
                 transient: Some(selected),
@@ -484,7 +494,8 @@ impl ViewerSession {
             Some(CommitSelection::Pending { commit }) => commit.id.clone(),
             _ => return PublishOutcome::Stale,
         };
-        let selected = base.with_selected(Arc::clone(&patch));
+        let patch = ViewerDiffSnapshot::new(patch);
+        let selected = base.with_selected(patch.clone());
         let transient =
             if self.cache.insert(ticket.tab_id, selected) == cache::CacheDisposition::Oversize {
                 self.cache.insert(ticket.tab_id, base);
@@ -722,6 +733,12 @@ impl ViewerSession {
 
     pub fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
         let identity = self.active_content_identity()?;
+        if let Some(view) = self.full_context_snapshot(identity) {
+            return Some(ActiveContentSnapshot {
+                identity,
+                view: view.shared_view(),
+            });
+        }
         let cached = self.cache.get(identity.tab_id()).cloned()?;
         let view = match self.commit_selection_snapshot(identity.tab_id()) {
             CommitSelectionSnapshot::None | CommitSelectionSnapshot::Error { .. } => cached.view,
@@ -729,7 +746,10 @@ impl ViewerSession {
             CommitSelectionSnapshot::Pending { .. } => return None,
         };
 
-        Some(ActiveContentSnapshot { identity, view })
+        Some(ActiveContentSnapshot {
+            identity,
+            view: view.shared_view(),
+        })
     }
 
     pub(super) fn replace_active_content_if_current(
@@ -747,14 +767,14 @@ impl ViewerSession {
         }
 
         let cached = self.cache.get(identity.tab_id()).cloned()?;
-        if Arc::ptr_eq(&cached.view, expected) {
+        if Arc::ptr_eq(&cached.view.shared_view(), expected) {
             return Some(self.replace_cached_range(identity.tab_id(), cached, replacement));
         }
 
         if cached
             .selected
             .as_ref()
-            .is_some_and(|selected| Arc::ptr_eq(selected, expected))
+            .is_some_and(|selected| Arc::ptr_eq(&selected.shared_view(), expected))
         {
             return self.replace_cached_selection(identity.tab_id(), &cached, replacement);
         }
@@ -769,11 +789,24 @@ impl ViewerSession {
         replacement: Arc<View>,
     ) -> Arc<View> {
         let candidate = CachedView::new(Arc::clone(&replacement));
+        let snapshot = candidate.view.clone();
         let disposition = self.cache.insert(tab_id, candidate);
         if disposition == CacheDisposition::Oversize {
             self.cache.insert(tab_id, cached);
+            self.full_context_transient = self
+                .active_content_identity()
+                .map(|identity| (identity, snapshot));
         }
         replacement
+    }
+
+    pub(super) fn full_context_snapshot(
+        &self,
+        identity: ActiveContentIdentity,
+    ) -> Option<ViewerDiffSnapshot> {
+        self.full_context_transient
+            .as_ref()
+            .and_then(|(current, view)| (*current == identity).then(|| view.clone()))
     }
 
     fn replace_cached_selection(
@@ -782,7 +815,8 @@ impl ViewerSession {
         cached: &CachedView,
         replacement: Arc<View>,
     ) -> Option<Arc<View>> {
-        let enriched = cached.with_selected(Arc::clone(&replacement));
+        let snapshot = ViewerDiffSnapshot::new(Arc::clone(&replacement));
+        let enriched = cached.with_selected(snapshot.clone());
         if self.cache.insert(tab_id, enriched) != CacheDisposition::Oversize {
             return Some(replacement);
         }
@@ -792,7 +826,7 @@ impl ViewerSession {
         let CommitSelection::Ready { transient, .. } = &mut tab.selection else {
             return None;
         };
-        *transient = Some(Arc::clone(&replacement));
+        *transient = Some(snapshot);
         Some(replacement)
     }
 
@@ -810,10 +844,10 @@ impl ViewerSession {
         else {
             return None;
         };
-        if !Arc::ptr_eq(transient, expected) {
+        if !Arc::ptr_eq(&transient.shared_view(), expected) {
             return None;
         }
-        *transient = Arc::clone(&replacement);
+        *transient = ViewerDiffSnapshot::new(Arc::clone(&replacement));
         Some(replacement)
     }
 
@@ -837,6 +871,15 @@ impl ViewerSession {
     }
 
     fn bump_version(&mut self) {
+        if self
+            .full_context_transient
+            .as_ref()
+            .is_some_and(|(identity, _)| {
+                self.active_displayed_content_identity() != Some(*identity)
+            })
+        {
+            self.full_context_transient = None;
+        }
         self.version = self.version.next();
     }
 
@@ -995,13 +1038,13 @@ mod tests {
             session.publish_live_if_current(
                 ticket,
                 head.clone(),
-                CachedView::new(range.view),
+                CachedView::new(range.view.shared_view()),
                 "updated".into()
             ),
             PublishOutcome::Published
         );
         assert!(
-            matches!(session.commit_selection_snapshot(id), CommitSelectionSnapshot::Ready { id: selected_id, view } if selected_id == ids[0] && Arc::ptr_eq(&view, &selected))
+            matches!(session.commit_selection_snapshot(id), CommitSelectionSnapshot::Ready { id: selected_id, view } if selected_id == ids[0] && Arc::ptr_eq(&view.shared_view(), &selected))
         );
         assert_ne!(
             session.active_content_identity().unwrap(),
@@ -1108,6 +1151,60 @@ mod tests {
     }
 
     #[test]
+    fn oversized_full_source_retains_its_identity_until_the_active_generation_changes() {
+        let (mut session, id) = ready_session();
+        let identity = session.active_content_identity().unwrap();
+        let expected = session.active_content_snapshot().unwrap().shared_view();
+        let mut full = (*expected).clone();
+        full.files = vec![crate::diffs::FileDiff {
+            path: crate::utils::repository_relative_path("large.rs"),
+            added: gtl_models::diffs::DiffLineCount::new(1),
+            removed: gtl_models::diffs::DiffLineCount::default(),
+            lines: vec!["+compact".into()],
+            full_lines: Some(vec![format!("+{}", "x".repeat(2048))]),
+        }];
+        let replacement = Arc::new(full);
+        session
+            .replace_active_content_if_current(identity, &expected, Arc::clone(&replacement))
+            .unwrap();
+        let options = super::super::project_render_options(super::super::RenderOptions::new(
+            super::super::DiffLayout::Unified,
+            super::super::DiffDensity::Full,
+        ));
+        let retained = session.full_context_snapshot(identity).unwrap();
+        let expected_id = retained.content_id(options);
+        assert!(Arc::ptr_eq(
+            &session.active_content_snapshot().unwrap().shared_view(),
+            &replacement
+        ));
+        session.mark_shell_changed();
+        assert_eq!(
+            session
+                .full_context_snapshot(identity)
+                .unwrap()
+                .content_id(options),
+            expected_id
+        );
+        let active = crate::viewer::shell::project(
+            &mut session,
+            super::super::RenderOptions::new(
+                super::super::DiffLayout::Unified,
+                super::super::DiffDensity::Full,
+            ),
+            super::super::Theme::Dark,
+            gtl_models::viewer::ViewerKeybindings::default(),
+            None,
+        )
+        .unwrap()
+        .active;
+        assert!(
+            matches!(active, gtl_wire::viewer::ViewerActiveState::Ready { view } if view.content_id == expected_id)
+        );
+        session.begin_compute(id).unwrap();
+        assert!(session.full_context_transient.is_none());
+    }
+
+    #[test]
     fn active_content_replacement_updates_only_the_selected_patch() {
         let (mut session, id, ids) = ready_session_with_commits();
         let (ticket, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
@@ -1125,7 +1222,7 @@ mod tests {
         assert!(matches!(
             session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Ready { view, .. }
-                if Arc::ptr_eq(&view, &replacement)
+                if Arc::ptr_eq(&view.shared_view(), &replacement)
         ));
         assert!(session.clear_commit_selection(id));
         assert_eq!(

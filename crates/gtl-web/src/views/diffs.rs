@@ -6,7 +6,7 @@ pub(crate) mod diff_workspace;
 mod file_status_badge;
 mod line_changes;
 #[cfg(feature = "desktop")]
-mod project_diff;
+pub(crate) mod project_diff;
 mod search_keybindings;
 
 #[cfg(feature = "desktop")]

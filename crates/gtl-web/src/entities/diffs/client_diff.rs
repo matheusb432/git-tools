@@ -124,7 +124,7 @@ pub(crate) struct ClientDiffWorkspace {
 
 impl ClientDiffWorkspace {
     #[cfg(feature = "desktop")]
-    fn loading(identity: ViewerViewIdentity, files: Vec<ViewerFileSummary>) -> Self {
+    pub(super) fn loading(identity: ViewerViewIdentity, files: Vec<ViewerFileSummary>) -> Self {
         Self {
             identity,
             files: files.into_iter().map(ClientDiffFile::loading).collect(),
@@ -186,16 +186,28 @@ impl ClientDiffRetryRequest {
 #[cfg(feature = "desktop")]
 #[derive(Clone, Copy)]
 pub(crate) struct ClientDiffWorkspaceController {
-    workspace: Store<ClientDiffWorkspace>,
+    workspace: Signal<Option<ClientDiffWorkspaceSelection>>,
     row_stream: Resource<()>,
     retry_request: Signal<ClientDiffRetryRequest>,
     identity: Memo<ViewerViewIdentity>,
+    cache_key: Memo<super::client_diff_cache::ClientDiffCacheKey>,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone)]
+struct ClientDiffWorkspaceSelection {
+    key: super::client_diff_cache::ClientDiffCacheKey,
+    workspace: Store<ClientDiffWorkspace>,
 }
 
 #[cfg(feature = "desktop")]
 impl ClientDiffWorkspaceController {
-    pub(crate) const fn workspace(self) -> Store<ClientDiffWorkspace> {
+    pub(crate) fn workspace(self) -> Option<Store<ClientDiffWorkspace>> {
         self.workspace
+            .read()
+            .as_ref()
+            .filter(|selected| selected.key == (self.cache_key)())
+            .map(|selected| selected.workspace)
     }
 
     pub(crate) fn row_stream_active(self) -> bool {
@@ -206,8 +218,10 @@ impl ClientDiffWorkspaceController {
         if self.row_stream.pending() {
             return;
         }
-        let retryable = self
-            .workspace
+        let Some(workspace) = self.workspace() else {
+            return;
+        };
+        let retryable = workspace
             .peek()
             .files
             .iter()
@@ -230,28 +244,20 @@ pub(crate) fn use_client_diff_workspace(
     view: ReadSignal<ViewerActiveView>,
 ) -> ClientDiffWorkspaceController {
     let identity = use_memo(move || view.read().identity);
-    let mut workspace = use_store(move || {
-        let view = view.peek();
-        ClientDiffWorkspace::loading(view.identity, view.files.clone())
+    let cache = use_context::<super::client_diff_cache::ClientDiffCache>();
+    let viewer = use_context::<crate::app::application_layout::ViewerContext>();
+    let cache_key = use_memo(move || super::client_diff_cache::ClientDiffCacheKey {
+        server_instance_id: viewer.server_instance_id(),
+        content_id: view.read().content_id,
     });
+    let workspace = use_signal(|| None::<ClientDiffWorkspaceSelection>);
     let retry_request = use_signal(ClientDiffRetryRequest::default);
     let row_stream = use_resource(move || {
         let identity = identity.cloned();
+        let key = cache_key();
         let retry_request = retry_request();
         let requested_file = retry_request.requested_file(identity);
-        let (only_file, file_ids) = requested_file.map_or_else(
-            || {
-                let files = view.peek().files.clone();
-                let file_ids = files.iter().map(|file| file.id.clone()).collect();
-                workspace.set(ClientDiffWorkspace::loading(identity, files));
-                (None, file_ids)
-            },
-            |file| (Some(file.clone()), vec![file]),
-        );
-
-        async move {
-            load_rows_from_server(workspace, identity, only_file, file_ids).await;
-        }
+        load_workspace_rows(cache, key, view, workspace, identity, requested_file)
     });
 
     ClientDiffWorkspaceController {
@@ -259,7 +265,44 @@ pub(crate) fn use_client_diff_workspace(
         row_stream,
         retry_request,
         identity,
+        cache_key,
     }
+}
+
+#[cfg(feature = "desktop")]
+async fn load_workspace_rows(
+    cache: super::client_diff_cache::ClientDiffCache,
+    key: super::client_diff_cache::ClientDiffCacheKey,
+    view: ReadSignal<ViewerActiveView>,
+    mut workspace: Signal<Option<ClientDiffWorkspaceSelection>>,
+    identity: ViewerViewIdentity,
+    requested_file: Option<ViewerDiffFileId>,
+) {
+    let cached = cache.select(key.server_instance_id.clone(), &view.peek());
+    let retained = workspace
+        .peek()
+        .as_ref()
+        .filter(|selected| selected.key == key)
+        .map(|selected| selected.workspace);
+    let selected = retained.unwrap_or(cached);
+    if retained.is_none() {
+        workspace.set(Some(ClientDiffWorkspaceSelection {
+            key,
+            workspace: selected,
+        }));
+    }
+    let file_ids = requested_file.as_ref().map_or_else(
+        || {
+            selected
+                .peek()
+                .files
+                .iter()
+                .map(|file| file.summary.id.clone())
+                .collect()
+        },
+        |file| vec![file.clone()],
+    );
+    load_rows_from_server(selected, identity, requested_file, file_ids).await;
 }
 
 #[cfg(feature = "desktop")]
@@ -326,7 +369,25 @@ impl ClientDiffLoad {
         file.state().set(ClientDiffFileState::Error(error.clone()));
     }
 
+    fn has_completed_file(&self, file_id: &ViewerDiffFileId) -> bool {
+        self.workspace
+            .peek()
+            .files
+            .iter()
+            .any(|file| &file.summary.id == file_id && file.state == ClientDiffFileState::Complete)
+    }
+
     fn accept_event(&self, event: ViewerRowEvent) -> bool {
+        let event_file = match &event {
+            ViewerRowEvent::FileStarted { file }
+            | ViewerRowEvent::UnifiedRows { file, .. }
+            | ViewerRowEvent::SplitRows { file, .. }
+            | ViewerRowEvent::FileFinished { file, .. }
+            | ViewerRowEvent::FileFailed { file, .. } => file,
+        };
+        if !self.files.contains(event_file) {
+            return self.has_completed_file(event_file);
+        }
         match event {
             ViewerRowEvent::FileStarted { file } => self.accept_file_started(&file),
             ViewerRowEvent::UnifiedRows { file, rows } => self.accept_unified_rows(&file, rows),
@@ -620,6 +681,143 @@ mod tests {
             !ClientDiffFileState::Error(ClientDiffFileError::InvalidResponse)
                 .accepts_stream_events()
         );
+    }
+
+    #[test]
+    fn resumed_stream_preserves_completed_files_and_rejects_unknown_files()
+    -> crate::test_support::TestResult {
+        use gtl_models::{
+            diffs::DiffLineCount,
+            viewer::{ViewerRangeGeneration, ViewerSelectionGeneration},
+        };
+        use gtl_wire::viewer::{ViewerDiffDensity, ViewerFileStatus, ViewerRenderOptions};
+
+        use crate::test_support::{absolute_file_path, repository_relative_path, viewer_tab_id};
+
+        let identity = ViewerViewIdentity {
+            tab_id: viewer_tab_id(1)?,
+            range_generation: ViewerRangeGeneration::new(1),
+            selection_generation: ViewerSelectionGeneration::default(),
+            render_options: ViewerRenderOptions {
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+            },
+        };
+        let summaries = (0..2)
+            .map(|index| {
+                Ok(ViewerFileSummary {
+                    id: ViewerDiffFileId::for_index(index),
+                    path: repository_relative_path(&format!("src/file_{index}.rs"))?,
+                    absolute_path: absolute_file_path(format!("/repo/src/file_{index}.rs"))?,
+                    anchor_id: format!("file-{index}"),
+                    added: DiffLineCount::new(1),
+                    removed: DiffLineCount::default(),
+                    status: ViewerFileStatus::Added,
+                    can_open_in_editor: true,
+                    initially_expanded: true,
+                })
+            })
+            .collect::<crate::test_support::TestResult<Vec<_>>>()?;
+        let completed_id = summaries[0].id.clone();
+        let pending_id = summaries[1].id.clone();
+        let mut cached = ClientDiffWorkspace::loading(identity, summaries);
+        cached.files[0]
+            .rows
+            .append_unified(vec![ViewerUnifiedRow::Meta("cached".to_owned())]);
+        cached.files[0].state = ClientDiffFileState::Complete;
+        cached.files[0].line_number_digits = 3;
+        cached.files[1]
+            .rows
+            .append_unified(vec![ViewerUnifiedRow::Meta("partial".to_owned())]);
+        cached.files[1].state = ClientDiffFileState::Error(ClientDiffFileError::Transport(
+            ViewerClientError::Unavailable,
+        ));
+        let completed = cached.files[0].clone();
+        let rows = cached.files[0].rows.unified[0].as_ptr();
+        let owner = VirtualDom::new(VNode::empty);
+        owner.in_scope(ScopeId::ROOT, || -> crate::test_support::TestResult {
+            let workspace = Store::new(cached);
+            assert_eq!(
+                files_waiting_for_connection(workspace, identity, None),
+                vec![pending_id.clone()]
+            );
+            let load = begin_files(
+                workspace,
+                identity,
+                vec![completed_id.clone(), pending_id.clone()],
+            )
+            .ok_or_else(|| std::io::Error::other("pending file did not resume"))?;
+            assert!(load.has_active_files());
+            assert!(workspace.peek().files[1].rows.unified.is_empty());
+
+            assert_replayed_file(&load, completed_id, true);
+            assert_replayed_file(&load, ViewerDiffFileId::for_index(99), false);
+
+            assert!(load.accept_event(ViewerRowEvent::FileStarted {
+                file: pending_id.clone()
+            }));
+            let resumed_rows = vec![ViewerUnifiedRow::Meta("resumed".to_owned())];
+            assert!(load.accept_event(ViewerRowEvent::UnifiedRows {
+                file: pending_id.clone(),
+                rows: resumed_rows.clone(),
+            }));
+            assert!(load.accept_event(ViewerRowEvent::FileFinished {
+                file: pending_id,
+                line_number_digits: 2,
+            }));
+            assert!(!load.has_active_files());
+            let file_ids = workspace
+                .peek()
+                .files
+                .iter()
+                .map(|file| file.summary.id.clone())
+                .collect();
+            assert!(begin_files(workspace, identity, file_ids).is_none());
+            assert_eq!(workspace.peek().files[1].rows.unified, vec![resumed_rows]);
+            assert_eq!(
+                workspace.peek().files[1].state,
+                ClientDiffFileState::Complete
+            );
+            assert_eq!(workspace.peek().files[1].line_number_digits, 2);
+            assert_eq!(workspace.peek().files[0], completed);
+            assert_eq!(workspace.peek().files[0].rows.unified[0].as_ptr(), rows);
+            Ok(())
+        })
+    }
+
+    fn assert_replayed_file(load: &ClientDiffLoad, file: ViewerDiffFileId, accepted: bool) {
+        use gtl_wire::viewer::ViewerFileFailureCode;
+
+        let workspace = load.workspace.peek().clone();
+        let rows = load.workspace.peek().files[0].rows.unified[0].as_ptr();
+        for event in [
+            ViewerRowEvent::FileStarted { file: file.clone() },
+            ViewerRowEvent::UnifiedRows {
+                file: file.clone(),
+                rows: vec![ViewerUnifiedRow::Meta("replayed".to_owned())],
+            },
+            ViewerRowEvent::SplitRows {
+                file: file.clone(),
+                rows: vec![ViewerSplitRow::Meta("replayed".to_owned())],
+            },
+            ViewerRowEvent::FileFinished {
+                file: file.clone(),
+                line_number_digits: 7,
+            },
+            ViewerRowEvent::FileFailed {
+                file,
+                code: ViewerFileFailureCode::ParseFailed,
+                message: "replayed failure".to_owned(),
+                retryable: true,
+            },
+        ] {
+            assert_eq!(load.accept_event(event), accepted);
+            assert_eq!(*load.workspace.peek(), workspace);
+            assert_eq!(
+                load.workspace.peek().files[0].rows.unified[0].as_ptr(),
+                rows
+            );
+        }
     }
 
     #[test]

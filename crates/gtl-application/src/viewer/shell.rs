@@ -14,7 +14,8 @@ use gtl_wire::viewer::{
 };
 
 use super::{
-    ViewerState, ViewerStateError, project_diff_view, project_render_options, project_theme,
+    ViewerState, ViewerStateError, diff_view::project_diff_view_with_content_id,
+    project_render_options, project_theme,
 };
 use crate::viewer::session::{
     ActiveContentIdentity, ActiveContentSnapshot, CommitSelectionSnapshot, RENDER_PENDING_REASON,
@@ -33,6 +34,8 @@ pub enum ProjectViewerShellError {
     ActiveTabMissing,
     #[error("the active viewer view is unavailable")]
     ActiveViewUnavailable,
+    #[error("the active viewer full-context source is pending")]
+    FullContextPending,
 }
 
 /// Projects one short-lived snapshot of the viewer shell.
@@ -72,8 +75,14 @@ pub fn project(
                 .ok_or(ProjectViewerShellError::ActiveTabMissing)?;
             match non_ready_active_state(tab_id, &state) {
                 Some(active) => active,
-                None => ViewerActiveState::Ready {
-                    view: Box::new(ready_active_view(session, tab_id, options)?),
+                None => match ready_active_view(session, tab_id, options) {
+                    Ok(view) => ViewerActiveState::Ready {
+                        view: Box::new(view),
+                    },
+                    Err(ProjectViewerShellError::FullContextPending) => {
+                        ViewerActiveState::Pending { tab_id }
+                    }
+                    Err(error) => return Err(error),
                 },
             }
         }
@@ -106,11 +115,20 @@ fn ready_active_view(
         .view;
     let selection = session.commit_selection_snapshot(tab_id);
     let displayed = match &selection {
-        CommitSelectionSnapshot::Ready { view, .. } => Arc::clone(view),
+        CommitSelectionSnapshot::Ready { view, .. } => view.clone(),
         CommitSelectionSnapshot::None
         | CommitSelectionSnapshot::Pending { .. }
-        | CommitSelectionSnapshot::Error { .. } => Arc::clone(&range),
+        | CommitSelectionSnapshot::Error { .. } => range.clone(),
     };
+    let displayed = session.full_context_snapshot(identity).unwrap_or(displayed);
+    if options.density() == super::DiffDensity::Full
+        && matches!(
+            displayed.full_context,
+            crate::diffs::FullContextDiffState::Deferred(_)
+        )
+    {
+        return Err(ProjectViewerShellError::FullContextPending);
+    }
     let commit_selection = match &selection {
         CommitSelectionSnapshot::None => ViewerCommitSelection::None,
         CommitSelectionSnapshot::Pending { id } => {
@@ -124,11 +142,12 @@ fn ready_active_view(
             message: reason.clone(),
         },
     };
-    Ok(project_diff_view(
+    Ok(project_diff_view_with_content_id(
         &displayed,
         &range,
         identity_for(identity, options),
         commit_selection,
+        displayed.content_id(project_render_options(options)),
     ))
 }
 

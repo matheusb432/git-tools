@@ -1,5 +1,7 @@
 mod client_diff;
 #[cfg(feature = "desktop")]
+mod client_diff_cache;
+#[cfg(feature = "desktop")]
 mod commit_pages;
 #[cfg(feature = "desktop")]
 mod diff_history;
@@ -19,6 +21,8 @@ pub(crate) use client_diff::{
     ClientDiffFile, ClientDiffFileState, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
     ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
 };
+#[cfg(feature = "desktop")]
+pub(crate) use client_diff_cache::use_client_diff_cache_provider;
 #[cfg(feature = "desktop")]
 pub(crate) use commit_pages::use_viewer_commit_pages;
 #[cfg(feature = "desktop")]

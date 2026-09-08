@@ -19,8 +19,8 @@ mod state;
 pub mod work;
 
 pub use diff_view::{
-    ViewerDiffFileSource, diff_file_anchor_id, project_diff_view, project_render_options,
-    project_theme, viewer_diff_file_source,
+    ViewerDiffFileSource, ViewerDiffSnapshot, diff_file_anchor_id, project_diff_view,
+    project_render_options, project_theme, viewer_diff_file_source,
 };
 pub use gtl_models::viewer::{
     DiffDensity, DiffLayout, ParseRenderOptionError, RenderHistoryId, RenderOptions, Theme,

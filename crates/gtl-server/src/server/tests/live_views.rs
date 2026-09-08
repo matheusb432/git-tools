@@ -144,3 +144,104 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     server.stop().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> TestResult {
+    use std::fmt::Write as _;
+
+    let directory = tempfile::tempdir()?;
+    let repository = directory.path().join("repo");
+    std::fs::create_dir(&repository)?;
+    git(&repository, &["init", "-q", "-b", "main"])?;
+    git(&repository, &["config", "user.name", "Content Test"])?;
+    git(
+        &repository,
+        &["config", "user.email", "content@example.invalid"],
+    )?;
+    let mut original = String::new();
+    for index in 0..30 {
+        writeln!(&mut original, "line {index}")?;
+    }
+    std::fs::write(repository.join("work.txt"), &original)?;
+    git(&repository, &["add", "."])?;
+    git(&repository, &["commit", "-qm", "base"])?;
+    std::fs::write(
+        repository.join("work.txt"),
+        original.replace("line 15", "alpha"),
+    )?;
+    let database = SqliteAppState::open(directory.path())?;
+    save_live_view::execute(
+        SaveLiveView {
+            path: repository.clone(),
+            comparison: LiveComparison::LocalChanges,
+        },
+        &HybridGitClient,
+        &mut *database.connection_lock()?,
+        &SystemClock,
+    )?;
+    let settings = directory.path().join("settings.toml");
+    std::fs::write(&settings, "")?;
+    let server = ServerHarness::start(directory.path(), Some(settings)).await?;
+    let mut client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
+        server.native_channel(),
+        server.authorization(),
+    );
+    let first = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    let ViewerActiveState::Ready { view: first } = first.active else {
+        return Err("expected initial ready view".into());
+    };
+    std::fs::write(
+        repository.join("work.txt"),
+        original.replace("line 15", "bravo"),
+    )?;
+    client
+        .refresh_viewer_tab(v1::RefreshViewerTabRequest {
+            tab_id: first.identity.tab_id.into(),
+        })
+        .await?;
+    let second = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    let ViewerActiveState::Ready { view: second } = second.active else {
+        return Err("expected refreshed ready view".into());
+    };
+    assert_eq!(first.files[0].added, second.files[0].added);
+    assert_eq!(first.files[0].removed, second.files[0].removed);
+    assert_ne!(first.content_id, second.content_id);
+    let full = client
+        .set_viewer_preference(v1::SetViewerPreferenceRequest {
+            preference: Some(v1::set_viewer_preference_request::Preference::Density(
+                v1::ViewerDiffDensity::Full as i32,
+            )),
+        })
+        .await?
+        .into_inner();
+    let full = proto::viewer::decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+        shell: full.shell,
+    })?;
+    let ViewerActiveState::Ready { view: full } = full.active else {
+        return Err("expected full-context ready view".into());
+    };
+    assert_ne!(second.content_id, full.content_id);
+    let mut stream = client
+        .stream_viewer_rows(v1::StreamViewerRowsRequest {
+            identity: Some(proto::viewer::encode_viewer_view_identity(full.identity)),
+            file_id: None,
+        })
+        .await?
+        .into_inner();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(event) = stream.message().await? {
+            assert_eq!(
+                proto::viewer::decode_stream_viewer_rows_response(event)?.identity,
+                full.identity
+            );
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    let repeated = shell(&mut client).await?;
+    assert!(
+        matches!(repeated.active, ViewerActiveState::Ready { view } if view.content_id == full.content_id)
+    );
+    server.stop().await?;
+    Ok(())
+}

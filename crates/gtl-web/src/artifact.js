@@ -313,7 +313,9 @@
     if (!(target instanceof HTMLDetailsElement) || !panel.contains(target)) {
       return;
     }
-    target.open = true;
+    if (!target.open) {
+      target.open = true;
+    }
     target.scrollIntoView({ block: "start" });
     const dialog = action.closest("dialog");
     if (dialog instanceof HTMLDialogElement) closeDialog(dialog, true);

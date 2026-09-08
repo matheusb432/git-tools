@@ -115,7 +115,9 @@ pub(crate) fn scroll_to_file(id: &str) {
     else {
         return;
     };
-    details.set_open(true);
+    if !details.open() {
+        details.set_open(true);
+    }
     details.scroll_into_view_with_bool(true);
 }
 

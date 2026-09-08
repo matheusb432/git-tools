@@ -1,4 +1,6 @@
 mod actions;
+#[cfg(test)]
+mod navigation_tests;
 mod rows;
 
 use dioxus::prelude::*;
@@ -24,6 +26,8 @@ pub(super) fn DiffFileCard(
     file_index: usize,
     artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
+    #[cfg(test)]
+    navigation_tests::record_render(file_index);
     let summary = file.summary();
     let initially_expanded = summary.peek().initially_expanded;
     let mut open = use_signal(|| initially_expanded);
@@ -60,10 +64,16 @@ pub(super) fn DiffFileCard(
     let artifact_enhancement = artifact_file_id.is_some();
     let artifact_initial_open =
         artifact_enhancement.then_some(if initially_expanded { "true" } else { "false" });
-    let is_flashing = flashing_file
-        .read()
-        .as_deref()
-        .is_some_and(|flashing| flashing == anchor_id);
+    let is_flashing = use_memo(move || {
+        let summary = summary.read();
+        flashing_file
+            .read()
+            .as_deref()
+            .is_some_and(|flashing| match artifact_tab_id {
+                Some(tab_id) => flashing == static_artifact_file_id(tab_id, &summary.id),
+                None => flashing == summary.anchor_id,
+            })
+    });
 
     rsx! {
         details {
@@ -76,7 +86,7 @@ pub(super) fn DiffFileCard(
             "data-gtl-comment-leader": comment_leader,
             "data-gtl-initial-open": artifact_initial_open,
             class: "group/file border-b border-line-2 bg-bg print:break-inside-avoid print:[&[hidden]]:block!",
-            class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
+            class: if is_flashing() { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
             DiffFileHeader {
                 summary,
@@ -219,7 +229,7 @@ mod tests {
         },
     };
 
-    fn test_file() -> TestResult<ClientDiffFile> {
+    pub(super) fn test_file() -> TestResult<ClientDiffFile> {
         Ok(ClientDiffFile {
             summary: ViewerFileSummary {
                 id: ViewerDiffFileId::for_index(0),

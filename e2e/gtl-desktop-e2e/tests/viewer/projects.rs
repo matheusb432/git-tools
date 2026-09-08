@@ -487,7 +487,7 @@ async fn select_view(driver: &WebDriver, label: &str) -> Result<()> {
 async fn table_row(driver: &WebDriver, name: &str) -> Result<WebElement> {
     Ok(driver
         .query(By::Css(format!(
-            "tr[data-project-row][aria-label='{name}']"
+            "[data-testid='project-table-row'][aria-label='{name}']"
         )))
         .and_displayed()
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
@@ -516,7 +516,9 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
             .await?,
         "no-upstream table action must be disabled"
     );
-    let link = alpha.find(By::Css("a[tabindex='0']")).await?;
+    let link = alpha
+        .find(By::Css("[data-testid='project-table-name']"))
+        .await?;
     let destination = link.attr("href").await?.context("row link destination")?;
     ensure!(
         destination.contains("/projects/unpushed?path="),
@@ -528,7 +530,9 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     );
     support::evidence::capture(session.driver(), "projects-table-desktop", true).await?;
     select_table_text_from_gutter(session.driver(), &alpha).await?;
-    let count = alpha.find(By::Css("td:nth-child(4)")).await?;
+    let count = alpha
+        .find(By::Css("[data-testid='project-table-unpushed']"))
+        .await?;
     session
         .driver()
         .action_chain()
@@ -573,7 +577,7 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     home(session.driver()).await?;
     table_row(session.driver(), "Alpha")
         .await?
-        .find(By::Css("a[tabindex='0']"))
+        .find(By::Css("[data-testid='project-table-name']"))
         .await?
         .send_keys(thirtyfour::Key::Enter)
         .await?;
@@ -629,11 +633,32 @@ async fn restore_table_presentation(session: &mut support::session::TestSession)
 }
 
 async fn select_table_text_from_gutter(driver: &WebDriver, row: &WebElement) -> Result<()> {
-    let branch = row.find(By::Css("td:nth-child(2) span span")).await?;
-    let (_, y) = branch.rect().await?.icenter();
+    let branch = row
+        .find(By::Css("[data-testid='project-table-branch-text']"))
+        .await?;
+    branch.scroll_into_view().await?;
+    let content = driver
+        .find(By::Css("[data-testid='projects-content']"))
+        .await?
+        .rect()
+        .await?;
+    let row_bounds = row.rect().await?;
+    let branch_bounds = branch.rect().await?;
+    let gutter = thirtyfour::ElementRect {
+        x: content.x,
+        y: branch_bounds.y,
+        width: row_bounds.x - content.x,
+        height: branch_bounds.height,
+    };
+    ensure!(
+        gutter.width > 0.0,
+        "Projects table has no selection gutter outside its links"
+    );
+    let (gutter_x, _) = gutter.icenter();
+    let (branch_x, _) = branch_bounds.icenter();
     driver
         .action_chain()
-        .move_to(8, y)
+        .move_to_element_with_offset(&branch, gutter_x - branch_x, 0)
         .click_and_hold()
         .move_to_element_center(&branch)
         .release()

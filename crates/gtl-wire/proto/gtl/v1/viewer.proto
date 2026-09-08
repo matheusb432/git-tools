@@ -165,6 +165,7 @@ message ViewerActiveView {
   ViewerCommitSelection commit_selection = 10;
   ViewerFooter footer = 11;
   optional ViewerAppliedExclusions exclusions = 12;
+  optional bytes content_id = 13;
 }
 
 message ViewerPendingState {

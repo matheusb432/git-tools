@@ -37,10 +37,15 @@ const DELETE_LIVE_VIEW_TRIGGER_ID: &str = "delete-live-view-trigger";
 pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
     let viewer = use_context::<ViewerContext>();
     let shell = viewer.shell();
+    let activating = matches!(&*shell.read(), ViewerShellLoad::Ready(state)
+        if tab_id.is_some() && tab_id != active_tab_id(&state.active));
 
     rsx! {
         document::Title { "Viewer - git-tools" }
-        main { class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
+        main {
+            class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
+            aria_busy: activating.to_string(),
+            "inert": activating.then_some(""),
             h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
             match &*shell.read() {
                 ViewerShellLoad::Loading => rsx! {
@@ -61,13 +66,6 @@ pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
                                 "Try again"
                             }
                         }
-                    }
-                }
-                ViewerShellLoad::Ready(
-                    state,
-                ) if tab_id.is_some() && tab_id != active_tab_id(&state.active) => {
-                    rsx! {
-                        WorkspaceLoading {}
                     }
                 }
                 ViewerShellLoad::Ready(_) => rsx! {

@@ -264,7 +264,11 @@ impl ViewerContext {
     }
 
     pub(crate) fn try_replace_shell(mut self, shell: ViewerShell) -> ViewerShellReplacement {
-        let Some(order) = (self.shell_order)().accept_command_response(shell.version) else {
+        let Some(order) = self
+            .shell_order
+            .peek()
+            .accept_command_response(shell.version)
+        else {
             return ViewerShellReplacement::Stale;
         };
         self.shell_order.set(order);
@@ -426,6 +430,8 @@ pub(crate) fn ApplicationLayout() -> Element {
 
 #[component]
 fn ApplicationLayoutContent() -> Element {
+    crate::entities::diffs::use_client_diff_cache_provider();
+    crate::views::diffs::project_diff::use_project_diff_destinations_provider();
     let shell = use_signal(|| ViewerShellLoad::Loading);
     let connection = use_signal(|| ViewerConnection::Connecting);
     let shell_order = use_signal(ViewerShellOrder::default);
@@ -651,8 +657,15 @@ const fn diff_noun(count: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use dioxus::{
+        dioxus_core::{AttributeValue, Mutation, Mutations},
+        prelude::*,
+    };
     use gtl_models::viewer::ViewerVersion;
-    use gtl_wire::viewer::{ViewerFeedback, ViewerTabRequest};
+    use gtl_wire::viewer::{
+        ViewerActiveState, ViewerFeedback, ViewerPreferences, ViewerRenderOptions, ViewerShell,
+        ViewerTabRequest,
+    };
 
     use super::{
         ViewerDiffRowsLoading, ViewerFeedbackToast, ViewerRenderCommand,
@@ -660,6 +673,113 @@ mod tests {
         ViewerRenderCommandTicket, ViewerShellOrder, viewer_feedback_toast,
     };
     use crate::test_support::{TestResult, viewer_tab_id};
+
+    #[component]
+    fn DiffInteractionFixture(shell: Signal<super::ViewerShellLoad>) -> Element {
+        rsx! {
+            super::ToastHost {
+                DiffInteractionContext { shell }
+            }
+        }
+    }
+
+    #[component]
+    fn DiffInteractionContext(shell: Signal<super::ViewerShellLoad>) -> Element {
+        let context = super::ViewerContext {
+            shell,
+            connection: use_signal(|| super::ViewerConnection::Connected),
+            shell_order: use_signal(super::ViewerShellOrder::default),
+            reconnect_generation: use_signal(|| 0),
+            server_instance_id: use_signal(|| Some("test-server".to_owned())),
+            render_state: use_signal(super::ViewerRenderState::default),
+            toast: super::use_toast(),
+            live_errors: use_signal(std::collections::HashMap::new),
+        };
+        use_context_provider(|| context);
+        rsx! {
+            crate::views::diffs::DiffWorkspaceView { tab_id: Some(viewer_tab_id(1).unwrap()) }
+        }
+    }
+
+    fn pending_shell(tab_id: u64) -> TestResult<super::ViewerShellLoad> {
+        Ok(super::ViewerShellLoad::Ready(ViewerShell {
+            version: ViewerVersion::default(),
+            focus_request_version: None,
+            tabs: [1, 2]
+                .into_iter()
+                .map(|id| {
+                    Ok(gtl_wire::viewer::ViewerTab {
+                        id: viewer_tab_id(id)?,
+                        label: format!("Diff {id}"),
+                        kind: gtl_wire::viewer::ViewerTabKind::Snapshot,
+                        state: gtl_wire::viewer::ViewerTabState::Pending,
+                    })
+                })
+                .collect::<TestResult<_>>()?,
+            active: ViewerActiveState::Pending {
+                tab_id: viewer_tab_id(tab_id)?,
+            },
+            preferences: ViewerPreferences {
+                theme: super::ViewerTheme::Dark,
+                render_options: ViewerRenderOptions {
+                    layout: gtl_wire::viewer::ViewerDiffLayout::Unified,
+                    density: gtl_wire::viewer::ViewerDiffDensity::Compact,
+                },
+                keybindings: gtl_models::viewer::ViewerKeybindings::default(),
+            },
+            feedback: None,
+        }))
+    }
+
+    fn inert_changes(mutations: &Mutations) -> Vec<&AttributeValue> {
+        mutations
+            .edits
+            .iter()
+            .filter_map(|edit| match edit {
+                Mutation::SetAttribute {
+                    name: "inert",
+                    value,
+                    ..
+                } => Some(value),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn diff_workspace_removes_inert_after_tab_activation() -> TestResult {
+        let owner = VirtualDom::new(VNode::empty);
+        let initial = pending_shell(1)?;
+        let mut shell = owner.in_scope(ScopeId::ROOT, || Signal::new(initial));
+        let mut dom = VirtualDom::new_with_props(
+            DiffInteractionFixture,
+            DiffInteractionFixtureProps { shell },
+        );
+        let mut mutations = Mutations::default();
+        dom.rebuild(&mut mutations);
+        assert!(
+            inert_changes(&mutations)
+                .iter()
+                .all(|value| matches!(value, AttributeValue::None)),
+            "a matching diff must omit inert, not write inert=false"
+        );
+
+        mutations.edits.clear();
+        shell.set(pending_shell(2)?);
+        dom.render_immediate(&mut mutations);
+        assert!(
+            matches!(inert_changes(&mutations).as_slice(), [AttributeValue::Text(value)] if value.is_empty())
+        );
+
+        mutations.edits.clear();
+        shell.set(pending_shell(1)?);
+        dom.render_immediate(&mut mutations);
+        assert!(
+            matches!(inert_changes(&mutations).as_slice(), [AttributeValue::None]),
+            "finishing activation must remove inert so pointer, focus, selection, and scroll work"
+        );
+        Ok(())
+    }
 
     fn version(value: u64) -> ViewerVersion {
         ViewerVersion::new(value)

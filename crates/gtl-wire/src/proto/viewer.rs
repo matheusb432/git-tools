@@ -226,6 +226,7 @@ fn encode_viewer_active_view(
 ) -> Result<v1::ViewerActiveView, ViewerCodecError> {
     Ok(v1::ViewerActiveView {
         identity: Some(encode_viewer_view_identity(view.identity)),
+        content_id: Some(view.content_id.into_digest().to_vec()),
         title: view.title,
         repository_name: view.repository_name.to_string(),
         branch: view.branch.to_string(),
@@ -1100,6 +1101,11 @@ fn decode_viewer_active_view(
 ) -> Result<ViewerActiveView, ViewerCodecError> {
     Ok(ViewerActiveView {
         identity: decode_viewer_view_identity(required(view.identity)?)?,
+        content_id: crate::viewer::ViewerRowContentId::from_digest(
+            required(view.content_id)?
+                .try_into()
+                .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        ),
         title: view.title,
         repository_name: ProjectName::try_new(view.repository_name)
             .map_err(|_| ViewerCodecError::InvalidMessage)?,

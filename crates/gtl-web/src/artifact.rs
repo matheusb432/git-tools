@@ -348,6 +348,7 @@ mod tests {
             })
             .collect::<crate::test_support::TestResult<Vec<_>>>()?;
         Ok(ViewerActiveView {
+            content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity: ViewerViewIdentity {
                 tab_id: viewer_tab_id(1)?,
                 range_generation: ViewerRangeGeneration::new(1),

@@ -28,17 +28,51 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     let diff = super::diff_workspace::use_workspace_context();
     let view = diff.view;
     let workspace = use_client_diff_workspace(view);
-    let toast = use_toast();
+    let identity = view.read().identity;
     let workspace_store = workspace.workspace();
-    let rows_loading = use_memo(move || {
-        workspace_store.files().iter().any(|file| {
-            *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
+    let stream_active = workspace.row_stream_active();
+    let is_loading = stream_active
+        && workspace_store.is_some_and(|store| {
+            store.files().iter().any(|file| {
+                *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
+            })
+        });
+    let retry_allowed = !stream_active && workspace_store.is_some_and(|store| {
+        store.files().iter().any(|file| {
+            matches!(&*file.state().read(), crate::entities::diffs::ClientDiffFileState::Error(error) if error.retryable())
         })
     });
-    let retry_allowed = !workspace.row_stream_active();
-    let (title, identity) = view.with(|view| (view.title.clone(), view.identity));
-    let is_loading = rows_loading();
     use_diff_rows_loading_tab(identity.tab_id, is_loading);
+
+    rsx! {
+        if let Some(workspace_store) = workspace_store {
+            LoadedDiffDocument {
+                workspace: workspace_store,
+                is_loading,
+                retry_allowed,
+                onopen,
+                onretry: move |file_id| workspace.retry_file(file_id),
+            }
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[component]
+fn LoadedDiffDocument(
+    workspace: Store<ClientDiffWorkspace>,
+    is_loading: bool,
+    retry_allowed: bool,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
+    onretry: EventHandler<ViewerDiffFileId>,
+) -> Element {
+    let workspace = use_memo(use_reactive((&workspace,), |(workspace,)| {
+        ReadStore::from(workspace)
+    }))();
+    let diff = super::diff_workspace::use_workspace_context();
+    let view = diff.view;
+    let toast = use_toast();
+    let (title, identity) = view.with(|view| (view.title.clone(), view.identity));
 
     rsx! {
         section {
@@ -54,18 +88,18 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
                 open: diff.find_open,
                 identity,
                 rows_loading: is_loading,
-                workspace: workspace_store,
+                workspace,
             }
             DiffDocumentBody {
                 title,
-                workspace: workspace_store,
+                workspace,
                 identity,
                 folded: diff.files_folded,
                 flashing_file: diff.flashing_file,
                 is_loading,
                 retry_allowed,
                 onopen,
-                onretry: move |file_id| workspace.retry_file(file_id),
+                onretry,
                 artifact_tab_id: None,
             }
         }
@@ -162,26 +196,53 @@ fn DiffDocumentBody(
             "data-view-identity": view_identity,
             "data-layout": layout.as_str(),
             "data-density": density.as_str(),
-            if workspace.files().is_empty() {
-                EmptyNotice { "no file changes" }
+            DiffDocumentFiles {
+                workspace,
+                layout,
+                density,
+                folded,
+                flashing_file,
+                retry_allowed,
+                onopen,
+                onretry,
+                artifact_tab_id,
             }
-            for (index, file) in workspace.files().iter().enumerate() {
-                {
-                    let file_id = file.summary().peek().id.clone();
-                    rsx! {
-                        DiffFileCard {
-                            key: "{file_id.as_str()}",
-                            file,
-                            layout,
-                            density,
-                            folded,
-                            flashing_file,
-                            onopen,
-                            onretry: move |()| onretry.call(file_id.clone()),
-                            retry_allowed,
-                            file_index: index,
-                            artifact_tab_id,
-                        }
+        }
+    }
+}
+
+#[component]
+fn DiffDocumentFiles(
+    workspace: ReadStore<ClientDiffWorkspace>,
+    layout: gtl_wire::viewer::ViewerDiffLayout,
+    density: gtl_wire::viewer::ViewerDiffDensity,
+    folded: ReadSignal<Option<bool>>,
+    flashing_file: ReadSignal<Option<String>>,
+    retry_allowed: bool,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
+    onretry: EventHandler<ViewerDiffFileId>,
+    artifact_tab_id: Option<ViewerTabId>,
+) -> Element {
+    rsx! {
+        if workspace.files().is_empty() {
+            EmptyNotice { "no file changes" }
+        }
+        for (index, file) in workspace.files().iter().enumerate() {
+            {
+                let file_id = file.summary().peek().id.clone();
+                rsx! {
+                    DiffFileCard {
+                        key: "{file_id.as_str()}",
+                        file,
+                        layout,
+                        density,
+                        folded,
+                        flashing_file,
+                        onopen,
+                        onretry: move |()| onretry.call(file_id.clone()),
+                        retry_allowed,
+                        file_index: index,
+                        artifact_tab_id,
                     }
                 }
             }
