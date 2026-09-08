@@ -167,7 +167,7 @@ pub struct SessionTab {
     generation: ViewerRangeGeneration,
     selection_generation: ViewerSelectionGeneration,
     selection: CommitSelection,
-    live_head: Option<gtl_models::git::GitHeadState>,
+    live_head: Option<super::refresh_live_view::LiveViewState>,
 }
 
 /// Authoritative recipe tabs plus their separately bounded computed views.
@@ -355,10 +355,27 @@ impl ViewerSession {
         })
     }
 
+    pub(super) fn is_branch_comparison(&self, tab_id: ViewerTabId) -> bool {
+        self.tab(tab_id)
+            .and_then(|tab| tab.live_head.as_ref())
+            .is_some_and(super::refresh_live_view::LiveViewState::is_branch_comparison)
+    }
+
+    pub(super) fn retain_snapshot_recipe(&mut self, ticket: ComputeTicket, recipe: &Recipe) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id)
+            && tab.tab.kind() == ViewerTabKind::Snapshot
+        {
+            tab.recipe = recipe.clone();
+        }
+    }
+
     pub(super) fn set_live_head(
         &mut self,
         ticket: ComputeTicket,
-        head: Option<gtl_models::git::GitHeadState>,
+        head: Option<super::refresh_live_view::LiveViewState>,
     ) {
         if let Some(tab) = self
             .tabs
@@ -372,7 +389,7 @@ impl ViewerSession {
     pub(super) fn publish_live_if_current(
         &mut self,
         ticket: ComputeTicket,
-        head: gtl_models::git::GitHeadState,
+        head: super::refresh_live_view::LiveViewState,
         mut value: CachedView,
         label: String,
     ) -> PublishOutcome {
@@ -1037,7 +1054,7 @@ mod tests {
         assert_eq!(
             session.publish_live_if_current(
                 ticket,
-                head.clone(),
+                head.clone().into(),
                 CachedView::new(range.view.shared_view()),
                 "updated".into()
             ),
@@ -1053,7 +1070,7 @@ mod tests {
         let ticket = session.current_ticket(id).unwrap();
         session.publish_live_if_current(
             ticket,
-            head,
+            head.into(),
             CachedView::new(view("empty range")),
             "updated".into(),
         );
@@ -1075,7 +1092,7 @@ mod tests {
         assert_eq!(
             session.publish_live_if_current(
                 stale,
-                head.clone(),
+                head.clone().into(),
                 CachedView::new(view("stale")),
                 "stale".into()
             ),
@@ -1090,7 +1107,7 @@ mod tests {
         assert_eq!(
             session.publish_live_if_current(
                 ticket,
-                head,
+                head.into(),
                 CachedView::new(view("stale")),
                 "stale".into()
             ),

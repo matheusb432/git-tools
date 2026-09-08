@@ -14,6 +14,8 @@ pub use tauri::{ViewerClient, ViewerRowStream, ViewerVersionStream};
 pub enum ViewerClientError {
     #[error("This desktop viewer and gtl-server use different viewer protocol versions.")]
     ProtocolMismatch,
+    #[error("User settings are invalid. Repair the settings file or back it up and reset it.")]
+    InvalidSettings,
     #[error("The viewer rejected this request. Refresh the page and try again.")]
     InvalidRequest,
     #[error("This viewer item is no longer available.")]
@@ -34,6 +36,9 @@ impl ViewerClientError {
     #[must_use]
     pub const fn message(self) -> &'static str {
         match self {
+            Self::InvalidSettings => {
+                "User settings are invalid. Repair the settings file or back it up and reset it."
+            }
             Self::ProtocolMismatch => {
                 "This desktop viewer and gtl-server use different versions. Update and restart both."
             }
@@ -81,6 +86,7 @@ mod tests {
     #[test]
     fn viewer_client_errors_round_trip_as_stable_wire_values() {
         for error in [
+            ViewerClientError::InvalidSettings,
             ViewerClientError::ProtocolMismatch,
             ViewerClientError::InvalidRequest,
             ViewerClientError::NotFound,

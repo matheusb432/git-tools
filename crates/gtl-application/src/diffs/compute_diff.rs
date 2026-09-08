@@ -25,6 +25,8 @@ pub struct ComputeDiffOk {
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeDiffError {
     #[error(transparent)]
+    Comparison(#[from] crate::projects::comparison::ComparisonError),
+    #[error(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
@@ -35,10 +37,17 @@ pub fn execute(
     req: ComputeDiff,
     app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { repo_root, target } = req;
     let settings = app_settings.load()?;
-    let mut built = diff_computation::build(git, &repo_root, &target, settings.diff_exclusions())?;
+    let mut built = diff_computation::build(
+        git,
+        &repo_root,
+        &target,
+        settings.diff_exclusions(),
+        comparisons,
+    )?;
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &built.view.full_context
     {
@@ -89,7 +98,12 @@ mod tests {
         request: ComputeDiff,
         source: &FakeGitClient,
     ) -> Result<ComputeDiffOk, ComputeDiffError> {
-        compute_diff::execute(request, &FixedUserSettingsStore::default(), source)
+        compute_diff::execute(
+            request,
+            &FixedUserSettingsStore::default(),
+            source,
+            &crate::utils::ProjectComparisons::default(),
+        )
     }
 
     fn pin() -> PinnedRange {
@@ -158,12 +172,12 @@ mod tests {
     }
 
     #[test]
-    fn no_upstream_falls_back_to_main_with_the_warning_note() {
+    fn no_upstream_compares_committed_branch_changes_against_local_main() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None,
-            known_revs: vec!["main".into()],
+            known_revs: vec!["refs/heads/main".into(), "HEAD".into()],
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -174,8 +188,8 @@ mod tests {
 
         assert_eq!(
             response.notes,
-            vec![Note::warn(
-                "diff-artifact: no upstream; falling back to main"
+            vec![Note::info(
+                "diff-artifact: no upstream; comparing branch changes against main"
             )]
         );
     }
@@ -276,8 +290,11 @@ mod tests {
         .unwrap_err();
 
         let err = match error {
-            ComputeDiffError::Unexpected(error) => Some(error),
-            ComputeDiffError::Settings(_) => None,
+            ComputeDiffError::Unexpected(error)
+            | ComputeDiffError::Comparison(
+                crate::projects::comparison::ComparisonError::Unexpected(error),
+            ) => Some(error),
+            ComputeDiffError::Settings(_) | ComputeDiffError::Comparison(_) => None,
         }
         .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");
@@ -346,6 +363,7 @@ index 333..444 100644\n\
             req(DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -383,6 +401,7 @@ new file mode 100644\n\
             req(DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -407,7 +426,13 @@ new file mode 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
-        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
+        let response = compute_diff::execute(
+            request,
+            &app_settings,
+            &source,
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap();
 
         let paths: Vec<String> = response
             .view
@@ -448,7 +473,13 @@ new file mode 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("other-repo", &["md"])));
 
-        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
+        let response = compute_diff::execute(
+            request,
+            &app_settings,
+            &source,
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap();
 
         assert_eq!(response.view.files.len(), 2);
         assert_eq!(response.view.exclusions, None);
@@ -468,7 +499,13 @@ new file mode 100644\n\
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
-        let response = compute_diff::execute(request, &app_settings, &source).unwrap();
+        let response = compute_diff::execute(
+            request,
+            &app_settings,
+            &source,
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap();
 
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.exclusions, None);

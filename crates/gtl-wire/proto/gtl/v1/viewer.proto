@@ -9,6 +9,7 @@ import "gtl/v1/settings.proto";
 service ViewerService {
   rpc ListViewerProjects(ListViewerProjectsRequest) returns (ListViewerProjectsResponse);
   rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
+  rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
   rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
   rpc StreamViewerRows(StreamViewerRowsRequest) returns (stream StreamViewerRowsResponse);
@@ -27,6 +28,8 @@ service ViewerService {
   rpc OpenViewerHistory(OpenViewerHistoryRequest) returns (OpenViewerHistoryResponse);
   rpc GetViewerHistoryCopy(GetViewerHistoryCopyRequest) returns (GetViewerHistoryCopyResponse);
   rpc GetViewerSettings(GetViewerSettingsRequest) returns (GetViewerSettingsResponse);
+  rpc GetSettingsRecovery(GetSettingsRecoveryRequest) returns (GetSettingsRecoveryResponse);
+  rpc ResetSettings(ResetSettingsRequest) returns (ResetSettingsResponse);
   rpc EditSettings(EditSettingsRequest) returns (EditSettingsResponse);
   rpc OpenViewerDiffFile(OpenViewerDiffFileRequest) returns (OpenViewerDiffFileResponse);
 }
@@ -78,6 +81,7 @@ enum ViewerTabKind {
   VIEWER_TAB_KIND_LIVE = 2;
   VIEWER_TAB_KIND_LIVE_LOCAL_CHANGES = 3;
   VIEWER_TAB_KIND_LIVE_UNPUSHED_COMMITS = 4;
+  VIEWER_TAB_KIND_LIVE_BRANCH_CHANGES = 5;
 }
 
 enum ViewerTabState {
@@ -619,7 +623,28 @@ message ViewerProject {
   string path = 1;
   RepositoryStatusResult status = 2;
   optional string last_rendered_at = 3;
+  string comparison_branch = 4;
+  ViewerProjectBranchComparison branch_comparison = 5;
 }
+message ViewerProjectBranchComparison {
+  oneof state {
+    Empty upstream = 1;
+    uint64 commits_ahead = 2;
+    string unavailable_reason = 3;
+  }
+}
+message ComparisonBranchFieldUpdate {
+  oneof operation {
+    string update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message UpdateViewerProjectRequest {
+  string path = 1;
+  ComparisonBranchFieldUpdate comparison_branch = 2;
+  string expected_comparison_branch = 3;
+}
+message UpdateViewerProjectResponse {}
 enum ViewerProjectComparison {
   VIEWER_PROJECT_COMPARISON_UNSPECIFIED = 0;
   VIEWER_PROJECT_COMPARISON_LOCAL_CHANGES = 1;
@@ -631,4 +656,20 @@ message OpenViewerProjectRequest {
 }
 message OpenViewerProjectResponse {
   uint64 tab_id = 1;
+}
+
+message GetSettingsRecoveryRequest {}
+
+message GetSettingsRecoveryResponse {
+  string configuration_path = 1;
+  optional string diagnostic = 2;
+  string revision = 3;
+}
+
+message ResetSettingsRequest {
+  string revision = 1;
+}
+
+message ResetSettingsResponse {
+  string backup_path = 1;
 }

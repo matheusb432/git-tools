@@ -7,7 +7,6 @@ const BADGE_CLASSES: &str = "inline-flex min-h-5 items-center justify-center rou
 pub(crate) enum BadgeVariant {
     #[default]
     Neutral,
-    Accent,
     // TODO: uncomment and implement on commits panel
     // Selected,
     Addition,
@@ -18,7 +17,6 @@ impl BadgeVariant {
     const fn classes(self) -> &'static str {
         match self {
             Self::Neutral => "border-line-2 bg-sunk text-ink-2",
-            Self::Accent => "border-acc-line bg-acc-soft text-acc",
             // Self::Selected => "border-acc bg-acc text-bg",
             Self::Addition => "border-add-line bg-add-bg text-add",
             Self::Deletion => "border-del-line bg-del-bg text-del",

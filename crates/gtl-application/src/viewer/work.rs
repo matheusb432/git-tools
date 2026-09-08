@@ -60,7 +60,7 @@ impl ReservedCommitWork {
 pub struct ComputedRecipeWork {
     ticket: ComputeTicket,
     result: Result<PrepareRecipeOk, PrepareRecipeError>,
-    head: Option<gtl_models::git::GitHeadState>,
+    head: Option<super::refresh_live_view::LiveViewState>,
 }
 
 /// Contains completed commit work ready for one publication attempt.
@@ -263,6 +263,7 @@ pub fn compute_recipe(
     work: ReservedRecipeWork,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
         recipe,
@@ -270,11 +271,23 @@ pub fn compute_recipe(
         ticket,
     } = work;
     let head_before = (kind == ViewerTabKind::Live)
-        .then(|| git.head_state(&recipe.cwd()).ok())
+        .then(|| super::refresh_live_view::inspect_recipe(&recipe, git, comparisons).ok())
         .flatten();
-    let path = recipe.cwd();
-    let result = prepare_recipe::execute(PrepareRecipe { recipe, kind }, settings, git);
-    let head = head_before.filter(|before| git.head_state(&path).as_ref().ok() == Some(before));
+    let result = prepare_recipe::execute(
+        PrepareRecipe {
+            recipe: recipe.clone(),
+            kind,
+        },
+        settings,
+        git,
+        comparisons,
+    );
+    let head = head_before.filter(|before| {
+        super::refresh_live_view::inspect_recipe(&recipe, git, comparisons)
+            .as_ref()
+            .ok()
+            == Some(before)
+    });
     ComputedRecipeWork {
         ticket,
         result,
@@ -309,6 +322,7 @@ pub fn publish_recipe(
             history,
         }) => match session.publish_labeled_if_current(ticket, CachedView::new(view), label) {
             PublishOutcome::Published => {
+                session.retain_snapshot_recipe(ticket, &history.recipe);
                 session.set_live_head(ticket, head);
                 RecipePublication::Published { history }
             }
@@ -318,7 +332,14 @@ pub fn publish_recipe(
             let outcome = session.set_state_if_current(
                 ticket,
                 gtl_models::viewer::ViewerTabState::Error {
-                    reason: COMPUTE_FAILED_MESSAGE.to_owned(),
+                    reason: match &error {
+                        PrepareRecipeError::Compute(
+                            super::compute_recipe::ComputeRecipeError::Diff(
+                                crate::diffs::compute_diff::ComputeDiffError::Comparison(error),
+                            ),
+                        ) if error.is_unavailable() => error.to_string(),
+                        _ => COMPUTE_FAILED_MESSAGE.to_owned(),
+                    },
                 },
             );
             match outcome {
@@ -430,6 +451,7 @@ mod tests {
             work,
             &FixedUserSettingsStore::default(),
             &crate::utils::FakeGitClient::default(),
+            &crate::utils::ProjectComparisons::default(),
         );
 
         let publication = publish_recipe(&state, work).unwrap();

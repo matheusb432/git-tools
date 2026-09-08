@@ -276,6 +276,7 @@ fn compute_compact(fixture: &MaterializedFixture, source: HybridGitClient) -> Re
         },
         &CompactSettingsStore,
         &source,
+        &std::collections::BTreeMap::new(),
     )
     .map(|response| response.view)
     .with_context(|| format!("compute {} compact view", fixture.workload))

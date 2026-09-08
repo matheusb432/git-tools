@@ -7,7 +7,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
+    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::Serialize;
 use tauri::State;
@@ -225,6 +225,17 @@ viewer_request_command!(
     GetViewerHistoryCopy,
     ViewerHistoryCopyPayload,
     get_history_copy
+);
+viewer_query_command!(
+    viewer_get_settings_recovery,
+    gtl_wire::viewer::ViewerSettingsRecovery,
+    get_settings_recovery
+);
+viewer_request_command!(
+    viewer_reset_settings,
+    gtl_wire::viewer::ResetSettings,
+    gtl_wire::viewer::ResetSettingsOk,
+    reset_settings
 );
 viewer_query_command!(viewer_get_settings, ViewerUserSettings, get_settings);
 viewer_request_command!(viewer_edit_settings, EditSettingsRequest, (), edit_settings);
@@ -721,4 +732,11 @@ viewer_request_command!(
     OpenViewerProject,
     OpenViewerProjectOk,
     open_project
+);
+
+viewer_request_command!(
+    viewer_update_project,
+    UpdateViewerProject,
+    (),
+    update_project
 );

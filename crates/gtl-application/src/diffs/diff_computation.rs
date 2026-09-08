@@ -28,7 +28,7 @@ struct ResolvedTarget {
     io_ranges: DiffRanges,
     view_ranges: DiffRanges,
     presentation: RangePresentation,
-    fallback_to_main: bool,
+    fallback_to_branch: bool,
 }
 
 impl ResolvedTarget {
@@ -38,7 +38,7 @@ impl ResolvedTarget {
             io_ranges: DiffRanges::exact(pin.to_git_range()),
             view_ranges: DiffRanges::exact(pin.to_display_range()),
             presentation,
-            fallback_to_main: false,
+            fallback_to_branch: false,
         }
     }
 
@@ -46,14 +46,14 @@ impl ResolvedTarget {
         base_ref: GitRevision,
         ranges: DiffRanges,
         presentation: RangePresentation,
-        fallback_to_main: bool,
+        fallback_to_branch: bool,
     ) -> Self {
         Self {
             base_ref,
             io_ranges: ranges.clone(),
             view_ranges: ranges,
             presentation,
-            fallback_to_main,
+            fallback_to_branch,
         }
     }
 }
@@ -63,7 +63,8 @@ pub(super) fn build(
     top: &RepositoryRoot,
     target: &DiffTarget,
     exclusions: &DiffExclusions,
-) -> anyhow::Result<DiffComputation> {
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<DiffComputation, crate::projects::comparison::ComparisonError> {
     let mut notes = Vec::new();
     let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
@@ -74,8 +75,8 @@ pub(super) fn build(
         io_ranges,
         view_ranges,
         presentation,
-        fallback_to_main,
-    } = resolve_target_ranges(git, top, target, &mut notes)?;
+        fallback_to_branch,
+    } = resolve_target_ranges(git, top, target, &mut notes, comparisons)?;
     let range_view = RangeView::new(&view_ranges.diff, presentation);
 
     let DiffData {
@@ -106,7 +107,9 @@ pub(super) fn build(
         DiffTarget::Range { .. } => base_ref.to_string(),
         DiffTarget::Base(_) => format!("{base_ref}..working"),
         DiffTarget::Merge { .. } => format!("to merge into {base_ref}"),
-        DiffTarget::Unpushed { .. } if fallback_to_main => format!("{base_ref}..working"),
+        DiffTarget::Unpushed { .. } if fallback_to_branch => {
+            format!("branch changes against {base_ref}")
+        }
         DiffTarget::Unpushed { .. } => format!("{} unpushed commit(s)", view.commits.len()),
         DiffTarget::Last { count, .. } => format!("last {count} commit(s)"),
     };
@@ -122,7 +125,8 @@ fn resolve_target_ranges(
     top: &RepositoryRoot,
     target: &DiffTarget,
     notes: &mut Vec<Note>,
-) -> anyhow::Result<ResolvedTarget> {
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<ResolvedTarget, crate::projects::comparison::ComparisonError> {
     let resolved = match target {
         DiffTarget::Range {
             pinned: Some(pin), ..
@@ -163,7 +167,7 @@ fn resolve_target_ranges(
                 io_ranges: DiffRanges::working_tree(base),
                 view_ranges: DiffRanges::working_tree(&short),
                 presentation: RangePresentation::WorkingTree,
-                fallback_to_main: false,
+                fallback_to_branch: false,
             }
         }
         DiffTarget::Merge {
@@ -183,20 +187,24 @@ fn resolve_target_ranges(
             ResolvedTarget::pinned(pin, pin.to_display_base(), RangePresentation::Exact)
         }
         DiffTarget::Unpushed { pinned: None } => {
-            let base = unpushed_or_main_base(git, top, notes)?;
-            let (ranges, presentation) = if base.is_upstream {
-                (
-                    DiffRanges::unpushed(&base.ref_name),
+            let comparison = crate::projects::comparison::resolve(top, git, comparisons)?;
+            let base = comparison.reference();
+            let (ranges, presentation, fallback) = match comparison {
+                crate::projects::comparison::ResolvedComparison::Upstream { .. } => (
+                    DiffRanges::unpushed(&base),
                     RangePresentation::Unpushed,
-                )
-            } else {
-                (
-                    DiffRanges::working_tree(&base.ref_name),
-                    RangePresentation::WorkingTree,
-                )
+                    false,
+                ),
+                crate::projects::comparison::ResolvedComparison::Branch { branch, .. } => {
+                    notes.push(Note::info(format!(
+                        "diff-artifact: no upstream; comparing branch changes against {branch}"
+                    )));
+                    (DiffRanges::merge(&base), RangePresentation::Branch, true)
+                }
             };
-            ResolvedTarget::same_ranges(base.ref_name, ranges, presentation, !base.is_upstream)
+            ResolvedTarget::same_ranges(base, ranges, presentation, fallback)
         }
+
         DiffTarget::Last {
             count,
             pinned: None,
@@ -212,36 +220,6 @@ fn resolve_target_ranges(
         }
     };
     Ok(resolved)
-}
-
-struct DiffBase {
-    ref_name: GitRevision,
-    is_upstream: bool,
-}
-
-fn unpushed_or_main_base(
-    git: &impl GitClient,
-    top: &RepositoryRoot,
-    notes: &mut Vec<Note>,
-) -> anyhow::Result<DiffBase> {
-    match git.upstream(top) {
-        Ok(crate::ports::GitEffect::Applied(upstream)) => Ok(DiffBase {
-            ref_name: GitRevision::from(&upstream),
-            is_upstream: true,
-        }),
-        Ok(crate::ports::GitEffect::Rejected(upstream_error)) => {
-            git.verify_commit(top, &GitRevision::main())
-                .map_err(|_| anyhow::anyhow!(upstream_error))?;
-            notes.push(Note::warn(
-                "diff-artifact: no upstream; falling back to main",
-            ));
-            Ok(DiffBase {
-                ref_name: GitRevision::main(),
-                is_upstream: false,
-            })
-        }
-        Err(error) => Err(error),
-    }
 }
 
 fn verify_exact_range(

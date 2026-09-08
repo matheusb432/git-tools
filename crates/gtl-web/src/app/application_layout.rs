@@ -412,7 +412,9 @@ async fn refresh_shell(
             context.shell.set(ViewerShellLoad::Ready(shell));
         }
         Err(error) => {
-            if matches!((context.shell)(), ViewerShellLoad::Ready(_)) {
+            if error != ViewerClientError::InvalidSettings
+                && matches!((context.shell)(), ViewerShellLoad::Ready(_))
+            {
                 context.toast.error(error.message());
             } else {
                 context.shell.set(ViewerShellLoad::Error(error));
@@ -571,7 +573,13 @@ fn ApplicationLayoutContent() -> Element {
                 "inert": (!connection.is_connected()).then_some(""),
                 aria_busy: (!connection.is_connected()).to_string(),
                 ApplicationNavigation {}
-                div { class: "min-h-0 flex-1 overflow-hidden", Outlet::<Route> {} }
+                div { class: "min-h-0 flex-1 overflow-hidden",
+                    if matches!(&*state, ViewerShellLoad::Error(ViewerClientError::InvalidSettings)) {
+                        crate::views::settings_recovery::SettingsRecovery { onretry: move |()| context.refresh(false) }
+                    } else {
+                        Outlet::<Route> {}
+                    }
+                }
             }
             if !connection.is_connected() {
                 ViewerConnectionNotice { connection, onretry: move |()| context.reconnect() }

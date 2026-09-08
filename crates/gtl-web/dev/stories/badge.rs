@@ -14,7 +14,6 @@ fn variants() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
             Badge { variant: BadgeVariant::Neutral, "Neutral" }
-            Badge { variant: BadgeVariant::Accent, "Selected branch" }
             Badge { variant: BadgeVariant::Addition, "+24 lines" }
             Badge { variant: BadgeVariant::Deletion, "-9 lines" }
         }

@@ -213,7 +213,7 @@ pub(super) fn edit(
     Ok(UserSettingsEditOutcome::Changed)
 }
 
-fn read_document_bytes(path: &Path) -> anyhow::Result<Vec<u8>> {
+pub(super) fn read_document_bytes(path: &Path) -> anyhow::Result<Vec<u8>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(bytes),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
@@ -253,6 +253,87 @@ struct BeforePersistHook {
 static BEFORE_PERSIST_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<BeforePersistHook>>> =
     std::sync::OnceLock::new();
 
+pub(super) fn revision(bytes: &[u8]) -> String {
+    use sha2::{Digest as _, Sha256};
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    Sha256::digest(bytes)
+        .into_iter()
+        .flat_map(|byte| {
+            [
+                char::from(HEX[usize::from(byte >> 4)]),
+                char::from(HEX[usize::from(byte & 15)]),
+            ]
+        })
+        .collect()
+}
+
+pub(super) fn reset_invalid(
+    settings_path: &Path,
+    expected_revision: &str,
+    timestamp: &gtl_models::timestamps::MachineTimestamp,
+) -> Result<PathBuf, UserSettingsEditError> {
+    let target = replacement_path(settings_path)?;
+    let _lease = acquire_lock(&target)?;
+    let bytes = read_document_bytes(&target)?;
+    if revision(&bytes) != expected_revision
+        || settings_document(settings_path, bytes.clone()).is_ok()
+    {
+        return Err(UserSettingsEditConflict::ConcurrentModification {
+            path: settings_path.to_path_buf(),
+        }
+        .into());
+    }
+    let timestamp = timestamp
+        .as_ref()
+        .chars()
+        .take(19)
+        .filter(|c| *c != '-' && *c != ':')
+        .collect::<String>()
+        .replace('T', "-");
+    let stem = settings_path
+        .file_stem()
+        .context("user-settings path has no file stem")?
+        .to_string_lossy();
+    let backup_path = settings_path.with_file_name(format!("{stem}.{timestamp}-backup.toml"));
+    let backup_parent = backup_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut backup =
+        tempfile::NamedTempFile::new_in(backup_parent).context("create settings backup")?;
+    backup.write_all(&bytes).context("write settings backup")?;
+    backup
+        .as_file()
+        .sync_all()
+        .context("synchronize settings backup")?;
+    backup
+        .persist_noclobber(&backup_path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("save settings backup {}", backup_path.display()))?;
+    let parent = target
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let defaults = tempfile::NamedTempFile::new_in(parent).context("create default settings")?;
+    defaults
+        .as_file()
+        .sync_all()
+        .context("synchronize default settings")?;
+    #[cfg(test)]
+    wait_before_persist_for_test(&target);
+    if read_document_bytes(&target)? != bytes {
+        return Err(UserSettingsEditConflict::ConcurrentModification {
+            path: settings_path.to_path_buf(),
+        }
+        .into());
+    }
+    defaults
+        .persist(&target)
+        .map_err(|error| error.error)
+        .context("restore default settings")?;
+    Ok(backup_path)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -282,6 +363,86 @@ mod tests {
     const LOCK_ATTEMPT_WAIT_TEST_MAX: Duration = Duration::from_millis(100);
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);
     const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(8);
+
+    #[test]
+    fn reset_preserves_invalid_bytes_and_restores_defaults() {
+        for raw in [
+            b"theme = {{{".as_slice(),
+            b"theme = 7",
+            b"\xff\xfe",
+            b"[[projects]]\nname = \"rust-snake\"\nexclude_from_push_all = true",
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("config.toml");
+            std::fs::write(&path, raw).unwrap();
+            let timestamp =
+                gtl_models::timestamps::MachineTimestamp::try_from("2026-09-08T03:10:09Z").unwrap();
+            let backup = super::reset_invalid(&path, &super::revision(raw), &timestamp).unwrap();
+            assert_eq!(
+                backup.file_name().unwrap(),
+                "config.20260908-031009-backup.toml"
+            );
+            assert_eq!(std::fs::read(&backup).unwrap(), raw);
+            assert_eq!(std::fs::read(&path).unwrap(), b"");
+            let store = crate::user_config::TomlSettingsStore::new(Some(path));
+            assert!(gtl_application::ports::UserSettingsReader::load(&store).is_ok());
+        }
+    }
+
+    #[test]
+    fn reset_rejects_changed_or_repaired_settings_and_backup_collisions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let timestamp =
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-09-08T03:10:09Z").unwrap();
+        let raw = b"theme = 7";
+        std::fs::write(&path, raw).unwrap();
+        assert!(matches!(
+            super::reset_invalid(&path, &super::revision(b"theme = 8"), &timestamp),
+            Err(UserSettingsEditError::Conflict(_))
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), raw);
+        let backup = path.with_file_name("config.20260908-031009-backup.toml");
+        std::fs::write(&backup, "keep this backup").unwrap();
+        assert!(super::reset_invalid(&path, &super::revision(raw), &timestamp).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "keep this backup"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), raw);
+        std::fs::write(&path, b"").unwrap();
+        assert!(matches!(
+            super::reset_invalid(&path, &super::revision(b""), &timestamp),
+            Err(UserSettingsEditError::Conflict(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reset_preserves_symbolic_links_and_private_backup_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let target = directory.path().join("managed.toml");
+        let raw = b"theme = 7";
+        std::fs::write(&target, raw).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let timestamp =
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-09-08T03:10:09Z").unwrap();
+        let backup = super::reset_invalid(&path, &super::revision(raw), &timestamp).unwrap();
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(std::fs::read(&target).unwrap().is_empty());
+        assert_eq!(std::fs::read(&backup).unwrap(), raw);
+        assert_eq!(
+            std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
 
     fn set(mutation: SettingKeyValue) -> UserSettingsPatch {
         mutation.into()

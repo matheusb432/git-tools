@@ -76,9 +76,10 @@ fn real_git_repository_build_pins_each_repository_independently() {
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         },
         &HybridGitClient,
+        &gtl_application::utils::ProjectComparisons::default(),
     )
     .unwrap();
-    let json = serde_json::to_value(recipes).unwrap();
+    let json = serde_json::to_value(recipes.recipes).unwrap();
 
     assert_eq!(json.as_array().unwrap().len(), 2);
     assert_eq!(json[0]["name"], "api");

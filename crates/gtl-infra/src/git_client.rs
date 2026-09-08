@@ -33,6 +33,20 @@ use self::parsing::{parse_local_tags, parse_remote_tags, parse_worktrees};
 pub struct HybridGitClient;
 
 impl GitClient for HybridGitClient {
+    fn primary_worktree(&self, path: &RepositoryRoot) -> anyhow::Result<RepositoryRoot> {
+        let repository = gix::discover(path.as_ref())?;
+        if repository.git_dir() == repository.common_dir() {
+            return Ok(path.clone());
+        }
+        let primary = gix::open(repository.common_dir())?;
+        primary.workdir().map_or_else(
+            || Ok(path.clone()),
+            |directory| {
+                RepositoryRoot::try_new(std::fs::canonicalize(directory)?).map_err(Into::into)
+            },
+        )
+    }
+
     fn repo_present(&self, repo_path: &RepositoryRoot) -> bool {
         repo_path.as_ref().join(".git").exists()
     }
@@ -378,6 +392,28 @@ impl GitClient for HybridGitClient {
         right: &GitRevision,
     ) -> anyhow::Result<CommitId> {
         crate::git_capture::merge_base(repo_path, left, right)
+    }
+
+    fn find_merge_base(
+        &self,
+        repo_path: &RepositoryRoot,
+        left: &GitRevision,
+        right: &GitRevision,
+    ) -> anyhow::Result<Option<CommitId>> {
+        let output = crate::git_process::run(
+            repo_path.as_ref(),
+            &["merge-base", left.as_ref(), right.as_ref()],
+        )?;
+        if output.exit_code == 1 {
+            return Ok(None);
+        }
+        anyhow::ensure!(output.success(), "{}", output.error_line());
+        output
+            .stdout
+            .trim()
+            .try_into()
+            .map(Some)
+            .map_err(Into::into)
     }
     fn committed_at(
         &self,

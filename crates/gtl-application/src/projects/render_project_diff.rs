@@ -1,8 +1,4 @@
-//! The `render_project_diff` vertical slice: render every already-filtered repo
-//! (upstream present, unpushed count > 0 -- filtering stays cli-side) into one
-//! tabbed artifact. Unlike `render_diff_subrepos`, this never skips an empty
-//! view and propagates a build error instead of swallowing it as a skip --
-//! matches `run_project_all`'s current no-skip behavior exactly.
+//! Renders selected project comparisons into one artifact, reporting unavailable bases.
 
 use gtl_models::{
     artifacts::ArtifactDiffIdentity,
@@ -23,8 +19,7 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff artifact across every repo in `repos`, which the caller
-/// already filtered to upstream-present and unpushed.
+/// Renders repositories selected for commits ahead of their comparison base.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderProjectDiff {
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -36,7 +31,7 @@ pub struct RenderProjectDiff {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderProjectDiffOk {
     pub rendered_repositories: Vec<gtl_models::paths::RepositoryRoot>,
-    pub placement: PlacedArtifact,
+    pub placement: Option<PlacedArtifact>,
     pub notes: Vec<Note>,
 }
 
@@ -58,6 +53,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<RenderProjectDiffOk, RenderProjectDiffError> {
     let RenderProjectDiff { root, repos } = req;
     let store_root = artifacts::root(&root);
@@ -70,7 +66,16 @@ pub fn execute(
         &repos,
         false,
         &mut notes,
+        comparisons,
     )?;
+
+    if batch.views.is_empty() {
+        return Ok(RenderProjectDiffOk {
+            rendered_repositories: batch.completed,
+            placement: None,
+            notes,
+        });
+    }
 
     let generated_at = clock.now().map_err(anyhow::Error::from)?;
     let title = dated_title(&generated_at, "diff-artifact all");
@@ -98,7 +103,7 @@ pub fn execute(
     notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderProjectDiffOk {
         rendered_repositories: batch.completed,
-        placement: placed,
+        placement: Some(placed),
         notes,
     })
 }
@@ -170,14 +175,15 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
         assert_eq!(
-            response.placement.path().as_path(),
+            response.placement.as_ref().unwrap().path().as_path(),
             PathBuf::from("/scan-root/.artifacts/gtl/artifact.html")
         );
-        assert!(!response.placement.is_reused());
+        assert!(!response.placement.as_ref().unwrap().is_reused());
         assert_eq!(
             response.notes,
             vec![
@@ -193,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn a_build_error_propagates_instead_of_being_skipped() {
+    fn unavailable_comparisons_produce_warnings_without_an_empty_artifact() {
         let source = FakeGitClient {
             upstream: None,
             known_revs: vec![],
@@ -212,9 +218,12 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         );
 
-        assert!(result.is_err());
+        let result = result.unwrap();
+        assert!(result.placement.is_none());
+        assert!(result.notes[0].text.contains("Local comparison branch"));
     }
 
     #[test]
@@ -276,6 +285,7 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
         let first_html = store
@@ -293,6 +303,7 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
         let second_html = store

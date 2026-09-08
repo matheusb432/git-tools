@@ -58,6 +58,12 @@ pub(crate) fn UserSettingsView() -> Element {
                         (true, _) | (false, None) => rsx! {
                             SettingsLoading {}
                         },
+                        (
+                            false,
+                            Some(Err(crate::shared::viewer_client::ViewerClientError::InvalidSettings)),
+                        ) => rsx! {
+                            crate::views::settings_recovery::SettingsRecovery { onretry: move |()| settings.restart() }
+                        },
                         (false, Some(Err(error))) => {
                             let message = error.message();
                             rsx! {

@@ -83,6 +83,7 @@ fn assemble_excludes_extensions_at_the_git_level() {
         },
         &FixedUserSettingsStore::new(settings),
         &HybridGitClient,
+        &gtl_application::utils::ProjectComparisons::default(),
     )
     .unwrap();
 
@@ -210,6 +211,7 @@ fn working_tree_diff_includes_untracked_without_mutating_the_index() {
         },
         &FixedUserSettingsStore::default(),
         &HybridGitClient,
+        &gtl_application::utils::ProjectComparisons::default(),
     )
     .unwrap();
     let paths = result
@@ -236,6 +238,7 @@ fn working_tree_diff_includes_untracked_without_mutating_the_index() {
         },
         &FixedUserSettingsStore::default(),
         &HybridGitClient,
+        &gtl_application::utils::ProjectComparisons::default(),
     )
     .unwrap();
     assert!(committed.view.files.is_empty());
@@ -258,6 +261,7 @@ fn initial_working_tree_diff_handles_staged_and_untracked_files() {
         },
         &FixedUserSettingsStore::default(),
         &HybridGitClient,
+        &gtl_application::utils::ProjectComparisons::default(),
     )
     .unwrap();
     assert!(result.view.commits.is_empty());

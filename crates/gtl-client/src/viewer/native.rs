@@ -9,7 +9,7 @@ use gtl_wire::{
         ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
-        projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
+        projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
     },
 };
 
@@ -79,6 +79,17 @@ impl ViewerClient {
                 }
             })?;
         proto::viewer::projects::decode_projects(response).map_err(Into::into)
+    }
+
+    pub async fn update_project(
+        &mut self,
+        request: UpdateViewerProject,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .update_viewer_project(proto::viewer::projects::encode_update(request))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
     }
 
     pub async fn open_project(
@@ -190,6 +201,33 @@ impl ViewerClient {
         ))
     }
 
+    pub async fn get_settings_recovery(
+        &mut self,
+    ) -> Result<gtl_wire::viewer::ViewerSettingsRecovery, ViewerClientError> {
+        let response = self
+            .client
+            .get_settings_recovery(v1::GetSettingsRecoveryRequest {})
+            .await
+            .map_err(|status| decode_status(&status))?
+            .into_inner();
+        Ok(proto::viewer::decode_get_settings_recovery_response(
+            response,
+        ))
+    }
+
+    pub async fn reset_settings(
+        &mut self,
+        request: gtl_wire::viewer::ResetSettings,
+    ) -> Result<gtl_wire::viewer::ResetSettingsOk, ViewerClientError> {
+        let response = self
+            .client
+            .reset_settings(proto::viewer::encode_reset_settings_request(request))
+            .await
+            .map_err(|status| decode_status(&status))?
+            .into_inner();
+        Ok(proto::viewer::decode_reset_settings_response(response))
+    }
+
     pub async fn get_settings(&mut self) -> Result<ViewerUserSettings, ViewerClientError> {
         let response = self
             .client
@@ -293,6 +331,14 @@ impl From<proto::viewer::ViewerCodecError> for ViewerClientError {
 }
 
 fn decode_status(status: &tonic::Status) -> ViewerClientError {
+    if status.code() == tonic::Code::FailedPrecondition
+        && status
+            .metadata()
+            .get("gtl-error-kind")
+            .is_some_and(|kind| kind == "invalid-user-settings")
+    {
+        return ViewerClientError::InvalidSettings;
+    }
     match status.code() {
         tonic::Code::InvalidArgument | tonic::Code::FailedPrecondition => {
             ViewerClientError::InvalidRequest
@@ -305,5 +351,26 @@ fn decode_status(status: &tonic::Status) -> ViewerClientError {
         | tonic::Code::Cancelled
         | tonic::Code::Unauthenticated => ViewerClientError::Unavailable,
         _ => ViewerClientError::Internal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_settings_uses_structured_metadata_instead_of_message_text() {
+        let mut status = tonic::Status::failed_precondition("any diagnostic");
+        assert_eq!(decode_status(&status), ViewerClientError::InvalidRequest);
+        status
+            .metadata_mut()
+            .insert("gtl-error-kind", "invalid-user-settings".parse().unwrap());
+        assert_eq!(decode_status(&status), ViewerClientError::InvalidSettings);
+        assert_eq!(
+            decode_status(&tonic::Status::failed_precondition(
+                "user settings are invalid"
+            )),
+            ViewerClientError::InvalidRequest
+        );
     }
 }

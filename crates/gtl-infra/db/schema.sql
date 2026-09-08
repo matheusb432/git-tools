@@ -81,7 +81,8 @@ CREATE TABLE projects (
         CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', [paused_at]) IS [paused_at]),
     [unmanaged_at] TEXT
         CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', [unmanaged_at]) IS [unmanaged_at])
-) STRICT;
+, comparison_branch TEXT NOT NULL DEFAULT 'main'
+    CHECK (length(comparison_branch) BETWEEN 1 AND 1024 AND comparison_branch = trim(comparison_branch))) STRICT;
 
 CREATE TABLE "recent_renders" (
   id           INTEGER PRIMARY KEY,

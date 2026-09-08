@@ -1,5 +1,6 @@
 use anyhow::Result;
 use assert_cmd::Command;
+use predicates::prelude::*;
 
 mod common;
 
@@ -10,11 +11,25 @@ fn server_request_failure_is_rendered_once_at_the_command_boundary() -> Result<(
     std::fs::write(&config, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
     let _server = common::ServerHarness::start(Some(&config), None)?;
 
-    Command::new(env!("CARGO_BIN_EXE_git-tools"))
-        .args(["push", "--all", "--dry"])
-        .assert()
-        .code(2)
-        .stdout("")
-        .stderr("user settings are invalid\n");
+    for (arguments, exit_code) in [
+        (["push", "--all", "--dry"], 2),
+        (["diff", "HEAD", "--raw"], 1),
+    ] {
+        Command::new(env!("CARGO_BIN_EXE_git-tools"))
+            .args(arguments)
+            .assert()
+            .code(exit_code)
+            .stdout("")
+            .stderr(
+                predicate::str::contains(format!(
+                    "user settings at {} are invalid",
+                    config.display()
+                ))
+                .count(1)
+                .and(predicate::str::contains(
+                    "`diff.exclude` must be an array of strings",
+                )),
+            );
+    }
     Ok(())
 }

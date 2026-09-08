@@ -388,6 +388,7 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
             pending,
             &FixedUserSettingsStore::default(),
             &HybridGitClient,
+            &gtl_application::utils::ProjectComparisons::default(),
         );
         let work::RecipePublication::Published { history } =
             work::publish_recipe(&viewer, computed).unwrap()

@@ -18,3 +18,6 @@ mod tab_overflow;
 
 #[path = "viewer/projects.rs"]
 mod projects;
+
+#[path = "viewer/settings_recovery.rs"]
+mod settings_recovery;

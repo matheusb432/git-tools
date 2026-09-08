@@ -5,6 +5,7 @@ use gtl_models::settings::SettingKey;
 pub mod edit_settings;
 pub mod get_user_settings;
 pub mod remove_setting_key;
+pub mod reset_settings;
 pub mod set_setting_key;
 mod user_settings_patch;
 

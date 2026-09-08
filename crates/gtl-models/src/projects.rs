@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub mod catalogue;
+pub mod comparison;
 pub mod push_ledger;
 
 /// One active project resolved to an absolute local Git repository path.

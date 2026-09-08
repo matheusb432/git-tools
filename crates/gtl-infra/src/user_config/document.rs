@@ -154,18 +154,6 @@ pub(super) enum UserSettingsDocumentError {
     },
 }
 
-impl UserSettingsDocumentError {
-    pub(super) fn client_diagnostic(&self) -> Option<String> {
-        matches!(
-            self,
-            Self::InvalidKeybinding { .. }
-                | Self::InvalidKeybindingSet { .. }
-                | Self::ConflictingKeybindings { .. }
-        )
-        .then(|| self.to_string())
-    }
-}
-
 /// A TOML document whose complete supported schema and domain values are valid.
 pub(super) struct UserSettingsDocument {
     raw: String,

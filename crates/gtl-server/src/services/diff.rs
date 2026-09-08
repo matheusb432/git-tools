@@ -14,7 +14,7 @@ use gtl_application::{
         render_project_diff::{
             self, RenderProjectDiff, RenderProjectDiffError, RenderProjectDiffOk,
         },
-        select_unpushed_repositories,
+        select_comparison_repositories,
     },
     recipes::{
         Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeTarget,
@@ -148,10 +148,11 @@ impl DiffService for DiffGrpcService {
             scope: traversal_scope(request.include_linked_worktrees),
         };
         let state = self.state.clone();
-        let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "build subrepositories diff recipes"))?;
-        let presentation = match present_snapshot(&self.state, recipes)? {
+        let recipes =
+            run_blocking(move || build_recipes::execute(request, &state.git, &state.database))
+                .await?
+                .map_err(|error| unexpected(error, "build subrepositories diff recipes"))?;
+        let mut presentation = match present_snapshot(&self.state, recipes.recipes)? {
             SnapshotPresentation::Ready(presentation) => presentation,
             SnapshotPresentation::ViewerUnavailable(error) => {
                 let response = self
@@ -162,6 +163,7 @@ impl DiffService for DiffGrpcService {
             }
         };
 
+        presentation.notes.extend(application_notes(&recipes.notes));
         Ok(Response::new(v1::PresentSubrepositoryDiffsResponse {
             presentation: Some(presentation),
         }))
@@ -187,10 +189,11 @@ impl DiffService for DiffGrpcService {
             },
         };
         let state = self.state.clone();
-        let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "build project diff recipes"))?;
-        let presentation = match present_snapshot(&self.state, recipes)? {
+        let recipes =
+            run_blocking(move || build_recipes::execute(request, &state.git, &state.database))
+                .await?
+                .map_err(|error| unexpected(error, "build project diff recipes"))?;
+        let mut presentation = match present_snapshot(&self.state, recipes.recipes)? {
             SnapshotPresentation::Ready(presentation) => presentation,
             SnapshotPresentation::ViewerUnavailable(error) => {
                 let response = self
@@ -203,6 +206,7 @@ impl DiffService for DiffGrpcService {
             }
         };
 
+        presentation.notes.extend(application_notes(&recipes.notes));
         Ok(Response::new(v1::PresentProjectRepositoryDiffsResponse {
             presentation: Some(presentation),
         }))
@@ -222,6 +226,7 @@ impl DiffService for DiffGrpcService {
                 &state.artifacts,
                 &state.renderer,
                 &state.clock,
+                &state.database,
             )
         })
         .await?
@@ -272,6 +277,7 @@ impl DiffService for DiffGrpcService {
                 &state.artifacts,
                 &state.renderer,
                 &state.clock,
+                &state.database,
             )
             .map_err(render_subrepositories_error)
         })
@@ -294,14 +300,15 @@ impl DiffService for DiffGrpcService {
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
         let result = run_blocking(move || {
-            let repos = select_unpushed_repositories::execute(repos, &state.git)
+            let repos = select_comparison_repositories::execute(repos, &state.git, &state.database)
                 .map_err(|error| unexpected(error, "select project diff repositories"))?;
-            if repos.is_empty() {
-                return Ok(None);
+            if repos.repositories.is_empty() {
+                return Ok((None, repos.notes));
             }
             let request = RenderProjectDiff {
                 root,
                 repos: repos
+                    .repositories
                     .into_iter()
                     .map(|repo| RepoRef {
                         top: repo.path,
@@ -316,20 +323,24 @@ impl DiffService for DiffGrpcService {
                 &state.artifacts,
                 &state.renderer,
                 &state.clock,
+                &state.database,
             )
-            .map(Some)
+            .map(|result| (Some(result), repos.notes))
             .map_err(render_project_error)
         })
         .await??;
 
+        let (result, notes) = result;
         if let Some(result) = &result {
             viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         }
-        Ok(Response::new(
-            result.map_or_else(empty_projects_response, |result| {
+        Ok(Response::new({
+            let mut response = result.map_or_else(empty_projects_response, |result| {
                 render_project_response(&result)
-            }),
-        ))
+            });
+            response.notes.extend(application_notes(&notes));
+            response
+        }))
     }
 }
 
@@ -548,6 +559,12 @@ fn prepend_fallback_note(
 
 fn render_error(error: RenderDiffError) -> Status {
     match error {
+        RenderDiffError::Comparison(error) => match error {
+            gtl_application::projects::comparison::ComparisonError::Unexpected(error) => {
+                unexpected(error, "resolve diff comparison")
+            }
+            error => Status::failed_precondition(error.to_string()),
+        },
         RenderDiffError::InvalidTarget(error) => Status::invalid_argument(error.to_string()),
         RenderDiffError::Settings(error) => user_settings_load_error(error),
         RenderDiffError::Unexpected(error) => unexpected(error, "render diff"),
@@ -640,11 +657,12 @@ fn render_project_response(
 ) -> v1::RenderProjectRepositoryDiffsResponse {
     v1::RenderProjectRepositoryDiffsResponse {
         notes: application_notes(&result.notes),
-        outcome: Some(
-            v1::render_project_repository_diffs_response::Outcome::Rendered(artifact(
-                &result.placement,
-            )),
-        ),
+        outcome: Some(match &result.placement {
+            Some(placement) => {
+                v1::render_project_repository_diffs_response::Outcome::Rendered(artifact(placement))
+            }
+            None => v1::render_project_repository_diffs_response::Outcome::Empty(v1::Empty {}),
+        }),
     }
 }
 

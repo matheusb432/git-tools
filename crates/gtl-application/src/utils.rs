@@ -1337,3 +1337,20 @@ pub(crate) fn make_linked_worktree(directory: &Path, git_directory: &str) {
     std::fs::create_dir_all(directory).unwrap();
     std::fs::write(directory.join(".git"), format!("gitdir: {git_directory}\n")).unwrap();
 }
+
+#[derive(Default)]
+pub struct ProjectComparisons(
+    pub  std::collections::BTreeMap<
+        gtl_models::paths::RepositoryRoot,
+        gtl_models::projects::comparison::ComparisonBranch,
+    >,
+);
+
+impl crate::ports::ProjectComparisonReader for ProjectComparisons {
+    fn comparison_branch(
+        &self,
+        path: &gtl_models::paths::RepositoryRoot,
+    ) -> anyhow::Result<Option<gtl_models::projects::comparison::ComparisonBranch>> {
+        Ok(self.0.get(path).cloned())
+    }
+}

@@ -6,7 +6,7 @@ use gtl_application::{
             SaveLiveViewOutcome,
         },
     },
-    projects::select_unpushed_repositories,
+    projects::select_comparison_repositories,
     recipes::{Recipe, RecipeBatch, RecipeBatchKind},
 };
 use gtl_models::{live_views::LiveSource, recipes::RecipeBatchId};
@@ -72,14 +72,16 @@ impl LiveViewService for LiveViewGrpcService {
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
         let results = run_blocking(move || {
-            let selected = select_unpushed_repositories::execute(repos, &state.git)
-                .map_err(|error| unexpected(error, "select project live views"))?;
+            let selected =
+                select_comparison_repositories::execute(repos, &state.git, &state.database)
+                    .map_err(|error| unexpected(error, "select project live views"))?;
             let mut connection = state
                 .database
                 .connection_lock()
                 .map_err(SaveLiveViewError::from)
                 .map_err(|error| unexpected(error, "open live-view database"))?;
-            selected
+            let results = selected
+                .repositories
                 .into_iter()
                 .map(|repository| {
                     save_live_view::execute(
@@ -93,10 +95,12 @@ impl LiveViewService for LiveViewGrpcService {
                     )
                     .map_err(|error| unexpected(error, "save project live view"))
                 })
-                .collect::<Result<Vec<_>, Status>>()
+                .collect::<Result<Vec<_>, Status>>()?;
+            Ok::<_, Status>((results, selected.notes))
         })
         .await??;
 
+        let (results, notes) = results;
         let recipes = results
             .iter()
             .filter_map(recipe_for_save)
@@ -107,6 +111,7 @@ impl LiveViewService for LiveViewGrpcService {
         Ok(Response::new(v1::SaveAndPresentProjectLiveViewsResponse {
             results,
             presentation,
+            notes: application_notes(&notes),
         }))
     }
 }

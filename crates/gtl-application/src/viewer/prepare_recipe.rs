@@ -55,8 +55,9 @@ pub fn execute(
     query: PrepareRecipe,
     user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
-    let PrepareRecipe { recipe, kind } = query;
+    let PrepareRecipe { mut recipe, kind } = query;
     let probe = probe_recipe::execute(
         ProbeRecipe {
             recipe: recipe.clone(),
@@ -68,7 +69,23 @@ pub fn execute(
         return Ok(PrepareRecipeOk::Broken { state });
     }
 
-    let view = compute_recipe::execute(recipe.clone(), user_settings, git)?;
+    if kind == ViewerTabKind::Snapshot
+        && let crate::recipes::RecipeOp::Diff {
+            target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
+        } = &recipe.op
+    {
+        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons)
+            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+            .map_err(compute_recipe::ComputeRecipeError::from)?;
+        let pin = comparison
+            .pin(&recipe.cwd(), git)
+            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+            .map_err(compute_recipe::ComputeRecipeError::from)?;
+        recipe.op = crate::recipes::RecipeOp::Diff {
+            target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
+        };
+    }
+    let view = compute_recipe::execute(recipe.clone(), user_settings, git, comparisons)?;
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
         kind,
@@ -128,6 +145,7 @@ mod tests {
                 repository_state: Some(GitRepositoryState::NotFound),
                 ..Default::default()
             },
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -145,6 +163,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             &source(),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 

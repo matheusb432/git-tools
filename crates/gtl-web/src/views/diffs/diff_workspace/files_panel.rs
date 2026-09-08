@@ -1,13 +1,13 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use gtl_models::diffs::DiffLineCount;
-use gtl_wire::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
+use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
 use crate::{
     shared::ui::{Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
     views::diffs::{
-        DiffFileStatusBadge, DiffFileStatusBadgeSize, DiffLineChangeBadge, DiffLineChangeKind,
+        DiffFileStatus, DiffLineChangeBadge, DiffLineChangeKind, file_status_text_class,
     },
 };
 
@@ -206,16 +206,11 @@ fn WorkspaceFileItem(
         |name| name.to_string_lossy(),
     );
     let anchor_id = file.anchor_id.clone();
-    let tone_classes = file_item_tone_classes(file.status);
+    let color = file_status_text_class(file.status);
     let artifact_action = artifact_enhancement.then_some("navigate-file");
-    let item_attributes = merge_attributes(vec![
-        attributes!(div {
-            class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug text-ink-2 hover:text-ink",
-        }),
-        attributes!(div {
-            class: tone_classes,
-        }),
-    ]);
+    let item_attributes = merge_attributes(vec![attributes!(div {
+        class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug bg-transparent hover:bg-surface-2 active:bg-surface-2",
+    })]);
 
     rsx! {
         li { class: "min-w-0",
@@ -228,24 +223,11 @@ fn WorkspaceFileItem(
                 "data-gtl-action": artifact_action,
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
-                DiffFileStatusBadge {
-                    status: file.status,
-                    size: DiffFileStatusBadgeSize::Compact,
-                }
-                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap {color}",
                     "{file_name}"
                 }
+                DiffFileStatus { status: file.status }
             }
-        }
-    }
-}
-
-const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
-    match status {
-        ViewerFileStatus::Added => "bg-add-bg/40 hover:bg-add-bg/60 active:bg-add-bg",
-        ViewerFileStatus::Deleted => "bg-del-bg/40 hover:bg-del-bg/60 active:bg-del-bg",
-        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => {
-            "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
         }
     }
 }

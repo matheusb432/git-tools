@@ -510,9 +510,11 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
     };
     use gtl_wire::{
         proto::viewer::projects,
-        viewer::projects::{OpenViewerProject, ViewerProject},
+        viewer::projects::{OpenViewerProject, ViewerProject, ViewerProjectBranchComparison},
     };
     let project = ViewerProject {
+        comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
+        branch_comparison: ViewerProjectBranchComparison::Upstream,
         path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
         name: ProjectName::try_new("Alpha").unwrap(),
         status: RepositoryStatus::Absent,
@@ -550,6 +552,8 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
     assert!(
         projects::decode_projects(v1::ListViewerProjectsResponse {
             projects: vec![v1::ViewerProject {
+                comparison_branch: "main".to_owned(),
+                branch_comparison: None,
                 path: "/repos/alpha".into(),
                 status: None,
                 last_rendered_at: None
@@ -569,7 +573,10 @@ fn project_statuses_round_trip_through_grpc_and_desktop_json() {
             status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
         },
     };
-    use gtl_wire::{proto::viewer::projects, viewer::projects::ViewerProject};
+    use gtl_wire::{
+        proto::viewer::projects,
+        viewer::projects::{ViewerProject, ViewerProjectBranchComparison},
+    };
     for status in [
         RepositoryStatus::Absent,
         RepositoryStatus::Present {
@@ -599,6 +606,8 @@ fn project_statuses_round_trip_through_grpc_and_desktop_json() {
         },
     ] {
         let project = ViewerProject {
+            comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
+            branch_comparison: ViewerProjectBranchComparison::Upstream,
             path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
             name: ProjectName::try_new("Alpha").unwrap(),
             status,

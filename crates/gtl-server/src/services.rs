@@ -105,9 +105,14 @@ pub(crate) fn invalid_user_settings_configuration(
     error: &UserSettingsConfigurationError,
     operation: &'static str,
 ) -> Status {
-    let message = error.client_message().to_owned();
+    let message = error.to_string();
     tracing::warn!(error = ?error, operation, "user settings are invalid");
-    Status::failed_precondition(message)
+    let mut status = Status::failed_precondition(message);
+    status.metadata_mut().insert(
+        "gtl-error-kind",
+        tonic::metadata::MetadataValue::from_static("invalid-user-settings"),
+    );
+    status
 }
 
 pub(crate) fn repository_resolution_error(error: ResolveRepositoryRootError) -> Status {

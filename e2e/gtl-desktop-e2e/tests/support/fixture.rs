@@ -291,6 +291,15 @@ pub struct ProjectsFixture {
 }
 
 impl ProjectsFixture {
+    pub fn use_local_comparison(&self) -> Result<()> {
+        git(&self.alpha, ["branch", "review-base", "main"])?;
+        git(&self.alpha, ["branch", "--unset-upstream"])
+    }
+
+    pub fn restore_upstream(&self) -> Result<()> {
+        git(&self.alpha, ["branch", "--set-upstream-to=main"])
+    }
+
     pub fn create(data_root: &Path) -> Result<Self> {
         let root = data_root.join("project-repositories");
         fs::create_dir_all(&root)?;

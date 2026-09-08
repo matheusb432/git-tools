@@ -95,7 +95,7 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     std::fs::write(&settings_path, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
-    let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
+    let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
     let mut client =
         ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
 
@@ -105,14 +105,27 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
         .unwrap_err();
 
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(error.message(), "user settings are invalid");
+    assert!(
+        error
+            .message()
+            .contains(&settings_path.display().to_string())
+    );
+    assert!(
+        error
+            .message()
+            .contains("`diff.exclude` must be an array of strings")
+    );
+    assert_eq!(
+        error.metadata().get("gtl-error-kind").unwrap(),
+        "invalid-user-settings"
+    );
     server.stop().await?;
     Ok(())
 }
 
 #[tokio::test]
 #[serial(server_tracing)]
-async fn reports_invalid_viewer_keybinding_without_exposing_the_config_path() -> TestResult {
+async fn reports_invalid_viewer_keybinding_with_the_config_path() -> TestResult {
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("private-config.toml");
     std::fs::write(&settings_path, "[keybindings]\nsearch_files = \"Cmd+P\"\n")?;
@@ -126,14 +139,78 @@ async fn reports_invalid_viewer_keybinding_without_exposing_the_config_path() ->
         .unwrap_err();
 
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(
-        error.message(),
-        "`keybindings.search_files` is invalid: unsupported token `Cmd`; use ctrl, alt, shift, or meta plus a-z, 0-9, f1-f12, enter, escape, space, tab, backspace, delete, insert, an arrow key, home, end, pageup, or pagedown"
+    assert!(
+        error
+            .message()
+            .contains("`keybindings.search_files` is invalid: unsupported token `Cmd`")
     );
     assert!(
-        !error
+        error
             .message()
-            .contains(&settings_path.to_string_lossy()[..])
+            .contains(&settings_path.display().to_string())
+    );
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn invalid_settings_can_be_inspected_and_reset_without_restarting_the_server() -> TestResult {
+    use gtl_wire::v1::{GetSettingsRecoveryRequest, ResetSettingsRequest};
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("config.toml");
+    let raw = "[[projects]]\nname = \"rust-snake\"\nexclude_from_push_all = true\n";
+    std::fs::write(&path, raw)?;
+    let server = ServerHarness::start(directory.path(), Some(path.clone())).await?;
+    let mut client =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let error = client
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .message()
+            .contains("unknown field `exclude_from_push_all`")
+    );
+    let recovery = client
+        .get_settings_recovery(GetSettingsRecoveryRequest {})
+        .await?
+        .into_inner();
+    assert_eq!(recovery.configuration_path, path.display().to_string());
+    assert!(
+        recovery
+            .diagnostic
+            .as_ref()
+            .unwrap()
+            .contains("excluded_from_push_all")
+    );
+    let stale = ResetSettingsRequest {
+        revision: "0".repeat(64),
+    };
+    assert_eq!(
+        client.reset_settings(stale).await.unwrap_err().code(),
+        tonic::Code::Aborted
+    );
+    assert_eq!(std::fs::read_to_string(&path)?, raw);
+    let request = ResetSettingsRequest {
+        revision: recovery.revision,
+    };
+    let reset = client.reset_settings(request.clone()).await?.into_inner();
+    assert_eq!(std::fs::read_to_string(&reset.backup_path)?, raw);
+    assert_eq!(std::fs::read_to_string(&path)?, "");
+    client.get_viewer_shell(GetViewerShellRequest {}).await?;
+    assert!(
+        client
+            .get_settings_recovery(GetSettingsRecoveryRequest {})
+            .await?
+            .into_inner()
+            .diagnostic
+            .is_none()
+    );
+    assert_eq!(
+        client.reset_settings(request).await.unwrap_err().code(),
+        tonic::Code::Aborted
     );
     server.stop().await?;
     Ok(())

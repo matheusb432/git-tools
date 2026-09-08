@@ -79,7 +79,13 @@ async fn check(state: &AppState, tab_id: ViewerTabId) -> anyhow::Result<bool> {
     let worker = state.clone();
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        refresh_live_view::prepare(tab_id, &worker.viewer, &worker.user_settings, &worker.git)
+        refresh_live_view::prepare(
+            tab_id,
+            &worker.viewer,
+            &worker.user_settings,
+            &worker.git,
+            &worker.database,
+        )
     })
     .await??;
     match result {

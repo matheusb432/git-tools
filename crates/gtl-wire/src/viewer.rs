@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 10;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 12;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -129,6 +129,7 @@ pub enum ViewerTabKind {
     Live,
     LiveLocalChanges,
     LiveUnpushedCommits,
+    LiveBranchChanges,
 }
 
 impl ViewerTabKind {
@@ -809,4 +810,21 @@ pub struct ViewerLiveCheck {
 pub struct ViewerStateChanged {
     pub version: ViewerVersion,
     pub live_check: Option<ViewerLiveCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerSettingsRecovery {
+    pub configuration_path: String,
+    pub diagnostic: Option<String>,
+    pub revision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetSettings {
+    pub revision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetSettingsOk {
+    pub backup_path: String,
 }

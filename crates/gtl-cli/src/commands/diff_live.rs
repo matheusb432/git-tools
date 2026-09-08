@@ -31,8 +31,9 @@ fn run_managed(client: &ServerClient) -> anyhow::Result<()> {
         client.save_and_present_project_live_views(v1::SaveAndPresentProjectLiveViewsRequest {
             open_viewer: open_viewer_requested(),
         })?;
+    print_notes(&response.notes)?;
     if response.results.is_empty() {
-        println!("diff live: no managed repos with unpushed commits");
+        println!("diff live: no managed repos with commits to compare");
         return Ok(());
     }
 

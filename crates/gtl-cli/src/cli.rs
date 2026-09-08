@@ -102,7 +102,7 @@ pub struct DiffArgs {
 pub enum DiffSub {
     /// Render a merge diff artifact (three-dot diff) against a base branch.
     Merge(MergeArgs),
-    /// Save + open a persisted live view of unpushed work in a managed repo.
+    /// Save and open a live upstream or local-branch comparison.
     Live(LiveArgs),
 }
 
@@ -122,7 +122,7 @@ pub struct MergeArgs {
 #[derive(Debug, Args)]
 pub struct LiveArgs {
     /// Repo to save + open a live view for (default: every managed repo with
-    /// unpushed commits).
+    /// commits ahead of its upstream or local comparison branch).
     #[arg(long)]
     pub path: Option<String>,
 }
@@ -251,7 +251,8 @@ pub enum WorktreeCommand {
 pub struct DiffTargetArgs {
     #[command(flatten)]
     pub scope: DiffScopeArgs,
-    /// Diff unpushed work (`@{u}..HEAD`); this is also the default when no target is supplied.
+    /// Diff unpushed commits, or committed branch changes against the project comparison
+    /// branch (default: local main) when no upstream exists. This is the default target.
     #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
     /// Base commit (including staged, unstaged, and untracked changes), a
@@ -281,7 +282,7 @@ pub struct DiffTargetArgs {
 
 #[derive(Debug, Args)]
 pub struct DiffScopeArgs {
-    /// Render one tabbed HTML diff for all managed repos with unpushed commits.
+    /// Render managed repos with commits ahead of upstream or their local comparison branch.
     #[arg(long, conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
     pub all: bool,
     /// Render one tabbed HTML diff for every git repo under the current directory.

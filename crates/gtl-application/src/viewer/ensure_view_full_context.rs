@@ -120,6 +120,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             git,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap()
         .view

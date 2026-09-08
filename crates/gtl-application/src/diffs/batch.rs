@@ -1,7 +1,4 @@
-//! Shared multi-repo render helper for the diff-subrepos and diff-all slices:
-//! builds one [`View`] per repo through the normal diff compute core, with `skip_empty` controlling
-//! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
-//! and propagated (diff-all).
+//! Builds multi-repository comparisons and reports unavailable local bases.
 
 use gtl_models::{
     paths::{ProjectName, RepositoryRoot},
@@ -31,11 +28,9 @@ pub(crate) struct BatchBuild {
     pub skipped: usize,
 }
 
-/// Builds one [`View`] per repo through the normal diff compute core, accumulating every note into
-/// `notes` in repo order. `skip_empty`: when true, an error or an empty view is
-/// counted as a skip (diff-subrepos); when false, a build error propagates and every
-/// view is kept regardless of emptiness (diff --all -- matches its current no-skip
-/// behavior exactly, do not "fix" this asymmetry).
+/// Recursive batches omit empty views; project batches retain them. Default comparisons
+/// report unavailable local bases and propagate unexpected failures. Explicit recursive
+/// targets retain their existing skip behavior.
 pub(crate) fn render_batch(
     git: &impl GitClient,
     target: &DiffTarget,
@@ -43,14 +38,28 @@ pub(crate) fn render_batch(
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> anyhow::Result<BatchBuild> {
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     let mut completed = Vec::new();
     for repo in repos {
-        let built = diff_computation::build(git, &repo.top, target, settings.diff_exclusions());
+        let built = diff_computation::build(
+            git,
+            &repo.top,
+            target,
+            settings.diff_exclusions(),
+            comparisons,
+        );
         if built.is_ok() {
             completed.push(repo.top.clone());
+        }
+        if let Err(error) = &built
+            && error.is_unavailable()
+        {
+            notes.push(Note::warn(format!("{}: {error}", repo.label)));
+            skipped += 1;
+            continue;
         }
         if !skip_empty {
             let mut response = built?;
@@ -71,6 +80,9 @@ pub(crate) fn render_batch(
             Ok(mut response) => {
                 notes.append(&mut response.notes);
                 skipped += 1;
+            }
+            Err(error) if matches!(target, DiffTarget::Unpushed { pinned: None }) => {
+                return Err(anyhow::Error::from(error).context(format!("compare {}", repo.label)));
             }
             Err(_) => skipped += 1,
         }
@@ -161,6 +173,7 @@ mod tests {
             &repos,
             true,
             &mut notes,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -189,6 +202,7 @@ mod tests {
             &repos,
             true,
             &mut notes,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -212,6 +226,7 @@ mod tests {
             &repos,
             false,
             &mut notes,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -262,6 +277,7 @@ diff --git a/notes.md b/notes.md\n\
             &repos,
             true,
             &mut notes,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -273,7 +289,7 @@ diff --git a/notes.md b/notes.md\n\
     }
 
     #[test]
-    fn skip_empty_false_propagates_a_build_error() {
+    fn project_batch_skips_an_unavailable_comparison_with_a_named_warning() {
         let source = FakeGitClient {
             upstream: None,
             known_revs: vec![],
@@ -289,8 +305,32 @@ diff --git a/notes.md b/notes.md\n\
             &repos,
             false,
             &mut notes,
+            &crate::utils::ProjectComparisons::default(),
         );
 
-        assert!(result.is_err());
+        assert!(result.unwrap().views.is_empty());
+        assert_eq!(notes.len(), 2);
+        assert!(notes[0].text.contains("repo"));
+    }
+
+    #[test]
+    fn recursive_default_comparison_preserves_unexpected_git_failures() {
+        let source = crate::utils::ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git process unavailable"
+        ))]);
+        let error = render_batch(
+            &source,
+            &DiffTarget::Unpushed { pinned: None },
+            &default_user_settings(),
+            &two_repos(),
+            true,
+            &mut Vec::new(),
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .err()
+        .unwrap();
+
+        assert_eq!(error.to_string(), "compare repo-a");
+        assert_eq!(error.root_cause().to_string(), "git process unavailable");
     }
 }

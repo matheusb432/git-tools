@@ -68,6 +68,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<RenderDiffSubreposOk, RenderDiffSubreposError> {
     let RenderDiffSubrepos {
         root,
@@ -78,7 +79,15 @@ pub fn execute(
     let target = DiffTarget::try_from(target)?;
     let settings = app_settings.load()?;
     let mut notes = Vec::new();
-    let batch = render_batch(git, &target, &settings, &repos, true, &mut notes)?;
+    let batch = render_batch(
+        git,
+        &target,
+        &settings,
+        &repos,
+        true,
+        &mut notes,
+        comparisons,
+    )?;
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(
@@ -178,6 +187,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -225,6 +235,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -281,6 +292,7 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 

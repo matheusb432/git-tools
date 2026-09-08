@@ -59,7 +59,11 @@ pub fn project(
                     ViewerTabKind::LiveLocalChanges
                 }
                 Some(gtl_models::live_views::LiveComparison::UnpushedCommits) => {
-                    ViewerTabKind::LiveUnpushedCommits
+                    if session.is_branch_comparison(entry.tab.id()) {
+                        ViewerTabKind::LiveBranchChanges
+                    } else {
+                        ViewerTabKind::LiveUnpushedCommits
+                    }
                 }
                 None => to_tab_kind(entry.tab.kind()),
             },

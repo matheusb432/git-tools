@@ -11,7 +11,8 @@ use super::{ViewerCodecError, required};
 use crate::{
     v1,
     viewer::projects::{
-        OpenViewerProject, OpenViewerProjectOk, VIEWER_PROJECTS_MAX, ViewerProject,
+        OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, VIEWER_PROJECTS_MAX,
+        ViewerProject, ViewerProjectBranchComparison,
     },
 };
 
@@ -24,6 +25,8 @@ pub fn encode_project(project: ViewerProject) -> v1::ViewerProject {
         }
     };
     v1::ViewerProject {
+        comparison_branch: project.comparison_branch.to_string(),
+        branch_comparison: Some(encode_branch_comparison(project.branch_comparison)),
         path: project.path.to_string(),
         status: Some(encode_status_result(&status)),
         last_rendered_at: project
@@ -57,6 +60,11 @@ pub fn decode_projects(
                 }
             };
             Ok(ViewerProject {
+                comparison_branch: project
+                    .comparison_branch
+                    .try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                branch_comparison: decode_branch_comparison(required(project.branch_comparison)?)?,
                 path: gtl_models::paths::RepositoryRoot::try_new(project.path.into())
                     .map_err(|_| ViewerCodecError::InvalidMessage)?,
                 name,
@@ -210,4 +218,83 @@ fn status_changes(changes: StatusChanges) -> v1::RepositoryStatusChanges {
         }
     };
     v1::RepositoryStatusChanges { state: Some(state) }
+}
+
+fn encode_branch_comparison(
+    comparison: ViewerProjectBranchComparison,
+) -> v1::ViewerProjectBranchComparison {
+    use v1::viewer_project_branch_comparison::State;
+
+    v1::ViewerProjectBranchComparison {
+        state: Some(match comparison {
+            ViewerProjectBranchComparison::Upstream => State::Upstream(v1::Empty {}),
+            ViewerProjectBranchComparison::Branch { commits_ahead } => {
+                State::CommitsAhead(commits_ahead.into_inner())
+            }
+            ViewerProjectBranchComparison::Unavailable { reason } => {
+                State::UnavailableReason(reason)
+            }
+        }),
+    }
+}
+
+fn decode_branch_comparison(
+    comparison: v1::ViewerProjectBranchComparison,
+) -> Result<ViewerProjectBranchComparison, ViewerCodecError> {
+    use v1::viewer_project_branch_comparison::State;
+
+    Ok(match required(comparison.state)? {
+        State::Upstream(_) => ViewerProjectBranchComparison::Upstream,
+        State::CommitsAhead(count) => ViewerProjectBranchComparison::Branch {
+            commits_ahead: CommitCount::new(count),
+        },
+        State::UnavailableReason(reason) => ViewerProjectBranchComparison::Unavailable { reason },
+    })
+}
+
+#[must_use]
+pub fn encode_update(request: UpdateViewerProject) -> v1::UpdateViewerProjectRequest {
+    use v1::comparison_branch_field_update::Operation;
+
+    use crate::viewer::FieldUpdate;
+    v1::UpdateViewerProjectRequest {
+        path: request.path.to_string(),
+        expected_comparison_branch: request.expected_comparison_branch.to_string(),
+        comparison_branch: match request.comparison_branch {
+            FieldUpdate::Unchanged => None,
+            FieldUpdate::Clear => Some(v1::ComparisonBranchFieldUpdate {
+                operation: Some(Operation::Clear(v1::ClearSetting {})),
+            }),
+            FieldUpdate::Update(branch) => Some(v1::ComparisonBranchFieldUpdate {
+                operation: Some(Operation::Update(branch.to_string())),
+            }),
+        },
+    }
+}
+
+pub fn decode_update(
+    request: v1::UpdateViewerProjectRequest,
+) -> Result<UpdateViewerProject, ViewerCodecError> {
+    use v1::comparison_branch_field_update::Operation;
+
+    use crate::viewer::FieldUpdate;
+    Ok(UpdateViewerProject {
+        path: gtl_models::paths::RepositoryRoot::try_new(request.path.into())
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        expected_comparison_branch: request
+            .expected_comparison_branch
+            .try_into()
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        comparison_branch: match request.comparison_branch {
+            None => FieldUpdate::Unchanged,
+            Some(field) => match required(field.operation)? {
+                Operation::Clear(_) => FieldUpdate::Clear,
+                Operation::Update(branch) => FieldUpdate::Update(
+                    branch
+                        .try_into()
+                        .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                ),
+            },
+        },
+    })
 }

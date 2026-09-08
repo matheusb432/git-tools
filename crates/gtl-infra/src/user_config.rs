@@ -37,13 +37,7 @@ fn settings_document(
     bytes: Vec<u8>,
 ) -> Result<UserSettingsDocument, UserSettingsConfigurationError> {
     UserSettingsDocument::parse(bytes).map_err(|source| {
-        let client_diagnostic = source.client_diagnostic();
-        let error =
-            UserSettingsConfigurationError::new(path.to_path_buf(), anyhow::Error::new(source));
-        match client_diagnostic {
-            Some(diagnostic) => error.with_client_diagnostic(diagnostic),
-            None => error,
-        }
+        UserSettingsConfigurationError::new(path.to_path_buf(), anyhow::Error::new(source))
     })
 }
 
@@ -146,6 +140,32 @@ fn config_path() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from);
     config_path_from(env_override, xdg_config_home, home)
+}
+
+impl gtl_application::ports::UserSettingsRecovery for TomlSettingsStore {
+    fn inspect(
+        &self,
+    ) -> Result<gtl_application::ports::UserSettingsRecoveryState, UserSettingsLoadError> {
+        let path = self.required_path()?;
+        let bytes = file_editor::read_document_bytes(path)?;
+        let revision = file_editor::revision(&bytes);
+        let diagnostic = UserSettingsDocument::parse(bytes)
+            .err()
+            .map(|error| error.to_string());
+        Ok(gtl_application::ports::UserSettingsRecoveryState {
+            configuration_path: path.to_path_buf(),
+            diagnostic,
+            revision,
+        })
+    }
+
+    fn reset_invalid(
+        &mut self,
+        revision: &str,
+        timestamp: &gtl_models::timestamps::MachineTimestamp,
+    ) -> Result<PathBuf, UserSettingsEditError> {
+        file_editor::reset_invalid(self.required_path()?, revision, timestamp)
+    }
 }
 
 #[cfg(test)]

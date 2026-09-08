@@ -10,7 +10,9 @@ use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, Vi
 use self::{actions::DiffFileActions, rows::DiffFileBody};
 use crate::{
     entities::diffs::{ClientDiffFile, ClientDiffFileStoreExt},
-    views::diffs::{DiffFileStatusBadge, DiffLineChangeKind, DiffLineChangeText},
+    views::diffs::{
+        DiffFileStatus, DiffLineChangeKind, DiffLineChangeText, file_status_text_class,
+    },
 };
 
 #[component]
@@ -117,7 +119,6 @@ fn DiffFileHeader(
     artifact_enhancement: bool,
 ) -> Element {
     let file_summary = summary.read();
-    let status_rail_classes = diff_file_status_rail_classes(file_summary.status);
     rsx! {
         summary {
             class: "relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-open/file:border-b [&::-webkit-details-marker]:hidden mobile:min-h-11 mobile:gap-1.5 mobile:py-1.5 mobile:pr-2 mobile:pl-4 print:static print:bg-[#f2f2f2]",
@@ -125,13 +126,11 @@ fn DiffFileHeader(
                 event.prevent_default();
                 open.toggle();
             },
-            span {
-                class: "pointer-events-none absolute inset-y-0 left-0 w-0.5 {status_rail_classes} print:hidden",
-                aria_hidden: "true",
-            }
             DiffFileCaret {}
-            DiffFileStatusBadge { status: file_summary.status }
-            DiffFilePath { path: file_summary.path.to_string_lossy().into_owned() }
+            DiffFilePath {
+                path: file_summary.path.to_string_lossy().into_owned(),
+                status: file_summary.status,
+            }
             DiffLineStats { added: file_summary.added, removed: file_summary.removed }
             span {
                 class: "h-5 w-px flex-none bg-line mobile:hidden",
@@ -143,15 +142,8 @@ fn DiffFileHeader(
                 onopen,
                 artifact_enhancement,
             }
+            DiffFileStatus { status: file_summary.status }
         }
-    }
-}
-
-const fn diff_file_status_rail_classes(status: ViewerFileStatus) -> &'static str {
-    match status {
-        ViewerFileStatus::Added => "bg-add",
-        ViewerFileStatus::Deleted => "bg-del",
-        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "bg-acc",
     }
 }
 
@@ -182,7 +174,8 @@ fn DiffFileCaret() -> Element {
 }
 
 #[component]
-fn DiffFilePath(path: String) -> Element {
+fn DiffFilePath(path: String, status: ViewerFileStatus) -> Element {
+    let color = file_status_text_class(status);
     let (directory, file_name) = path
         .rsplit_once('/')
         .map_or((None, path.as_str()), |(directory, file_name)| {
@@ -193,7 +186,7 @@ fn DiffFilePath(path: String) -> Element {
             if let Some(directory) = directory {
                 span { class: "text-ink-3", "{directory}/" }
             }
-            span { class: "font-semibold text-ink", "{file_name}" }
+            span { class: "font-semibold {color}", "{file_name}" }
         }
     }
 }
@@ -361,7 +354,7 @@ mod tests {
         assert!(artifact.contains(r#"data-gtl-initial-open="false""#));
         assert!(artifact.contains("group/file border-b border-line-2 bg-bg"));
         assert!(artifact.contains("relative sticky top-0 z-10"));
-        assert!(artifact.contains("absolute inset-y-0 left-0 w-0.5 bg-acc"));
+        assert!(artifact.contains(r#"aria-label="Modified file">M</span></summary>"#));
         assert!(!artifact.contains("mb-5 rounded-panel"));
         assert_artifact_copy_menu(&artifact);
 
@@ -380,26 +373,6 @@ mod tests {
         assert!(!desktop.contains("data-gtl-file="));
         assert!(!desktop.contains("data-gtl-copy="));
         Ok(())
-    }
-
-    #[test]
-    fn file_status_rail_uses_the_file_status_tone() {
-        assert_eq!(
-            diff_file_status_rail_classes(ViewerFileStatus::Added),
-            "bg-add"
-        );
-        assert_eq!(
-            diff_file_status_rail_classes(ViewerFileStatus::Deleted),
-            "bg-del"
-        );
-        assert_eq!(
-            diff_file_status_rail_classes(ViewerFileStatus::Renamed),
-            "bg-acc"
-        );
-        assert_eq!(
-            diff_file_status_rail_classes(ViewerFileStatus::Modified),
-            "bg-acc"
-        );
     }
 
     fn assert_artifact_copy_menu(artifact: &str) {

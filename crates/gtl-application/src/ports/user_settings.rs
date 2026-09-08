@@ -11,39 +11,19 @@ pub struct UserSettingsConfigurationError {
     path: PathBuf,
     #[source]
     source: anyhow::Error,
-    client_diagnostic: Option<String>,
 }
 
 impl UserSettingsConfigurationError {
     /// Associates a concrete document failure with its settings path.
     #[must_use]
     pub fn new(path: PathBuf, source: anyhow::Error) -> Self {
-        Self {
-            path,
-            source,
-            client_diagnostic: None,
-        }
-    }
-
-    /// Adds a path-free diagnostic that is safe to return across a client boundary.
-    #[must_use]
-    pub fn with_client_diagnostic(mut self, diagnostic: String) -> Self {
-        self.client_diagnostic = Some(diagnostic);
-        self
+        Self { path, source }
     }
 
     /// Returns the invalid settings path.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    /// Returns a safe diagnostic without the private configuration path.
-    #[must_use]
-    pub fn client_message(&self) -> &str {
-        self.client_diagnostic
-            .as_deref()
-            .unwrap_or("user settings are invalid")
     }
 }
 
@@ -116,4 +96,22 @@ pub trait UserSettingsEditor: UserSettingsReader {
         &mut self,
         patch: UserSettingsPatch,
     ) -> Result<UserSettingsEditOutcome, UserSettingsEditError>;
+}
+
+/// Recovery preserves the observed invalid document before restoring defaults.
+pub trait UserSettingsRecovery: UserSettingsReader {
+    fn inspect(&self) -> Result<UserSettingsRecoveryState, UserSettingsLoadError>;
+
+    fn reset_invalid(
+        &mut self,
+        revision: &str,
+        timestamp: &gtl_models::timestamps::MachineTimestamp,
+    ) -> Result<PathBuf, UserSettingsEditError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct UserSettingsRecoveryState {
+    pub configuration_path: PathBuf,
+    pub diagnostic: Option<String>,
+    pub revision: String,
 }

@@ -23,6 +23,7 @@ pub fn execute(
     recipe: Recipe,
     user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<View, ComputeRecipeError> {
     let cwd = recipe.cwd();
     let view = match recipe.op {
@@ -34,6 +35,7 @@ pub fn execute(
                 },
                 user_settings,
                 git,
+                comparisons,
             )?
             .view
         }
@@ -107,6 +109,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -161,6 +164,7 @@ mod tests {
                 recipe(RecipeOp::Diff { target }),
                 &FixedUserSettingsStore::default(),
                 &source,
+                &crate::utils::ProjectComparisons::default(),
             )
             .unwrap();
 
@@ -187,6 +191,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -207,6 +212,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -229,6 +235,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap_err();
         let merge = compute_recipe::execute(
@@ -238,6 +245,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap_err();
         assert!(matches!(diff, ComputeRecipeError::Diff(_)));

@@ -16,12 +16,12 @@ use tauri::{
 use viewer_ipc::{
     ViewerIpcState, viewer_activate_tab, viewer_clear_commit_selection, viewer_close_tab,
     viewer_connect, viewer_delete_live_tab, viewer_edit_settings, viewer_find_diff,
-    viewer_get_history_copy, viewer_get_settings, viewer_get_shell, viewer_list_commits,
-    viewer_list_history, viewer_list_projects, viewer_move_tab, viewer_open_diff_file,
-    viewer_open_history, viewer_open_project, viewer_refresh_tab, viewer_search_files,
-    viewer_select_commit, viewer_set_preference, viewer_stream_rows_cancel,
-    viewer_stream_rows_next_batch, viewer_stream_rows_start, viewer_watch_cancel,
-    viewer_watch_next_batch, viewer_watch_start,
+    viewer_get_history_copy, viewer_get_settings, viewer_get_settings_recovery, viewer_get_shell,
+    viewer_list_commits, viewer_list_history, viewer_list_projects, viewer_move_tab,
+    viewer_open_diff_file, viewer_open_history, viewer_open_project, viewer_refresh_tab,
+    viewer_reset_settings, viewer_search_files, viewer_select_commit, viewer_set_preference,
+    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
+    viewer_update_project, viewer_watch_cancel, viewer_watch_next_batch, viewer_watch_start,
 };
 
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
@@ -202,6 +202,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_get_shell,
             viewer_list_projects,
             viewer_open_project,
+            viewer_update_project,
             viewer_activate_tab,
             viewer_move_tab,
             viewer_close_tab,
@@ -216,6 +217,8 @@ pub fn run() -> anyhow::Result<()> {
             viewer_list_history,
             viewer_open_history,
             viewer_get_history_copy,
+            viewer_get_settings_recovery,
+            viewer_reset_settings,
             viewer_get_settings,
             viewer_edit_settings,
             viewer_open_diff_file,

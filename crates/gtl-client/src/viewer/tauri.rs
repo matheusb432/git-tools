@@ -6,7 +6,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
+    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -110,6 +110,7 @@ impl ViewerClient {
     }
 
     viewer_unary_methods! {
+        update_project(UpdateViewerProject) -> () => "viewer_update_project";
         open_project(OpenViewerProject) -> OpenViewerProjectOk => "viewer_open_project";
         activate_tab(ViewerTabRequest) -> ViewerShell => "viewer_activate_tab";
         move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";
@@ -125,8 +126,15 @@ impl ViewerClient {
         list_history(ListViewerHistory) -> ViewerHistoryPage => "viewer_list_history";
         open_history(OpenViewerHistory) -> ViewerShell => "viewer_open_history";
         get_history_copy(GetViewerHistoryCopy) -> ViewerHistoryCopyPayload => "viewer_get_history_copy";
+        reset_settings(gtl_wire::viewer::ResetSettings) -> gtl_wire::viewer::ResetSettingsOk => "viewer_reset_settings";
         edit_settings(EditSettingsRequest) -> () => "viewer_edit_settings";
         open_diff_file(OpenViewerDiffFile) -> () => "viewer_open_diff_file";
+    }
+
+    pub async fn get_settings_recovery(
+        &mut self,
+    ) -> Result<gtl_wire::viewer::ViewerSettingsRecovery, ViewerClientError> {
+        invoke_without_arguments("viewer_get_settings_recovery").await
     }
 
     pub async fn get_settings(&mut self) -> Result<ViewerUserSettings, ViewerClientError> {

@@ -36,7 +36,7 @@ pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
 
 pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
     tokio::task::spawn_blocking(move || {
-        let work = work::compute_recipe(work, &state.user_settings, &state.git);
+        let work = work::compute_recipe(work, &state.user_settings, &state.git, &state.database);
         match work::publish_recipe(&state.viewer, work) {
             Ok(RecipePublication::Published { history }) => {
                 record_history(&state, &history);

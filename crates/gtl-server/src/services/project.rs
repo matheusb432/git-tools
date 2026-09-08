@@ -496,7 +496,10 @@ mod tests {
         ));
 
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-        assert_eq!(status.message(), "user settings are invalid");
+        assert_eq!(
+            status.message(),
+            "user settings at /tmp/config.toml are invalid: bad project settings"
+        );
     }
 
     #[test]

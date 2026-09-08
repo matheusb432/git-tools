@@ -43,6 +43,8 @@ pub enum RenderDiffOutcome {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffError {
     #[error(transparent)]
+    Comparison(#[from] crate::projects::comparison::ComparisonError),
+    #[error(transparent)]
     InvalidTarget(#[from] DiffTargetRequestError),
     #[error(transparent)]
     Settings(#[from] UserSettingsLoadError),
@@ -54,6 +56,7 @@ fn resolved_range(
     git: &impl GitClient,
     top: &RepositoryRoot,
     target: &DiffTarget,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Option<ArtifactCommitRange> {
     let (kind, range) = match target {
         DiffTarget::Range {
@@ -99,13 +102,21 @@ fn resolved_range(
             (DiffKind::ThreeDot, DiffRanges::merge(base).diff)
         }
         DiffTarget::Unpushed { pinned: None } => {
-            // The compute path owns the no-upstream fallback and warning.
-            let crate::ports::GitEffect::Applied(upstream) = git.upstream(top).ok()? else {
-                return None;
+            let comparison = crate::projects::comparison::resolve(top, git, comparisons).ok()?;
+            let kind = match comparison {
+                crate::projects::comparison::ResolvedComparison::Upstream { .. } => {
+                    ArtifactRangeKind::TwoDot
+                }
+                crate::projects::comparison::ResolvedComparison::Branch { .. } => {
+                    ArtifactRangeKind::ThreeDot
+                }
             };
-            let upstream = GitRevision::from(&upstream);
-            (DiffKind::TwoDot, DiffRanges::unpushed(&upstream).diff)
+            return Some(ArtifactCommitRange {
+                kind,
+                commits: comparison.pin(top, git).ok()?,
+            });
         }
+
         DiffTarget::Base(_) => return None,
     };
     let base = git.resolve_commit_id(top, &range_base(&range)?).ok()?;
@@ -124,6 +135,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<RenderDiffOk, RenderDiffError> {
     let RenderDiff { cwd, target, name } = req;
     let target = DiffTarget::try_from(target)?;
@@ -138,7 +150,7 @@ pub fn execute(
         .for_project_or_default(&top.project_name());
 
     if name.is_none()
-        && let Some(range) = resolved_range(git, &top, &target)
+        && let Some(range) = resolved_range(git, &top, &target, comparisons)
         && let Some(hit) = store.lookup_by_range(
             &store_root,
             &top,
@@ -161,8 +173,9 @@ pub fn execute(
         });
     }
 
-    let commit_range = resolved_range(git, &top, &target).map(|range| range.commits);
-    let computed = diff_computation::build(git, &top, &target, settings.diff_exclusions())?;
+    let commit_range = resolved_range(git, &top, &target, comparisons).map(|range| range.commits);
+    let computed =
+        diff_computation::build(git, &top, &target, settings.diff_exclusions(), comparisons)?;
     let mut view = computed.view;
     let summary = computed.summary;
     notes.extend(computed.notes);
@@ -306,6 +319,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -359,6 +373,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -388,6 +403,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -430,6 +446,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -485,6 +502,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -540,6 +558,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -593,6 +612,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -638,6 +658,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -652,12 +673,12 @@ mod tests {
     }
 
     #[test]
-    fn unpushed_without_upstream_warns_and_falls_back_to_main() {
+    fn unpushed_without_upstream_renders_committed_branch_changes() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None,
-            known_revs: vec!["main".into()],
+            known_revs: vec!["refs/heads/main".into(), "HEAD".into()],
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
@@ -671,6 +692,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
@@ -678,8 +700,8 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![
-                Note::warn("diff-artifact: no upstream; falling back to main"),
-                Note::info("diff-artifact: main..working, 1 file(s)"),
+                Note::info("diff-artifact: no upstream; comparing branch changes against main"),
+                Note::info("diff-artifact: branch changes against refs/heads/main, 1 file(s)"),
                 Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );
@@ -705,12 +727,18 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap_err();
 
         let err = match error {
-            RenderDiffError::Unexpected(error) => Some(error),
-            RenderDiffError::InvalidTarget(_) | RenderDiffError::Settings(_) => None,
+            RenderDiffError::Unexpected(error)
+            | RenderDiffError::Comparison(
+                crate::projects::comparison::ComparisonError::Unexpected(error),
+            ) => Some(error),
+            RenderDiffError::InvalidTarget(_)
+            | RenderDiffError::Settings(_)
+            | RenderDiffError::Comparison(_) => None,
         }
         .unwrap();
         assert_eq!(format!("{err:#}"), "unknown revision nope");

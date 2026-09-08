@@ -4,7 +4,7 @@ use gtl_wire::viewer::{
     SelectViewerCommit, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
     ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, ViewerProject},
+    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 
 use crate::shared::viewer_client::ViewerClientError;
@@ -107,6 +107,17 @@ viewer_request!(
     clear_commit_selection
 );
 viewer_request!(open_diff_file, OpenViewerDiffFile, (), open_diff_file);
+viewer_query!(
+    get_settings_recovery,
+    gtl_wire::viewer::ViewerSettingsRecovery,
+    get_settings_recovery
+);
+viewer_request!(
+    reset_settings,
+    gtl_wire::viewer::ResetSettings,
+    gtl_wire::viewer::ResetSettingsOk,
+    reset_settings
+);
 viewer_query!(get_settings, ViewerUserSettings, get_settings);
 viewer_request!(edit_settings, EditSettingsRequest, (), edit_settings);
 
@@ -142,3 +153,5 @@ where
 {
     std::future::ready(Err(ViewerClientError::Unavailable))
 }
+
+viewer_request!(update_project, UpdateViewerProject, (), update_project);

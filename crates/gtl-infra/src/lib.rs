@@ -9,6 +9,7 @@ pub mod file_system;
 mod git_capture;
 pub mod git_client;
 mod git_process;
+mod project_comparison_reader;
 pub mod project_repository_client;
 pub mod store;
 #[cfg(test)]

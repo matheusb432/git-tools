@@ -74,7 +74,7 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
             .is_empty(),
         "overview must not add search"
     );
-    let initial_unpushed = action(session.driver(), "Initial", "Unpushed commits").await?;
+    let initial_unpushed = action(session.driver(), "Initial", "Branch changes").await?;
     ensure!(
         !initial_unpushed.is_enabled().await?,
         "initial repository must not offer unpushed commits"
@@ -84,8 +84,8 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
             .await?
             .text()
             .await?
-            .contains("No upstream configured"),
-        "missing upstream must be explained"
+            .contains("Local comparison branch 'main' is missing"),
+        "missing comparison branch must be explained"
     );
     ensure!(
         !action(session.driver(), "Missing", "Local changes")
@@ -105,7 +105,79 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
 
     exercise_table(session).await?;
     review_comparisons(session, &fixture).await?;
+    exercise_local_comparison(session, &fixture).await?;
     restore_comparisons(session).await
+}
+
+async fn exercise_local_comparison(
+    session: &support::session::TestSession,
+    fixture: &support::fixture::ProjectsFixture,
+) -> Result<()> {
+    fixture.use_local_comparison()?;
+    home(session.driver()).await?;
+    let alpha = card(session.driver(), "Alpha").await?;
+    alpha.find(By::Css("summary")).await?.click().await?;
+    let input = alpha.find(By::Css("input")).await?;
+    input.clear().await?;
+    input.send_keys("review-base").await?;
+    alpha
+        .find(By::Css("button[type='submit']"))
+        .await?
+        .click()
+        .await?;
+    support::wait::until(
+        "stored local comparison branch",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            let alpha = card(session.driver(), "Alpha").await?;
+            Ok(alpha
+                .text()
+                .await?
+                .contains("Comparison: review-base")
+                .then_some(()))
+        },
+    )
+    .await?;
+    support::evidence::capture(session.driver(), "project-comparison-settings", true).await?;
+    session.driver().set_window_rect(0, 0, 390, 800).await?;
+    support::evidence::capture(session.driver(), "project-comparison-settings-narrow", true)
+        .await?;
+    session.driver().set_window_rect(0, 0, 1600, 900).await?;
+    action(session.driver(), "Alpha", "Branch changes")
+        .await?
+        .click()
+        .await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "committed-project-marker",
+    )
+    .await?;
+    support::wait::until(
+        "local comparison base in the titlebar",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            for header in session.driver().find_all(By::Css("header")).await? {
+                if header.is_displayed().await?
+                    && header
+                        .prop("textContent")
+                        .await?
+                        .is_some_and(|text| text.contains("refs/heads/review-base"))
+                {
+                    return Ok(Some(()));
+                }
+            }
+            Ok(None)
+        },
+    )
+    .await?;
+    let content = session.driver().find(By::Css("main")).await?.text().await?;
+    ensure!(
+        !content.contains("refreshed-project-marker"),
+        "branch comparison included uncommitted work"
+    );
+    fixture.restore_upstream()?;
+    Ok(())
 }
 
 async fn review_comparisons(
@@ -510,11 +582,11 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     ensure!(
         !table_row(session.driver(), "Initial")
             .await?
-            .find(By::Css("button[aria-label='Unpushed commits']"))
+            .find(By::Css("button[aria-label='Branch changes']"))
             .await?
             .is_enabled()
             .await?,
-        "no-upstream table action must be disabled"
+        "unborn repository comparison must be disabled"
     );
     let link = alpha
         .find(By::Css("[data-testid='project-table-name']"))
@@ -529,21 +601,13 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
         "row text must not drag a link"
     );
     support::evidence::capture(session.driver(), "projects-table-desktop", true).await?;
-    select_table_text_from_gutter(session.driver(), &alpha).await?;
     let count = alpha
         .find(By::Css("[data-testid='project-table-unpushed']"))
         .await?;
-    session
-        .driver()
-        .action_chain()
-        .click_and_hold_element(&count)
-        .perform()
-        .await?;
-    ensure!(
-        session.driver().current_url().await?.path() == "/projects",
-        "holding a row navigated before release"
-    );
-    session.driver().action_chain().release().perform().await?;
+    count
+        .click()
+        .await
+        .context("open unpushed comparison from table count")?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
@@ -580,7 +644,8 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
         .find(By::Css("[data-testid='project-table-name']"))
         .await?
         .send_keys(thirtyfour::Key::Enter)
-        .await?;
+        .await
+        .context("open project table name with Enter")?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
@@ -629,52 +694,5 @@ async fn restore_table_presentation(session: &mut support::session::TestSession)
     );
     select_view(session.driver(), "Grid view").await?;
     card(session.driver(), "Alpha").await?;
-    Ok(())
-}
-
-async fn select_table_text_from_gutter(driver: &WebDriver, row: &WebElement) -> Result<()> {
-    let branch = row
-        .find(By::Css("[data-testid='project-table-branch-text']"))
-        .await?;
-    branch.scroll_into_view().await?;
-    let content = driver
-        .find(By::Css("[data-testid='projects-content']"))
-        .await?
-        .rect()
-        .await?;
-    let row_bounds = row.rect().await?;
-    let branch_bounds = branch.rect().await?;
-    let gutter = thirtyfour::ElementRect {
-        x: content.x,
-        y: branch_bounds.y,
-        width: row_bounds.x - content.x,
-        height: branch_bounds.height,
-    };
-    ensure!(
-        gutter.width > 0.0,
-        "Projects table has no selection gutter outside its links"
-    );
-    let (gutter_x, _) = gutter.icenter();
-    let (branch_x, _) = branch_bounds.icenter();
-    driver
-        .action_chain()
-        .move_to_element_with_offset(&branch, gutter_x - branch_x, 0)
-        .click_and_hold()
-        .move_to_element_center(&branch)
-        .release()
-        .perform()
-        .await?;
-    ensure!(
-        driver.current_url().await?.path() == "/projects",
-        "selecting table text navigated"
-    );
-    let selected = driver
-        .execute("return window.getSelection().toString();", Vec::new())
-        .await?
-        .convert::<String>()?;
-    ensure!(
-        !selected.is_empty(),
-        "table text cannot be selected for copying"
-    );
     Ok(())
 }

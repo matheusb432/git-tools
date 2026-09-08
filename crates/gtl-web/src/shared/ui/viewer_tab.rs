@@ -155,6 +155,7 @@ pub(crate) fn ViewerTabRailMeasurementItem(
 fn tab_description(tab: &ViewerTab) -> String {
     match tab.kind {
         ViewerTabKind::LiveLocalChanges => format!("{} - Local changes", tab.label),
+        ViewerTabKind::LiveBranchChanges => format!("{} - Branch changes", tab.label),
         ViewerTabKind::LiveUnpushedCommits => format!("{} - Unpushed commits", tab.label),
         ViewerTabKind::Snapshot | ViewerTabKind::Live => tab.label.clone(),
     }
@@ -207,6 +208,7 @@ fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
         ViewerTabKind::Live => ", Live",
         ViewerTabKind::LiveLocalChanges => ", Live, Local changes",
         ViewerTabKind::LiveUnpushedCommits => ", Live, Unpushed commits",
+        ViewerTabKind::LiveBranchChanges => ", Live, Branch changes",
     };
     rsx! {
         span {
@@ -220,9 +222,11 @@ fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
                 ViewerTabKind::LiveLocalChanges => rsx! {
                     FileDiff { size: 13 }
                 },
-                ViewerTabKind::LiveUnpushedCommits => rsx! {
-                    ArrowUp { size: 13 }
-                },
+                ViewerTabKind::LiveUnpushedCommits | ViewerTabKind::LiveBranchChanges => {
+                    rsx! {
+                        ArrowUp { size: 13 }
+                    }
+                }
             }
         }
         if !label.is_empty() {

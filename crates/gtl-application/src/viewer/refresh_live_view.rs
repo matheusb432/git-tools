@@ -13,10 +13,55 @@ use crate::{
     recipes::Recipe,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LiveViewState {
+    head: GitHeadState,
+    comparison: Option<crate::projects::comparison::ResolvedComparison>,
+}
+
+impl LiveViewState {
+    pub(super) const fn is_branch_comparison(&self) -> bool {
+        self.comparison.is_some()
+    }
+}
+
+pub(super) fn inspect_recipe(
+    recipe: &Recipe,
+    git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> anyhow::Result<LiveViewState> {
+    let path = recipe.cwd();
+    let head = git.head_state(&path)?;
+    let comparison = if matches!(
+        recipe.op,
+        crate::recipes::RecipeOp::Diff {
+            target: crate::recipes::RecipeTarget::Unpushed { pinned: None }
+        }
+    ) {
+        match crate::projects::comparison::resolve(&path, git, comparisons)? {
+            value @ crate::projects::comparison::ResolvedComparison::Branch { .. } => Some(value),
+            crate::projects::comparison::ResolvedComparison::Upstream { .. } => None,
+        }
+    } else {
+        None
+    };
+    Ok(LiveViewState { head, comparison })
+}
+
+#[cfg(test)]
+impl From<GitHeadState> for LiveViewState {
+    fn from(head: GitHeadState) -> Self {
+        Self {
+            head,
+            comparison: None,
+        }
+    }
+}
+
 pub(super) struct LiveViewRefresh {
     pub(super) ticket: ComputeTicket,
     pub(super) recipe: Recipe,
-    pub(super) head: Option<GitHeadState>,
+    pub(super) head: Option<LiveViewState>,
 }
 
 pub enum LiveViewCheck {
@@ -28,7 +73,7 @@ pub enum LiveViewCheck {
 
 pub struct LiveViewPublication {
     ticket: ComputeTicket,
-    head: GitHeadState,
+    head: LiveViewState,
     value: CachedView,
     label: String,
 }
@@ -38,24 +83,25 @@ pub fn prepare(
     state: &ViewerState,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> anyhow::Result<LiveViewCheck> {
     let Some(request) = state.inspect(|session| session.live_refresh_request(tab_id))? else {
         return Ok(LiveViewCheck::Inactive);
     };
-    let path = request.recipe.cwd();
-    let head = git.head_state(&path)?;
+    let head = inspect_recipe(&request.recipe, git, comparisons)?;
     if request.head.as_ref() == Some(&head) {
         return Ok(LiveViewCheck::Unchanged);
     }
     let result = prepare_recipe::execute(
         PrepareRecipe {
-            recipe: request.recipe,
+            recipe: request.recipe.clone(),
             kind: ViewerTabKind::Live,
         },
         settings,
         git,
+        comparisons,
     )?;
-    if git.head_state(&path)? != head {
+    if inspect_recipe(&request.recipe, git, comparisons)? != head {
         return Ok(LiveViewCheck::ChangedDuringComputation);
     }
     match result {

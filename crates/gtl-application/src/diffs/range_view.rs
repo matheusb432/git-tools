@@ -12,6 +12,7 @@ const LABEL_COMMITS_TO_MERGE: &str = "# commits to merge";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RangePresentation {
     Unpushed,
+    Branch,
     WorkingTree,
     Exact,
     Merge,
@@ -28,6 +29,7 @@ impl RangeView {
     pub(super) fn new(spec: &GitDiffSpec, presentation: RangePresentation) -> Self {
         let range = spec.to_string();
         let (title, commits_label) = match presentation {
+            RangePresentation::Branch => (TITLE_DIFF, "# branch changes".to_string()),
             RangePresentation::Unpushed => (TITLE_DIFF, LABEL_UNPUSHED_COMMITS.to_string()),
             RangePresentation::WorkingTree => (TITLE_DIFF, format!("# commits since {range}")),
             RangePresentation::Exact => (TITLE_DIFF, LABEL_COMMITS_IN_RANGE.to_string()),

@@ -18,10 +18,17 @@ pub struct BuildRepositoryRecipes {
     pub scope: RepositoryTraversalScope,
 }
 
+pub struct BuildRepositoryRecipesOk {
+    pub recipes: Vec<Recipe>,
+    pub notes: Vec<crate::shared::notes::Note>,
+}
+
 /// Reports a failure while discovering recursive repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BuildRepositoryRecipesError {
+    #[error(transparent)]
+    Comparison(#[from] crate::projects::comparison::ComparisonError),
     /// Recursive repository discovery or top-level resolution failed.
     #[error(transparent)]
     Discover(#[from] find_repository_roots::FindRepositoryRootsError),
@@ -36,7 +43,8 @@ pub enum BuildRepositoryRecipesError {
 pub fn execute(
     query: BuildRepositoryRecipes,
     git: &impl GitClient,
-) -> Result<Vec<Recipe>, BuildRepositoryRecipesError> {
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<BuildRepositoryRecipesOk, BuildRepositoryRecipesError> {
     let repos = find_repository_roots::execute(
         find_repository_roots::FindRepositoryRoots {
             root: query.root,
@@ -44,17 +52,35 @@ pub fn execute(
         },
         git,
     )?;
-    Ok(repos
-        .into_iter()
-        .map(|repo| {
-            crate::recipes::build_resolved(
-                repo.path,
-                query.operation.clone(),
-                Some(repo.label),
-                git,
-            )
-        })
-        .collect())
+    let mut recipes = Vec::new();
+    let mut notes = Vec::new();
+    for repo in repos {
+        if matches!(
+            query.operation,
+            RecipeOp::Diff {
+                target: crate::recipes::RecipeTarget::Unpushed { pinned: None }
+            }
+        ) {
+            match crate::projects::comparison::resolve(&repo.path, git, comparisons) {
+                Ok(_) => {}
+                Err(error) if error.is_unavailable() => {
+                    notes.push(crate::shared::notes::Note::warn(format!(
+                        "{}: {error}",
+                        repo.label
+                    )));
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        recipes.push(crate::recipes::build_resolved(
+            repo.path,
+            query.operation.clone(),
+            Some(repo.label),
+            git,
+        ));
+    }
+    Ok(BuildRepositoryRecipesOk { recipes, notes })
 }
 
 #[cfg(test)]
@@ -101,8 +127,10 @@ mod tests {
                 scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
             },
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
-        .unwrap();
+        .unwrap()
+        .recipes;
 
         assert_eq!(
             recipes
@@ -150,8 +178,10 @@ mod tests {
                 scope: RepositoryTraversalScope::IncludeLinkedWorktrees,
             },
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
-        .unwrap();
+        .unwrap()
+        .recipes;
 
         assert_eq!(
             recipes
@@ -168,7 +198,9 @@ mod tests {
         let git = ScriptedGitClient::with_results(vec![
             Ok(ScriptedGitClient::applied("/real/api\n")),
             Ok(ScriptedGitClient::applied("/real/web\n")),
+            Ok(ScriptedGitClient::applied("origin/main\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
+            Ok(ScriptedGitClient::applied("origin/main\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
@@ -181,8 +213,10 @@ mod tests {
                 scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
             },
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
-        .unwrap();
+        .unwrap()
+        .recipes;
 
         assert!(recipes.iter().all(|recipe| recipe.op
             == RecipeOp::Diff {

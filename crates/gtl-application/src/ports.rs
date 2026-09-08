@@ -10,6 +10,7 @@ mod file_system_client;
 mod git_client;
 mod html_renderer;
 mod project_client;
+mod project_comparison_reader;
 mod text_editor_client;
 mod user_settings;
 
@@ -33,8 +34,10 @@ pub use project_client::{
     ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
     ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
 };
+pub use project_comparison_reader::ProjectComparisonReader;
 pub use text_editor_client::TextEditorClient;
 pub use user_settings::{
     UserSettingsConfigurationError, UserSettingsEditConflict, UserSettingsEditError,
     UserSettingsEditOutcome, UserSettingsEditor, UserSettingsLoadError, UserSettingsReader,
+    UserSettingsRecovery, UserSettingsRecoveryState,
 };

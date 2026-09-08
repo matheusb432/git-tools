@@ -119,6 +119,10 @@ pub enum GitRepositoryState {
 
 /// Git repository effects used by application operations.
 pub trait GitClient: Clone + Send + Sync + 'static {
+    fn primary_worktree(&self, path: &RepositoryRoot) -> anyhow::Result<RepositoryRoot> {
+        Ok(path.clone())
+    }
+
     fn repo_present(&self, repo_path: &RepositoryRoot) -> bool;
 
     /// Classifies `dir` as a worktree repository, missing path, or non-repository path.
@@ -320,6 +324,16 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     ) -> anyhow::Result<CommitId>;
 
     /// The best common ancestor of two revisions.
+    fn find_merge_base(
+        &self,
+        repo_path: &RepositoryRoot,
+        left: &GitRevision,
+        right: &GitRevision,
+    ) -> anyhow::Result<Option<CommitId>> {
+        self.merge_base(repo_path, left, right).map(Some)
+    }
+
+    /// The best common ancestor of two revisions; unrelated histories are an error.
     fn merge_base(
         &self,
         repo_path: &RepositoryRoot,

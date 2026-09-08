@@ -1,4 +1,4 @@
-//! Selects present project repositories whose HEAD is ahead of its upstream.
+//! Selects project repositories with commits ahead of their effective comparison.
 
 use gtl_models::{
     git::{CommitCount, GitRange},
@@ -9,10 +9,16 @@ use gtl_models::{
 
 use crate::ports::GitClient;
 
-/// Reports an unexpected Git failure while selecting unpushed repositories.
+#[derive(Debug)]
+pub struct SelectedProjectRepositories {
+    pub repositories: Vec<RepositoryTarget>,
+    pub notes: Vec<crate::shared::notes::Note>,
+}
+
+/// Reports an unexpected Git failure while selecting project comparisons.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum SelectUnpushedRepositoriesError {
+pub enum SelectComparisonRepositoriesError {
     /// Git transport failed while resolving a repository's upstream.
     #[error("{source}")]
     Upstream {
@@ -36,55 +42,77 @@ pub enum SelectUnpushedRepositoriesError {
     },
 }
 
-/// Returns every present project repository with commits ahead of its upstream.
+/// Selects nonempty upstream or local-branch comparisons and reports unavailable bases.
 ///
-/// Repositories without an upstream, with an invalid ahead count, or with zero
-/// commits ahead are expected omissions rather than errors.
+/// Missing repositories and comparisons with no commits ahead are omitted.
+/// Missing local bases and unrelated histories are omitted with named warnings.
 ///
 /// # Errors
 ///
-/// Returns [`SelectUnpushedRepositoriesError`] when Git transport fails, the ahead-count
+/// Returns [`SelectComparisonRepositoriesError`] when Git transport fails, the ahead-count
 /// command is rejected, or an ahead repository's top-level path cannot be resolved.
 #[cqrsy::query]
 pub fn execute(
     repos: Vec<ProjectRepository>,
     git: &impl GitClient,
-) -> Result<Vec<RepositoryTarget>, SelectUnpushedRepositoriesError> {
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<SelectedProjectRepositories, SelectComparisonRepositoriesError> {
     let mut selected = Vec::new();
+    let mut notes = Vec::new();
     for repo in repos {
         if !git.repo_present(&repo.path) {
             continue;
         }
 
-        match git.upstream(&repo.path).map_err(|source| {
-            SelectUnpushedRepositoriesError::Upstream {
+        let range = match git.upstream(&repo.path).map_err(|source| {
+            SelectComparisonRepositoriesError::Upstream {
                 repo: repo.name.clone(),
                 source,
             }
         })? {
-            crate::ports::GitEffect::Applied(_) => {}
-            crate::ports::GitEffect::Rejected(_) => continue,
-        }
+            crate::ports::GitEffect::Applied(reference) => GitRange::two_dot(
+                &gtl_models::git::GitRevision::from(&reference),
+                &gtl_models::git::GitRevision::head(),
+            ),
+            crate::ports::GitEffect::Rejected(_) => {
+                match super::comparison::resolve_local(&repo.path, git, comparisons) {
+                    Ok(comparison) => comparison.commit_range(),
+                    Err(error) if error.is_unavailable() => {
+                        notes.push(crate::shared::notes::Note::warn(format!(
+                            "{}: {error}",
+                            repo.name
+                        )));
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(SelectComparisonRepositoriesError::Upstream {
+                            repo: repo.name,
+                            source: error.into(),
+                        });
+                    }
+                }
+            }
+        };
 
-        let count = git
-            .commit_count(&repo.path, &GitRange::upstream_to_head())
-            .map_err(|source| SelectUnpushedRepositoriesError::Count {
+        let count = git.commit_count(&repo.path, &range).map_err(|source| {
+            SelectComparisonRepositoriesError::Count {
                 repo: repo.name.clone(),
                 source,
-            })?;
+            }
+        })?;
         let Some(count) = count else { continue };
         if count == CommitCount::default() {
             continue;
         }
 
         let top = git.discover_top(&repo.path).map_err(|source| {
-            SelectUnpushedRepositoriesError::TopLevel {
+            SelectComparisonRepositoriesError::TopLevel {
                 repo: repo.name.clone(),
                 source,
             }
         })?;
         let Some(top) = top else {
-            return Err(SelectUnpushedRepositoriesError::TopLevel {
+            return Err(SelectComparisonRepositoriesError::TopLevel {
                 repo: repo.name,
                 source: anyhow::anyhow!("not a git repository"),
             });
@@ -94,7 +122,10 @@ pub fn execute(
             label: repo.name,
         });
     }
-    Ok(selected)
+    Ok(SelectedProjectRepositories {
+        repositories: selected,
+        notes,
+    })
 }
 
 #[cfg(test)]
@@ -103,8 +134,8 @@ mod tests {
 
     use gtl_models::{projects::ProjectRepository, repository::traversal::RepositoryTarget};
 
-    use super::SelectUnpushedRepositoriesError;
-    use crate::{projects::select_unpushed_repositories, utils::ScriptedGitClient};
+    use super::SelectComparisonRepositoriesError;
+    use crate::{projects::select_comparison_repositories, utils::ScriptedGitClient};
 
     fn repo(name: &str) -> ProjectRepository {
         ProjectRepository {
@@ -123,6 +154,7 @@ mod tests {
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("0\n"),
             ScriptedGitClient::rejected("no upstream"),
+            ScriptedGitClient::rejected("missing comparison branch"),
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("invalid\n"),
         ]);
@@ -131,7 +163,7 @@ mod tests {
             .unwrap()
             .push(PathBuf::from("/repos/absent"));
 
-        let selected = select_unpushed_repositories::execute(
+        let selected = select_comparison_repositories::execute(
             vec![
                 repo("absent"),
                 repo("api"),
@@ -140,11 +172,12 @@ mod tests {
                 repo("invalid"),
             ],
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
         assert_eq!(
-            selected,
+            selected.repositories,
             vec![RepositoryTarget {
                 path: crate::utils::repository_root("/repos/api"),
                 label: crate::utils::project_name("api"),
@@ -158,16 +191,21 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = select_unpushed_repositories::execute(vec![repo("api")], &git).unwrap_err();
+        let error = select_comparison_repositories::execute(
+            vec![repo("api")],
+            &git,
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap_err();
 
         assert_eq!(
             error.source().map(ToString::to_string),
             Some("git transport unavailable".into())
         );
         let (repo, source) = match error {
-            SelectUnpushedRepositoriesError::Upstream { repo, source } => Some((repo, source)),
-            SelectUnpushedRepositoriesError::Count { .. }
-            | SelectUnpushedRepositoriesError::TopLevel { .. } => None,
+            SelectComparisonRepositoriesError::Upstream { repo, source } => Some((repo, source)),
+            SelectComparisonRepositoriesError::Count { .. }
+            | SelectComparisonRepositoriesError::TopLevel { .. } => None,
         }
         .unwrap();
         assert_eq!(repo.as_str(), "api");

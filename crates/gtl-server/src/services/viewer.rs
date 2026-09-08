@@ -136,9 +136,6 @@ impl ViewerService for ViewerGrpcService {
         .await?
         .map_err(|error| match error {
             OpenViewerProjectError::NotFound => Status::not_found("project is no longer available"),
-            OpenViewerProjectError::NoUpstream => {
-                Status::failed_precondition("No upstream configured")
-            }
             OpenViewerProjectError::Unexpected(error) => {
                 unexpected(error, "open project comparison")
             }
@@ -146,6 +143,52 @@ impl ViewerService for ViewerGrpcService {
         let tab_id = work.ticket().tab_id.into();
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::OpenViewerProjectResponse { tab_id }))
+    }
+
+    async fn update_viewer_project(
+        &self,
+        request: Request<v1::UpdateViewerProjectRequest>,
+    ) -> Result<Response<v1::UpdateViewerProjectResponse>, Status> {
+        use gtl_application::projects::update_viewer_project::{
+            self, UpdateProjectComparison, UpdateProjectComparisonError,
+        };
+        let request =
+            proto::viewer::projects::decode_update(request.into_inner()).map_err(|_| {
+                Status::invalid_argument("invalid local comparison branch or project path")
+            })?;
+        let repositories = self
+            .state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_catalogue_error(&error))?;
+        let project = repositories
+            .into_iter()
+            .find(|project| project.path == request.path)
+            .ok_or_else(|| Status::not_found("project is no longer available"))?;
+        let state = self.state.clone();
+        run_blocking(move || {
+            let connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| unexpected(error, "open project database"))?;
+            update_viewer_project::execute(
+                UpdateProjectComparison {
+                    project_name: project.name,
+                    comparison_branch: request.comparison_branch,
+                    expected_comparison_branch: request.expected_comparison_branch,
+                },
+                &connection,
+            )
+            .map_err(|error| match error {
+                UpdateProjectComparisonError::Conflict => Status::aborted(error.to_string()),
+                UpdateProjectComparisonError::Database(error) => {
+                    unexpected(error, "update project comparison")
+                }
+            })
+        })
+        .await??;
+        Ok(Response::new(v1::UpdateViewerProjectResponse {}))
     }
 
     async fn get_viewer_shell(
@@ -461,6 +504,56 @@ impl ViewerService for ViewerGrpcService {
                 .path()
                 .map(|path| path.display().to_string()),
         )))
+    }
+
+    async fn get_settings_recovery(
+        &self,
+        _request: Request<v1::GetSettingsRecoveryRequest>,
+    ) -> Result<Response<v1::GetSettingsRecoveryResponse>, Status> {
+        use gtl_application::ports::UserSettingsRecovery as _;
+        let store = self.state.user_settings.clone();
+        let recovery = run_blocking(move || store.inspect())
+            .await?
+            .map_err(user_settings_load_error)?;
+        Ok(Response::new(v1::GetSettingsRecoveryResponse {
+            configuration_path: recovery.configuration_path.display().to_string(),
+            diagnostic: recovery.diagnostic,
+            revision: recovery.revision,
+        }))
+    }
+
+    async fn reset_settings(
+        &self,
+        request: Request<v1::ResetSettingsRequest>,
+    ) -> Result<Response<v1::ResetSettingsResponse>, Status> {
+        use gtl_application::settings::reset_settings::{self, ResetSettingsError};
+        let revision = request.into_inner().revision;
+        if revision.len() != 64 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(Status::invalid_argument("settings revision is invalid"));
+        }
+        let state = self.state.clone();
+        let backup = run_blocking(move || {
+            reset_settings::execute(
+                &revision,
+                &mut state.user_settings.clone(),
+                &state.clock,
+                &state.viewer,
+            )
+        })
+        .await?
+        .map_err(|error| match error {
+            ResetSettingsError::Settings(error) => {
+                edit_settings_error(EditSettingsError::Settings(error))
+            }
+            error => unexpected(error, "reset settings"),
+        })?;
+        self.state
+            .viewer_row_streams
+            .cancel_current_stream()
+            .map_err(|error| unexpected_viewer(error, "cancel viewer row stream"))?;
+        Ok(Response::new(v1::ResetSettingsResponse {
+            backup_path: backup.display().to_string(),
+        }))
     }
 
     async fn edit_settings(

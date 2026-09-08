@@ -1,10 +1,10 @@
-//! Builds snapshot recipes for project repositories with unpushed commits.
+//! Builds snapshot recipes for project repositories with commits to compare.
 
 use gtl_models::projects::ProjectRepository;
 
 use crate::{
     ports::GitClient,
-    projects::select_unpushed_repositories,
+    projects::select_comparison_repositories,
     recipes::{Recipe, RecipeOp},
 };
 
@@ -15,16 +15,21 @@ pub struct BuildProjectRecipes {
     pub operation: RecipeOp,
 }
 
+pub struct BuildProjectRecipesOk {
+    pub recipes: Vec<Recipe>,
+    pub notes: Vec<crate::shared::notes::Note>,
+}
+
 /// Reports a failure while selecting project repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BuildProjectRecipesError {
     /// Project-repository selection failed.
     #[error(transparent)]
-    Select(#[from] select_unpushed_repositories::SelectUnpushedRepositoriesError),
+    Select(#[from] select_comparison_repositories::SelectComparisonRepositoriesError),
 }
 
-/// Builds one complete recipe per present project repository ahead of upstream.
+/// Builds one complete recipe per project repository ahead of its effective comparison.
 ///
 /// # Errors
 ///
@@ -33,9 +38,11 @@ pub enum BuildProjectRecipesError {
 pub fn execute(
     query: BuildProjectRecipes,
     git: &impl GitClient,
-) -> Result<Vec<Recipe>, BuildProjectRecipesError> {
-    let selected = select_unpushed_repositories::execute(query.repos, git)?;
-    Ok(selected
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<BuildProjectRecipesOk, BuildProjectRecipesError> {
+    let selected = select_comparison_repositories::execute(query.repos, git, comparisons)?;
+    let recipes = selected
+        .repositories
         .into_iter()
         .map(|repo| {
             crate::recipes::build_resolved(
@@ -45,7 +52,11 @@ pub fn execute(
                 git,
             )
         })
-        .collect())
+        .collect();
+    Ok(BuildProjectRecipesOk {
+        recipes,
+        notes: selected.notes,
+    })
 }
 
 #[cfg(test)]
@@ -92,8 +103,10 @@ mod tests {
                 },
             },
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
-        .unwrap();
+        .unwrap()
+        .recipes;
 
         assert_eq!(
             recipes
@@ -133,8 +146,10 @@ mod tests {
                 },
             },
             &git,
+            &crate::utils::ProjectComparisons::default(),
         )
-        .unwrap();
+        .unwrap()
+        .recipes;
 
         assert_eq!(
             recipes[0].op,

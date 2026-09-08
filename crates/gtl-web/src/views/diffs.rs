@@ -3,7 +3,7 @@ mod client_diff_document;
 mod diff_history;
 mod diff_rows;
 pub(crate) mod diff_workspace;
-mod file_status_badge;
+mod file_status;
 mod line_changes;
 #[cfg(feature = "desktop")]
 pub(crate) mod project_diff;
@@ -20,7 +20,7 @@ pub(crate) use diff_rows::{SplitDiffRowBatch, UnifiedDiffRowBatch};
 pub(crate) use diff_workspace::ArtifactDiffWorkspace;
 #[cfg(feature = "desktop")]
 pub(crate) use diff_workspace::DiffWorkspaceView;
-pub(crate) use file_status_badge::{DiffFileStatusBadge, DiffFileStatusBadgeSize};
+pub(crate) use file_status::{DiffFileStatus, file_status_text_class};
 pub(crate) use line_changes::{DiffLineChangeBadge, DiffLineChangeKind, DiffLineChangeText};
 #[cfg(feature = "desktop")]
 pub(crate) use project_diff::ProjectDiffView;

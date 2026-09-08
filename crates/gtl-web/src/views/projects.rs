@@ -11,7 +11,10 @@ use gtl_models::{
     },
     settings::ProjectsViewMode,
 };
-use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate, projects::ViewerProject};
+use gtl_wire::viewer::{
+    EditSettingsRequest, FieldUpdate,
+    projects::{UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison},
+};
 use lucide_dioxus::{ArrowUp, FileDiff, GitBranch, LayoutGrid, List, RefreshCw};
 
 use crate::{
@@ -102,6 +105,7 @@ async fn refresh_projects(mut load: Signal<ProjectLoad>, viewer: ViewerContext) 
 #[component]
 pub(crate) fn ProjectsView() -> Element {
     let projects = use_projects();
+    use_context_provider(|| projects);
     let presentation = use_projects_presentation();
     let viewer = use_context::<ViewerContext>();
     let try_again = use_callback(move |()| {
@@ -224,15 +228,16 @@ struct ProjectStatusPresentation<'a> {
     branch: Option<&'a str>,
     local_available: bool,
     ahead: Option<u64>,
-    issue: Option<&'static str>,
+    issue: Option<&'a str>,
     symbols: String,
     symbols_description: &'static str,
-    status_label: &'static str,
+    status_label: &'a str,
     status_color: &'static str,
 }
 
-fn project_status(status: &RepositoryStatus) -> ProjectStatusPresentation<'_> {
-    let (branch, changes, ahead, issue) = match status {
+fn project_status(project: &ViewerProject) -> ProjectStatusPresentation<'_> {
+    let status = &project.status;
+    let (branch, changes, mut ahead, mut issue) = match status {
         RepositoryStatus::Absent => (
             None,
             StatusChanges::Unavailable,
@@ -262,6 +267,17 @@ fn project_status(status: &RepositoryStatus) -> ProjectStatusPresentation<'_> {
             (branch, *changes, ahead, issue)
         }
     };
+    match &project.branch_comparison {
+        ViewerProjectBranchComparison::Branch { commits_ahead } => {
+            ahead = Some(commits_ahead.into_inner());
+            issue = None;
+        }
+        ViewerProjectBranchComparison::Unavailable { reason } => {
+            ahead = None;
+            issue = Some(reason.as_str());
+        }
+        ViewerProjectBranchComparison::Upstream => {}
+    }
     let local_available = !matches!(changes, StatusChanges::Unavailable);
     let symbols = changes.symbols();
     let symbols_description = match changes {
@@ -276,12 +292,14 @@ fn project_status(status: &RepositoryStatus) -> ProjectStatusPresentation<'_> {
             }
         }
     };
-    let (status_label, status_color) = match status.class() {
+    let (status_label, status_color) = match project.review_class() {
         StatusClass::Pending => ("Changes to review", "text-acc"),
         StatusClass::Clean => ("Up to date", "text-add"),
-        StatusClass::Warn | StatusClass::Absent => {
-            (issue.unwrap_or("Status unavailable"), "text-warn")
+        StatusClass::Warn if local_available && ahead.is_none() => {
+            ("Comparison unavailable", "text-warn")
         }
+        StatusClass::Warn => ("Status unavailable", "text-warn"),
+        StatusClass::Absent => ("Repository not found", "text-warn"),
     };
     ProjectStatusPresentation {
         branch,
@@ -306,7 +324,7 @@ fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
         symbols_description,
         status_label,
         status_color,
-    } = project_status(&project.status);
+    } = project_status(&project);
     let rendered = project
         .last_rendered_at
         .as_ref()
@@ -351,23 +369,25 @@ fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                         NoData {}
                     }
                 }
-                "Unpushed commits"
+                "{comparison_label(&project)}"
             }
             div { class: "mt-5 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2",
                 for comparison in [LiveComparison::LocalChanges, LiveComparison::UnpushedCommits] {
                     ProjectComparisonAction {
                         path: project.path.clone(),
                         comparison,
+                        branch_changes: is_branch_comparison(&project),
                         available: match comparison {
                             LiveComparison::LocalChanges => local_available,
                             LiveComparison::UnpushedCommits => ahead.is_some(),
                         },
                         disabled,
-                        issue,
+                        issue: issue.map(str::to_owned),
                     }
                 }
             }
 
+            ProjectComparisonEditor { project: project.clone(), disabled }
             p { class: "mt-4 truncate font-mono text-[10px] text-ink-3",
                 if let Some(rendered) = rendered {
                     span { title: rendered.clone(), "{rendered}" }
@@ -385,9 +405,15 @@ fn ProjectComparisonAction(
     comparison: LiveComparison,
     available: bool,
     disabled: bool,
-    issue: Option<&'static str>,
+    issue: Option<String>,
+    #[props(default)] branch_changes: bool,
     #[props(default)] compact: bool,
 ) -> Element {
+    let label = if comparison == LiveComparison::UnpushedCommits && branch_changes {
+        "Branch changes"
+    } else {
+        comparison.label()
+    };
     let size = if compact {
         ButtonSize::IconMedium
     } else {
@@ -400,7 +426,7 @@ fn ProjectComparisonAction(
             ArrowUp { size: 14 }
         }
         if !compact {
-            "{comparison.label()}"
+            "{label}"
         }
     };
     rsx! {
@@ -409,8 +435,8 @@ fn ProjectComparisonAction(
                 to: Route::project_diff(&path, comparison),
                 draggable: "false",
                 class: "{button_classes(ButtonLayout::Inline, ButtonVariant::Outline, size)} min-h-9 select-text max-sm:min-h-11",
-                title: comparison.label(),
-                aria_label: comparison.label(),
+                title: label,
+                aria_label: label,
                 {content}
             }
         } else {
@@ -419,8 +445,8 @@ fn ProjectComparisonAction(
                 size,
                 class: "min-h-9 max-sm:min-h-11",
                 state: ButtonState::Disabled,
-                title: issue.unwrap_or(comparison.label()),
-                aria_label: comparison.label(),
+                title: issue.as_deref().unwrap_or(label),
+                aria_label: label,
                 {content}
             }
         }
@@ -545,7 +571,7 @@ fn ProjectTable(projects: Vec<ViewerProject>, disabled: bool) -> Element {
                 TableHeading { "Branch" }
                 TableHeading { "Changes" }
                 TableHeading {
-                    span { class: "block text-right", "Unpushed" }
+                    span { class: "block text-right", "Commits" }
                 }
                 TableHeading { "Last rendered" }
                 TableHeading {
@@ -562,7 +588,7 @@ fn ProjectTable(projects: Vec<ViewerProject>, disabled: bool) -> Element {
 #[component]
 fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
     use crate::shared::ui::data_table::{DataTableRow, TableColumn};
-    let status = project_status(&project.status);
+    let status = project_status(&project);
     let destination = (!disabled && status.ahead.is_some())
         .then(|| Route::project_diff(&project.path, LiveComparison::UnpushedCommits));
     let rendered = project
@@ -631,7 +657,9 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 ProjectTableLink {
                     destination: destination.clone(),
                     test_id: "project-table-unpushed",
-                    span { class: "w-full text-right font-mono text-sm tabular-nums text-ink",
+                    span {
+                        class: "w-full text-right font-mono text-sm tabular-nums text-ink",
+                        title: comparison_label(&project),
                         if let Some(count) = status.ahead {
                             "{count}"
                         } else {
@@ -654,17 +682,19 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn {
+                ProjectComparisonEditor { project: project.clone(), disabled }
                 div { class: "flex justify-end gap-1",
                     for comparison in [LiveComparison::LocalChanges, LiveComparison::UnpushedCommits] {
                         ProjectComparisonAction {
                             path: project.path.clone(),
                             comparison,
+                            branch_changes: is_branch_comparison(&project),
                             available: match comparison {
                                 LiveComparison::LocalChanges => status.local_available,
                                 LiveComparison::UnpushedCommits => status.ahead.is_some(),
                             },
                             disabled,
-                            issue: status.issue,
+                            issue: status.issue.map(str::to_owned),
                             compact: true,
                         }
                     }
@@ -694,6 +724,126 @@ fn ProjectTableLink(
             }
         } else {
             div { class, "data-testid": test_id, {children} }
+        }
+    }
+}
+
+fn is_branch_comparison(project: &ViewerProject) -> bool {
+    !matches!(
+        project.branch_comparison,
+        ViewerProjectBranchComparison::Upstream
+    )
+}
+
+fn comparison_label(project: &ViewerProject) -> &'static str {
+    if is_branch_comparison(project) {
+        "Branch changes"
+    } else {
+        "Unpushed commits"
+    }
+}
+
+struct ProjectComparisonEdit {
+    draft: ReadSignal<Option<String>>,
+    pending: Memo<bool>,
+    error: Memo<Option<String>>,
+    change: Callback<String>,
+    save: Callback<()>,
+}
+
+fn use_project_comparison_edit(project: &ViewerProject) -> ProjectComparisonEdit {
+    let projects = use_context::<Projects>();
+    let mut draft = use_signal(|| None::<String>);
+    let mut validation_error = use_signal(|| None::<String>);
+    let mut action = use_action(move |request: UpdateViewerProject| async move {
+        viewer_server::update_project(request).await?;
+        draft.set(None);
+        (projects.refresh)(());
+        Ok::<(), ViewerClientError>(())
+    });
+    let change = use_callback(move |value| {
+        draft.set(Some(value));
+        validation_error.set(None);
+    });
+    let path = project.path.clone();
+    let previous = project.comparison_branch.clone();
+    let save = use_callback(move |()| {
+        let Some(value) = draft.peek().clone() else {
+            return;
+        };
+        match gtl_models::projects::comparison::ComparisonBranch::try_new(value) {
+            Ok(branch) => {
+                validation_error.set(None);
+                action.call(UpdateViewerProject {
+                    path: path.clone(),
+                    comparison_branch: FieldUpdate::Update(branch),
+                    expected_comparison_branch: previous.clone(),
+                });
+            }
+            Err(_) => validation_error.set(Some(
+                "Enter a local branch name, such as main or release/next.".to_owned(),
+            )),
+        }
+    });
+    ProjectComparisonEdit {
+        draft: draft.into(),
+        pending: use_memo(move || action.pending()),
+        error: use_memo(move || {
+            validation_error().or_else(|| {
+                action
+                    .value()
+                    .and_then(Result::err)
+                    .map(|error| error.to_string())
+            })
+        }),
+        change,
+        save,
+    }
+}
+
+#[component]
+fn ProjectComparisonEditor(project: ViewerProject, disabled: bool) -> Element {
+    use crate::shared::ui::{ButtonType, TextInput};
+    let edit = use_project_comparison_edit(&project);
+    let value = (edit.draft)().unwrap_or_else(|| project.comparison_branch.to_string());
+    let pending = (edit.pending)();
+    let error = (edit.error)();
+    rsx! {
+        details { class: "my-3 min-w-0 text-xs",
+            summary { class: "cursor-pointer break-all text-ink-2 focus-visible:outline-2 focus-visible:outline-acc",
+                "Comparison: {project.comparison_branch}"
+            }
+            form {
+                class: "mt-3 grid gap-2",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    (edit.save)(());
+                },
+                TextInput {
+                    label: "Local comparison branch",
+                    value,
+                    disabled: disabled || pending,
+                    maxlength: "1024",
+                    aria_invalid: error.is_some().to_string(),
+                    oninput: move |event: FormEvent| (edit.change)(event.value()),
+                    supporting_content: rsx! { "Used when the current branch has no upstream." },
+                }
+                if let Some(error) = error {
+                    p { class: "break-words text-del", role: "alert", "{error}" }
+                }
+                Button {
+                    button_type: ButtonType::Submit,
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Outline,
+                    state: if pending { ButtonState::Loading } else if disabled || (edit.draft)().is_none() { ButtonState::Disabled } else { ButtonState::Enabled },
+                    "Save comparison"
+                }
+            }
+        }
+        if let ViewerProjectBranchComparison::Unavailable { reason } = &project
+            .branch_comparison
+        {
+            p { class: "mt-2 max-w-sm break-words text-xs text-del", "{reason}" }
         }
     }
 }

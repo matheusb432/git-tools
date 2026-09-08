@@ -309,10 +309,10 @@ async fn wait_for_commit_card_selection(
 ) -> Result<WebElement> {
     let aria_pressed = if selected { "true" } else { "false" };
     driver
-        .query(By::Css("[aria-label='Commits'] button[aria-pressed]"))
+        .query(By::Css(format!(
+            "[aria-label='Commits'] button[aria-label*='{subject}'][aria-pressed='{aria_pressed}']"
+        )))
         .ignore_errors(true)
-        .with_attribute("aria-label", StringMatch::new(subject).partial())
-        .with_attribute("aria-pressed", aria_pressed)
         .and_enabled()
         .and_displayed()
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))

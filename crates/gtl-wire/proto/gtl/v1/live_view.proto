@@ -57,6 +57,7 @@ message SaveAndPresentProjectLiveViewsRequest {
 }
 
 message SaveAndPresentProjectLiveViewsResponse {
+  repeated Note notes = 3;
   repeated SaveLiveViewResponse results = 1;
   optional DiffPresentation presentation = 2;
 }

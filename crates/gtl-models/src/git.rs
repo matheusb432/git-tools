@@ -235,6 +235,11 @@ pub struct RemoteUrl(String);
 pub struct GitRevision(String);
 
 impl GitRevision {
+    #[must_use]
+    pub fn comparison_branch(branch: &crate::projects::comparison::ComparisonBranch) -> Self {
+        known_valid(Self::try_new(format!("refs/heads/{branch}")))
+    }
+
     /// Returns Git's symbolic current revision.
     #[must_use]
     pub fn head() -> Self {

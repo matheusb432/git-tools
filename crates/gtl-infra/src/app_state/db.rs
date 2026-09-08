@@ -225,6 +225,9 @@ const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(SCHEMA_V5),
     M::up(SCHEMA_V6),
     M::up(include_str!("../../db/migrations/0007_own_projects.sql")),
+    M::up(include_str!(
+        "../../db/migrations/0008_project_comparison_branch.sql"
+    )),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -326,6 +329,48 @@ mod tests {
     }
 
     #[test]
+    fn migration_v8_defaults_existing_and_new_projects_without_losing_metadata() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..7])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (1, 'directory', '~/tools/example');
+            INSERT INTO projects (id, source_id, title, mux_session_name, affiliation) VALUES ('PRJ', 1, 'Example', 'example', 'personal');
+            INSERT INTO project_groups (project_id, group_name) VALUES ('PRJ', 'tools');").unwrap();
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        let row: (String, String) = connection
+            .query_row(
+                "SELECT title, comparison_branch FROM projects WHERE id = 'PRJ'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("Example".to_owned(), "main".to_owned()));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT group_name FROM project_groups WHERE project_id = 'PRJ'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "tools"
+        );
+        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (2, 'directory', '~/tools/new');
+            INSERT INTO projects (id, source_id, title, mux_session_name, affiliation) VALUES ('NEW', 2, 'New', 'new', 'personal');").unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT comparison_branch FROM projects WHERE id = 'NEW'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "main"
+        );
+    }
+
+    #[test]
     fn migration_v2_drops_settings_and_preserves_runtime_state() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("gtl.db");
@@ -371,7 +416,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 7);
+        assert_eq!(user_version, 8);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -606,7 +651,7 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 7);
+        assert_eq!(user_version, 8);
     }
 
     /// Two processes can open a fresh database concurrently; both

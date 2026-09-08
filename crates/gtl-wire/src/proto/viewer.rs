@@ -160,6 +160,7 @@ fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
             ViewerTabKind::Snapshot => v1::ViewerTabKind::Snapshot,
             ViewerTabKind::Live => v1::ViewerTabKind::Live,
             ViewerTabKind::LiveLocalChanges => v1::ViewerTabKind::LiveLocalChanges,
+            ViewerTabKind::LiveBranchChanges => v1::ViewerTabKind::LiveBranchChanges,
             ViewerTabKind::LiveUnpushedCommits => v1::ViewerTabKind::LiveUnpushedCommits,
         } as i32,
         state: match tab.state {
@@ -1026,6 +1027,7 @@ fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> 
             Ok(v1::ViewerTabKind::Snapshot) => ViewerTabKind::Snapshot,
             Ok(v1::ViewerTabKind::Live) => ViewerTabKind::Live,
             Ok(v1::ViewerTabKind::LiveLocalChanges) => ViewerTabKind::LiveLocalChanges,
+            Ok(v1::ViewerTabKind::LiveBranchChanges) => ViewerTabKind::LiveBranchChanges,
             Ok(v1::ViewerTabKind::LiveUnpushedCommits) => ViewerTabKind::LiveUnpushedCommits,
             Ok(v1::ViewerTabKind::Unspecified) | Err(_) => {
                 return Err(ViewerCodecError::InvalidMessage);
@@ -1714,5 +1716,33 @@ fn encode_projects_view_update(
                 encode_projects_view(*value) as i32,
             )),
         }),
+    }
+}
+#[must_use]
+pub fn decode_get_settings_recovery_response(
+    response: v1::GetSettingsRecoveryResponse,
+) -> crate::viewer::ViewerSettingsRecovery {
+    crate::viewer::ViewerSettingsRecovery {
+        configuration_path: response.configuration_path,
+        diagnostic: response.diagnostic,
+        revision: response.revision,
+    }
+}
+
+#[must_use]
+pub fn encode_reset_settings_request(
+    request: crate::viewer::ResetSettings,
+) -> v1::ResetSettingsRequest {
+    v1::ResetSettingsRequest {
+        revision: request.revision,
+    }
+}
+
+#[must_use]
+pub fn decode_reset_settings_response(
+    response: v1::ResetSettingsResponse,
+) -> crate::viewer::ResetSettingsOk {
+    crate::viewer::ResetSettingsOk {
+        backup_path: response.backup_path,
     }
 }

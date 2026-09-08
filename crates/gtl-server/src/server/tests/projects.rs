@@ -26,6 +26,82 @@ fn creation(id: &str, title: &str) -> v1::CreateProjectRequest {
 
 #[tokio::test]
 #[serial(server_tracing)]
+async fn updates_project_comparison_with_validation_and_a_revision_precondition() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut projects =
+        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    projects
+        .create_project(creation("TST", "Comparison test"))
+        .await?;
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
+        server.native_channel(),
+        server.authorization(),
+    );
+    let project = viewer
+        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .await?
+        .into_inner()
+        .projects
+        .remove(0);
+    assert_eq!(project.comparison_branch, "main");
+    let request = |branch: &str| v1::UpdateViewerProjectRequest {
+        path: project.path.clone(),
+        expected_comparison_branch: "main".into(),
+        comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
+            operation: Some(v1::comparison_branch_field_update::Operation::Update(
+                branch.into(),
+            )),
+        }),
+    };
+    assert_eq!(
+        viewer
+            .update_viewer_project(request("main~1"))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+    viewer.update_viewer_project(request("develop")).await?;
+    assert_eq!(
+        viewer
+            .update_viewer_project(request("release"))
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::Aborted
+    );
+    let updated = viewer
+        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .await?
+        .into_inner()
+        .projects
+        .remove(0);
+    assert_eq!(updated.comparison_branch, "develop");
+    viewer
+        .update_viewer_project(v1::UpdateViewerProjectRequest {
+            path: project.path,
+            expected_comparison_branch: "develop".into(),
+            comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
+                operation: Some(v1::comparison_branch_field_update::Operation::Clear(
+                    v1::ClearSetting {},
+                )),
+            }),
+        })
+        .await?;
+    let updated = viewer
+        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .await?
+        .into_inner()
+        .projects
+        .remove(0);
+    assert_eq!(updated.comparison_branch, "main");
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
 async fn manages_its_own_projects_through_authenticated_grpc() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;

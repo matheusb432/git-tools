@@ -1,7 +1,4 @@
-use gtl_models::{
-    live_views::LiveComparison, projects::ProjectRepository, recipes::RecipeBatchId,
-    viewer::ViewerTabKind,
-};
+use gtl_models::{projects::ProjectRepository, recipes::RecipeBatchId, viewer::ViewerTabKind};
 use gtl_wire::viewer::projects::OpenViewerProject;
 use rusqlite::Connection;
 
@@ -10,7 +7,7 @@ use crate::{
         recipe_for_record,
         save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
-    ports::{Clock, GitClient, GitEffect},
+    ports::{Clock, GitClient},
     viewer::{
         ViewerState,
         work::{self, ReservedRecipeWork},
@@ -26,8 +23,6 @@ pub struct OpenProjectComparison {
 pub enum OpenViewerProjectError {
     #[error("project is no longer available")]
     NotFound,
-    #[error("No upstream configured")]
-    NoUpstream,
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
@@ -57,11 +52,6 @@ pub fn execute(
     }
     if !matched {
         return Err(OpenViewerProjectError::NotFound);
-    }
-    if request.project.comparison == LiveComparison::UnpushedCommits
-        && matches!(git.upstream(&request.project.path)?, GitEffect::Rejected(_))
-    {
-        return Err(OpenViewerProjectError::NoUpstream);
     }
     let result = save_live_view::execute(
         SaveLiveView {
