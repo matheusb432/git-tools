@@ -94,7 +94,7 @@ fn production_flavor_allows_wasm_without_a_network_endpoint() {
         [
             "default-src 'self'",
             "base-uri 'self'",
-            "connect-src 'self'",
+            "connect-src 'self' ipc: http://ipc.localhost",
             "font-src 'self' data:",
             "form-action 'none'",
             "frame-src 'none'",

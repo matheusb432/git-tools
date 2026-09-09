@@ -56,12 +56,15 @@ mod tests {
                     .unwrap(),
                 added: DiffLineCount::new(1),
                 removed: DiffLineCount::new(1),
-                lines: vec!["@@ -1 +1 @@".to_owned(), "+static_rendered".to_owned()],
-                full_lines: Some(vec![
-                    "@@ -1 +1 @@".to_owned(),
-                    "+static_rendered".to_owned(),
-                    " context".to_owned(),
-                ]),
+                lines: vec!["@@ -1 +1 @@".to_owned(), "+static_rendered".to_owned()].into(),
+                full_lines: Some(
+                    vec![
+                        "@@ -1 +1 @@".to_owned(),
+                        "+static_rendered".to_owned(),
+                        " context".to_owned(),
+                    ]
+                    .into(),
+                ),
             }],
             title: "diff".to_owned(),
             cmd: Cmd {

@@ -11,6 +11,7 @@ struct HoverState {
 
 #[derive(Clone, Copy)]
 pub(crate) struct HoverInteraction {
+    pub active: Memo<bool>,
     pub pointer_enter: Callback<()>,
     pub pointer_leave: Callback<()>,
     pub focus_enter: Callback<()>,
@@ -19,10 +20,15 @@ pub(crate) struct HoverInteraction {
 
 pub(crate) fn use_hover_popover(id: String) -> HoverInteraction {
     let state = use_signal(HoverState::default);
+    let active = use_memo(move || {
+        let state = state.read();
+        state.pointer_inside || state.focus_inside
+    });
     let pointer_id = id.clone();
     let pointer_leave_id = id.clone();
     let focus_id = id.clone();
     HoverInteraction {
+        active,
         pointer_enter: use_callback(move |()| begin(state, true, pointer_id.clone())),
         pointer_leave: use_callback(move |()| end(state, true, &pointer_leave_id)),
         focus_enter: use_callback(move |()| begin(state, false, focus_id.clone())),

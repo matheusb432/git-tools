@@ -1,6 +1,9 @@
 use std::{cell::Cell, rc::Rc};
 
-use dioxus::{core::spawn_forever, prelude::*};
+use dioxus::{
+    core::{Task, spawn_forever},
+    prelude::*,
+};
 use gtl_models::viewer::{ViewerTabId, ViewerVersion};
 use gtl_wire::viewer::{ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme};
 
@@ -45,6 +48,12 @@ impl ViewerConnection {
 struct ViewerShellOrder {
     request_generation: ViewerShellRequestGeneration,
     version_watermark: Option<ViewerVersion>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct ViewerShellRequests {
+    order: ViewerShellOrder,
+    task: Option<Task>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -216,7 +225,7 @@ pub(crate) enum ViewerShellReplacement {
 pub(crate) struct ViewerContext {
     shell: Signal<ViewerShellLoad>,
     connection: Signal<ViewerConnection>,
-    shell_order: Signal<ViewerShellOrder>,
+    shell_requests: Signal<ViewerShellRequests>,
     reconnect_generation: Signal<u64>,
     server_instance_id: Signal<Option<String>>,
     render_state: Signal<ViewerRenderState>,
@@ -265,18 +274,34 @@ impl ViewerContext {
 
     pub(crate) fn try_replace_shell(mut self, shell: ViewerShell) -> ViewerShellReplacement {
         let Some(order) = self
-            .shell_order
+            .shell_requests
             .peek()
+            .order
             .accept_command_response(shell.version)
         else {
             return ViewerShellReplacement::Stale;
         };
-        self.shell_order.set(order);
+        self.shell_requests.write().order = order;
+        self.cancel_shell_request();
         if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
             notification.enqueue(self.toast);
         }
-        self.shell.set(ViewerShellLoad::Ready(shell));
+        self.publish_shell(shell);
         ViewerShellReplacement::Accepted
+    }
+
+    fn cancel_shell_request(mut self) {
+        let task = self.shell_requests.write().task.take();
+        if let Some(task) = task {
+            task.cancel();
+        }
+    }
+
+    fn publish_shell(mut self, shell: ViewerShell) {
+        let next = ViewerShellLoad::Ready(shell);
+        if *self.shell.peek() != next {
+            self.shell.set(next);
+        }
     }
 
     pub(crate) fn refresh_tab(self, tab_id: ViewerTabId) {
@@ -322,10 +347,11 @@ impl ViewerContext {
     }
 
     pub(crate) fn set_diff_rows_loading(mut self, tab_id: ViewerTabId, loading: bool) {
-        self.render_state
-            .write()
-            .diff_rows_loading
-            .set(tab_id, loading);
+        let mut next = *self.render_state.peek();
+        next.diff_rows_loading.set(tab_id, loading);
+        if *self.render_state.peek() != next {
+            self.render_state.set(next);
+        }
     }
 
     fn connected_to(mut self, server_instance_id: String) -> bool {
@@ -335,13 +361,18 @@ impl ViewerContext {
             .as_ref()
             .is_some_and(|current| current != &server_instance_id);
         if server_changed {
-            self.shell_order.set(ViewerShellOrder::default());
+            self.cancel_shell_request();
+            self.shell_requests.write().order = ViewerShellOrder::default();
             self.shell.set(ViewerShellLoad::Loading);
             self.render_state.set(ViewerRenderState::default());
             self.live_errors.write().clear();
         }
-        self.server_instance_id.set(Some(server_instance_id));
-        self.connection.set(ViewerConnection::Connected);
+        if self.server_instance_id.peek().as_ref() != Some(&server_instance_id) {
+            self.server_instance_id.set(Some(server_instance_id));
+        }
+        if *self.connection.peek() != ViewerConnection::Connected {
+            self.connection.set(ViewerConnection::Connected);
+        }
         server_changed
     }
 
@@ -359,21 +390,26 @@ impl ViewerContext {
     }
 
     pub(crate) fn refresh(mut self, show_loading: bool) {
-        let (order, request_generation) = (self.shell_order)().start_request();
-        self.shell_order.set(order);
+        if self.shell_requests.peek().task.is_some() {
+            return;
+        }
+        let (order, request_generation) = self.shell_requests.peek().order.start_request();
+        self.shell_requests.write().order = order;
         if show_loading {
             self.shell.set(ViewerShellLoad::Loading);
         }
 
-        spawn(refresh_shell(self, request_generation));
+        self.shell_requests.write().task = Some(spawn(refresh_shell(self, request_generation)));
     }
 
     fn invalidate(mut self, version: ViewerVersion) {
-        let order = (self.shell_order)().observe_event(version);
-        self.shell_order.set(order);
+        let order = self.shell_requests.peek().order.observe_event(version);
+        if self.shell_requests.peek().order != order {
+            self.shell_requests.write().order = order;
+        }
         let is_current = matches!(
-            (self.shell)(),
-            ViewerShellLoad::Ready(ref shell) if !order.version_is_stale(shell.version)
+            &*self.shell.peek(),
+            ViewerShellLoad::Ready(shell) if !order.version_is_stale(shell.version)
         );
         if !is_current {
             self.refresh(false);
@@ -396,20 +432,22 @@ async fn refresh_shell(
     request_generation: ViewerShellRequestGeneration,
 ) {
     let result = viewer_server::get_shell().await;
-    let order = (context.shell_order)();
+    context.shell_requests.write().task = None;
+    let order = context.shell_requests.peek().order;
     if !order.request_is_current(request_generation) {
         return;
     }
     match result {
         Ok(shell) => {
             let Some(order) = order.accept_query_response(request_generation, shell.version) else {
+                context.refresh(false);
                 return;
             };
-            context.shell_order.set(order);
+            context.shell_requests.write().order = order;
             if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
                 notification.enqueue(context.toast);
             }
-            context.shell.set(ViewerShellLoad::Ready(shell));
+            context.publish_shell(shell);
         }
         Err(error) => {
             if error != ViewerClientError::InvalidSettings
@@ -433,10 +471,11 @@ pub(crate) fn ApplicationLayout() -> Element {
 #[component]
 fn ApplicationLayoutContent() -> Element {
     crate::entities::diffs::use_client_diff_cache_provider();
+    crate::entities::diffs::use_commit_page_cache_provider();
     crate::views::diffs::project_diff::use_project_diff_destinations_provider();
     let shell = use_signal(|| ViewerShellLoad::Loading);
     let connection = use_signal(|| ViewerConnection::Connecting);
-    let shell_order = use_signal(ViewerShellOrder::default);
+    let shell_requests = use_signal(ViewerShellRequests::default);
     let reconnect_generation = use_signal(|| 0_u64);
     let server_instance_id = use_signal(|| None::<String>);
     let render_state = use_signal(ViewerRenderState::default);
@@ -446,7 +485,7 @@ fn ApplicationLayoutContent() -> Element {
     let context = ViewerContext {
         shell,
         connection,
-        shell_order,
+        shell_requests,
         reconnect_generation,
         server_instance_id,
         render_state,
@@ -454,6 +493,7 @@ fn ApplicationLayoutContent() -> Element {
         live_errors,
     };
     use_context_provider(|| context);
+    crate::views::diffs::use_diff_presentation_provider();
     use_viewer_routes(context);
 
     let visible = browser::use_document_visible();
@@ -511,11 +551,14 @@ fn ApplicationLayoutContent() -> Element {
                             context.observe_live_check(check);
                         }
                         let mut version = state_change_version;
-                        version.with_mut(|version| {
-                            *version = Some(
-                                version.map_or(event.version, |current| current.max(event.version)),
-                            );
-                        });
+                        let next = Some(
+                            version
+                                .peek()
+                                .map_or(event.version, |current| current.max(event.version)),
+                        );
+                        if *version.peek() != next {
+                            version.set(next);
+                        }
                     },
                 )
                 .await;
@@ -696,7 +739,7 @@ mod tests {
         let context = super::ViewerContext {
             shell,
             connection: use_signal(|| super::ViewerConnection::Connected),
-            shell_order: use_signal(super::ViewerShellOrder::default),
+            shell_requests: use_signal(super::ViewerShellRequests::default),
             reconnect_generation: use_signal(|| 0),
             server_instance_id: use_signal(|| Some("test-server".to_owned())),
             render_state: use_signal(super::ViewerRenderState::default),

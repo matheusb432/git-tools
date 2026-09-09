@@ -10,7 +10,7 @@ use gtl_application::{
     ports::ProjectComparisonReader,
     projects::{
         catalogue::create_project, comparison, select_comparison_repositories,
-        update_viewer_project,
+        update_project_comparison,
     },
     recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
     utils::FixedUserSettingsStore,
@@ -104,8 +104,8 @@ impl Fixture {
     }
 
     fn set_branch(&self, title: &str, previous: &str, branch: &str) {
-        update_viewer_project::execute(
-            update_viewer_project::UpdateProjectComparison {
+        update_project_comparison::execute(
+            update_project_comparison::UpdateProjectComparison {
                 project_name: title.to_owned().try_into().unwrap(),
                 comparison_branch: FieldUpdate::Update(ComparisonBranch::try_new(branch).unwrap()),
                 expected_comparison_branch: ComparisonBranch::try_new(previous).unwrap(),
@@ -369,8 +369,8 @@ fn invalid_comparisons_are_reported_and_skipped_in_batches() {
     .unwrap();
     assert!(result.repositories.is_empty());
     assert_eq!(result.notes.len(), 1);
-    let conflict = update_viewer_project::execute(
-        update_viewer_project::UpdateProjectComparison {
+    let conflict = update_project_comparison::execute(
+        update_project_comparison::UpdateProjectComparison {
             project_name: "project".to_owned().try_into().unwrap(),
             comparison_branch: FieldUpdate::Update(ComparisonBranch::default()),
             expected_comparison_branch: ComparisonBranch::default(),
@@ -379,6 +379,6 @@ fn invalid_comparisons_are_reported_and_skipped_in_batches() {
     );
     assert!(matches!(
         conflict,
-        Err(update_viewer_project::UpdateProjectComparisonError::Conflict)
+        Err(update_project_comparison::UpdateProjectComparisonError::Conflict)
     ));
 }

@@ -102,7 +102,7 @@ fn unified_line_number_width_style(
 }
 
 #[component]
-fn DiffFileLoadState(
+pub(in crate::views::diffs::client_diff_document) fn DiffFileLoadState(
     state: ReadSignal<ClientDiffFileState>,
     retry_allowed: bool,
     onretry: EventHandler<()>,

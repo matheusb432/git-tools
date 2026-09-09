@@ -1,9 +1,6 @@
 use std::{
     path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Context as _;
@@ -27,7 +24,8 @@ pub(crate) struct AppState {
     pub(crate) file_system: LocalFileSystemClient,
     pub(crate) text_editor: GitTextEditorClient,
     pub(crate) viewer: gtl_application::viewer::ViewerState,
-    pub(crate) viewer_row_streams: ViewerRowStreams,
+    pub(crate) viewer_row_streams: ViewerWorkRequests,
+    pub(crate) viewer_searches: ViewerWorkRequests,
     pub(crate) live_refresh_permits: Arc<tokio::sync::Semaphore>,
 }
 
@@ -53,64 +51,69 @@ impl AppState {
             file_system: LocalFileSystemClient,
             text_editor: GitTextEditorClient,
             viewer: gtl_application::viewer::ViewerState::new(),
-            viewer_row_streams: ViewerRowStreams::default(),
+            viewer_row_streams: ViewerWorkRequests::default(),
+            viewer_searches: ViewerWorkRequests::default(),
             live_refresh_permits: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct ViewerRowStreams {
-    version: Arc<AtomicU64>,
+pub(crate) struct ViewerWorkRequests {
+    current: Arc<Mutex<Option<gtl_application::viewer::rows::ViewerWorkCancellation>>>,
 }
 
-impl ViewerRowStreams {
-    pub(crate) fn start_stream(&self) -> Result<u64, ViewerRowStreamVersionExhausted> {
+impl ViewerWorkRequests {
+    pub(crate) fn start_stream(
+        &self,
+    ) -> Result<gtl_application::viewer::rows::ViewerWorkCancellation, ViewerWorkStateError> {
+        let cancellation = gtl_application::viewer::rows::ViewerWorkCancellation::default();
         let previous = self
-            .version
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |version| {
-                version.checked_add(1)
-            })
-            .map_err(|_| ViewerRowStreamVersionExhausted)?;
-        previous
-            .checked_add(1)
-            .ok_or(ViewerRowStreamVersionExhausted)
+            .current
+            .lock()
+            .map_err(|_| ViewerWorkStateError)?
+            .replace(cancellation.clone());
+        if let Some(previous) = previous {
+            previous.cancel();
+        }
+        Ok(cancellation)
     }
 
-    pub(crate) fn is_current(&self, stream: u64) -> bool {
-        self.version.load(Ordering::Acquire) == stream
-    }
-
-    pub(crate) fn cancel_current_stream(&self) -> Result<(), ViewerRowStreamVersionExhausted> {
-        self.start_stream().map(|_| ())
+    pub(crate) fn cancel_current_stream(&self) -> Result<(), ViewerWorkStateError> {
+        let previous = self
+            .current
+            .lock()
+            .map_err(|_| ViewerWorkStateError)?
+            .take();
+        if let Some(previous) = previous {
+            previous.cancel();
+        }
+        Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("viewer row stream version is exhausted")]
-pub(crate) struct ViewerRowStreamVersionExhausted;
+#[error("viewer work state lock is poisoned")]
+pub(crate) struct ViewerWorkStateError;
 
 #[cfg(test)]
 mod tests {
-    use super::ViewerRowStreams;
+    use super::ViewerWorkRequests;
 
     #[test]
-    fn starting_a_row_stream_replaces_the_previous_stream() {
-        let streams = ViewerRowStreams::default();
+    fn starting_a_row_stream_cancels_the_previous_worker() {
+        let streams = ViewerWorkRequests::default();
         let first = streams.start_stream().unwrap();
         let second = streams.start_stream().unwrap();
-
-        assert!(!streams.is_current(first));
-        assert!(streams.is_current(second));
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
     }
 
     #[test]
-    fn settings_change_cancels_the_current_row_stream() {
-        let streams = ViewerRowStreams::default();
+    fn settings_change_cancels_the_current_row_worker() {
+        let streams = ViewerWorkRequests::default();
         let stream = streams.start_stream().unwrap();
-
         streams.cancel_current_stream().unwrap();
-
-        assert!(!streams.is_current(stream));
+        assert!(stream.is_cancelled());
     }
 }

@@ -80,6 +80,7 @@ impl SideHighlighter {
         &mut self,
         language: SyntaxLanguage,
         source: &str,
+        cancellation: Option<&std::sync::atomic::AtomicUsize>,
     ) -> Result<Vec<ByteSyntaxToken>, String> {
         if source.is_empty() {
             return Ok(Vec::new());
@@ -93,7 +94,7 @@ impl SideHighlighter {
             .highlight(
                 configuration,
                 source.as_bytes(),
-                None,
+                cancellation,
                 |injection| match configurations.for_injection(injection) {
                     Ok(configuration) => configuration,
                     Err(error) => {
@@ -506,7 +507,9 @@ mod tests {
             (SyntaxLanguage::Swift, "let value = 1"),
             (SyntaxLanguage::CSharp, "var value = 1;"),
         ] {
-            let tokens = SideHighlighter::new().tokens(language, source).unwrap();
+            let tokens = SideHighlighter::new()
+                .tokens(language, source, None)
+                .unwrap();
             assert!(!tokens.is_empty(), "no tokens for {language:?}");
         }
     }

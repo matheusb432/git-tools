@@ -39,7 +39,9 @@ async fn shell(client: &mut Client) -> TestResult<ViewerShell> {
 async fn ready_shell(client: &mut Client) -> TestResult<ViewerShell> {
     loop {
         let shell = shell(client).await?;
-        if matches!(shell.active, ViewerActiveState::Ready { .. }) {
+        if matches!(&shell.active, ViewerActiveState::Ready { view }
+            if view.row_source == gtl_wire::viewer::ViewerRowSourceState::Ready)
+        {
             return Ok(shell);
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -220,28 +222,117 @@ async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> Tes
     let ViewerActiveState::Ready { view: full } = full.active else {
         return Err("expected full-context ready view".into());
     };
+    assert_eq!(full.files.len(), second.files.len());
+    assert_eq!(full.commit_count, second.commit_count);
+    let prepared =
+        tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    let ViewerActiveState::Ready { view: full } = prepared.active else {
+        return Err("expected prepared full-context view".into());
+    };
     assert_ne!(second.content_id, full.content_id);
-    let mut stream = client
-        .stream_viewer_rows(v1::StreamViewerRowsRequest {
-            identity: Some(proto::viewer::encode_viewer_view_identity(full.identity)),
-            file_id: None,
-        })
-        .await?
-        .into_inner();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while let Some(event) = stream.message().await? {
-            assert_eq!(
-                proto::viewer::decode_stream_viewer_rows_response(event)?.identity,
-                full.identity
-            );
-        }
-        Ok::<_, Box<dyn std::error::Error>>(())
-    })
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        assert_row_window(&mut client, &full),
+    )
     .await??;
     let repeated = shell(&mut client).await?;
     assert!(
         matches!(repeated.active, ViewerActiveState::Ready { view } if view.content_id == full.content_id)
     );
     server.stop().await?;
+    Ok(())
+}
+
+async fn assert_row_window(
+    client: &mut Client,
+    full: &gtl_wire::viewer::ViewerActiveView,
+) -> TestResult {
+    let mut stream = client
+        .stream_viewer_rows(v1::StreamViewerRowsRequest {
+            identity: Some(proto::viewer::encode_viewer_view_identity(full.identity)),
+            file_id: None,
+            row_range: None,
+        })
+        .await?
+        .into_inner();
+    let mut all_rows = Vec::new();
+    while let Some(event) = stream.message().await? {
+        let event = proto::viewer::decode_stream_viewer_rows_response(event)?;
+        assert_eq!(event.identity, full.identity);
+        if let gtl_wire::viewer::ViewerRowEvent::UnifiedRows { rows, .. } = event.event {
+            all_rows.extend(rows);
+        }
+    }
+    assert_eq!(all_rows.len(), full.files[0].row_count);
+    assert_text_window(client, full, &all_rows[7..10]).await?;
+    let mut window = client
+        .stream_viewer_rows(v1::StreamViewerRowsRequest {
+            identity: Some(proto::viewer::encode_viewer_view_identity(full.identity)),
+            file_id: Some(full.files[0].id.as_str().to_owned()),
+            row_range: Some(v1::ViewerRowRange { start: 7, count: 3 }),
+        })
+        .await?
+        .into_inner();
+    let mut window_rows = Vec::new();
+    while let Some(event) = window.message().await? {
+        match proto::viewer::decode_stream_viewer_rows_response(event)?.event {
+            gtl_wire::viewer::ViewerRowEvent::FileStarted {
+                row_count,
+                start_row,
+                ..
+            } => {
+                assert_eq!(row_count as usize, all_rows.len());
+                assert_eq!(start_row, 7);
+            }
+            gtl_wire::viewer::ViewerRowEvent::UnifiedRows {
+                start_row, rows, ..
+            } => {
+                assert_eq!(start_row as usize, 7 + window_rows.len());
+                window_rows.extend(rows);
+            }
+            gtl_wire::viewer::ViewerRowEvent::FileFinished { end_row, .. } => {
+                assert_eq!(end_row, 10);
+            }
+            event => return Err(format!("unexpected range event: {event:?}").into()),
+        }
+    }
+    assert_eq!(window_rows, all_rows[7..10]);
+    Ok(())
+}
+
+async fn assert_text_window(
+    client: &mut Client,
+    view: &gtl_wire::viewer::ViewerActiveView,
+    expected_rows: &[gtl_wire::viewer::ViewerUnifiedRow],
+) -> TestResult {
+    use gtl_wire::viewer::{
+        ReadViewerDiffText, ViewerDiffTextLine, ViewerRowRange, ViewerUnifiedRow,
+    };
+    let request = ReadViewerDiffText {
+        identity: view.identity,
+        file: view.files[0].id.clone(),
+        row_range: ViewerRowRange::try_new(7, 3)?,
+        old_side: false,
+    };
+    let response = client
+        .read_viewer_diff_text(proto::viewer::text::encode_request(&request))
+        .await?
+        .into_inner();
+    let lines = proto::viewer::text::decode_response(response)?;
+    let expected = expected_rows
+        .iter()
+        .filter_map(|row| match row {
+            ViewerUnifiedRow::Context(source) | ViewerUnifiedRow::Added(source) => source
+                .new_line_number
+                .map(|line_number| ViewerDiffTextLine {
+                    line_number,
+                    text: source.code.text.clone(),
+                }),
+            ViewerUnifiedRow::Meta(_)
+            | ViewerUnifiedRow::Hunk(_)
+            | ViewerUnifiedRow::Removed(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines, expected);
     Ok(())
 }

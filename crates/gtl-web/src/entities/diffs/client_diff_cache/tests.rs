@@ -16,8 +16,7 @@ use super::ClientDiffCache;
 use crate::{
     entities::diffs::{ClientDiffFileState, ClientDiffWorkspace},
     test_support::{
-        TestResult, absolute_file_path, project_name, repository_relative_path, unified_source_row,
-        viewer_tab_id,
+        TestResult, absolute_file_path, project_name, repository_relative_path, viewer_tab_id,
     },
 };
 
@@ -28,7 +27,7 @@ fn same_content_reuses_row_allocation_and_store_across_tabs_and_generations() ->
     owner.in_scope(ScopeId::ROOT, || -> TestResult {
         let cache = cache();
         let original = cache.select(Some("server-a".to_owned()), &view);
-        complete(original);
+        complete(cache, &view);
         let rows = original.peek().files[0].rows.unified[0].as_ptr();
 
         let identities = [
@@ -78,7 +77,7 @@ fn changed_content_loads_fresh_rows_and_preserves_the_previous_content() -> Test
     owner.in_scope(ScopeId::ROOT, || {
         let cache = cache();
         let original = cache.select(Some("server-a".to_owned()), &original_view);
-        complete(original);
+        complete(cache, &original_view);
         let rows = original.peek().files[0].rows.unified[0].as_ptr();
 
         let changed = cache.select(Some("server-a".to_owned()), &changed_view);
@@ -108,7 +107,7 @@ fn replacement_server_discards_previous_workspaces_and_recency() -> TestResult {
     owner.in_scope(ScopeId::ROOT, || {
         let cache = cache();
         for view in &views {
-            complete(cache.select(Some("server-a".to_owned()), view));
+            complete(cache, view);
         }
         assert_eq!(cache.workspaces.peek().len(), 2);
         assert_eq!(cache.recency.peek().len(), 2);
@@ -132,7 +131,7 @@ fn replacement_server_discards_previous_workspaces_and_recency() -> TestResult {
                     .iter()
                     .all(|key| key.server_instance_id == server_instance_id)
             );
-            complete(replacement);
+            complete_on_server(cache, &views[0], server_instance_id);
         }
     });
     Ok(())
@@ -145,13 +144,13 @@ fn ninth_content_evicts_the_least_recently_selected_workspace() -> TestResult {
     owner.in_scope(ScopeId::ROOT, || {
         let cache = cache();
         for view in &views[..8] {
-            complete(cache.select(Some("server-a".to_owned()), view));
+            complete(cache, view);
         }
         assert_eq!(cache.workspaces.peek().len(), 8);
 
         let recently_selected = cache.select(Some("server-a".to_owned()), &views[0]);
         let rows = recently_selected.peek().files[0].rows.unified[0].as_ptr();
-        complete(cache.select(Some("server-a".to_owned()), &views[8]));
+        complete(cache, &views[8]);
 
         assert_eq!(cache.workspaces.peek().len(), 8);
         assert_eq!(cache.recency.peek().len(), 8);
@@ -173,97 +172,143 @@ fn ninth_content_evicts_the_least_recently_selected_workspace() -> TestResult {
 }
 
 #[test]
-fn retained_row_capacity_over_64_mib_evicts_oldest_content_below_the_entry_limit() -> TestResult {
-    let views = (1..=3).map(view).collect::<TestResult<Vec<_>>>()?;
+fn active_and_inactive_windows_share_the_same_byte_bound() -> TestResult {
+    let views = (1..=2).map(view).collect::<TestResult<Vec<_>>>()?;
     let owner = VirtualDom::new(VNode::empty);
     owner.in_scope(ScopeId::ROOT, || {
         let cache = cache();
-        complete_with_capacity(
-            cache.select(Some("server-a".to_owned()), &views[0]),
-            33 * 1024 * 1024,
-        );
-        let retained = cache.select(Some("server-a".to_owned()), &views[1]);
-        complete_with_capacity(retained, 33 * 1024 * 1024);
-        let rows = retained.peek().files[0].rows.unified[0].as_ptr();
-
-        let active = cache.select(Some("server-a".to_owned()), &views[2]);
-        assert_loading(active, &views[2]);
+        let first = cache.select(Some("server-a".to_owned()), &views[0]);
+        complete_with_capacity(cache, &views[0], 33 * 1024 * 1024).unwrap();
+        let second = cache.select(Some("server-a".to_owned()), &views[1]);
+        complete_with_capacity(cache, &views[1], 33 * 1024 * 1024).unwrap();
+        assert!(first.peek().files[0].rows.unified[0].is_empty());
+        assert!(!second.peek().files[0].rows.unified[0].is_empty());
+        assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
         assert_eq!(cache.workspaces.peek().len(), 2);
-        assert_eq!(cache.recency.peek().len(), 2);
-        let selected_again = cache.select(Some("server-a".to_owned()), &views[1]);
-        assert_eq!(
-            selected_again.peek().files[0].rows.unified[0].as_ptr(),
-            rows
-        );
-        assert_eq!(
-            selected_again.peek().files[0].state,
-            ClientDiffFileState::Complete
-        );
-
-        let evicted = cache.select(Some("server-a".to_owned()), &views[0]);
-        assert_loading(evicted, &views[0]);
+        assert_eq!(first.peek().files[0].summary, views[0].files[0]);
     });
     Ok(())
 }
 
 #[test]
-fn oversized_active_workspace_survives_trim_until_another_content_is_selected() -> TestResult {
-    let large_view = view(1)?;
-    let next_view = view(2)?;
+fn a_single_active_file_evicts_old_windows_without_losing_file_metadata() -> TestResult {
+    let mut view = view(1)?;
+    view.files[0].row_count = 128;
     let owner = VirtualDom::new(VNode::empty);
     owner.in_scope(ScopeId::ROOT, || {
         let cache = cache();
-        let active = cache.select(Some("server-a".to_owned()), &large_view);
-        complete_with_capacity(active, 65 * 1024 * 1024);
-        let rows = active.peek().files[0].rows.unified[0].as_ptr();
-
-        cache.trim();
-        assert_eq!(cache.workspaces.peek().len(), 1);
-        let selected_again = cache.select(Some("server-a".to_owned()), &large_view);
-        assert_eq!(
-            selected_again.peek().files[0].rows.unified[0].as_ptr(),
-            rows
+        let active = cache.select(Some("server-a".to_owned()), &view);
+        for batch in 0..2 {
+            let mut rows = vec![ViewerUnifiedRow::Meta(String::new()); 64];
+            rows[0] = ViewerUnifiedRow::Meta(String::with_capacity(33 * 1024 * 1024));
+            cache
+                .retain_window(
+                    &key(&view, Some("server-a".to_owned())),
+                    super::ClientDiffWindow { file: 0, batch },
+                    super::LoadedRowWindow {
+                        rows: gtl_wire::viewer::ViewerRows::Unified(rows),
+                        line_number_digits: 3,
+                    },
+                    &[],
+                )
+                .unwrap();
+        }
+        assert!(active.peek().files[0].rows.unified[0].is_empty());
+        assert_eq!(active.peek().files[0].rows.unified[1].len(), 64);
+        let mut rows = vec![ViewerUnifiedRow::Meta(String::new()); 64];
+        rows[0] = ViewerUnifiedRow::Meta(String::with_capacity(33 * 1024 * 1024));
+        assert!(
+            !cache
+                .retain_window(
+                    &key(&view, Some("server-a".to_owned())),
+                    super::ClientDiffWindow { file: 0, batch: 0 },
+                    super::LoadedRowWindow {
+                        rows: gtl_wire::viewer::ViewerRows::Unified(rows),
+                        line_number_digits: 3
+                    },
+                    &[super::ClientDiffWindow { file: 0, batch: 1 }],
+                )
+                .unwrap()
         );
-        assert_eq!(
-            selected_again.peek().files[0].state,
-            ClientDiffFileState::Complete
-        );
-
-        let next = cache.select(Some("server-a".to_owned()), &next_view);
-        assert_loading(next, &next_view);
-        assert_eq!(cache.workspaces.peek().len(), 1);
-        assert_eq!(cache.recency.peek().len(), 1);
-        let evicted = cache.select(Some("server-a".to_owned()), &large_view);
-        assert_loading(evicted, &large_view);
+        assert!(active.peek().files[0].rows.unified[0].is_empty());
+        assert_eq!(active.peek().files[0].rows.unified[1].len(), 64);
+        assert_eq!(active.peek().files[0].summary, view.files[0]);
+        assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
     });
     Ok(())
 }
 
-fn complete_with_capacity(mut workspace: Store<ClientDiffWorkspace>, capacity: usize) {
+#[test]
+fn an_oversize_window_is_rejected_without_evicting_existing_rows() -> TestResult {
+    let view = view(1)?;
+    let owner = VirtualDom::new(VNode::empty);
+    owner.in_scope(ScopeId::ROOT, || {
+        let cache = cache();
+        let active = cache.select(Some("server-a".to_owned()), &view);
+        complete(cache, &view);
+        let pointer = active.peek().files[0].rows.unified[0].as_ptr();
+        assert!(complete_with_capacity(cache, &view, 65 * 1024 * 1024).is_err());
+        assert_eq!(active.peek().files[0].rows.unified[0].as_ptr(), pointer);
+        assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
+    });
+    Ok(())
+}
+
+fn key(view: &ViewerActiveView, server_instance_id: Option<String>) -> super::ClientDiffCacheKey {
+    super::ClientDiffCacheKey {
+        server_instance_id,
+        content_id: view.content_id,
+    }
+}
+
+fn complete_with_capacity(
+    cache: ClientDiffCache,
+    view: &ViewerActiveView,
+    capacity: usize,
+) -> Result<(), super::ClientDiffFileError> {
     let mut text = String::with_capacity(capacity);
     text.push_str("cached");
-    let mut workspace = workspace.write();
-    workspace.files[0].rows.unified = vec![vec![ViewerUnifiedRow::Meta(text)]];
-    workspace.files[0].state = ClientDiffFileState::Complete;
+    cache
+        .retain_window(
+            &key(view, Some("server-a".to_owned())),
+            super::ClientDiffWindow { file: 0, batch: 0 },
+            super::LoadedRowWindow {
+                rows: gtl_wire::viewer::ViewerRows::Unified(vec![ViewerUnifiedRow::Meta(text)]),
+                line_number_digits: 1,
+            },
+            &[],
+        )
+        .map(|_| ())
 }
 
 fn cache() -> ClientDiffCache {
     ClientDiffCache {
         workspaces: Store::new(HashMap::new()),
         recency: Signal::new(VecDeque::new()),
+        rows: Signal::new(super::RetainedRows::default()),
     }
 }
 
-fn complete(mut workspace: Store<ClientDiffWorkspace>) {
-    let mut workspace = workspace.write();
-    let file = &mut workspace.files[0];
-    file.rows.unified = vec![vec![ViewerUnifiedRow::Added(unified_source_row(
-        "let value = 42;",
-        None,
-        Some(1),
-        None,
-    ))]];
-    file.state = ClientDiffFileState::Complete;
+fn complete(cache: ClientDiffCache, view: &ViewerActiveView) {
+    complete_on_server(cache, view, Some("server-a".to_owned()));
+}
+
+fn complete_on_server(cache: ClientDiffCache, view: &ViewerActiveView, server: Option<String>) {
+    let mut workspace = cache.select(server.clone(), view);
+    cache
+        .retain_window(
+            &key(view, server),
+            super::ClientDiffWindow { file: 0, batch: 0 },
+            super::LoadedRowWindow {
+                rows: gtl_wire::viewer::ViewerRows::Unified(vec![ViewerUnifiedRow::Meta(
+                    "cached".to_owned(),
+                )]),
+                line_number_digits: 1,
+            },
+            &[],
+        )
+        .unwrap();
+    workspace.write().files[0].state = ClientDiffFileState::Complete;
 }
 
 fn assert_loading(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView) {
@@ -273,12 +318,13 @@ fn assert_loading(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView
     let file = &workspace.files[0];
     assert_eq!(file.summary, view.files[0]);
     assert_eq!(file.state, ClientDiffFileState::Loading);
-    assert!(file.rows.unified.is_empty());
+    assert!(file.rows.unified.iter().all(Vec::is_empty));
     assert!(file.rows.split.is_empty());
 }
 
 fn view(content: u8) -> TestResult<ViewerActiveView> {
     Ok(ViewerActiveView {
+        row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity: ViewerViewIdentity {
             tab_id: viewer_tab_id(1)?,
             range_generation: ViewerRangeGeneration::new(1),
@@ -308,6 +354,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             status: ViewerFileStatus::Added,
             can_open_in_editor: true,
             initially_expanded: true,
+            row_count: 1,
         }],
         commits_label: "0 commits".to_owned(),
         commit_count: 0,

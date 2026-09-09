@@ -1,7 +1,7 @@
 use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
 use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
-use super::FileDiff;
+use super::{FileDiff, source_lines::DiffSourceLines};
 
 pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
     if raw.trim().is_empty() {
@@ -9,30 +9,33 @@ pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
     }
 
     let mut files = Vec::new();
-    let mut current: Option<FileDiff> = None;
+    let mut current: Option<(FileDiff, Vec<&str>)> = None;
     let mut line_classifier = UnifiedDiffLineClassifier::default();
 
     for line in raw.split('\n') {
         if let Some(rest) = line.strip_prefix("diff --git a/")
             && let Some((_, path)) = rest.split_once(" b/")
         {
-            files.extend(current.take());
+            files.extend(current.take().map(finish_file));
             line_classifier = UnifiedDiffLineClassifier::default();
-            current = Some(FileDiff {
-                path: RepositoryRelativePath::try_new(path.into())?,
-                added: DiffLineCount::default(),
-                removed: DiffLineCount::default(),
-                lines: Vec::new(),
-                full_lines: None,
-            });
+            current = Some((
+                FileDiff {
+                    path: RepositoryRelativePath::try_new(path.into())?,
+                    added: DiffLineCount::default(),
+                    removed: DiffLineCount::default(),
+                    lines: DiffSourceLines::default(),
+                    full_lines: None,
+                },
+                Vec::new(),
+            ));
             continue;
         }
 
-        let Some(file) = current.as_mut() else {
+        let Some((file, lines)) = current.as_mut() else {
             continue;
         };
 
-        file.lines.push(line.to_string());
+        lines.push(line);
         match line_classifier.classify(line) {
             UnifiedDiffLineKind::Added => file.added.increment(),
             UnifiedDiffLineKind::Removed => file.removed.increment(),
@@ -43,10 +46,15 @@ pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
     }
 
     if let Some(file) = current {
-        files.push(file);
+        files.push(finish_file(file));
     }
 
     Ok(files)
+}
+
+fn finish_file((mut file, lines): (FileDiff, Vec<&str>)) -> FileDiff {
+    file.lines = lines.into_iter().collect();
+    file
 }
 
 #[cfg(test)]

@@ -176,10 +176,13 @@ mod tests {
             "src/<script>path_attack()</script>.rs".into(),
         )
         .unwrap();
-        view.files[0].lines[0] = "@@ -1 +1,2 @@".to_owned();
-        view.files[0]
-            .lines
-            .push("+<img src=x onerror=line_attack()></script>".to_owned());
+        view.files[0].lines = [
+            "@@ -1 +1,2 @@",
+            "+static_rendered",
+            "+<img src=x onerror=line_attack()></script>",
+        ]
+        .into_iter()
+        .collect();
         view.files[0].full_lines = Some(view.files[0].lines.clone());
 
         let html = build_tabbed_html(
@@ -209,7 +212,8 @@ mod tests {
             "-pub fn old() {}".to_owned(),
             "+pub fn current() -> usize { 42 }".to_owned(),
             format!("+{long_body}"),
-        ];
+        ]
+        .into();
         view.files[0].full_lines = Some(view.files[0].lines.clone());
 
         let unified = build_html(
@@ -239,7 +243,7 @@ mod tests {
         let first = sample_view();
         let mut second = sample_view();
         second.repo_name = gtl_models::paths::ProjectName::try_from("worker").unwrap();
-        second.files[0].lines[1] = "+second-view-marker".to_owned();
+        second.files[0].lines = ["@@ -1 +1 @@", "+second-view-marker"].into_iter().collect();
         second.files[0].full_lines = Some(second.files[0].lines.clone());
 
         let html = build_tabbed_html(
@@ -320,8 +324,8 @@ mod tests {
         }
         view.files[0].added = DiffLineCount::new(11);
         view.files[0].removed = DiffLineCount::default();
-        view.files[0].lines.clone_from(&lines);
-        view.files[0].full_lines = Some(lines);
+        view.files[0].lines = lines.into();
+        view.files[0].full_lines = Some(view.files[0].lines.clone());
         view
     }
 
@@ -345,8 +349,8 @@ mod tests {
             .unwrap(),
             added: DiffLineCount::new(100),
             removed: DiffLineCount::default(),
-            full_lines: Some(lines.clone()),
-            lines,
+            full_lines: Some(lines.clone().into()),
+            lines: lines.into(),
         }
     }
 

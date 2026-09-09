@@ -241,6 +241,7 @@ fn benchmark_stream_viewer_rows(
     let request = StreamViewerRowsRequest {
         identity: Some(identity),
         file_id: None,
+        row_range: None,
     };
     let (message_count, output_bytes) = runtime.block_on(consume_viewer_rows(
         client.clone(),
@@ -329,6 +330,7 @@ async fn wait_for_ready_view(client: &BenchmarkViewerClient) -> v1::ViewerViewId
                 | v1::viewer_active_state::State::Broken(_)
                 | v1::viewer_active_state::State::Error(_) => None,
             })
+            .filter(|view| view.row_source() == v1::ViewerRowSourceState::Ready)
             .and_then(|view| view.identity);
         if let Some(identity) = identity {
             return identity;

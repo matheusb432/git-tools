@@ -1,14 +1,15 @@
 use gtl_application::viewer::{
-    ensure_view_full_context::{self, EnsureViewFullContext, EnsureViewFullContextOk},
-    rows::{ViewerFileRowParser, ViewerRowBatch, ViewerSyntaxDiagnostic},
+    rows::{
+        ViewerRowWindowError, ViewerRowWindowParser, ViewerWorkCancellation, viewer_file_row_count,
+    },
     shell, viewer_diff_file_source,
 };
 use gtl_wire::{
     proto, v1,
     viewer::{
         VIEWER_ROW_BATCH_MAX_ENCODED_BYTES, VIEWER_ROW_BATCH_MAX_ROWS,
-        VIEWER_ROW_MAX_ENCODED_BYTES, ViewerDiffFileId, ViewerDiffLayout, ViewerRows,
-        ViewerSplitRow, ViewerUnifiedRow, ViewerViewIdentity,
+        VIEWER_ROW_MAX_ENCODED_BYTES, ViewerDiffFileId, ViewerDiffLayout, ViewerRowRange,
+        ViewerRows, ViewerSplitRow, ViewerUnifiedRow, ViewerViewIdentity,
     },
 };
 use prost::Message as _;
@@ -19,10 +20,22 @@ use tonic::Status;
 use super::{load_user_settings, parse_identity};
 use crate::state::AppState;
 
-const SOURCE_CHUNK_LINES: usize = 64;
 const ROW_STREAM_BUFFER: usize = 8;
 
-pub(super) type RowStream = ReceiverStream<Result<v1::StreamViewerRowsResponse, Status>>;
+pub(crate) struct RowStream {
+    receiver: ReceiverStream<Result<v1::StreamViewerRowsResponse, Status>>,
+    _cancel_on_drop: super::cancellation::CancelOnDrop,
+}
+
+impl tokio_stream::Stream for RowStream {
+    type Item = Result<v1::StreamViewerRowsResponse, Status>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.receiver).poll_next(context)
+    }
+}
 
 pub(super) fn start(
     state: AppState,
@@ -39,114 +52,70 @@ pub(super) fn start(
     let snapshot = shell::content_snapshot_for_identity(&state.viewer, identity, options)
         .map_err(|error| super::viewer_state_error(error, "load viewer rows"))?
         .ok_or_else(|| Status::aborted("viewer identity changed"))?;
-    let all_files = (0..snapshot.view().files.len())
-        .map(ViewerDiffFileId::for_index)
-        .collect::<Vec<_>>();
+    if identity.render_options.density == gtl_wire::viewer::ViewerDiffDensity::Full
+        && matches!(
+            snapshot.view().full_context,
+            gtl_application::diffs::FullContextDiffState::Deferred(_)
+        )
+    {
+        return Err(Status::failed_precondition(
+            "the diff source is still being prepared",
+        ));
+    }
+    let range = request
+        .row_range
+        .map(|range| ViewerRowRange::try_new(range.start, range.count))
+        .transpose()
+        .map_err(|_| Status::invalid_argument("viewer row range is invalid"))?;
+    if range.is_some() && request.file_id.is_none() {
+        return Err(Status::invalid_argument("a row range requires one file"));
+    }
     let files = match request.file_id {
-        Some(requested) => vec![
-            all_files
-                .into_iter()
-                .find(|file| file.as_str() == requested)
-                .ok_or_else(|| Status::not_found("viewer diff file is not available"))?,
-        ],
-        None => all_files,
+        Some(requested) => {
+            let file: ViewerDiffFileId = requested
+                .try_into()
+                .map_err(|_| Status::invalid_argument("file is required"))?;
+            if viewer_diff_file_source(snapshot.view(), &file, identity.render_options.density)
+                .is_none()
+            {
+                return Err(Status::not_found("viewer diff file is not available"));
+            }
+            vec![file]
+        }
+        None => (0..snapshot.view().files.len())
+            .map(ViewerDiffFileId::for_index)
+            .collect(),
     };
     let row_stream = state
         .viewer_row_streams
         .start_stream()
-        .map_err(|_| Status::resource_exhausted("viewer row stream counter is exhausted"))?;
+        .map_err(|_| Status::internal("viewer work state is unavailable"))?;
     let (sender, receiver) = mpsc::channel(ROW_STREAM_BUFFER);
-    tokio::task::spawn_blocking(move || {
-        produce_rows(
-            state,
-            identity,
-            proto_identity,
-            snapshot.shared_view(),
-            files,
-            row_stream,
-            sender,
-        );
-    });
-    Ok(ReceiverStream::new(receiver))
+    let cancel_on_drop = super::cancellation::CancelOnDrop(row_stream.clone());
+    let writer = StreamWriter {
+        state,
+        identity,
+        proto_identity,
+        sequence: 0,
+        next_row: 0,
+        row_stream,
+        sender,
+    };
+    tokio::task::spawn_blocking(move || produce_rows(writer, snapshot.view(), files, range));
+    Ok(RowStream {
+        receiver: ReceiverStream::new(receiver),
+        _cancel_on_drop: cancel_on_drop,
+    })
 }
 
 fn produce_rows(
-    state: AppState,
-    identity: ViewerViewIdentity,
-    proto_identity: v1::ViewerViewIdentity,
-    view: std::sync::Arc<gtl_application::diffs::View>,
+    mut writer: StreamWriter,
+    view: &gtl_application::diffs::View,
     files: Vec<ViewerDiffFileId>,
-    row_stream: u64,
-    sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
+    range: Option<ViewerRowRange>,
 ) {
-    let view = if identity.render_options.density == gtl_wire::viewer::ViewerDiffDensity::Full {
-        match ensure_view_full_context::execute(
-            EnsureViewFullContext::Identity {
-                identity,
-                render_options: to_render_options(identity.render_options),
-            },
-            &state.viewer,
-            &state.git,
-        ) {
-            Ok(EnsureViewFullContextOk::Ready(view)) => view,
-            Ok(EnsureViewFullContextOk::Stale) => return,
-            Err(error) => {
-                tracing::error!(error = ?error, "load full-context viewer rows failed");
-                return produce_source_failures(
-                    state,
-                    identity,
-                    proto_identity,
-                    files,
-                    row_stream,
-                    sender,
-                );
-            }
-        }
-    } else {
-        view
-    };
-    let mut writer = StreamWriter {
-        state,
-        identity,
-        proto_identity,
-        sequence: 0,
-        row_stream,
-        sender,
-    };
     for file_id in files {
-        if !produce_file_rows(&mut writer, &view, &file_id) {
-            return;
-        }
-    }
-}
-
-fn produce_source_failures(
-    state: AppState,
-    identity: ViewerViewIdentity,
-    proto_identity: v1::ViewerViewIdentity,
-    files: Vec<ViewerDiffFileId>,
-    row_stream: u64,
-    sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
-) {
-    let mut writer = StreamWriter {
-        state,
-        identity,
-        proto_identity,
-        sequence: 0,
-        row_stream,
-        sender,
-    };
-    for file_id in files {
-        if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
-            v1::ViewerFileStarted {
-                file_id: file_id.as_str().to_owned(),
-            },
-        )) || !writer.file_failed(
-            &file_id,
-            v1::ViewerFileFailureCode::SourceUnavailable,
-            "The full-context diff source is unavailable. Refresh and retry.",
-            true,
-        ) {
+        if !produce_file_rows(&mut writer, view, &file_id, range) {
             return;
         }
     }
@@ -156,14 +125,8 @@ fn produce_file_rows(
     writer: &mut StreamWriter,
     view: &gtl_application::diffs::View,
     file_id: &ViewerDiffFileId,
+    range: Option<ViewerRowRange>,
 ) -> bool {
-    if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
-        v1::ViewerFileStarted {
-            file_id: file_id.as_str().to_owned(),
-        },
-    )) {
-        return false;
-    }
     let Some(source) =
         viewer_diff_file_source(view, file_id, writer.identity.render_options.density)
     else {
@@ -174,28 +137,71 @@ fn produce_file_rows(
             false,
         );
     };
-    let mut parser = ViewerFileRowParser::new(writer.identity.render_options.layout, source.path);
+    let row_count = viewer_file_row_count(source.lines, writer.identity.render_options.layout);
+    let Ok(total) = u32::try_from(row_count) else {
+        return report_oversized_row(writer, file_id);
+    };
+    let (start_row, end_row) = range.map_or((0, total), |range| (range.start(), range.end()));
+    if end_row > total {
+        let _ = writer.sender.blocking_send(Err(Status::out_of_range(
+            "viewer row range is outside the file",
+        )));
+        return false;
+    }
+    writer.next_row = start_row;
+    if !writer.send(v1::stream_viewer_rows_response::Event::FileStarted(
+        v1::ViewerFileStarted {
+            file_id: file_id.as_str().to_owned(),
+            row_count: total,
+            start_row,
+        },
+    )) {
+        return false;
+    }
 
-    for lines in source.lines.chunks(SOURCE_CHUNK_LINES) {
-        match send_projected_rows(writer, file_id, parser.push(lines)) {
+    let mut parser = ViewerRowWindowParser::new(
+        source.path,
+        source.lines,
+        writer.identity.render_options.layout,
+    );
+    let mut line_number_digits = 1;
+    for start in (start_row as usize..end_row as usize).step_by(VIEWER_ROW_BATCH_MAX_ROWS) {
+        if !writer.is_current() {
+            return false;
+        }
+        let parsed = parser.parse(
+            start..(start + VIEWER_ROW_BATCH_MAX_ROWS).min(end_row as usize),
+            &writer.row_stream,
+        );
+        let parsed = match parsed {
+            Ok(parsed) => parsed,
+            Err(ViewerRowWindowError::Cancelled) => return false,
+            Err(ViewerRowWindowError::InvalidRange) => {
+                return writer.file_failed(
+                    file_id,
+                    v1::ViewerFileFailureCode::SourceUnavailable,
+                    "The diff row range is unavailable.",
+                    false,
+                );
+            }
+        };
+        line_number_digits = parsed.line_number_digits;
+        for diagnostic in &parsed.diagnostics {
+            tracing::debug!(file = file_id.as_str(), side = ?diagnostic.side, message = %diagnostic.message, "viewer syntax fallback");
+        }
+        match send_projected_rows(writer, file_id, parsed.rows) {
             BatchResult::Sent => {}
             BatchResult::Cancelled => return false,
             BatchResult::RowTooLarge => return report_oversized_row(writer, file_id),
         }
     }
-
-    let parsed = parser.finish();
-    let line_number_digits = parsed.line_number_digits;
-    match send_projected_rows(writer, file_id, parsed) {
-        BatchResult::Sent => writer.send(v1::stream_viewer_rows_response::Event::FileFinished(
-            v1::ViewerFileFinished {
-                file_id: file_id.as_str().to_owned(),
-                line_number_digits,
-            },
-        )),
-        BatchResult::Cancelled => false,
-        BatchResult::RowTooLarge => report_oversized_row(writer, file_id),
-    }
+    writer.send(v1::stream_viewer_rows_response::Event::FileFinished(
+        v1::ViewerFileFinished {
+            file_id: file_id.as_str().to_owned(),
+            line_number_digits,
+            end_row: writer.next_row,
+        },
+    ))
 }
 
 fn report_oversized_row(writer: &mut StreamWriter, file_id: &ViewerDiffFileId) -> bool {
@@ -212,21 +218,26 @@ struct StreamWriter {
     identity: ViewerViewIdentity,
     proto_identity: v1::ViewerViewIdentity,
     sequence: u64,
-    row_stream: u64,
+    next_row: u32,
+    row_stream: ViewerWorkCancellation,
     sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
 }
 
 impl StreamWriter {
     fn is_current(&self) -> bool {
-        if !self.state.viewer_row_streams.is_current(self.row_stream) {
+        if self.row_stream.is_cancelled() || self.sender.is_closed() {
             return false;
         }
-        shell::identity_is_current(
+        let current = shell::identity_is_current(
             &self.state.viewer,
             self.identity,
             to_render_options(self.identity.render_options),
         )
-        .unwrap_or(false)
+        .unwrap_or(false);
+        if !current {
+            self.row_stream.cancel();
+        }
+        current
     }
 
     fn response(
@@ -250,11 +261,23 @@ impl StreamWriter {
             )));
             return false;
         };
+        let count = match &event {
+            v1::stream_viewer_rows_response::Event::UnifiedRows(rows) => rows.rows.len(),
+            v1::stream_viewer_rows_response::Event::SplitRows(rows) => rows.rows.len(),
+            _ => 0,
+        };
+        let Some(next_row) = u32::try_from(count)
+            .ok()
+            .and_then(|count| self.next_row.checked_add(count))
+        else {
+            return false;
+        };
         let response = self.response(event);
         if self.sender.blocking_send(Ok(response)).is_err() {
             return false;
         }
         self.sequence = next_sequence;
+        self.next_row = next_row;
         true
     }
 
@@ -286,10 +309,12 @@ enum BatchResult {
 fn send_projected_rows(
     writer: &mut StreamWriter,
     file_id: &ViewerDiffFileId,
-    batch: ViewerRowBatch,
+    rows: ViewerRows,
 ) -> BatchResult {
-    log_syntax_diagnostics(file_id, &batch.diagnostics);
-    match batch.rows {
+    if !writer.is_current() {
+        return BatchResult::Cancelled;
+    }
+    match rows {
         ViewerRows::Unified(rows) => send_unified_rows(writer, file_id, rows),
         ViewerRows::Split(rows) => send_split_rows(writer, file_id, rows),
     }
@@ -307,10 +332,11 @@ fn send_unified_rows(
     else {
         return BatchResult::RowTooLarge;
     };
-    send_bounded(writer, rows, |rows| {
+    send_bounded(writer, rows, |rows, start_row| {
         v1::stream_viewer_rows_response::Event::UnifiedRows(v1::ViewerUnifiedRows {
             file_id: file_id.as_str().to_owned(),
             rows,
+            start_row,
         })
     })
 }
@@ -327,10 +353,11 @@ fn send_split_rows(
     else {
         return BatchResult::RowTooLarge;
     };
-    send_bounded(writer, rows, |rows| {
+    send_bounded(writer, rows, |rows, start_row| {
         v1::stream_viewer_rows_response::Event::SplitRows(v1::ViewerSplitRows {
             file_id: file_id.as_str().to_owned(),
             rows,
+            start_row,
         })
     })
 }
@@ -338,33 +365,23 @@ fn send_split_rows(
 fn send_bounded<Row>(
     writer: &mut StreamWriter,
     rows: Vec<Row>,
-    event: impl Fn(Vec<Row>) -> v1::stream_viewer_rows_response::Event,
+    event: impl Fn(Vec<Row>, u32) -> v1::stream_viewer_rows_response::Event,
 ) -> BatchResult
 where
     Row: prost::Message,
 {
-    let empty_event = event(Vec::new());
-    let Some(empty_event_encoded_len) = row_event_encoded_len(&empty_event) else {
-        return BatchResult::RowTooLarge;
-    };
-    let mut empty_response_encoded_len = writer.response(empty_event).encoded_len();
     let mut batch = Vec::new();
-    let mut rows_encoded_len = 0_usize;
+    let mut rows_encoded_len = 0;
     for row in rows {
-        let result = append_bounded_row(
-            writer,
-            &mut batch,
-            row,
-            &mut rows_encoded_len,
-            &mut empty_response_encoded_len,
-            empty_event_encoded_len,
-            &event,
-        );
+        if !writer.is_current() {
+            return BatchResult::Cancelled;
+        }
+        let result = append_bounded_row(writer, &mut batch, row, &mut rows_encoded_len, &event);
         if result != BatchResult::Sent {
             return result;
         }
     }
-    if !batch.is_empty() && !writer.send(event(batch)) {
+    if !batch.is_empty() && !writer.send(event(batch, writer.next_row)) {
         return BatchResult::Cancelled;
     }
     BatchResult::Sent
@@ -375,9 +392,7 @@ fn append_bounded_row<Row>(
     batch: &mut Vec<Row>,
     row: Row,
     rows_encoded_len: &mut usize,
-    empty_response_encoded_len: &mut usize,
-    empty_event_encoded_len: usize,
-    event: &impl Fn(Vec<Row>) -> v1::stream_viewer_rows_response::Event,
+    event: &impl Fn(Vec<Row>, u32) -> v1::stream_viewer_rows_response::Event,
 ) -> BatchResult
 where
     Row: prost::Message,
@@ -385,52 +400,52 @@ where
     if row.encoded_len() > VIEWER_ROW_MAX_ENCODED_BYTES {
         return BatchResult::RowTooLarge;
     }
-    let framed_row_len = prost::encoding::message::encoded_len(2, &row);
-    let Some(candidate_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
+    let framed = prost::encoding::message::encoded_len(2, &row);
+    let Some(candidate) = rows_encoded_len
+        .checked_add(framed)
+        .and_then(|bytes| batch_encoded_bytes(writer, bytes, event))
+    else {
         return BatchResult::RowTooLarge;
     };
-    let Some(candidate_response_len) = row_batch_response_encoded_len(
-        *empty_response_encoded_len,
-        empty_event_encoded_len,
-        candidate_rows_encoded_len,
-    ) else {
-        return BatchResult::RowTooLarge;
-    };
-    let crosses_bound = !batch.is_empty()
+    if !batch.is_empty()
         && (batch.len() >= VIEWER_ROW_BATCH_MAX_ROWS
-            || candidate_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES);
-    if crosses_bound && !writer.send(event(std::mem::take(batch))) {
-        return BatchResult::Cancelled;
-    }
-    if crosses_bound {
+            || candidate > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES)
+    {
+        if !writer.send(event(std::mem::take(batch), writer.next_row)) {
+            return BatchResult::Cancelled;
+        }
         *rows_encoded_len = 0;
-        *empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
     }
-
-    let Some(next_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
-        return BatchResult::RowTooLarge;
-    };
-    *rows_encoded_len = next_rows_encoded_len;
+    *rows_encoded_len += framed;
     batch.push(row);
     if batch.len() != 1 {
         return BatchResult::Sent;
     }
-    let Some(single_response_len) = row_batch_response_encoded_len(
-        *empty_response_encoded_len,
-        empty_event_encoded_len,
-        *rows_encoded_len,
-    ) else {
+    let Some(single) = batch_encoded_bytes(writer, *rows_encoded_len, event) else {
         return BatchResult::RowTooLarge;
     };
-    if single_response_len <= VIEWER_ROW_BATCH_MAX_ENCODED_BYTES {
+    if single <= VIEWER_ROW_BATCH_MAX_ENCODED_BYTES {
         return BatchResult::Sent;
     }
-    if !writer.send(event(std::mem::take(batch))) {
+    if !writer.send(event(std::mem::take(batch), writer.next_row)) {
         return BatchResult::Cancelled;
     }
     *rows_encoded_len = 0;
-    *empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
     BatchResult::Sent
+}
+
+fn batch_encoded_bytes<Row>(
+    writer: &StreamWriter,
+    rows_bytes: usize,
+    event: &impl Fn(Vec<Row>, u32) -> v1::stream_viewer_rows_response::Event,
+) -> Option<usize> {
+    let empty = event(Vec::new(), writer.next_row);
+    let event_bytes = row_event_encoded_len(&empty)?;
+    row_batch_response_encoded_len(
+        writer.response(empty).encoded_len(),
+        event_bytes,
+        rows_bytes,
+    )
 }
 
 fn row_event_encoded_len(event: &v1::stream_viewer_rows_response::Event) -> Option<usize> {
@@ -476,20 +491,22 @@ fn to_render_options(
     )
 }
 
-fn log_syntax_diagnostics(file: &ViewerDiffFileId, diagnostics: &[ViewerSyntaxDiagnostic]) {
-    for diagnostic in diagnostics {
-        tracing::warn!(
-            file_id = file.as_str(),
-            side = ?diagnostic.side,
-            error = diagnostic.message,
-            "viewer syntax highlighting skipped part of a diff"
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropping_the_grpc_stream_cancels_its_cpu_worker() {
+        let cancellation = ViewerWorkCancellation::default();
+        let (_sender, receiver) = mpsc::channel(1);
+        let stream = RowStream {
+            receiver: ReceiverStream::new(receiver),
+            _cancel_on_drop: super::super::cancellation::CancelOnDrop(cancellation.clone()),
+        };
+        assert!(!cancellation.is_cancelled());
+        drop(stream);
+        assert!(cancellation.is_cancelled());
+    }
 
     #[test]
     fn incremental_row_batch_size_matches_protobuf_encoding() {
@@ -502,6 +519,7 @@ mod tests {
             },
         ];
         let empty_event = v1::ViewerUnifiedRows {
+            start_row: 0,
             file_id: "file-0".to_owned(),
             rows: Vec::new(),
         };
@@ -510,6 +528,7 @@ mod tests {
             sequence: 7,
             event: Some(v1::stream_viewer_rows_response::Event::UnifiedRows(
                 v1::ViewerUnifiedRows {
+                    start_row: 0,
                     file_id: empty_event.file_id.clone(),
                     rows,
                 },

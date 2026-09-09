@@ -64,7 +64,10 @@ mod tests {
         let full_context = fetch_full_context_diff::execute(&request, &git).unwrap();
 
         assert_eq!(full_context.files[0].path.to_string_lossy(), "full.txt");
-        assert_eq!(full_context.files[0].lines, [" retained context", ""]);
+        assert_eq!(
+            full_context.files[0].lines.iter().collect::<Vec<_>>(),
+            [" retained context", ""]
+        );
     }
 
     #[test]

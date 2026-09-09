@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use gtl_wire::viewer::{
-    FindViewerDiff, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffLayout, ViewerDiffSearchDirection,
+    FindViewerDiff, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffSearchDirection,
     ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerViewIdentity,
 };
 
@@ -34,7 +34,6 @@ struct DiffFindRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DiffFindState {
     Idle,
-    WaitingForRows,
     QueryTooLong,
     Loading,
     Ready(ViewerDiffSearchResult),
@@ -45,11 +44,7 @@ impl DiffFindState {
     fn active_match(&self) -> Option<ViewerDiffSearchMatch> {
         match self {
             Self::Ready(result) => result.active_match.clone(),
-            Self::Idle
-            | Self::WaitingForRows
-            | Self::QueryTooLong
-            | Self::Loading
-            | Self::Error(_) => None,
+            Self::Idle | Self::QueryTooLong | Self::Loading | Self::Error(_) => None,
         }
     }
 
@@ -60,7 +55,6 @@ impl DiffFindState {
     fn message(&self) -> String {
         match self {
             Self::Idle => String::new(),
-            Self::WaitingForRows => "Search is available when the diff finishes loading.".into(),
             Self::QueryTooLong => {
                 format!("Search is limited to {VIEWER_SEARCH_QUERY_MAX_BYTES} UTF-8 bytes.")
             }
@@ -88,47 +82,47 @@ const fn wrapped_label(wrapped: bool) -> &'static str {
 fn use_diff_find(
     mut open: Signal<bool>,
     identity: ViewerViewIdentity,
-    rows_loading: bool,
     workspace: ReadStore<ClientDiffWorkspace>,
+    mut target: Signal<Option<super::DiffSearchTarget>>,
 ) -> DiffFindController {
     let mut query = use_signal(String::new);
     let state = use_signal(|| DiffFindState::Idle);
     let search = use_action(move |next: DiffFindRequest| async move {
-        execute_find_request(next, state, workspace).await;
+        execute_find_request(next, state, workspace, target).await;
         Ok::<(), std::convert::Infallible>(())
     });
 
     use_effect(move || {
         if open() {
             browser::focus_element(FIND_INPUT_ID.to_owned());
-            queue_initial_search(search, state, identity, query.peek().clone(), rows_loading);
+            queue_initial_search(search, state, identity, query.peek().clone());
         } else {
             let mut search = search;
             search.reset();
+            target.set(None);
             browser::clear_diff_search_match();
         }
     });
-    use_effect(use_reactive(
-        (&identity, &rows_loading),
-        move |(identity, rows_loading)| {
-            browser::clear_diff_search_match();
-            if *open.peek() {
-                queue_initial_search(search, state, identity, query.peek().clone(), rows_loading);
-            }
-        },
-    ));
+    use_effect(use_reactive((&identity,), move |(identity,)| {
+        browser::clear_diff_search_match();
+        if *open.peek() {
+            queue_initial_search(search, state, identity, query.peek().clone());
+        }
+    }));
     use_drop(browser::clear_diff_search_match);
 
     let update_query = use_callback(move |value: String| {
         query.set(value.clone());
+        target.set(None);
         browser::clear_diff_search_match();
-        queue_initial_search(search, state, identity, value, rows_loading);
+        queue_initial_search(search, state, identity, value);
     });
     let navigate = use_callback(move |direction| {
         queue_navigation(search, state, identity, query.peek().clone(), direction);
     });
     let close = use_callback(move |()| {
         open.set(false);
+        target.set(None);
         browser::clear_diff_search_match();
         browser::focus_element("workspace-heading".to_owned());
     });
@@ -146,10 +140,10 @@ fn use_diff_find(
 pub(super) fn DiffFindBar(
     open: Signal<bool>,
     identity: ViewerViewIdentity,
-    rows_loading: bool,
     workspace: ReadStore<ClientDiffWorkspace>,
+    target: Signal<Option<super::DiffSearchTarget>>,
 ) -> Element {
-    let find = use_diff_find(open, identity, rows_loading, workspace);
+    let find = use_diff_find(open, identity, workspace, target);
 
     if !open() {
         return rsx! {};
@@ -178,7 +172,6 @@ fn queue_initial_search(
     mut state: Signal<DiffFindState>,
     identity: ViewerViewIdentity,
     query: String,
-    rows_loading: bool,
 ) {
     if query.is_empty() {
         search.reset();
@@ -188,11 +181,6 @@ fn queue_initial_search(
     if query.len() > VIEWER_SEARCH_QUERY_MAX_BYTES {
         search.reset();
         state.set(DiffFindState::QueryTooLong);
-        return;
-    }
-    if rows_loading {
-        search.reset();
-        state.set(DiffFindState::WaitingForRows);
         return;
     }
     queue_search(
@@ -243,6 +231,7 @@ async fn execute_find_request(
     next: DiffFindRequest,
     mut state: Signal<DiffFindState>,
     workspace: ReadStore<ClientDiffWorkspace>,
+    mut target: Signal<Option<super::DiffSearchTarget>>,
 ) {
     if next.debounce {
         dioxus_sdk_time::sleep(FIND_DEBOUNCE).await;
@@ -257,12 +246,11 @@ async fn execute_find_request(
     .and_then(|result| validate_diff_search_result(&workspace.peek(), next.identity, result));
     match result {
         Ok((result, row_target)) => {
-            if let Some((file_index, row_index)) = row_target
-                && !browser::show_diff_search_match(file_index, row_index)
-            {
-                state.set(DiffFindState::Error(ViewerClientError::Internal));
-                return;
-            }
+            target.set(row_target.map(|(file, row)| super::DiffSearchTarget {
+                identity: next.identity,
+                file,
+                row,
+            }));
             if result.active_match.is_none() {
                 browser::clear_diff_search_match();
             }
@@ -287,14 +275,13 @@ fn validate_diff_search_result(
     let row_target = result
         .active_match
         .as_ref()
-        .map(|found| diff_search_match_target(workspace, identity, found))
+        .map(|found| diff_search_match_target(workspace, found))
         .transpose()?;
     Ok((result, row_target))
 }
 
 fn diff_search_match_target(
     workspace: &ClientDiffWorkspace,
-    identity: ViewerViewIdentity,
     found: &ViewerDiffSearchMatch,
 ) -> Result<(usize, usize), ViewerClientError> {
     let file_index = workspace
@@ -302,20 +289,7 @@ fn diff_search_match_target(
         .iter()
         .position(|file| file.summary.id == found.file)
         .ok_or(ViewerClientError::Internal)?;
-    let row_count = match identity.render_options.layout {
-        ViewerDiffLayout::Unified => workspace.files[file_index]
-            .rows
-            .unified
-            .iter()
-            .map(Vec::len)
-            .sum(),
-        ViewerDiffLayout::Split => workspace.files[file_index]
-            .rows
-            .split
-            .iter()
-            .map(Vec::len)
-            .sum(),
-    };
+    let row_count = workspace.files[file_index].summary.row_count;
     let row_index = usize::try_from(found.row_index).map_err(|_| ViewerClientError::Internal)?;
     if row_index >= row_count {
         return Err(ViewerClientError::Internal);
@@ -330,7 +304,7 @@ mod tests {
         viewer::{ViewerRangeGeneration, ViewerSelectionGeneration},
     };
     use gtl_wire::viewer::{
-        ViewerDiffDensity, ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary,
+        ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
         ViewerRenderOptions, ViewerSplitRow, ViewerUnifiedRow,
     };
 
@@ -388,6 +362,7 @@ mod tests {
                     status: ViewerFileStatus::Modified,
                     can_open_in_editor: true,
                     initially_expanded: false,
+                    row_count: 3,
                 },
                 rows,
                 line_number_digits: 1,
@@ -397,9 +372,10 @@ mod tests {
     }
 
     #[test]
-    fn validates_logical_row_indexes_across_variable_batches() -> TestResult {
+    fn validates_logical_row_indexes_before_rows_are_loaded() -> TestResult {
         for layout in [ViewerDiffLayout::Unified, ViewerDiffLayout::Split] {
-            let workspace = workspace(layout)?;
+            let mut workspace = workspace(layout)?;
+            workspace.files[0].rows = ClientDiffRows::default();
             let identity = workspace.identity;
             let result = ViewerDiffSearchResult {
                 identity,

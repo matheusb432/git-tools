@@ -1,37 +1,36 @@
-use gtl_models::{paths::ProjectName, projects::comparison::ComparisonBranch};
-use gtl_wire::viewer::FieldUpdate;
-use rusqlite::{Connection, params};
+use gtl_models::projects::ProjectRepository;
+use gtl_wire::viewer::projects::UpdateViewerProject;
+use rusqlite::Connection;
 
-pub struct UpdateProjectComparison {
-    pub project_name: ProjectName,
-    pub comparison_branch: FieldUpdate<ComparisonBranch>,
-    pub expected_comparison_branch: ComparisonBranch,
-}
+use super::update_project_comparison::{
+    self, UpdateProjectComparison, UpdateProjectComparisonError,
+};
 
 #[derive(Debug, thiserror::Error)]
-pub enum UpdateProjectComparisonError {
-    #[error("The project changed or is no longer available. Reload Projects and retry.")]
-    Conflict,
+pub enum UpdateViewerProjectError {
+    #[error("project is no longer available")]
+    NotFound,
     #[error(transparent)]
-    Database(#[from] rusqlite::Error),
+    Comparison(#[from] UpdateProjectComparisonError),
 }
 
 #[cqrsy::command]
 pub fn execute(
-    request: UpdateProjectComparison,
+    request: UpdateViewerProject,
+    repositories: &[ProjectRepository],
     connection: &Connection,
-) -> Result<(), UpdateProjectComparisonError> {
-    let branch = match request.comparison_branch {
-        FieldUpdate::Update(branch) => branch,
-        FieldUpdate::Clear => ComparisonBranch::default(),
-        FieldUpdate::Unchanged => return Ok(()),
-    };
-    let changed = connection.execute(
-        "UPDATE projects SET comparison_branch = ?1 WHERE title = ?2 AND comparison_branch = ?3 AND paused_at IS NULL AND unmanaged_at IS NULL",
-        params![branch.as_ref(), request.project_name.as_str(), request.expected_comparison_branch.as_ref()],
+) -> Result<(), UpdateViewerProjectError> {
+    let project = repositories
+        .iter()
+        .find(|project| project.path == request.path)
+        .ok_or(UpdateViewerProjectError::NotFound)?;
+    update_project_comparison::execute(
+        UpdateProjectComparison {
+            project_name: project.name.clone(),
+            comparison_branch: request.comparison_branch,
+            expected_comparison_branch: request.expected_comparison_branch,
+        },
+        connection,
     )?;
-    if changed == 0 {
-        return Err(UpdateProjectComparisonError::Conflict);
-    }
     Ok(())
 }

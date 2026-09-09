@@ -123,12 +123,14 @@ impl View {
 }
 
 fn attach_full_context(files: &mut [FileDiff], full_context: FullContextDiff) {
-    let mut full_by_path: std::collections::HashMap<RepositoryRelativePath, Vec<String>> =
-        full_context
-            .files
-            .into_iter()
-            .map(|file| (file.path, file.lines))
-            .collect();
+    let mut full_by_path: std::collections::HashMap<
+        RepositoryRelativePath,
+        super::source_lines::DiffSourceLines,
+    > = full_context
+        .files
+        .into_iter()
+        .map(|file| (file.path, file.lines))
+        .collect();
     for file in files {
         if file.status() != super::FileStatus::Modified {
             continue;
@@ -184,7 +186,7 @@ mod tests {
             path: repository_relative_path("f.txt"),
             added: DiffLineCount::new(1),
             removed: DiffLineCount::default(),
-            lines: Vec::new(),
+            lines: crate::diffs::source_lines::DiffSourceLines::default(),
             full_lines: None,
         }
     }
@@ -294,35 +296,35 @@ new file mode 100644\n\
                 path: repository_relative_path("src/render.rs"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             },
             FileDiff {
                 path: repository_relative_path("docs/adr/0001-render-stack.md"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             },
             FileDiff {
                 path: repository_relative_path("src/assets/preview.css"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             },
             FileDiff {
                 path: repository_relative_path("src/model.rs"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             },
             FileDiff {
                 path: repository_relative_path("src/assets/components.js"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             },
         ];

@@ -1,6 +1,6 @@
 //! Process-boundary values and their optional protobuf codecs.
 
-#[cfg(feature = "grpc")]
+#[cfg(feature = "protobuf")]
 pub mod proto;
 
 pub mod viewer;
@@ -14,9 +14,9 @@ pub mod viewer;
     clippy::too_many_lines,
     clippy::trivially_copy_pass_by_ref
 )]
-#[cfg(feature = "grpc")]
+#[cfg(feature = "protobuf")]
 pub mod v1 {
-    tonic::include_proto!("gtl.v1");
+    include!(concat!(env!("OUT_DIR"), "/gtl.v1.rs"));
 }
 
 #[cfg(feature = "grpc")]

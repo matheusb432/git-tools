@@ -9,7 +9,7 @@ use gtl_wire::viewer::{
     projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
 
 use super::{ViewerClientError, validate_viewer_protocol};
 
@@ -123,6 +123,7 @@ impl ViewerClient {
         list_commits(ListViewerCommits) -> ViewerCommitPage => "viewer_list_commits";
         search_files(SearchViewerFiles) -> ViewerFileSearchResult => "viewer_search_files";
         find_diff(FindViewerDiff) -> ViewerDiffSearchResult => "viewer_find_diff";
+        read_diff_text(gtl_wire::viewer::ReadViewerDiffText) -> Vec<gtl_wire::viewer::ViewerDiffTextLine> => "viewer_read_diff_text";
         list_history(ListViewerHistory) -> ViewerHistoryPage => "viewer_list_history";
         open_history(OpenViewerHistory) -> ViewerShell => "viewer_open_history";
         get_history_copy(GetViewerHistoryCopy) -> ViewerHistoryCopyPayload => "viewer_get_history_copy";
@@ -168,7 +169,7 @@ pub struct ViewerRowStream {
 
 impl ViewerRowStream {
     pub async fn message(&mut self) -> Result<Option<ViewerRowStreamItem>, ViewerClientError> {
-        self.stream.message().await
+        self.stream.message_with(invoke_row_batch).await
     }
 }
 
@@ -202,10 +203,7 @@ struct IpcPullStream<Item> {
     finished: bool,
 }
 
-impl<Item> IpcPullStream<Item>
-where
-    Item: DeserializeOwned,
-{
+impl<Item> IpcPullStream<Item> {
     fn new(stream_id: u32, next_batch_command: &'static str, cancel_command: &'static str) -> Self {
         Self {
             stream_id,
@@ -216,15 +214,28 @@ where
         }
     }
 
-    async fn message(&mut self) -> Result<Option<Item>, ViewerClientError> {
+    async fn message(&mut self) -> Result<Option<Item>, ViewerClientError>
+    where
+        Item: DeserializeOwned,
+    {
+        self.message_with(invoke_with_stream_id::<Vec<Item>>).await
+    }
+
+    async fn message_with<F, Fut>(
+        &mut self,
+        read_batch: F,
+    ) -> Result<Option<Item>, ViewerClientError>
+    where
+        F: FnOnce(&'static str, u32) -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<Item>, ViewerClientError>>,
+    {
         if let Some(item) = self.buffered_items.pop_front() {
             return Ok(Some(item));
         }
         if self.finished {
             return Ok(None);
         }
-        let batch: Vec<Item> =
-            invoke_with_stream_id(self.next_batch_command, self.stream_id).await?;
+        let batch = read_batch(self.next_batch_command, self.stream_id).await?;
         if batch.is_empty() {
             self.finished = true;
             return Ok(None);
@@ -288,6 +299,46 @@ async fn invoke<Response>(command: &str, arguments: JsValue) -> Result<Response,
 where
     Response: DeserializeOwned,
 {
+    let value = invoke_value(command, arguments).await?;
+    serde_wasm_bindgen::from_value(value).map_err(|_| ViewerClientError::Internal)
+}
+
+async fn invoke_row_batch(
+    command: &'static str,
+    stream_id: u32,
+) -> Result<Vec<ViewerRowStreamItem>, ViewerClientError> {
+    let arguments = serde_wasm_bindgen::to_value(&StreamArguments { stream_id })
+        .map_err(|_| ViewerClientError::Internal)?;
+    let value = invoke_value(command, arguments).await?;
+    let bytes = row_bytes(value)?;
+    gtl_wire::proto::row_ipc::decode_batch(&bytes).map_err(|_| ViewerClientError::Internal)
+}
+
+fn row_bytes(value: JsValue) -> Result<Vec<u8>, ViewerClientError> {
+    let maximum = gtl_wire::proto::row_ipc::ROW_IPC_BATCH_BYTES_MAX;
+    if let Some(buffer) = value.dyn_ref::<js_sys::ArrayBuffer>() {
+        if buffer.byte_length() as usize > maximum {
+            return Err(ViewerClientError::Internal);
+        }
+        return Ok(js_sys::Uint8Array::new(buffer).to_vec());
+    }
+    // Tauri uses a numeric byte array on platforms without custom-protocol responses.
+    let array = value
+        .dyn_into::<js_sys::Array>()
+        .map_err(|_| ViewerClientError::Internal)?;
+    if array.length() as usize > maximum {
+        return Err(ViewerClientError::Internal);
+    }
+    if !array.iter().all(|byte| {
+        byte.as_f64()
+            .is_some_and(|byte| byte.fract() == 0.0 && (0.0..=255.0).contains(&byte))
+    }) {
+        return Err(ViewerClientError::Internal);
+    }
+    Ok(js_sys::Uint8Array::new(&array).to_vec())
+}
+
+async fn invoke_value(command: &str, arguments: JsValue) -> Result<JsValue, ViewerClientError> {
     let value = invoke_tauri(command, arguments).await.map_err(|value| {
         let error = serde_wasm_bindgen::from_value(value).unwrap_or(ViewerClientError::Unavailable);
         if error == ViewerClientError::Unavailable {
@@ -295,7 +346,7 @@ where
         }
         error
     })?;
-    serde_wasm_bindgen::from_value(value).map_err(|_| ViewerClientError::Internal)
+    Ok(value)
 }
 
 fn cancel_stream(command: &'static str, stream_id: u32) {

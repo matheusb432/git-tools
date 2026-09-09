@@ -1,23 +1,16 @@
 use gtl_wire::viewer::{ViewerCodeLine, ViewerSplitRow, ViewerUnifiedRow};
 
-use super::super::client_diff::ClientDiffWorkspace;
-
-pub(super) fn workspace_bytes(workspace: &ClientDiffWorkspace) -> usize {
-    let mut bytes = workspace.files.capacity()
-        * std::mem::size_of::<super::super::client_diff::ClientDiffFile>();
-    for file in &workspace.files {
-        bytes += file.rows.unified.capacity() * std::mem::size_of::<Vec<ViewerUnifiedRow>>();
-        bytes += file.rows.split.capacity() * std::mem::size_of::<Vec<ViewerSplitRow>>();
-        for batch in &file.rows.unified {
-            bytes += batch.capacity() * std::mem::size_of::<ViewerUnifiedRow>();
-            bytes += batch.iter().map(unified_bytes).sum::<usize>();
+pub(in crate::entities::diffs) fn row_window_bytes(rows: &gtl_wire::viewer::ViewerRows) -> usize {
+    match rows {
+        gtl_wire::viewer::ViewerRows::Unified(rows) => {
+            rows.capacity() * std::mem::size_of::<ViewerUnifiedRow>()
+                + rows.iter().map(unified_row_bytes).sum::<usize>()
         }
-        for batch in &file.rows.split {
-            bytes += batch.capacity() * std::mem::size_of::<ViewerSplitRow>();
-            bytes += batch.iter().map(split_bytes).sum::<usize>();
+        gtl_wire::viewer::ViewerRows::Split(rows) => {
+            rows.capacity() * std::mem::size_of::<ViewerSplitRow>()
+                + rows.iter().map(split_row_bytes).sum::<usize>()
         }
     }
-    bytes
 }
 
 fn code_bytes(code: &ViewerCodeLine) -> usize {
@@ -25,7 +18,7 @@ fn code_bytes(code: &ViewerCodeLine) -> usize {
         + code.spans.capacity() * std::mem::size_of::<gtl_wire::viewer::ViewerCodeSpan>()
 }
 
-fn unified_bytes(row: &ViewerUnifiedRow) -> usize {
+pub(in crate::entities::diffs) fn unified_row_bytes(row: &ViewerUnifiedRow) -> usize {
     match row {
         ViewerUnifiedRow::Meta(text) | ViewerUnifiedRow::Hunk(text) => text.capacity(),
         ViewerUnifiedRow::Context(row)
@@ -34,7 +27,7 @@ fn unified_bytes(row: &ViewerUnifiedRow) -> usize {
     }
 }
 
-fn split_bytes(row: &ViewerSplitRow) -> usize {
+pub(in crate::entities::diffs) fn split_row_bytes(row: &ViewerSplitRow) -> usize {
     match row {
         ViewerSplitRow::Meta(text) | ViewerSplitRow::Hunk(text) => text.capacity(),
         ViewerSplitRow::Context { code, .. } => code_bytes(code),

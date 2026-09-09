@@ -4,7 +4,7 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 // WebKit paints native scrollbars over the top layer, so hide background bars while overlays are
 // open.
 #[cfg(any(feature = "artifact", feature = "desktop"))]
-pub(crate) const OVERLAY_SCROLLBAR_CLASSES: &str = "[&:has(:popover-open,:modal)_*:not(:popover-open,:modal,:popover-open_*,:modal_*)]:[scrollbar-width:none]";
+pub(crate) const OVERLAY_SCROLLBAR_CLASSES: &str = "[&:has(:popover-open,:modal)_:is(.overflow-auto,.overflow-y-auto,.overflow-x-auto):not(:popover-open,:modal,:popover-open_*,:modal_*)]:[scrollbar-width:none]";
 
 const SCROLL_AREA_STANDARD_CLASSES: &str = "[scrollbar-color:var(--color-acc-line)_transparent] [&::-webkit-scrollbar]:size-3 [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-4 [&::-webkit-scrollbar-thumb]:border-solid [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-acc-line [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-acc [&::-webkit-scrollbar-thumb:active]:bg-acc-2";
 #[cfg(feature = "interactive-ui")]

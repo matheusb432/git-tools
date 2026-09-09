@@ -115,8 +115,8 @@ mod tests {
         let lines = (0..300)
             .map(|index| format!("+{index:03}-{}", "x".repeat(1_000)))
             .collect::<Vec<_>>();
-        view.files[0].lines.clone_from(&lines);
-        view.files[0].full_lines = Some(lines.clone());
+        view.files[0].lines = lines.clone().into();
+        view.files[0].full_lines = Some(view.files[0].lines.clone());
 
         let payload = project_payload(&[view], RenderOptions::DEFAULT, None).unwrap();
 

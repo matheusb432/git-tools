@@ -21,12 +21,16 @@ use thirtyfour::{WebDriver, WebElement};
 
 use crate::support::{self, wait};
 
+#[path = "desktop_scroll_baseline/interactions.rs"]
+mod interactions;
 #[path = "desktop_scroll_baseline/metrics.rs"]
 mod metrics;
 #[path = "desktop_scroll_baseline/process_memory.rs"]
 mod process_memory;
 #[path = "desktop_scroll_baseline/runner_environment.rs"]
 mod runner_environment;
+#[path = "desktop_scroll_baseline/viewport_journey.rs"]
+mod viewport_journey;
 
 use metrics::BrowserScrollSample;
 
@@ -55,6 +59,15 @@ const diffDocument = documents[0] ?? null;
 const changedFiles = document.querySelector(arguments[0]);
 const commitPanels = [...document.querySelectorAll(arguments[1])];
 const commits = commitPanels.find(isVisible) ?? null;
+const box = diffDocument?.getBoundingClientRect();
+const inViewport = element => {
+    const rectangle = element.getBoundingClientRect();
+    return rectangle.bottom > box.top && rectangle.top < box.bottom && rectangle.height > 0;
+};
+const viewportReady = box !== undefined &&
+    [...diffDocument.querySelectorAll('[data-gtl-diff-row]')].some(inViewport) &&
+    [...diffDocument.querySelectorAll('[data-gtl-row-window]')]
+        .filter(inViewport).every(window => window.getAttribute('aria-busy') === 'false');
 
 return {
     active_tab_count: activeTabs.length,
@@ -67,12 +80,14 @@ return {
     document_chunks_complete: diffDocument?.getAttribute('data-chunks-complete') ?? null,
     document_layout: diffDocument?.getAttribute('data-layout') ?? null,
     document_density: diffDocument?.getAttribute('data-density') ?? null,
-    diff_file_count: diffDocument?.querySelectorAll('[data-gtl-diff-file]').length ?? 0,
+    diff_file_count: Number(diffDocument?.getAttribute('data-total-files') ??
+        diffDocument?.querySelectorAll('[data-gtl-diff-file]').length ?? 0),
+    viewport_ready: viewportReady,
     changed_files_text: changedFiles?.innerText ?? null,
     visible_changed_files_count: Number(isVisible(changedFiles)),
     commit_panel_count: commitPanels.length,
     visible_commit_panel_count: commitPanels.filter(isVisible).length,
-    commit_count: commits?.querySelectorAll("[data-gtl-action='copy-commit']").length ?? 0,
+    commit_count: commits?.querySelectorAll('article[data-gtl-hover-popover-target]').length ?? 0,
 };
 "#;
 
@@ -93,10 +108,11 @@ const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].
     return style.display !== 'none' && style.visibility !== 'hidden' &&
         rectangle.width > 0 && rectangle.height > 0;
 });
-return diffDocument?.querySelectorAll('[data-gtl-diff-row]').length ?? 0;
+return Number(diffDocument?.getAttribute('data-total-rows') ??
+    diffDocument?.querySelectorAll('[data-gtl-diff-row]').length ?? 0);
 ";
 
-const EXPAND_DIFF_FILES_SCRIPT: &str = r"
+const EXPAND_DIFF_FILES_SCRIPT: &str = r#"
 const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].find((candidate) => {
     const style = getComputedStyle(candidate);
     const rectangle = candidate.getBoundingClientRect();
@@ -104,11 +120,16 @@ const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].
         rectangle.width > 0 && rectangle.height > 0;
 });
 const files = [...(diffDocument?.querySelectorAll('[data-gtl-diff-file]') ?? [])];
+if (diffDocument?.hasAttribute('data-total-files')) {
+    const collapse = document.querySelector("button[aria-label='Collapse all']");
+    if (collapse) collapse.click();
+    return Number(diffDocument.getAttribute('data-total-files'));
+}
 for (const file of files) {
     if (!file.open) file.firstElementChild?.click();
 }
 return files.length;
-";
+"#;
 
 const DIFF_DOCUMENT_SCROLL_READY_SCRIPT: &str = r"
 const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].find((candidate) => {
@@ -119,7 +140,8 @@ const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].
 });
 if (diffDocument === undefined) return false;
 const files = [...diffDocument.querySelectorAll('[data-gtl-diff-file]')];
-return files.length === arguments[0] && files.every((file) => file.open) &&
+const total = Number(diffDocument.getAttribute('data-total-files') ?? files.length);
+return total === arguments[0] && files.length > 0 && files.every((file) => file.open) &&
     diffDocument.scrollHeight - diffDocument.clientHeight >= arguments[1];
 ";
 
@@ -143,7 +165,16 @@ const observe = (timestamp) => {
         sample.complete = true;
         return;
     }
-    completing = started && diffDocument?.getAttribute('data-view-state') === 'complete';
+    if (diffDocument !== null) {
+        const box = diffDocument.getBoundingClientRect();
+        const inViewport = element => {
+            const rectangle = element.getBoundingClientRect();
+            return rectangle.bottom > box.top && rectangle.top < box.bottom && rectangle.height > 0;
+        };
+        completing = [...diffDocument.querySelectorAll('[data-gtl-diff-row]')].some(inViewport) &&
+            [...diffDocument.querySelectorAll('[data-gtl-row-window]')]
+                .filter(inViewport).every(window => window.getAttribute('aria-busy') === 'false');
+    }
     requestAnimationFrame(observe);
 };
 requestAnimationFrame(observe);
@@ -288,6 +319,7 @@ struct ReadinessSnapshot {
     document_layout: Option<String>,
     document_density: Option<String>,
     diff_file_count: usize,
+    viewport_ready: bool,
     changed_files_text: Option<String>,
     visible_changed_files_count: usize,
     commit_panel_count: usize,
@@ -310,9 +342,7 @@ impl ReadinessSnapshot {
             && self.visible_active_tab_count == 1
             && self.document_count == 1
             && self.visible_document_count == 1
-            && self.document_aria_busy.as_deref() == Some("false")
-            && self.document_view_state.as_deref() == Some("complete")
-            && self.document_chunks_complete.as_deref() == Some("true")
+            && self.viewport_ready
             && self.document_layout.as_deref() == Some("unified")
             && self.document_density.as_deref() == Some("compact")
             && self.diff_file_count == expectation.file_count
@@ -382,7 +412,7 @@ async fn production_viewer_scrolls_large_diff_workloads() -> Result<()> {
             outer_window_height_pixels: WINDOW_HEIGHT,
             expected_layout: "unified".to_owned(),
             expected_density: "compact".to_owned(),
-            readiness: "complete production DOM for the committed many-file fixture and deterministic 20,005-row single-file fixture".to_owned(),
+            readiness: "usable initial viewport and complete file/commit metadata for the unchanged many-file and 20,005-row fixtures; logical row totals verified separately".to_owned(),
             memory_attribution: process_memory::ATTRIBUTION.to_owned(),
             process_cpu_clock_ticks_per_second: process_memory::clock_ticks_per_second()?,
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
@@ -504,6 +534,7 @@ async fn measure_launch(
         start_loading_measurement(driver, session.data_root()).await?;
     let readiness_started_at = Instant::now();
     forward_fixture(&repository, session.data_root())?;
+    open_initial_diff_file(driver).await?;
     let expectation = ReadyViewExpectation {
         name: VIEW_NAME,
         file_count: desktop_scroll::DISTINCT_FILE_COUNT,
@@ -514,15 +545,8 @@ async fn measure_launch(
     let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
     let loading_frame_gaps_ms = finish_loading_frames(driver).await?;
     verify_diff_row_count(driver, expectation).await?;
-    driver
-        .set_script_timeout(SCRIPT_TIMEOUT)
-        .await
-        .context("set benchmark animation-script timeout")?;
-
-    let window = driver
-        .get_window_rect()
-        .await
-        .context("read fixed desktop benchmark window")?;
+    prepare_scroll(driver).await?;
+    let window = driver.get_window_rect().await?;
     expand_diff_files_for_scroll(driver, expectation).await?;
     let diff_document_element = visible_element(
         driver,
@@ -566,6 +590,15 @@ async fn measure_launch(
     )
     .await?;
     let memory_after_commits = process_memory::snapshot(session.data_root())?;
+    interactions::measure(
+        driver,
+        &repository,
+        session.data_root(),
+        VIEW_NAME,
+        "10",
+        launch,
+    )
+    .await?;
 
     ensure!(
         changed_files.inner_width_css_pixels == commits.inner_width_css_pixels
@@ -608,6 +641,7 @@ async fn measure_single_file_launch(
         start_loading_measurement(driver, session.data_root()).await?;
     let readiness_started_at = Instant::now();
     forward_single_file_fixture(&repository, session.data_root())?;
+    open_initial_diff_file(driver).await?;
     let expectation = ReadyViewExpectation {
         name: SINGLE_FILE_VIEW_NAME,
         file_count: 1,
@@ -618,15 +652,8 @@ async fn measure_single_file_launch(
     let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
     let loading_frame_gaps_ms = finish_loading_frames(driver).await?;
     verify_diff_row_count(driver, expectation).await?;
-    driver
-        .set_script_timeout(SCRIPT_TIMEOUT)
-        .await
-        .context("set single-file benchmark animation-script timeout")?;
-
-    let window = driver
-        .get_window_rect()
-        .await
-        .context("read fixed single-file benchmark window")?;
+    prepare_scroll(driver).await?;
+    let window = driver.get_window_rect().await?;
     expand_diff_files_for_scroll(driver, expectation).await?;
     let diff_document_element = visible_element(
         driver,
@@ -643,6 +670,16 @@ async fn measure_single_file_launch(
     .await?;
     let memory_after_diff_document = process_memory::snapshot(session.data_root())?;
 
+    interactions::measure(
+        driver,
+        &repository,
+        session.data_root(),
+        SINGLE_FILE_VIEW_NAME,
+        "1",
+        launch,
+    )
+    .await?;
+
     Ok(DesktopScrollSingleFileLaunch {
         launch,
         conditions_before_launch,
@@ -657,6 +694,13 @@ async fn measure_single_file_launch(
         diff_document,
         memory_after_diff_document,
     })
+}
+
+async fn prepare_scroll(driver: &WebDriver) -> Result<()> {
+    driver
+        .set_script_timeout(SCRIPT_TIMEOUT)
+        .await
+        .context("set benchmark animation-script timeout")
 }
 
 fn hydrate_repository(launch: usize) -> Result<PathBuf> {
@@ -799,24 +843,42 @@ async fn wait_for_ready_view(
     Ok(())
 }
 
+async fn open_initial_diff_file(driver: &WebDriver) -> Result<()> {
+    wait::until("initial diff file", ASSERTION_TIMEOUT, || async {
+        let opened: bool = driver
+            .execute(
+                r"
+            const file = document.querySelector('[data-gtl-diff-file]');
+            if (!file) return false;
+            if (!file.open) file.firstElementChild?.click();
+            return true;
+            ",
+                Vec::new(),
+            )
+            .await?
+            .convert()?;
+        Ok(opened.then_some(()))
+    })
+    .await
+}
+
 async fn verify_diff_row_count(
     driver: &WebDriver,
     expectation: ReadyViewExpectation,
 ) -> Result<()> {
-    let result = driver
-        .execute(DIFF_ROW_COUNT_SCRIPT, Vec::new())
-        .await
-        .context("count completed production diff rows")?;
-    let actual: usize = result
-        .convert()
-        .context("decode production diff row count")?;
-    ensure!(
-        actual == expectation.diff_row_count,
-        "{} rendered {actual} diff rows, expected {}",
-        expectation.name,
-        expectation.diff_row_count
-    );
-    Ok(())
+    wait::until(
+        "complete logical diff row count",
+        ASSERTION_TIMEOUT,
+        || async {
+            let actual: usize = driver
+                .execute(DIFF_ROW_COUNT_SCRIPT, Vec::new())
+                .await?
+                .convert()
+                .context("decode production diff row count")?;
+            Ok((actual == expectation.diff_row_count).then_some(()))
+        },
+    )
+    .await
 }
 
 async fn expand_diff_files_for_scroll(
@@ -834,6 +896,12 @@ async fn expand_diff_files_for_scroll(
         "expanded {expanded_file_count} diff files, expected {}",
         expectation.file_count
     );
+    let expand = driver
+        .find_all(thirtyfour::By::Css("button[aria-label='Expand all']"))
+        .await?;
+    if let Some(expand) = expand.first() {
+        expand.click().await?;
+    }
     let protocol = ScrollProtocol::diff_document();
     wait::until(
         "expanded diff document with the fixed scroll range",
@@ -1026,6 +1094,7 @@ fn readiness_accepts_complete_production_dom_snapshot() {
         document_layout: Some("unified".to_owned()),
         document_density: Some("compact".to_owned()),
         diff_file_count: desktop_scroll::DISTINCT_FILE_COUNT,
+        viewport_ready: true,
         changed_files_text: Some("Files\n50 files\n\n10\ncommits".to_owned()),
         visible_changed_files_count: 1,
         commit_panel_count: 1,

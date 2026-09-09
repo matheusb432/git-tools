@@ -49,7 +49,11 @@ pub(crate) fn Popover(
                         }
                     }
                 }
-                ScrollArea { class: "min-h-0 overflow-auto p-4", {children} }
+                ScrollArea { class: "min-h-0 overflow-auto p-4",
+                    if open || artifact_view_id.is_some() {
+                        {children}
+                    }
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const REPORT_FORMAT_VERSION: u32 = 2;
+pub const REPORT_FORMAT_VERSION: u32 = 3;
 pub const BENCHMARK_NAME: &str = "server-highlighting-production-stream";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]

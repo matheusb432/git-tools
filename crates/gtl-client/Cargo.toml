@@ -17,6 +17,7 @@ tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true, optional = true }
 serde-wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
@@ -38,6 +39,8 @@ workspace = true
 
 [features]
 viewer-ipc = [
+  "gtl-wire/protobuf",
+  "dep:js-sys",
   "dep:serde-wasm-bindgen",
   "dep:wasm-bindgen",
   "dep:wasm-bindgen-futures",

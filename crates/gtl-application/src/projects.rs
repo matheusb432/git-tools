@@ -16,6 +16,7 @@ pub mod record_project_render;
 mod remote_sync;
 pub mod render_project_diff;
 pub mod select_comparison_repositories;
+pub mod update_project_comparison;
 pub mod update_viewer_project;
 
 pub use remote_sync::{RepoSyncResult, SyncExit, SyncStatus};

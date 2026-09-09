@@ -34,15 +34,39 @@ pub(crate) fn UnifiedDiffRowBatch(
 ) -> Element {
     let rows = file.rows().unified().index(batch_index);
     rsx! {
-        UnifiedRows { rows, artifact_enhancement }
+        UnifiedRows { rows, artifact_enhancement, first_row: batch_index * 64 }
     }
 }
 
 #[component]
-fn UnifiedRows(rows: ReadStore<Vec<ViewerUnifiedRow>>, artifact_enhancement: bool) -> Element {
+fn UnifiedRows(
+    rows: ReadStore<Vec<ViewerUnifiedRow>>,
+    artifact_enhancement: bool,
+    #[props(default)] first_row: usize,
+) -> Element {
+    if artifact_enhancement {
+        return rsx! {
+            for (index, row) in rows.iter().enumerate() {
+                UnifiedDiffRow {
+                    key: "{index}",
+                    row,
+                    artifact_enhancement,
+                    row_index: first_row + index,
+                }
+            }
+        };
+    }
     rsx! {
         for (index, row) in rows.iter().enumerate() {
-            UnifiedDiffRow { key: "{index}", row, artifact_enhancement }
+            div {
+                key: "{index}",
+                "data-row-index": (first_row + index).to_string(),
+                UnifiedDiffRow {
+                    row,
+                    artifact_enhancement,
+                    row_index: first_row + index,
+                }
+            }
         }
     }
 }
@@ -54,7 +78,15 @@ enum UnifiedRowPresentation {
 }
 
 #[component]
-fn UnifiedDiffRow(row: ReadStore<ViewerUnifiedRow>, artifact_enhancement: bool) -> Element {
+fn UnifiedDiffRow(
+    row: ReadStore<ViewerUnifiedRow>,
+    artifact_enhancement: bool,
+    row_index: usize,
+) -> Element {
+    #[cfg(feature = "desktop")]
+    crate::views::diffs::presentation::use_diff_row(row_index);
+    #[cfg(not(feature = "desktop"))]
+    let _ = row_index;
     let presentation = {
         let row = row.read();
         match &*row {

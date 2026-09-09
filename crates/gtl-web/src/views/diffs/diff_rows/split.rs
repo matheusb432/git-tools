@@ -32,15 +32,39 @@ pub(crate) fn SplitDiffRowBatch(
 ) -> Element {
     let rows = file.rows().split().index(batch_index);
     rsx! {
-        SplitRows { rows, artifact_enhancement }
+        SplitRows { rows, artifact_enhancement, first_row: batch_index * 64 }
     }
 }
 
 #[component]
-fn SplitRows(rows: ReadStore<Vec<ViewerSplitRow>>, artifact_enhancement: bool) -> Element {
+fn SplitRows(
+    rows: ReadStore<Vec<ViewerSplitRow>>,
+    artifact_enhancement: bool,
+    #[props(default)] first_row: usize,
+) -> Element {
+    if artifact_enhancement {
+        return rsx! {
+            for (index, row) in rows.iter().enumerate() {
+                SplitDiffRowView {
+                    key: "{index}",
+                    row,
+                    artifact_enhancement,
+                    row_index: first_row + index,
+                }
+            }
+        };
+    }
     rsx! {
         for (index, row) in rows.iter().enumerate() {
-            SplitDiffRowView { key: "{index}", row, artifact_enhancement }
+            div {
+                key: "{index}",
+                "data-row-index": (first_row + index).to_string(),
+                SplitDiffRowView {
+                    row,
+                    artifact_enhancement,
+                    row_index: first_row + index,
+                }
+            }
         }
     }
 }
@@ -62,7 +86,15 @@ enum SplitRowPresentation {
 }
 
 #[component]
-fn SplitDiffRowView(row: ReadStore<ViewerSplitRow>, artifact_enhancement: bool) -> Element {
+fn SplitDiffRowView(
+    row: ReadStore<ViewerSplitRow>,
+    artifact_enhancement: bool,
+    row_index: usize,
+) -> Element {
+    #[cfg(feature = "desktop")]
+    crate::views::diffs::presentation::use_diff_row(row_index);
+    #[cfg(not(feature = "desktop"))]
+    let _ = row_index;
     let presentation = {
         let row = row.read();
         match &*row {

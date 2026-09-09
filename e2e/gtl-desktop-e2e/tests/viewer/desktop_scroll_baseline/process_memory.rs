@@ -122,6 +122,44 @@ pub fn snapshot(data_root: &Path) -> Result<DesktopScrollProcessMemory> {
     attributed_process_snapshot(data_root).map(|snapshot| snapshot.memory)
 }
 
+#[derive(serde::Serialize)]
+pub(super) struct DetailedMemory {
+    rss_bytes: u64,
+    pss_bytes: u64,
+    server_rss_bytes: u64,
+}
+
+pub(super) fn detailed_snapshot(data_root: &Path) -> Result<DetailedMemory> {
+    let inventory = attributed_process_inventory(data_root)?;
+    let server_rss_bytes = inventory
+        .server_roots
+        .iter()
+        .map(|pid| process_rss_bytes(*pid))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .sum();
+    let snapshot = inventory.into_snapshot()?;
+    let mut pss_bytes = 0;
+    for pid in snapshot.cpu_clock_ticks_by_process.keys() {
+        let rollup = fs::read_to_string(format!("/proc/{pid}/smaps_rollup"))?;
+        let pss = rollup
+            .lines()
+            .find_map(|line| line.strip_prefix("Pss:"))
+            .context("process proportional set size")?;
+        pss_bytes += pss
+            .split_whitespace()
+            .next()
+            .context("PSS value")?
+            .parse::<u64>()?
+            * 1024;
+    }
+    Ok(DetailedMemory {
+        rss_bytes: snapshot.memory.rss_bytes,
+        pss_bytes,
+        server_rss_bytes,
+    })
+}
+
 fn attributed_process_snapshot(data_root: &Path) -> Result<AttributedProcessSnapshot> {
     let inventory = attributed_process_inventory(data_root)?;
     ensure!(

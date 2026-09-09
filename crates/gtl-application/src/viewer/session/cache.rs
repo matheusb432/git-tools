@@ -63,23 +63,30 @@ pub struct CachedView {
     pub view: ViewerDiffSnapshot,
     pub selected: Option<ViewerDiffSnapshot>,
     weight: ViewCacheWeight,
+    base_weight: ViewCacheWeight,
 }
 
 impl CachedView {
     #[must_use]
     pub fn new(view: Arc<View>) -> Self {
+        Self::from_snapshot(ViewerDiffSnapshot::new(view))
+    }
+
+    pub(in crate::viewer) fn from_snapshot(view: ViewerDiffSnapshot) -> Self {
         let weight = view_weight(&view);
         Self {
-            view: ViewerDiffSnapshot::new(view),
+            view,
             selected: None,
             weight,
+            base_weight: weight,
         }
     }
 
     #[must_use]
     pub fn with_selected(&self, selected: ViewerDiffSnapshot) -> Self {
         Self {
-            weight: self.weight + view_weight(&selected),
+            weight: self.base_weight + view_weight(&selected),
+            base_weight: self.base_weight,
             view: self.view.clone(),
             selected: Some(selected),
         }
@@ -90,7 +97,8 @@ impl CachedView {
         Self {
             view: self.view.clone(),
             selected: None,
-            weight: view_weight(&self.view),
+            weight: self.base_weight,
+            base_weight: self.base_weight,
         }
     }
 
@@ -234,16 +242,12 @@ fn commit_weight(commit: &Commit) -> ViewCacheWeight {
 
 fn file_weight(file: &FileDiff) -> ViewCacheWeight {
     path_weight(file.path.as_path())
-        + file
-            .lines
-            .iter()
-            .map(string_weight)
-            .sum::<ViewCacheWeight>()
+        + ViewCacheWeight::new(file.lines.retained_bytes())
         + file
             .full_lines
             .as_ref()
             .map_or(ViewCacheWeight::default(), |lines| {
-                lines.iter().map(string_weight).sum()
+                ViewCacheWeight::new(lines.retained_bytes())
             })
 }
 
@@ -306,6 +310,16 @@ mod tests {
             return;
         };
         let _ = cache.get(id(older_id));
+    }
+
+    #[test]
+    fn replacing_a_selected_patch_counts_only_the_retained_patch() {
+        let range = cached("range");
+        let patch = cached("patch").view;
+        let selected = range.with_selected(patch.clone());
+        let replaced = selected.with_selected(patch);
+        assert_eq!(replaced.weight(), selected.weight());
+        assert_eq!(replaced.without_selected().weight(), range.weight());
     }
 
     #[test]
@@ -378,8 +392,8 @@ mod tests {
                 path: repository_relative_path("src/large.rs"),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                full_lines: Some(lines.clone()),
-                lines,
+                full_lines: Some(lines.clone().into()),
+                lines: lines.into(),
             }],
             title: "Large diff".into(),
             cmd: Cmd {

@@ -5,22 +5,32 @@ mod file;
 mod find;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(super) mod search_bar;
+#[cfg(feature = "desktop")]
+pub(super) mod viewport;
 
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerViewIdentity};
 
+#[cfg(feature = "artifact")]
 use self::file::DiffFileCard;
 #[cfg(feature = "desktop")]
 use crate::app::application_layout::ViewerContext;
 #[cfg(feature = "desktop")]
 use crate::entities::diffs::use_client_diff_workspace;
-#[cfg(feature = "desktop")]
-use crate::shared::ui::use_toast;
-use crate::{
-    entities::diffs::{ClientDiffFileStoreExt, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt},
-    shared::ui::EmptyNotice,
+use crate::entities::diffs::{
+    ClientDiffFileStoreExt, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
 };
+#[cfg(feature = "artifact")]
+use crate::shared::ui::EmptyNotice;
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DiffSearchTarget {
+    identity: ViewerViewIdentity,
+    file: usize,
+    row: usize,
+}
 
 #[cfg(feature = "desktop")]
 #[component]
@@ -29,14 +39,16 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     let view = diff.view;
     let workspace = use_client_diff_workspace(view);
     let identity = view.read().identity;
+    let row_source = view.read().row_source;
     let workspace_store = workspace.workspace();
     let stream_active = workspace.row_stream_active();
-    let is_loading = stream_active
-        && workspace_store.is_some_and(|store| {
-            store.files().iter().any(|file| {
-                *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
-            })
-        });
+    let is_loading = row_source == gtl_wire::viewer::ViewerRowSourceState::Pending
+        || stream_active
+            && workspace_store.is_some_and(|store| {
+                store.files().iter().any(|file| {
+                    *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
+                })
+            });
     let retry_allowed = !stream_active && workspace_store.is_some_and(|store| {
         store.files().iter().any(|file| {
             matches!(&*file.state().read(), crate::entities::diffs::ClientDiffFileState::Error(error) if error.retryable())
@@ -45,13 +57,16 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     use_diff_rows_loading_tab(identity.tab_id, is_loading);
 
     rsx! {
-        if let Some(workspace_store) = workspace_store {
+        if row_source != gtl_wire::viewer::ViewerRowSourceState::Ready {
+            DiffSourcePreparation { state: row_source, tab_id: identity.tab_id }
+        } else if let Some(workspace_store) = workspace_store {
             LoadedDiffDocument {
                 workspace: workspace_store,
+                controller: workspace,
                 is_loading,
                 retry_allowed,
                 onopen,
-                onretry: move |file_id| workspace.retry_file(file_id),
+                onretry: move |file_id| workspace.retry_file(&file_id),
             }
         }
     }
@@ -59,8 +74,42 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
 
 #[cfg(feature = "desktop")]
 #[component]
+fn DiffSourcePreparation(
+    state: gtl_wire::viewer::ViewerRowSourceState,
+    tab_id: ViewerTabId,
+) -> Element {
+    use crate::shared::ui::{Button, ButtonVariant, PageNotice};
+    let viewer = use_context::<ViewerContext>();
+    match state {
+        gtl_wire::viewer::ViewerRowSourceState::Pending => rsx! {
+            div {
+                class: "flex h-full items-center justify-center text-sm text-ink-3",
+                role: "status",
+                "Preparing diff…"
+            }
+        },
+        gtl_wire::viewer::ViewerRowSourceState::Failed => rsx! {
+            PageNotice {
+                class: "h-full px-5",
+                role: "alert",
+                title: "Diff source is unavailable",
+                message: "Refresh this tab to try loading its diff again.",
+                Button {
+                    variant: ButtonVariant::Outline,
+                    onclick: move |_| viewer.refresh_tab(tab_id),
+                    "Refresh"
+                }
+            }
+        },
+        gtl_wire::viewer::ViewerRowSourceState::Ready => rsx! {},
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[component]
 fn LoadedDiffDocument(
     workspace: Store<ClientDiffWorkspace>,
+    controller: crate::entities::diffs::ClientDiffWorkspaceController,
     is_loading: bool,
     retry_allowed: bool,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
@@ -71,36 +120,39 @@ fn LoadedDiffDocument(
     }))();
     let diff = super::diff_workspace::use_workspace_context();
     let view = diff.view;
-    let toast = use_toast();
-    let (title, identity) = view.with(|view| (view.title.clone(), view.identity));
+    let search_target = use_signal(|| None::<DiffSearchTarget>);
+    let (title, identity, content_id) =
+        view.with(|view| (view.title.clone(), view.identity, view.content_id));
+    copy_context::use_diff_copy(identity, workspace);
 
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
-            oncopy: move |event: ClipboardEvent| {
-                let Some(message) = copy_context::copy_selected_diff_lines(&event) else {
-                    return;
-                };
-                toast.ok(message);
-            },
-            find::DiffFindBar {
-                open: diff.find_open,
-                identity,
-                rows_loading: is_loading,
-                workspace,
-            }
-            DiffDocumentBody {
-                title,
-                workspace,
-                identity,
-                folded: diff.files_folded,
-                flashing_file: diff.flashing_file,
-                is_loading,
-                retry_allowed,
-                onopen,
-                onretry,
-                artifact_tab_id: None,
+            // Dioxus reconciles keys in lists; each tab owns these hook lifetimes.
+            for identity in [identity] {
+                find::DiffFindBar {
+                    key: "{identity.tab_id}:{content_id:?}",
+                    open: diff.find_open,
+                    identity,
+                    workspace,
+                    target: search_target,
+                }
+                viewport::DiffViewport {
+                    title: title.clone(),
+                    workspace,
+                    identity,
+                    content_id,
+                    controller,
+                    search_target,
+                    folded: diff.files_folded,
+                    fold_command: diff.fold_command,
+                    flashing_file: diff.flashing_file,
+                    is_loading,
+                    retry_allowed,
+                    onopen,
+                    onretry,
+                }
             }
         }
     }
@@ -161,6 +213,7 @@ pub(crate) fn StaticDiffDocument(
     }
 }
 
+#[cfg(feature = "artifact")]
 #[component]
 fn DiffDocumentBody(
     title: String,
@@ -211,6 +264,7 @@ fn DiffDocumentBody(
     }
 }
 
+#[cfg(feature = "artifact")]
 #[component]
 fn DiffDocumentFiles(
     workspace: ReadStore<ClientDiffWorkspace>,

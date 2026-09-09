@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 12;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 16;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -223,6 +223,7 @@ pub struct ViewerFileSummary {
     pub status: ViewerFileStatus,
     pub can_open_in_editor: bool,
     pub initially_expanded: bool,
+    pub row_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -377,10 +378,19 @@ pub enum ViewerCommitSelection {
     Error { id: CommitId, message: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerRowSourceState {
+    Ready,
+    Pending,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerActiveView {
     pub identity: ViewerViewIdentity,
     pub content_id: ViewerRowContentId,
+    pub row_source: ViewerRowSourceState,
     pub title: String,
     pub repository_name: ProjectName,
     pub branch: GitHead,
@@ -711,18 +721,23 @@ pub enum ViewerFileFailureCode {
 pub enum ViewerRowEvent {
     FileStarted {
         file: ViewerDiffFileId,
+        row_count: u32,
+        start_row: u32,
     },
     UnifiedRows {
         file: ViewerDiffFileId,
+        start_row: u32,
         rows: Vec<ViewerUnifiedRow>,
     },
     SplitRows {
         file: ViewerDiffFileId,
+        start_row: u32,
         rows: Vec<ViewerSplitRow>,
     },
     FileFinished {
         file: ViewerDiffFileId,
         line_number_digits: u32,
+        end_row: u32,
     },
     FileFailed {
         file: ViewerDiffFileId,
@@ -743,6 +758,75 @@ pub struct ViewerRowStreamItem {
 pub struct StreamViewerRows {
     pub identity: ViewerViewIdentity,
     pub file: Option<ViewerDiffFileId>,
+    pub row_range: Option<ViewerRowRange>,
+}
+
+/// A nonempty logical row window, bounded to one normal batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ViewerRowRangeFields", into = "ViewerRowRangeFields")]
+pub struct ViewerRowRange {
+    start: u32,
+    count: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ViewerRowRangeFields {
+    start: u32,
+    count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewerRowRangeError;
+
+impl std::fmt::Display for ViewerRowRangeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("viewer row range exceeds supported bounds")
+    }
+}
+
+impl std::error::Error for ViewerRowRangeError {}
+
+impl ViewerRowRange {
+    pub fn try_new(start: u32, count: u32) -> Result<Self, ViewerRowRangeError> {
+        if count == 0
+            || u64::from(count) > VIEWER_ROW_BATCH_MAX_ROWS as u64
+            || start.checked_add(count).is_none()
+        {
+            return Err(ViewerRowRangeError);
+        }
+        Ok(Self { start, count })
+    }
+
+    #[must_use]
+    pub const fn start(self) -> u32 {
+        self.start
+    }
+
+    #[must_use]
+    pub const fn count(self) -> u32 {
+        self.count
+    }
+
+    #[must_use]
+    pub const fn end(self) -> u32 {
+        self.start + self.count
+    }
+}
+
+impl TryFrom<ViewerRowRangeFields> for ViewerRowRange {
+    type Error = ViewerRowRangeError;
+    fn try_from(fields: ViewerRowRangeFields) -> Result<Self, Self::Error> {
+        Self::try_new(fields.start, fields.count)
+    }
+}
+
+impl From<ViewerRowRange> for ViewerRowRangeFields {
+    fn from(range: ViewerRowRange) -> Self {
+        Self {
+            start: range.start,
+            count: range.count,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -776,6 +860,20 @@ pub struct FindViewerDiff {
     pub query: String,
     pub direction: ViewerDiffSearchDirection,
     pub anchor: Option<ViewerDiffSearchMatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadViewerDiffText {
+    pub identity: ViewerViewIdentity,
+    pub file: ViewerDiffFileId,
+    pub row_range: ViewerRowRange,
+    pub old_side: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffTextLine {
+    pub line_number: u32,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

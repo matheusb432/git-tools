@@ -310,7 +310,8 @@ mod tests {
                     lines: match status {
                         FileStatus::Deleted => vec!["deleted file mode 100644".into()],
                         _ => Vec::new(),
-                    },
+                    }
+                    .into(),
                     full_lines: None,
                 })
                 .collect(),

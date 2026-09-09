@@ -1,7 +1,7 @@
 mod actions;
 #[cfg(test)]
 mod navigation_tests;
-mod rows;
+pub(super) mod rows;
 
 use dioxus::prelude::*;
 use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath, viewer::ViewerTabId};
@@ -15,6 +15,13 @@ use crate::{
     },
 };
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct DiffFileControls {
+    pub(super) open: ReadSignal<bool>,
+    pub(super) onchange: Callback<bool>,
+    pub(super) onresize: EventHandler<ResizeEvent>,
+}
+
 #[component]
 pub(super) fn DiffFileCard(
     file: ReadStore<ClientDiffFile>,
@@ -27,15 +34,27 @@ pub(super) fn DiffFileCard(
     retry_allowed: bool,
     file_index: usize,
     artifact_tab_id: Option<ViewerTabId>,
+    controls: Option<DiffFileControls>,
+    body: Option<Element>,
 ) -> Element {
     #[cfg(test)]
     navigation_tests::record_render(file_index);
     let summary = file.summary();
     let initially_expanded = summary.peek().initially_expanded;
-    let mut open = use_signal(|| initially_expanded);
+    let mut local_open = use_signal(|| initially_expanded);
+    let open = controls.map_or_else(|| ReadSignal::from(local_open), |controls| controls.open);
+    let set_open = use_callback(move |next: bool| {
+        if let Some(controls) = controls {
+            controls.onchange.call(next);
+        } else if *local_open.peek() != next {
+            local_open.set(next);
+        }
+    });
     use_effect(move || {
-        if let Some(folded) = folded() {
-            open.set(!folded);
+        if controls.is_none()
+            && let Some(folded) = folded()
+        {
+            set_open.call(!folded);
         }
     });
     let (file_id, original_anchor_id, path, absolute_path, comment_leader) =
@@ -57,7 +76,7 @@ pub(super) fn DiffFileCard(
     let navigation_anchor_id = anchor_id.clone();
     use_effect(move || {
         if flashing_file.read().as_deref() == Some(navigation_anchor_id.as_str()) {
-            open.set(true);
+            set_open.call(true);
         }
     });
     let copy_popover_id = format!("{anchor_id}-copy-menu");
@@ -81,6 +100,7 @@ pub(super) fn DiffFileCard(
         details {
             id: anchor_id,
             "data-gtl-diff-file": "",
+            "data-file-index": file_index.to_string(),
             "data-path": path.clone(),
             "data-gtl-file": artifact_file_id.clone(),
             "data-gtl-path": artifact_path,
@@ -93,18 +113,24 @@ pub(super) fn DiffFileCard(
             DiffFileHeader {
                 summary,
                 open,
+                onopenchange: set_open,
+                onresize: controls.map(|controls| controls.onresize),
                 copy_popover_id,
                 onopen,
                 artifact_enhancement,
             }
-            DiffFileBody {
-                file,
-                layout,
-                density,
-                file_index,
-                onretry,
-                retry_allowed,
-                artifact_file_id: artifact_file_id.clone(),
+            if let Some(body) = body {
+                {body}
+            } else {
+                DiffFileBody {
+                    file,
+                    layout,
+                    density,
+                    file_index,
+                    onretry,
+                    retry_allowed,
+                    artifact_file_id: artifact_file_id.clone(),
+                }
             }
         }
     }
@@ -113,7 +139,9 @@ pub(super) fn DiffFileCard(
 #[component]
 fn DiffFileHeader(
     summary: ReadSignal<gtl_wire::viewer::ViewerFileSummary>,
-    mut open: Signal<bool>,
+    open: ReadSignal<bool>,
+    onopenchange: Callback<bool>,
+    onresize: Option<EventHandler<ResizeEvent>>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
@@ -124,7 +152,12 @@ fn DiffFileHeader(
             class: "relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-open/file:border-b [&::-webkit-details-marker]:hidden mobile:min-h-11 mobile:gap-1.5 mobile:py-1.5 mobile:pr-2 mobile:pl-4 print:static print:bg-[#f2f2f2]",
             onclick: move |event| {
                 event.prevent_default();
-                open.toggle();
+                onopenchange.call(!*open.peek());
+            },
+            onresize: move |event| {
+                if let Some(onresize) = onresize {
+                    onresize.call(event);
+                }
             },
             DiffFileCaret {}
             DiffFilePath {
@@ -151,7 +184,7 @@ fn static_artifact_file_id(tab_id: ViewerTabId, file_id: &ViewerDiffFileId) -> S
     format!("artifact-view-{tab_id}-{}", file_id.as_str())
 }
 
-fn copy_comment_leader(path: &RepositoryRelativePath) -> &'static str {
+pub(super) fn copy_comment_leader(path: &RepositoryRelativePath) -> &'static str {
     match path
         .as_path()
         .extension()
@@ -234,6 +267,7 @@ mod tests {
                 status: ViewerFileStatus::Modified,
                 can_open_in_editor: true,
                 initially_expanded: false,
+                row_count: 1,
             },
             rows: ClientDiffRows {
                 unified: vec![vec![

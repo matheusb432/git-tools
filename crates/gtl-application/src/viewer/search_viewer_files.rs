@@ -2,12 +2,24 @@
 
 use gtl_wire::viewer::{SearchViewerFiles, ViewerDiffFileId, ViewerFileSearchResult};
 
-use crate::diffs::View;
+use super::{
+    ViewerState,
+    source::{self, ViewerSourceError},
+};
+use crate::{diffs::View, ports::UserSettingsReader};
 
 /// Searches changed-file paths without exposing the diff view to the client.
 #[cqrsy::query]
-#[must_use]
-pub fn execute(query: &SearchViewerFiles, view: &View) -> ViewerFileSearchResult {
+pub fn execute(
+    query: &SearchViewerFiles,
+    state: &ViewerState,
+    settings: &impl UserSettingsReader,
+) -> Result<ViewerFileSearchResult, ViewerSourceError> {
+    let snapshot = source::current(query.identity, state, settings)?;
+    Ok(search(query, snapshot.view()))
+}
+
+fn search(query: &SearchViewerFiles, view: &View) -> ViewerFileSearchResult {
     let needle = query.query.to_lowercase();
     let files = view
         .files
@@ -61,12 +73,12 @@ mod tests {
                 path: repository_relative_path(path),
                 added: DiffLineCount::default(),
                 removed: DiffLineCount::default(),
-                lines: Vec::new(),
+                lines: crate::diffs::source_lines::DiffSourceLines::default(),
                 full_lines: None,
             })
             .collect();
 
-        let result = search_viewer_files::execute(
+        let result = search_viewer_files::search(
             &SearchViewerFiles {
                 identity: identity(),
                 query: "RENDER".into(),

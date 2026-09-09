@@ -118,8 +118,24 @@ pub(super) fn LongLine(
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
-    let mut expanded = use_signal(|| false);
+    #[cfg(feature = "desktop")]
+    let retained = retained_line(copy_text);
+    #[cfg(feature = "desktop")]
+    let initial = retained
+        .as_ref()
+        .is_some_and(|(presentation, tab, line)| presentation.line_expanded(*tab, line));
+    #[cfg(not(feature = "desktop"))]
+    let initial = false;
+    let mut expanded = use_signal(move || initial);
     let is_expanded = expanded();
+    let toggle = use_callback(move |()| {
+        let next = !*expanded.peek();
+        expanded.set(next);
+        #[cfg(feature = "desktop")]
+        if let Some((presentation, tab, line)) = &retained {
+            presentation.set_line_expanded(*tab, line.clone(), next);
+        }
+    });
     let artifact_long_line = artifact_enhancement.then_some("");
     let artifact_expanded = artifact_enhancement.then(|| is_expanded.to_string());
     rsx! {
@@ -138,10 +154,40 @@ pub(super) fn LongLine(
                 character_count,
                 expanded: is_expanded,
                 artifact_enhancement,
-                on_toggle: move |()| expanded.toggle(),
+                on_toggle: toggle,
             }
         }
     }
+}
+
+#[cfg(feature = "desktop")]
+fn retained_line(
+    copy_text: bool,
+) -> Option<(
+    crate::views::diffs::presentation::DiffPresentation,
+    gtl_models::viewer::ViewerTabId,
+    crate::views::diffs::presentation::ExpandedLine,
+)> {
+    use crate::views::diffs::presentation::{
+        DiffPresentation, DiffRowPresentation, ExpandedLine, LineSide,
+    };
+    let presentation = try_use_context::<DiffPresentation>();
+    let row = try_use_context::<Option<DiffRowPresentation>>().flatten();
+    let (presentation, row) = presentation.zip(row)?;
+    Some((
+        presentation,
+        row.batch.tab,
+        ExpandedLine {
+            content: row.batch.content,
+            file: row.batch.file.to_string(),
+            row: row.row,
+            side: if copy_text {
+                LineSide::New
+            } else {
+                LineSide::Old
+            },
+        },
+    ))
 }
 
 #[component]

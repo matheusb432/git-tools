@@ -72,6 +72,12 @@ viewer_request!(
 );
 viewer_request!(find_diff, FindViewerDiff, ViewerDiffSearchResult, find_diff);
 viewer_request!(
+    read_diff_text,
+    gtl_wire::viewer::ReadViewerDiffText,
+    Vec<gtl_wire::viewer::ViewerDiffTextLine>,
+    read_diff_text
+);
+viewer_request!(
     list_history,
     ListViewerHistory,
     ViewerHistoryPage,

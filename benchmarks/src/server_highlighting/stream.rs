@@ -77,17 +77,40 @@ impl StreamValidator {
             .ok_or(StreamValidationError::MissingEvent)?;
         self.validate_event(event)?;
 
-        let semantic = StreamViewerRowsResponse {
-            identity: None,
-            sequence: response.sequence,
-            event: response.event.clone(),
-        };
-        let encoded = semantic.encode_to_vec();
-        self.digest.update((encoded.len() as u64).to_le_bytes());
-        self.digest.update(&encoded);
+        self.hash_event(event);
         self.message_count = self.message_count.saturating_add(1);
         self.encoded_bytes = self.encoded_bytes.saturating_add(response.encoded_len());
         Ok(())
+    }
+
+    fn hash_event(&mut self, event: &stream_viewer_rows_response::Event) {
+        match event {
+            stream_viewer_rows_response::Event::FileStarted(started) => {
+                self.hash_value(0, started.file_id.as_bytes());
+            }
+            stream_viewer_rows_response::Event::UnifiedRows(batch) => {
+                for row in &batch.rows {
+                    self.hash_value(1, &row.encode_to_vec());
+                }
+            }
+            stream_viewer_rows_response::Event::SplitRows(batch) => {
+                for row in &batch.rows {
+                    self.hash_value(2, &row.encode_to_vec());
+                }
+            }
+            stream_viewer_rows_response::Event::FileFinished(finished) => {
+                self.hash_value(3, finished.file_id.as_bytes());
+                self.digest
+                    .update(finished.line_number_digits.to_le_bytes());
+            }
+            stream_viewer_rows_response::Event::FileFailed(_) => {}
+        }
+    }
+
+    fn hash_value(&mut self, kind: u8, value: &[u8]) {
+        self.digest.update([kind]);
+        self.digest.update((value.len() as u64).to_le_bytes());
+        self.digest.update(value);
     }
 
     pub fn finish(self) -> Result<StreamEvidence, StreamValidationError> {
@@ -285,6 +308,48 @@ mod tests {
     }
 
     #[test]
+    fn semantic_digest_ignores_batch_boundaries_but_preserves_rows() {
+        let mut split = valid_stream();
+        split.insert(2, split[1].clone());
+        for (sequence, message) in split.iter_mut().enumerate() {
+            message.sequence = sequence as u64;
+        }
+        let mut combined = valid_stream();
+        let batch = match combined[1].event.as_mut() {
+            Some(stream_viewer_rows_response::Event::UnifiedRows(batch)) => Some(batch),
+            _ => None,
+        }
+        .unwrap();
+        batch.rows.push(batch.rows[0].clone());
+        for messages in [&mut split, &mut combined] {
+            if let Some(stream_viewer_rows_response::Event::FileStarted(started)) =
+                messages[0].event.as_mut()
+            {
+                started.row_count = 2;
+            }
+            if let Some(stream_viewer_rows_response::Event::FileFinished(finished)) =
+                messages.last_mut().unwrap().event.as_mut()
+            {
+                finished.end_row = 2;
+            }
+        }
+        if let Some(stream_viewer_rows_response::Event::UnifiedRows(batch)) =
+            split[2].event.as_mut()
+        {
+            batch.start_row = 1;
+        }
+        let first = evidence(combined).unwrap();
+        let second = evidence(split).unwrap();
+        assert_eq!(first.row_count, second.row_count);
+        assert_ne!(first.message_count, second.message_count);
+        assert_eq!(first.semantic_sha256, second.semantic_sha256);
+        assert_ne!(
+            first.semantic_sha256,
+            evidence(valid_stream()).unwrap().semantic_sha256
+        );
+    }
+
+    #[test]
     fn validator_rejects_non_utf8_span_boundaries() {
         let mut messages = valid_stream();
         let batch = match messages[1].event.as_mut() {
@@ -327,6 +392,8 @@ mod tests {
                 event: Some(stream_viewer_rows_response::Event::FileStarted(
                     v1::ViewerFileStarted {
                         file_id: "f-0".to_owned(),
+                        start_row: 0,
+                        row_count: 1,
                     },
                 )),
             },
@@ -336,6 +403,7 @@ mod tests {
                 event: Some(stream_viewer_rows_response::Event::UnifiedRows(
                     v1::ViewerUnifiedRows {
                         file_id: "f-0".to_owned(),
+                        start_row: 0,
                         rows: vec![ViewerUnifiedRow {
                             row: Some(viewer_unified_row::Row::Added(v1::ViewerUnifiedSourceRow {
                                 old_line_number: None,
@@ -362,6 +430,7 @@ mod tests {
                     v1::ViewerFileFinished {
                         file_id: "f-0".to_owned(),
                         line_number_digits: 1,
+                        end_row: 1,
                     },
                 )),
             },

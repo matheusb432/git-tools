@@ -1,4 +1,5 @@
 pub mod projects;
+pub mod text;
 
 use std::path::PathBuf;
 
@@ -228,6 +229,11 @@ fn encode_viewer_active_view(
     Ok(v1::ViewerActiveView {
         identity: Some(encode_viewer_view_identity(view.identity)),
         content_id: Some(view.content_id.into_digest().to_vec()),
+        row_source: match view.row_source {
+            crate::viewer::ViewerRowSourceState::Ready => v1::ViewerRowSourceState::Ready,
+            crate::viewer::ViewerRowSourceState::Pending => v1::ViewerRowSourceState::Pending,
+            crate::viewer::ViewerRowSourceState::Failed => v1::ViewerRowSourceState::Failed,
+        } as i32,
         title: view.title,
         repository_name: view.repository_name.to_string(),
         branch: view.branch.to_string(),
@@ -258,11 +264,13 @@ fn encode_viewer_active_view(
                     } as i32,
                     can_open_in_editor: file.can_open_in_editor,
                     initially_expanded: file.initially_expanded,
+                    row_count: u32::try_from(file.row_count)
+                        .map_err(|_| ViewerCodecError::Unrepresentable)?,
                 })
             })
             .collect::<Result<Vec<_>, ViewerCodecError>>()?,
         commits_label: view.commits_label,
-        commit_count: u32::try_from(view.commits.len())
+        commit_count: u32::try_from(view.commit_count)
             .map_err(|_| ViewerCodecError::Unrepresentable)?,
         commit_selection: Some(encode_viewer_commit_selection(view.commit_selection)),
         footer: Some(v1::ViewerFooter {
@@ -785,11 +793,24 @@ pub fn encode_open_viewer_diff_file_request(
     }
 }
 
+pub fn decode_open_viewer_diff_file_request(
+    request: v1::OpenViewerDiffFileRequest,
+) -> Result<OpenViewerDiffFile, ViewerCodecError> {
+    Ok(OpenViewerDiffFile {
+        identity: decode_viewer_view_identity(required(request.identity)?)?,
+        file: decode_viewer_diff_file_id(request.file_id)?,
+    })
+}
+
 #[must_use]
 pub fn encode_stream_viewer_rows_request(request: StreamViewerRows) -> v1::StreamViewerRowsRequest {
     v1::StreamViewerRowsRequest {
         identity: Some(encode_viewer_view_identity(request.identity)),
         file_id: request.file.map(|file| file.as_str().to_owned()),
+        row_range: request.row_range.map(|range| v1::ViewerRowRange {
+            start: range.start(),
+            count: range.count(),
+        }),
     }
 }
 
@@ -1103,6 +1124,14 @@ fn decode_viewer_active_view(
 ) -> Result<ViewerActiveView, ViewerCodecError> {
     Ok(ViewerActiveView {
         identity: decode_viewer_view_identity(required(view.identity)?)?,
+        row_source: match v1::ViewerRowSourceState::try_from(view.row_source)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?
+        {
+            v1::ViewerRowSourceState::Ready => crate::viewer::ViewerRowSourceState::Ready,
+            v1::ViewerRowSourceState::Pending => crate::viewer::ViewerRowSourceState::Pending,
+            v1::ViewerRowSourceState::Failed => crate::viewer::ViewerRowSourceState::Failed,
+            v1::ViewerRowSourceState::Unspecified => return Err(ViewerCodecError::InvalidMessage),
+        },
         content_id: crate::viewer::ViewerRowContentId::from_digest(
             required(view.content_id)?
                 .try_into()
@@ -1161,6 +1190,8 @@ fn decode_viewer_file_summary(
         },
         can_open_in_editor: file.can_open_in_editor,
         initially_expanded: file.initially_expanded,
+        row_count: usize::try_from(file.row_count)
+            .map_err(|_| ViewerCodecError::Unrepresentable)?,
     })
 }
 
@@ -1389,9 +1420,12 @@ fn decode_viewer_row_event(
     match event {
         Event::FileStarted(event) => Ok(ViewerRowEvent::FileStarted {
             file: decode_viewer_diff_file_id(event.file_id)?,
+            row_count: event.row_count,
+            start_row: event.start_row,
         }),
         Event::UnifiedRows(event) => Ok(ViewerRowEvent::UnifiedRows {
             file: decode_viewer_diff_file_id(event.file_id)?,
+            start_row: event.start_row,
             rows: event
                 .rows
                 .into_iter()
@@ -1400,6 +1434,7 @@ fn decode_viewer_row_event(
         }),
         Event::SplitRows(event) => Ok(ViewerRowEvent::SplitRows {
             file: decode_viewer_diff_file_id(event.file_id)?,
+            start_row: event.start_row,
             rows: event
                 .rows
                 .into_iter()
@@ -1409,6 +1444,7 @@ fn decode_viewer_row_event(
         Event::FileFinished(event) => Ok(ViewerRowEvent::FileFinished {
             file: decode_viewer_diff_file_id(event.file_id)?,
             line_number_digits: event.line_number_digits,
+            end_row: event.end_row,
         }),
         Event::FileFailed(event) => Ok(ViewerRowEvent::FileFailed {
             file: decode_viewer_diff_file_id(event.file_id)?,

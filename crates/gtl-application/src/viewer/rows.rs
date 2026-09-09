@@ -12,6 +12,105 @@ use gtl_wire::viewer::{
     ViewerUnifiedSourceRow,
 };
 
+/// Cancellation shared by a viewer request and its CPU worker.
+#[derive(Clone, Debug, Default)]
+pub struct ViewerWorkCancellation {
+    pub(super) parser: gtl_parser::cancellation::ParseCancellation,
+}
+
+impl ViewerWorkCancellation {
+    pub fn cancel(&self) {
+        self.parser.cancel();
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.parser.is_cancelled()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ViewerRowWindowError {
+    #[error("viewer row range is invalid")]
+    InvalidRange,
+    #[error("viewer row work was cancelled")]
+    Cancelled,
+}
+
+pub(crate) const fn indexed_layout(layout: ViewerDiffLayout) -> gtl_parser::index::DiffRowLayout {
+    match layout {
+        ViewerDiffLayout::Unified => gtl_parser::index::DiffRowLayout::Unified,
+        ViewerDiffLayout::Split => gtl_parser::index::DiffRowLayout::Split,
+    }
+}
+
+#[must_use]
+pub fn viewer_file_row_count(
+    source: &crate::diffs::source_lines::DiffSourceLines,
+    layout: ViewerDiffLayout,
+) -> usize {
+    source.index().len(indexed_layout(layout))
+}
+
+/// Projects adjacent row windows while retaining one bounded syntax hunk.
+pub struct ViewerRowWindowParser<'source> {
+    source: &'source crate::diffs::source_lines::DiffSourceLines,
+    layout: ViewerDiffLayout,
+    parser: gtl_parser::index::DiffWindowParser<'source>,
+}
+
+impl<'source> ViewerRowWindowParser<'source> {
+    #[must_use]
+    pub fn new(
+        path: &RepositoryRelativePath,
+        source: &'source crate::diffs::source_lines::DiffSourceLines,
+        layout: ViewerDiffLayout,
+    ) -> Self {
+        Self {
+            source,
+            layout,
+            parser: source.index().window_parser(
+                gtl_parser::ParseOptions::default(),
+                SyntaxLanguage::from_path(path.as_path()),
+            ),
+        }
+    }
+
+    pub fn parse(
+        &mut self,
+        range: std::ops::Range<usize>,
+        cancellation: &ViewerWorkCancellation,
+    ) -> Result<ViewerRowBatch, ViewerRowWindowError> {
+        let parsed = self
+            .parser
+            .parse_range(
+                |line| self.source.line(line),
+                range,
+                indexed_layout(self.layout),
+                &cancellation.parser,
+            )
+            .map_err(|error| match error {
+                gtl_parser::index::DiffWindowError::InvalidRange => {
+                    ViewerRowWindowError::InvalidRange
+                }
+                gtl_parser::index::DiffWindowError::Cancelled => ViewerRowWindowError::Cancelled,
+            })?;
+        let rows = match parsed.rows {
+            gtl_parser::index::ParsedDiffWindowRows::Unified(rows) => {
+                ViewerRows::Unified(rows.iter().map(project_unified_row).collect())
+            }
+            gtl_parser::index::ParsedDiffWindowRows::Split(rows) => {
+                ViewerRows::Split(rows.iter().map(project_split_row).collect())
+            }
+        };
+        Ok(ViewerRowBatch {
+            rows,
+            line_number_digits: self.source.index().line_number_digits().get(),
+            diagnostics: project_diagnostics(parsed.diagnostics),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewerSyntaxSide {
     Old,
@@ -53,7 +152,7 @@ impl ViewerFileRowParser {
     }
 
     #[must_use]
-    pub fn push(&mut self, lines: &[String]) -> ViewerRowBatch {
+    pub fn push(&mut self, lines: impl IntoIterator<Item = impl AsRef<str>>) -> ViewerRowBatch {
         let parsed = self.parser.push(lines);
         let line_number_digits = parsed.line_number_digits().get();
         let (rows, diagnostics) = parsed.into_parts();
@@ -94,15 +193,16 @@ fn project_rows(split: &mut Option<SplitDiffStream>, rows: Vec<DiffRow>) -> View
 #[must_use]
 pub fn parse_viewer_diff_file(
     path: &RepositoryRelativePath,
-    lines: &[String],
+    lines: impl IntoIterator<Item = impl AsRef<str>>,
     layout: ViewerDiffLayout,
 ) -> ParsedViewerFile {
     let mut parser = ViewerFileRowParser::new(layout, path);
     let mut rows = empty_rows(layout);
     let mut diagnostics = Vec::new();
     let mut line_number_digits = 1;
-    for source in lines.chunks(VIEWER_ROW_BATCH_MAX_ROWS) {
-        let batch = parser.push(source);
+    let mut lines = lines.into_iter().peekable();
+    while lines.peek().is_some() {
+        let batch = parser.push(lines.by_ref().take(VIEWER_ROW_BATCH_MAX_ROWS));
         append_rows(&mut rows, batch.rows);
         line_number_digits = line_number_digits.max(batch.line_number_digits);
         diagnostics.extend(batch.diagnostics);
@@ -256,6 +356,35 @@ mod tests {
 
     use super::*;
     use crate::utils::repository_relative_path;
+
+    #[test]
+    fn indexed_windows_project_the_same_rows_as_complete_artifacts() {
+        let path = repository_relative_path("src/example.rs");
+        let source = [
+            "--- a/example.rs",
+            "+++ b/example.rs",
+            "@@ -40,2 +50,2 @@",
+            "-let old = 1;",
+            "+let new = 2;",
+            " context",
+            "",
+        ]
+        .into_iter()
+        .collect::<crate::diffs::source_lines::DiffSourceLines>();
+        for layout in [ViewerDiffLayout::Unified, ViewerDiffLayout::Split] {
+            let expected = parse_viewer_diff_file(&path, &source, layout).file;
+            let mut rows = empty_rows(layout);
+            let mut parser = ViewerRowWindowParser::new(&path, &source, layout);
+            for start in 0..viewer_file_row_count(&source, layout) {
+                let window = parser
+                    .parse(start..start + 1, &ViewerWorkCancellation::default())
+                    .unwrap();
+                assert_eq!(window.line_number_digits, expected.line_number_digits);
+                append_rows(&mut rows, window.rows);
+            }
+            assert_eq!(rows, expected.rows);
+        }
+    }
 
     #[test]
     fn projects_syntax_and_line_numbers_for_supported_files() {

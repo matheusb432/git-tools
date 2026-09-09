@@ -2,26 +2,49 @@
 
 use gtl_wire::viewer::{
     FindViewerDiff, ViewerDiffFileId, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
-    ViewerDiffSearchResult, ViewerRows, ViewerSplitRow, ViewerUnifiedRow,
+    ViewerDiffSearchResult,
 };
 
-use super::{rows::parse_viewer_diff_file, viewer_diff_file_source};
-use crate::diffs::View;
+use super::{
+    ViewerState,
+    rows::{ViewerWorkCancellation, indexed_layout},
+    source::{self, ViewerSourceError},
+    viewer_diff_file_source,
+};
+use crate::{diffs::View, ports::UserSettingsReader};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum FindViewerDiffError {
+    #[error(transparent)]
+    Source(#[from] ViewerSourceError),
     #[error("viewer diff search row index exceeds u32")]
     RowIndexExhausted,
     #[error("viewer diff search match count exceeds u64")]
     MatchCountExhausted,
+    #[error("viewer diff search was cancelled")]
+    Cancelled,
 }
 
 /// Finds one logical rendered row and counts all matches for browser-like navigation.
 #[cqrsy::query]
 pub fn execute(
     query: &FindViewerDiff,
-    view: &View,
+    state: &ViewerState,
+    settings: &impl UserSettingsReader,
+    cancellation: &ViewerWorkCancellation,
 ) -> Result<ViewerDiffSearchResult, FindViewerDiffError> {
+    let snapshot = source::ready(query.identity, state, settings)?;
+    find(query, snapshot.view(), cancellation)
+}
+
+fn find(
+    query: &FindViewerDiff,
+    view: &View,
+    cancellation: &ViewerWorkCancellation,
+) -> Result<ViewerDiffSearchResult, FindViewerDiffError> {
+    if cancellation.is_cancelled() {
+        return Err(FindViewerDiffError::Cancelled);
+    }
     let needle = query.query.to_lowercase();
     if needle.is_empty() {
         return Ok(ViewerDiffSearchResult {
@@ -38,7 +61,7 @@ pub fn execute(
     let mut search = SearchAccumulator::new(query.direction, anchor);
 
     for file_index in 0..view.files.len() {
-        search_file(&mut search, query, view, file_index, &needle)?;
+        search_file(&mut search, query, view, file_index, &needle, cancellation)?;
     }
 
     Ok(search.finish(query.identity))
@@ -50,74 +73,36 @@ fn search_file(
     view: &View,
     file_index: usize,
     needle: &str,
+    cancellation: &ViewerWorkCancellation,
 ) -> Result<(), FindViewerDiffError> {
     let file = ViewerDiffFileId::for_index(file_index);
     let Some(source) = viewer_diff_file_source(view, &file, query.identity.render_options.density)
     else {
         return Ok(());
     };
-    let parsed = parse_viewer_diff_file(
-        source.path,
-        source.lines,
-        query.identity.render_options.layout,
-    );
-    match parsed.file.rows {
-        ViewerRows::Unified(rows) => {
-            observe_matching_rows(search, file_index, &file, &rows, |row| {
-                unified_row_matches(row, needle)
-            })?;
+    let layout = indexed_layout(query.identity.render_options.layout);
+    let index = source.lines.index();
+    for row_index in 0..index.len(layout) {
+        if cancellation.is_cancelled() {
+            return Err(FindViewerDiffError::Cancelled);
         }
-        ViewerRows::Split(rows) => {
-            observe_matching_rows(search, file_index, &file, &rows, |row| {
-                split_row_matches(row, needle)
-            })?;
+        let matches = index.row(layout, row_index).is_some_and(|row| {
+            row.lines().any(|line| {
+                let text = source.lines.line(line.source_index);
+                let text = match line.kind {
+                    gtl_parser::DiffRowKind::Meta | gtl_parser::DiffRowKind::Hunk => text,
+                    gtl_parser::DiffRowKind::Context
+                    | gtl_parser::DiffRowKind::Added
+                    | gtl_parser::DiffRowKind::Removed => gtl_parser::diff_line_body(text),
+                };
+                contains_case_insensitive(text, needle)
+            })
+        });
+        if matches {
+            search.observe(file_index, row_index, file.clone())?;
         }
     }
     Ok(())
-}
-
-fn observe_matching_rows<Row>(
-    search: &mut SearchAccumulator,
-    file_index: usize,
-    file: &ViewerDiffFileId,
-    rows: &[Row],
-    matches: impl Fn(&Row) -> bool,
-) -> Result<(), FindViewerDiffError> {
-    for row_index in rows
-        .iter()
-        .enumerate()
-        .filter(|(_, row)| matches(row))
-        .map(|(row_index, _)| row_index)
-    {
-        search.observe(file_index, row_index, file.clone())?;
-    }
-    Ok(())
-}
-
-fn unified_row_matches(row: &ViewerUnifiedRow, needle: &str) -> bool {
-    let text = match row {
-        ViewerUnifiedRow::Meta(text) | ViewerUnifiedRow::Hunk(text) => text,
-        ViewerUnifiedRow::Context(row)
-        | ViewerUnifiedRow::Added(row)
-        | ViewerUnifiedRow::Removed(row) => &row.code.text,
-    };
-    contains_case_insensitive(text, needle)
-}
-
-fn split_row_matches(row: &ViewerSplitRow, needle: &str) -> bool {
-    match row {
-        ViewerSplitRow::Meta(text) | ViewerSplitRow::Hunk(text) => {
-            contains_case_insensitive(text, needle)
-        }
-        ViewerSplitRow::Context { code, .. } => contains_case_insensitive(&code.text, needle),
-        ViewerSplitRow::Pair { old, new } => {
-            old.as_ref()
-                .is_some_and(|cell| contains_case_insensitive(&cell.code.text, needle))
-                || new
-                    .as_ref()
-                    .is_some_and(|cell| contains_case_insensitive(&cell.code.text, needle))
-        }
-    }
 }
 
 fn contains_case_insensitive(text: &str, needle: &str) -> bool {
@@ -243,14 +228,15 @@ pub(crate) mod tests {
                     "@@ -1 +1 @@".into(),
                     "-old needle".into(),
                     "+new value".into(),
-                ],
+                ]
+                .into(),
                 full_lines: None,
             },
             FileDiff {
                 path: repository_relative_path("src/second.rs"),
                 added: DiffLineCount::new(1),
                 removed: DiffLineCount::default(),
-                lines: vec!["@@ -0,0 +1 @@".into(), "+second NEEDLE".into()],
+                lines: vec!["@@ -0,0 +1 @@".into(), "+second NEEDLE".into()].into(),
                 full_lines: None,
             },
         ];
@@ -258,10 +244,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn cancelled_search_returns_no_partial_match_count() {
+        let cancellation = ViewerWorkCancellation::default();
+        cancellation.cancel();
+        let result = find_viewer_diff::find(
+            &FindViewerDiff {
+                identity: identity(ViewerDiffLayout::Split),
+                query: "needle".into(),
+                direction: ViewerDiffSearchDirection::Forward,
+                anchor: None,
+            },
+            &search_view(),
+            &cancellation,
+        );
+        assert!(matches!(result, Err(FindViewerDiffError::Cancelled)));
+    }
+
+    #[test]
     fn forward_search_counts_matches_and_wraps_across_files() {
         let view = search_view();
         let identity = identity(ViewerDiffLayout::Unified);
-        let first = find_viewer_diff::execute(
+        let first = find_viewer_diff::find(
             &FindViewerDiff {
                 identity,
                 query: "needle".into(),
@@ -269,6 +272,7 @@ pub(crate) mod tests {
                 anchor: None,
             },
             &view,
+            &ViewerWorkCancellation::default(),
         )
         .unwrap();
         assert_eq!(first.total_matches, 2);
@@ -278,7 +282,7 @@ pub(crate) mod tests {
         );
         assert!(!first.wrapped);
 
-        let wrapped = find_viewer_diff::execute(
+        let wrapped = find_viewer_diff::find(
             &FindViewerDiff {
                 identity,
                 query: "needle".into(),
@@ -289,6 +293,7 @@ pub(crate) mod tests {
                 }),
             },
             &view,
+            &ViewerWorkCancellation::default(),
         )
         .unwrap();
         assert_eq!(wrapped.active_match, first.active_match);
@@ -298,7 +303,7 @@ pub(crate) mod tests {
     #[test]
     fn split_search_counts_a_matching_pair_as_one_logical_row() {
         let view = search_view();
-        let result = find_viewer_diff::execute(
+        let result = find_viewer_diff::find(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Split),
                 query: "needle".into(),
@@ -306,6 +311,7 @@ pub(crate) mod tests {
                 anchor: None,
             },
             &view,
+            &ViewerWorkCancellation::default(),
         )
         .unwrap();
 
@@ -315,7 +321,7 @@ pub(crate) mod tests {
     #[test]
     fn backward_search_starts_at_the_last_match() {
         let view = search_view();
-        let result = find_viewer_diff::execute(
+        let result = find_viewer_diff::find(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Unified),
                 query: "needle".into(),
@@ -323,6 +329,7 @@ pub(crate) mod tests {
                 anchor: None,
             },
             &view,
+            &ViewerWorkCancellation::default(),
         )
         .unwrap();
 

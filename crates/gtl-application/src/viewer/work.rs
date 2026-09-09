@@ -190,7 +190,6 @@ pub fn activate_tab(
         if !session.activate(tab_id) {
             return Err(ReserveRecipeError::UnknownTab);
         }
-        session.clear_commit_selection(tab_id);
         reserve_active_if_needed(session)
     })?
 }
@@ -305,30 +304,39 @@ pub fn publish_recipe(
         result,
         head,
     } = work;
-    state.update(|session| match result {
-        Ok(PrepareRecipeOk::Broken { state }) => {
-            match session.set_state_if_current(ticket, state) {
-                PublishOutcome::Published => RecipePublication::Broken,
-                PublishOutcome::Stale => RecipePublication::Stale,
-            }
-        }
-        Ok(PrepareRecipeOk::Skipped { path, .. }) => match session.close_if_current(ticket) {
-            PublishOutcome::Published => RecipePublication::Skipped { path },
-            PublishOutcome::Stale => RecipePublication::Stale,
-        },
+    match result {
         Ok(PrepareRecipeOk::Publish {
             label,
             view,
             history,
-        }) => match session.publish_labeled_if_current(ticket, CachedView::new(view), label) {
-            PublishOutcome::Published => {
-                session.retain_snapshot_recipe(ticket, &history.recipe);
-                session.set_live_head(ticket, head);
-                RecipePublication::Published { history }
-            }
-            PublishOutcome::Stale => RecipePublication::Stale,
-        },
-        Err(error) => {
+        }) => {
+            let value = CachedView::from_snapshot(state.prepare_snapshot(view)?);
+            state.update(
+                |session| match session.publish_labeled_if_current(ticket, value, label) {
+                    PublishOutcome::Published => {
+                        session.retain_snapshot_recipe(ticket, &history.recipe);
+                        session.set_live_head(ticket, head);
+                        RecipePublication::Published { history }
+                    }
+                    PublishOutcome::Stale => RecipePublication::Stale,
+                },
+            )
+        }
+        Ok(PrepareRecipeOk::Broken { state: broken }) => {
+            state.update(
+                |session| match session.set_state_if_current(ticket, broken) {
+                    PublishOutcome::Published => RecipePublication::Broken,
+                    PublishOutcome::Stale => RecipePublication::Stale,
+                },
+            )
+        }
+        Ok(PrepareRecipeOk::Skipped { path, .. }) => {
+            state.update(|session| match session.close_if_current(ticket) {
+                PublishOutcome::Published => RecipePublication::Skipped { path },
+                PublishOutcome::Stale => RecipePublication::Stale,
+            })
+        }
+        Err(error) => state.update(|session| {
             let outcome = session.set_state_if_current(
                 ticket,
                 gtl_models::viewer::ViewerTabState::Error {
@@ -346,8 +354,24 @@ pub fn publish_recipe(
                 PublishOutcome::Published => RecipePublication::Failed { error },
                 PublishOutcome::Stale => RecipePublication::Stale,
             }
-        }
-    })
+        }),
+    }
+}
+
+pub fn reserve_selected_commit_reload(
+    state: &ViewerState,
+) -> Result<Option<ReservedCommitWork>, ReserveCommitError> {
+    state.update(|session| {
+        let Some((tab_id, commit_id)) = session.selected_commit_to_reload() else {
+            return Ok(None);
+        };
+        let (ticket, repo_root, commit) = session.begin_commit_selection(tab_id, &commit_id)?;
+        Ok(Some(ReservedCommitWork {
+            repo_root,
+            commit,
+            ticket,
+        }))
+    })?
 }
 
 pub fn reserve_commit(
@@ -386,8 +410,12 @@ pub fn publish_commit(
     work: ComputedCommitWork,
 ) -> Result<CommitPublication, ViewerStateError> {
     let ComputedCommitWork { ticket, result } = work;
+    let result = match result {
+        Ok(view) => Ok(state.prepare_snapshot(Arc::new(view))?),
+        Err(error) => Err(error),
+    };
     state.update(|session| match result {
-        Ok(view) => match session.publish_commit_patch_if_current(ticket, Arc::new(view)) {
+        Ok(view) => match session.publish_commit_patch_if_current(ticket, view) {
             PublishOutcome::Published => CommitPublication::Published,
             PublishOutcome::Stale => CommitPublication::Stale,
         },

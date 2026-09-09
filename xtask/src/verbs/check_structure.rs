@@ -252,18 +252,27 @@ fn collect_package_violations(
         }
         if policy.from == "gtl-application"
             && dependency.name == "gtl-wire"
-            && dependency_enables_grpc(dependency.uses_default_features, &dependency.features)
+            && dependency_enables_generated_transport(
+                dependency.uses_default_features,
+                &dependency.features,
+            )
         {
             violations.push(
-                "[gtl-application omits generated transport] gtl-application -> gtl-wire/grpc: application code may use hand-written wire contracts but not generated protobuf or Tonic types"
+                "[gtl-application omits generated transport] gtl-application -> gtl-wire protobuf/grpc: application code may use hand-written wire contracts but not generated protobuf or Tonic types"
                     .to_owned(),
             );
         }
     }
 }
 
-fn dependency_enables_grpc(uses_default_features: bool, features: &[String]) -> bool {
-    uses_default_features || features.iter().any(|feature| feature == "grpc")
+fn dependency_enables_generated_transport(
+    uses_default_features: bool,
+    features: &[String],
+) -> bool {
+    uses_default_features
+        || features
+            .iter()
+            .any(|feature| matches!(feature.as_str(), "grpc" | "protobuf"))
 }
 
 fn dependency_is_forbidden(
@@ -390,10 +399,17 @@ mod tests {
     }
 
     #[test]
-    fn application_wire_dependency_must_omit_grpc_and_default_features() {
-        assert!(!dependency_enables_grpc(false, &[]));
-        assert!(dependency_enables_grpc(true, &[]));
-        assert!(dependency_enables_grpc(false, &["grpc".to_owned()]));
+    fn application_wire_dependency_must_omit_generated_transport_and_default_features() {
+        assert!(!dependency_enables_generated_transport(false, &[]));
+        assert!(dependency_enables_generated_transport(true, &[]));
+        assert!(dependency_enables_generated_transport(
+            false,
+            &["grpc".to_owned()]
+        ));
+        assert!(dependency_enables_generated_transport(
+            false,
+            &["protobuf".to_owned()]
+        ));
     }
 
     #[test]

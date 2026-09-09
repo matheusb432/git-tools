@@ -8,7 +8,7 @@ fn file(path: &str) -> FileDiff {
         path: RepositoryRelativePath::try_new(path.into()).unwrap(),
         added: DiffLineCount::default(),
         removed: DiffLineCount::default(),
-        lines: Vec::new(),
+        lines: gtl_application::diffs::source_lines::DiffSourceLines::default(),
         full_lines: None,
     }
 }

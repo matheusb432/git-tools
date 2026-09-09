@@ -1,7 +1,9 @@
 use std::fmt;
 
 #[cfg(feature = "desktop")]
-use dioxus::prelude::ClipboardEvent;
+mod selection;
+#[cfg(feature = "desktop")]
+pub(super) use selection::use_diff_copy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SelectedLineRange {
@@ -69,83 +71,6 @@ impl SelectedDiffLines {
 struct ContextualizedCopy {
     text: String,
     status: String,
-}
-
-#[cfg(feature = "desktop")]
-pub(super) fn copy_selected_diff_lines(event: &ClipboardEvent) -> Option<String> {
-    use dioxus::web::WebEventExt as _;
-    use wasm_bindgen::JsCast as _;
-
-    let clipboard_event = event
-        .data()
-        .try_as_web_event()?
-        .dyn_into::<web_sys::ClipboardEvent>()
-        .ok()?;
-    let selection = web_sys::window()?.get_selection().ok().flatten()?;
-    if selection.is_collapsed() || selection.range_count() == 0 {
-        return None;
-    }
-
-    let anchor_node = selection.anchor_node()?;
-    let focus_node = selection.focus_node()?;
-    let file = closest_diff_file(&anchor_node)?;
-    let focus_file = closest_diff_file(&focus_node)?;
-    if !file.is_same_node(Some(&focus_file)) {
-        return None;
-    }
-
-    let rows = file.query_selector_all("[data-gtl-copy-line]").ok()?;
-    let mut selected = SelectedDiffLines::default();
-    for index in 0..rows.length() {
-        let Some(row) = rows
-            .item(index)
-            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
-        else {
-            continue;
-        };
-        if !selection
-            .contains_node_with_allow_partial_containment(&row, true)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let Some(text) = row
-            .query_selector("[data-gtl-copy-text]")
-            .ok()
-            .flatten()
-            .and_then(|element| element.text_content())
-        else {
-            continue;
-        };
-        let line_number = row
-            .get_attribute("data-gtl-new-line")
-            .and_then(|value| value.parse::<u32>().ok())
-            .filter(|number| *number > 0);
-        selected.push(text, line_number);
-    }
-
-    let path = file.get_attribute("data-path")?;
-    let comment_leader = file
-        .get_attribute("data-gtl-comment-leader")
-        .unwrap_or_else(|| "//".to_owned());
-    let copied = selected.with_context(&path, &comment_leader)?;
-    clipboard_event
-        .clipboard_data()?
-        .set_data("text/plain", &copied.text)
-        .ok()?;
-    clipboard_event.prevent_default();
-    Some(copied.status)
-}
-
-#[cfg(feature = "desktop")]
-fn closest_diff_file(node: &web_sys::Node) -> Option<web_sys::Element> {
-    use wasm_bindgen::JsCast as _;
-
-    let element = node
-        .dyn_ref::<web_sys::Element>()
-        .cloned()
-        .or_else(|| node.parent_element())?;
-    element.closest("[data-gtl-diff-file]").ok().flatten()
 }
 
 #[cfg(test)]

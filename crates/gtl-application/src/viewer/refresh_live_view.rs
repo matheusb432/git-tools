@@ -109,7 +109,7 @@ pub fn prepare(
             Ok(LiveViewCheck::Prepared(LiveViewPublication {
                 ticket: request.ticket,
                 head,
-                value: CachedView::new(view),
+                value: CachedView::from_snapshot(state.prepare_snapshot(view)?),
                 label,
             }))
         }

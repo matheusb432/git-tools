@@ -6,13 +6,8 @@ publish.workspace = true
 
 [features]
 default = []
-grpc = [
-  "dep:prost",
-  "dep:thiserror",
-  "dep:tonic",
-  "dep:tonic-prost",
-  "dep:tonic-prost-build",
-]
+grpc = ["protobuf", "dep:tonic", "dep:tonic-prost"]
+protobuf = ["dep:prost", "dep:thiserror", "dep:tonic-prost-build"]
 
 [dependencies]
 gtl-models.workspace = true

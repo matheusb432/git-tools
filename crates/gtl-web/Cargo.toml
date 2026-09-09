@@ -14,6 +14,7 @@ gtl-client = { workspace = true, optional = true, features = ["viewer-ipc"] }
 gtl-models.workspace = true
 gtl-wire.workspace = true
 gtl-web-contracts.workspace = true
+lru = { workspace = true, optional = true }
 lucide-dioxus = { version = "3.26.0", features = [
   "account",
   "arrows",
@@ -48,6 +49,7 @@ web-sys = { workspace = true, features = [
   "Node",
   "NodeList",
   "PointerEvent",
+  "Range",
   "Selection",
   "Window",
 ] }
@@ -69,7 +71,13 @@ component-preview = [
   "interactive-ui",
   "web",
 ]
-desktop = ["interactive-ui", "web", "dioxus/router", "dep:gtl-client"]
+desktop = [
+  "interactive-ui",
+  "web",
+  "dioxus/router",
+  "dep:gtl-client",
+  "dep:lru",
+]
 interactive-ui = []
 web = ["dioxus/launch", "dioxus/web"]
 

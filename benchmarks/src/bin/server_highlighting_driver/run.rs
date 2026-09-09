@@ -115,6 +115,7 @@ async fn measure_independent(
     let request = StreamViewerRowsRequest {
         identity: Some(view),
         file_id: None,
+        row_range: None,
     };
     let interval = Duration::from_micros(config.rss_sample_interval_microseconds);
     let cold = measure_stream(
@@ -185,6 +186,7 @@ async fn measure_residency(
             StreamViewerRowsRequest {
                 identity: Some(view),
                 file_id: None,
+                row_range: None,
             },
             server.process_id(),
             interval,
@@ -233,6 +235,7 @@ async fn run_massif(config: &DriverConfig) -> Result<()> {
         StreamViewerRowsRequest {
             identity: Some(view),
             file_id: None,
+            row_range: None,
         },
         server.process_id(),
         Duration::from_micros(config.rss_sample_interval_microseconds),
@@ -306,6 +309,7 @@ async fn wait_for_ready_view(
                 | viewer_active_state::State::Broken(_)
                 | viewer_active_state::State::Error(_) => None,
             })
+            .filter(|view| view.row_source() == v1::ViewerRowSourceState::Ready)
         {
             let paths = view
                 .files

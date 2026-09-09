@@ -193,12 +193,12 @@ fn ReadyWorkspace(
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
     let mut delete_open = use_signal(|| false);
-    let mut delete_pending = use_signal(|| false);
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
-    let file_filter = use_signal(String::new);
+    let mut file_filter = use_signal(String::new);
     let mut path_filter_open = use_signal(|| false);
-    let files_folded = use_signal(|| None::<bool>);
-    let flashing_file = use_signal(|| None::<String>);
+    let presentation = use_context::<crate::views::diffs::presentation::DiffPresentation>();
+    let mut files_folded = use_signal(move || presentation.all_folded(view.peek().identity.tab_id));
+    let mut flashing_file = use_signal(|| None::<String>);
     let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
     let keybindings = shell.with(|shell| match shell {
@@ -270,6 +270,35 @@ fn ReadyWorkspace(
             Err(error) => toast.error(error.message()),
         }
         Ok::<(), std::convert::Infallible>(())
+    });
+    let mut delete_view = use_action(move |tab_id: ViewerTabId| async move {
+        match viewer_server::delete_live_tab(ViewerTabRequest { tab_id }).await {
+            Ok(shell) => {
+                delete_open.set(false);
+                viewer.replace_shell(shell);
+            }
+            Err(error) => toast.error(error.message()),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let active_tab = use_memo(move || view.read().identity.tab_id);
+    let mut previous_tab = use_signal(move || *active_tab.peek());
+    use_effect(move || {
+        let tab = active_tab();
+        if *previous_tab.peek() == tab {
+            return;
+        }
+        previous_tab.set(tab);
+        commit_selection.cancel();
+        delete_view.cancel();
+        delete_open.set(false);
+        mobile_panel.set(None);
+        file_filter.set(String::new());
+        path_filter_open.set(false);
+        find_open.set(false);
+        flashing_file.set(None);
+        files_folded.set(presentation.all_folded(tab));
+        browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
     });
     let onclear_commit = use_callback(move |()| {
         commit_selection.call(CommitSelectionAction::UnselectCommit);
@@ -385,28 +414,18 @@ fn ReadyWorkspace(
             title: "Delete live view",
             description: "This removes the saved live view and closes its tab. Render history remains available.",
             confirm_label: "Delete live view",
-            confirm_state: if delete_pending() { ButtonState::Loading } else { ButtonState::Enabled },
-            cancel_disabled: delete_pending(),
+            confirm_state: if delete_view.pending() { ButtonState::Loading } else { ButtonState::Enabled },
+            cancel_disabled: delete_view.pending(),
             oncancel: move |()| {
-                if !delete_pending() {
+                if !delete_view.pending() {
                     delete_open.set(false);
                 }
             },
             onconfirm: move |()| {
-                if delete_pending() {
+                if delete_view.pending() {
                     return;
                 }
-                delete_pending.set(true);
-                spawn(async move {
-                    match viewer_server::delete_live_tab(ViewerTabRequest { tab_id }).await {
-                        Ok(shell) => {
-                            delete_open.set(false);
-                            viewer.replace_shell(shell);
-                        }
-                        Err(error) => toast.error(error.message()),
-                    }
-                    delete_pending.set(false);
-                });
+                delete_view.call(tab_id);
             },
         }
     }

@@ -132,12 +132,12 @@ impl DiffSyntaxHighlighter {
         row_count: usize,
     ) -> Result<Vec<Vec<SyntaxToken>>, HighlightFailure> {
         let byte_tokens = match side {
-            DiffSide::Old => self.old_side.tokens(self.language, &source.text),
-            DiffSide::New => self.new_side.tokens(self.language, &source.text),
+            DiffSide::Old => self.old_side.tokens(self.language, &source.text, None),
+            DiffSide::New => self.new_side.tokens(self.language, &source.text, None),
         }
         .map_err(|message| HighlightFailure { side, message })?;
 
-        tokens_by_row(source, &byte_tokens, row_count)
+        tokens_by_row(&source.text, &source.rows, &byte_tokens, row_count)
             .map_err(|message| HighlightFailure { side, message })
     }
 }
@@ -198,9 +198,9 @@ impl HunkBuffer {
 }
 
 #[derive(Default)]
-struct HunkSource {
-    text: String,
-    rows: Vec<SourceRowRange>,
+pub(crate) struct HunkSource {
+    pub(crate) text: String,
+    pub(crate) rows: Vec<SourceRowRange>,
 }
 
 impl HunkSource {
@@ -217,10 +217,10 @@ impl HunkSource {
     }
 }
 
-struct SourceRowRange {
-    row_index: usize,
-    byte_range: Range<usize>,
-    suppress_tokens: bool,
+pub(crate) struct SourceRowRange {
+    pub(crate) row_index: usize,
+    pub(crate) byte_range: Range<usize>,
+    pub(crate) suppress_tokens: bool,
 }
 
 struct HighlightFailure {
@@ -246,8 +246,9 @@ fn reconstruct_sources(rows: &[DiffRow]) -> (HunkSource, HunkSource) {
     (old_source, new_source)
 }
 
-fn tokens_by_row(
-    source: &HunkSource,
+pub(crate) fn tokens_by_row(
+    text: &str,
+    rows: &[SourceRowRange],
     byte_tokens: &[ByteSyntaxToken],
     row_count: usize,
 ) -> Result<Vec<Vec<SyntaxToken>>, String> {
@@ -255,27 +256,27 @@ fn tokens_by_row(
     let mut first_candidate = 0usize;
 
     for token in byte_tokens {
-        while source
-            .rows
+        while rows
             .get(first_candidate)
             .is_some_and(|row| row.byte_range.end <= token.start)
         {
             first_candidate += 1;
         }
 
-        append_token_to_rows(source, token, first_candidate, &mut output)?;
+        append_token_to_rows(text, rows, token, first_candidate, &mut output)?;
     }
 
     Ok(output)
 }
 
 fn append_token_to_rows(
-    source: &HunkSource,
+    text: &str,
+    rows: &[SourceRowRange],
     token: &ByteSyntaxToken,
     first_candidate: usize,
     output: &mut [Vec<SyntaxToken>],
 ) -> Result<(), String> {
-    for row in source.rows.iter().skip(first_candidate) {
+    for row in rows.iter().skip(first_candidate) {
         if row.byte_range.start >= token.end {
             break;
         }
@@ -288,12 +289,10 @@ fn append_token_to_rows(
         if start >= end {
             continue;
         }
-        let prefix = source
-            .text
+        let prefix = text
             .get(row.byte_range.start..start)
             .ok_or_else(|| "highlight start is not on a UTF-8 boundary".to_owned())?;
-        let text = source
-            .text
+        let text = text
             .get(start..end)
             .ok_or_else(|| "highlight end is not on a UTF-8 boundary".to_owned())?;
         let character_start = prefix.chars().count();
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     fn completed_hunk_preserves_multiline_comment_context_on_both_sides() {
-        let parsed = rust_parser().parse(&lines(&[
+        let parsed = rust_parser().parse(lines(&[
             "@@ -1,4 +1,4 @@",
             " /* open",
             "-old inside",
@@ -376,8 +375,8 @@ mod tests {
     #[test]
     fn hunk_buffer_crosses_push_boundaries_and_finish_emits_it() {
         let mut stream = rust_parser().stream();
-        let first = stream.push(&lines(&["@@ -1,4 +1,4 @@", " /* open"]));
-        let second = stream.push(&lines(&["-old inside", "+new inside", " */"]));
+        let first = stream.push(lines(&["@@ -1,4 +1,4 @@", " /* open"]));
+        let second = stream.push(lines(&["-old inside", "+new inside", " */"]));
 
         assert!(first.rows().is_empty());
         assert!(second.rows().is_empty());
@@ -396,7 +395,7 @@ mod tests {
     #[test]
     fn next_hunk_flushes_the_completed_hunk() {
         let mut stream = rust_parser().stream();
-        let batch = stream.push(&lines(&[
+        let batch = stream.push(lines(&[
             "@@ -1 +1 @@",
             " let first = 1;",
             "@@ -4 +4 @@",
@@ -421,7 +420,7 @@ mod tests {
                 .with_max_syntax_hunk_bytes(SyntaxHunkByteLimit::new(10)),
         )
         .with_syntax(Some(SyntaxLanguage::Rust));
-        let parsed = parser.parse(&lines(&[
+        let parsed = parser.parse(lines(&[
             "@@ -1 +1 @@",
             " let value = 1;",
             "@@ -3 +3 @@",
@@ -440,7 +439,7 @@ mod tests {
 
     #[test]
     fn rust_macros_raw_identifiers_and_multi_hash_strings_keep_distinct_classes() {
-        let parsed = rust_parser().parse(&lines(&[
+        let parsed = rust_parser().parse(lines(&[
             "@@ -1,6 +1,6 @@",
             " macro_rules! passthrough { ($($tokens:tt)*) => { $($tokens)* }; }",
             " passthrough! {",
@@ -485,7 +484,7 @@ mod tests {
 
     #[test]
     fn unicode_byte_ranges_map_to_row_character_offsets() {
-        let parsed = rust_parser().parse(&lines(&["@@ -1 +1 @@", " let café = \"α\";"]));
+        let parsed = rust_parser().parse(lines(&["@@ -1 +1 @@", " let café = \"α\";"]));
         let string = parsed.rows()[1]
             .syntax_tokens()
             .iter()
@@ -500,7 +499,7 @@ mod tests {
     fn overlong_rows_feed_parser_context_without_receiving_tokens() {
         let parser = DiffParser::with_options(ParseOptions::new(CharacterCount::new(4)))
             .with_syntax(Some(SyntaxLanguage::Rust));
-        let parsed = parser.parse(&lines(&[
+        let parsed = parser.parse(lines(&[
             "@@ -1,2 +1,2 @@",
             " /* comment begins beyond the row limit",
             " x",
@@ -516,7 +515,7 @@ mod tests {
 
     #[test]
     fn malformed_rust_keeps_valid_captures_without_a_diagnostic() {
-        let parsed = rust_parser().parse(&lines(&[
+        let parsed = rust_parser().parse(lines(&[
             "@@ -1,2 +1,2 @@",
             " let broken = ;",
             " async fn valid() {}",
@@ -539,7 +538,7 @@ mod tests {
     fn supported_injections_highlight_and_unsupported_css_stays_plain() {
         let markdown = DiffParser::new()
             .with_syntax(Some(SyntaxLanguage::Markdown))
-            .parse(&lines(&[
+            .parse(lines(&[
                 "@@ -1,3 +1,3 @@",
                 " ```rust",
                 " async fn run() {}",
@@ -553,7 +552,7 @@ mod tests {
 
         let html = DiffParser::new()
             .with_syntax(Some(SyntaxLanguage::Html))
-            .parse(&lines(&[
+            .parse(lines(&[
                 "@@ -1,2 +1,2 @@",
                 " <script>const value = 1;</script>",
                 " <style>color: red;</style>",
@@ -576,7 +575,7 @@ mod tests {
             ParseOptions::default().with_max_syntax_hunk_bytes(SyntaxHunkByteLimit::new(10)),
         )
         .with_syntax(Some(SyntaxLanguage::Rust));
-        let parsed = parser.parse(&lines(&[
+        let parsed = parser.parse(lines(&[
             "@@ -0,0 +1 @@",
             "+let added_value = 1;",
             "+let more = 2;",

@@ -208,6 +208,15 @@ fn CollapseFilesButton(
             onclick: move |_| {
                 let folded = !files_folded;
                 workspace.files_folded.set(Some(folded));
+                #[cfg(feature = "desktop")]
+                workspace
+                    .fold_command
+                    .set(
+                        Some(super::FileFoldCommand {
+                            tab_id: workspace.view.peek().identity.tab_id,
+                            folded,
+                        }),
+                    );
                 if folded {
                     browser::scroll_diff_document_to_start();
                 }

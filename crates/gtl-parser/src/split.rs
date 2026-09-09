@@ -115,28 +115,9 @@ impl SplitDiffStream {
         match row.kind() {
             DiffRowKind::Removed => self.removed.push(row),
             DiffRowKind::Added => self.added.push(row),
-            DiffRowKind::Meta => {
+            DiffRowKind::Meta | DiffRowKind::Hunk | DiffRowKind::Context => {
                 self.flush_pairs(output);
-                output.push(SplitDiffRow::Meta {
-                    text: row.text().to_owned(),
-                });
-            }
-            DiffRowKind::Hunk => {
-                self.flush_pairs(output);
-                output.push(SplitDiffRow::Hunk {
-                    text: row.text().to_owned(),
-                });
-            }
-            DiffRowKind::Context => {
-                self.flush_pairs(output);
-                output.push(SplitDiffRow::Context {
-                    old_line_number: row.old_line_number().unwrap_or_default(),
-                    new_line_number: row.new_line_number().unwrap_or_default(),
-                    text: row.text().to_owned(),
-                    syntax_tokens: row.syntax_tokens().to_vec(),
-                    semantic_spans: row.semantic_spans().to_vec(),
-                    long_line_character_count: row.long_line_character_count(),
-                });
+                output.push(single_row(&row));
             }
         }
     }
@@ -154,15 +135,39 @@ impl SplitDiffStream {
             let old = self.removed.get(index);
             let new = self.added.get(index);
 
-            let spans = changed_line_spans(old, new);
-
-            output.push(SplitDiffRow::Pair {
-                old: old.map(|row| split_cell(row, spans.old.clone(), true)),
-                new: new.map(|row| split_cell(row, spans.new.clone(), false)),
-            });
+            output.push(paired_row(old, new));
         }
         self.removed.clear();
         self.added.clear();
+    }
+}
+
+pub(crate) fn paired_row(old: Option<&DiffRow>, new: Option<&DiffRow>) -> SplitDiffRow {
+    let spans = changed_line_spans(old, new);
+    SplitDiffRow::Pair {
+        old: old.map(|row| split_cell(row, spans.old, true)),
+        new: new.map(|row| split_cell(row, spans.new, false)),
+    }
+}
+
+pub(crate) fn single_row(row: &DiffRow) -> SplitDiffRow {
+    match row.kind() {
+        DiffRowKind::Meta => SplitDiffRow::Meta {
+            text: row.text().to_owned(),
+        },
+        DiffRowKind::Hunk => SplitDiffRow::Hunk {
+            text: row.text().to_owned(),
+        },
+        DiffRowKind::Context => SplitDiffRow::Context {
+            old_line_number: row.old_line_number().unwrap_or_default(),
+            new_line_number: row.new_line_number().unwrap_or_default(),
+            text: row.text().to_owned(),
+            syntax_tokens: row.syntax_tokens().to_vec(),
+            semantic_spans: row.semantic_spans().to_vec(),
+            long_line_character_count: row.long_line_character_count(),
+        },
+        DiffRowKind::Added => paired_row(None, Some(row)),
+        DiffRowKind::Removed => paired_row(Some(row), None),
     }
 }
 
@@ -211,7 +216,7 @@ mod tests {
     }
 
     fn split(raw: &[&str]) -> Vec<SplitDiffRow> {
-        DiffParser::new().parse(&lines(raw)).split_rows()
+        DiffParser::new().parse(lines(raw)).split_rows()
     }
 
     #[test]

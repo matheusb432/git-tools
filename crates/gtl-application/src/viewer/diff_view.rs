@@ -9,7 +9,7 @@ use gtl_wire::viewer::{
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    diffs::{FileDiff, FileStatus, View},
+    diffs::{FileDiff, FileStatus, View, source_lines::DiffSourceLines},
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
 
@@ -105,7 +105,7 @@ fn row_content_id(
 /// Borrowed source selected for one identity-bound viewer file.
 pub struct ViewerDiffFileSource<'view> {
     pub path: &'view RepositoryRelativePath,
-    pub lines: &'view [String],
+    pub lines: &'view DiffSourceLines,
 }
 
 /// Projects validated application rendering options into the shared client contract.
@@ -171,7 +171,20 @@ pub fn project_diff_view(
         source_digest(view, identity.render_options.density),
         identity.render_options.layout,
     );
-    project_diff_view_with_content_id(view, range_view, identity, commit_selection, content_id)
+    let mut projected =
+        project_diff_view_with_content_id(view, range_view, identity, commit_selection, content_id);
+    projected.commits = range_view
+        .commits
+        .iter()
+        .map(|commit| ViewerCommitSummary {
+            id: commit.id.clone(),
+            subject: commit.subject.clone(),
+            body: commit.body.clone(),
+            committed_at: commit.committed_at.clone(),
+            is_merge: commit.is_merge(),
+        })
+        .collect();
+    projected
 }
 
 pub(super) fn project_diff_view_with_content_id(
@@ -182,6 +195,7 @@ pub(super) fn project_diff_view_with_content_id(
     content_id: ViewerRowContentId,
 ) -> ViewerActiveView {
     ViewerActiveView {
+        row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity,
         content_id,
         title: view.title.clone(),
@@ -201,17 +215,7 @@ pub(super) fn project_diff_view_with_content_id(
             .collect(),
         commits_label: range_view.commits_label.clone(),
         commit_count: range_view.commits.len(),
-        commits: range_view
-            .commits
-            .iter()
-            .map(|commit| ViewerCommitSummary {
-                id: commit.id.clone(),
-                subject: commit.subject.clone(),
-                body: commit.body.clone(),
-                committed_at: commit.committed_at.clone(),
-                is_merge: commit.is_merge(),
-            })
-            .collect(),
+        commits: Vec::new(),
         commit_selection,
         footer: ViewerFooter {
             command: view.foot.cmd.clone(),
@@ -256,22 +260,25 @@ fn project_file(
         removed: file.removed,
         status: viewer_file_status(status),
         can_open_in_editor: status != FileStatus::Deleted,
-        initially_expanded: selected_lines(file, identity.render_options.density)
-            .iter()
-            .map(String::len)
-            .sum::<usize>()
+        row_count: super::rows::viewer_file_row_count(
+            selected_lines(file, identity.render_options.density),
+            identity.render_options.layout,
+        ),
+        initially_expanded: selected_lines(file, identity.render_options.density).text_bytes()
             <= GIANT_FILE_CHARACTERS,
     }
 }
 
 fn file_by_id<'view>(view: &'view View, id: &ViewerDiffFileId) -> Option<&'view FileDiff> {
-    view.files.iter().enumerate().find_map(|(index, file)| {
-        (ViewerDiffFileId::for_index(index).as_str() == id.as_str()).then_some(file)
-    })
+    let index = id.as_str().strip_prefix("file-")?.parse::<usize>().ok()?;
+    if ViewerDiffFileId::for_index(index) != *id {
+        return None;
+    }
+    view.files.get(index)
 }
 
-fn selected_lines(file: &FileDiff, density: ViewerDiffDensity) -> &[String] {
-    match (density, file.full_lines.as_deref()) {
+fn selected_lines(file: &FileDiff, density: ViewerDiffDensity) -> &DiffSourceLines {
+    match (density, file.full_lines.as_ref()) {
         (ViewerDiffDensity::Full, Some(lines)) => lines,
         (ViewerDiffDensity::Compact | ViewerDiffDensity::Full, _) => &file.lines,
     }
@@ -332,14 +339,14 @@ mod tests {
                     path: utils::repository_relative_path("src/a b.rs"),
                     added: DiffLineCount::new(2),
                     removed: DiffLineCount::new(1),
-                    lines: vec!["new file mode 100644".into(), "+compact".into()],
-                    full_lines: Some(vec!["new file mode 100644".into(), "+full".into()]),
+                    lines: vec!["new file mode 100644".into(), "+compact".into()].into(),
+                    full_lines: Some(vec!["new file mode 100644".into(), "+full".into()].into()),
                 },
                 FileDiff {
                     path: utils::repository_relative_path("removed.rs"),
                     added: DiffLineCount::default(),
                     removed: DiffLineCount::new(1),
-                    lines: vec!["deleted file mode 100644".into()],
+                    lines: vec!["deleted file mode 100644".into()].into(),
                     full_lines: None,
                 },
             ],
@@ -413,12 +420,12 @@ mod tests {
         let original = view();
         let expected = content_id(&original, ViewerDiffDensity::Compact);
         let mut edited = original.clone();
-        edited.files[0].lines[1] = "+changed".into();
+        edited.files[0].lines = ["new file mode 100644", "+changed"].into_iter().collect();
         assert_eq!(original.files[0].added, edited.files[0].added);
         assert_eq!(original.files[0].removed, edited.files[0].removed);
         assert_eq!(
-            original.files[0].lines[1].len(),
-            edited.files[0].lines[1].len()
+            original.files[0].lines.iter().nth(1).unwrap().len(),
+            edited.files[0].lines.iter().nth(1).unwrap().len()
         );
         assert_ne!(expected, content_id(&edited, ViewerDiffDensity::Compact));
 
@@ -449,9 +456,9 @@ mod tests {
             );
         }
         first.files[0].path = utils::repository_relative_path("ab");
-        first.files[0].lines = vec!["c".into()];
+        first.files[0].lines = vec!["c".into()].into();
         second.files[0].path = utils::repository_relative_path("a");
-        second.files[0].lines = vec!["bc".into()];
+        second.files[0].lines = vec!["bc".into()].into();
         assert_ne!(
             content_id(&first, ViewerDiffDensity::Compact),
             content_id(&second, ViewerDiffDensity::Compact)
@@ -465,7 +472,7 @@ mod tests {
         let full = content_id(&original, ViewerDiffDensity::Full);
         assert_ne!(compact, full);
         let mut changed = original.clone();
-        changed.files[0].full_lines.as_mut().unwrap()[1] = "+more".into();
+        changed.files[0].full_lines = Some(["new file mode 100644", "+more"].into_iter().collect());
         assert_eq!(compact, content_id(&changed, ViewerDiffDensity::Compact));
         assert_ne!(full, content_id(&changed, ViewerDiffDensity::Full));
         changed.files[0].full_lines = Some(changed.files[0].lines.clone());
@@ -494,8 +501,9 @@ mod tests {
         let snapshot = super::ViewerDiffSnapshot::new(std::sync::Arc::clone(&source));
         let options = identity(ViewerDiffDensity::Compact).render_options;
         let expected = snapshot.content_id(options);
-        std::sync::Arc::make_mut(&mut source).files[0].lines[1] = "+changed".into();
-        assert_eq!(snapshot.files[0].lines[1], "+compact");
+        std::sync::Arc::make_mut(&mut source).files[0].lines =
+            ["new file mode 100644", "+changed"].into_iter().collect();
+        assert_eq!(snapshot.files[0].lines.iter().nth(1).unwrap(), "+compact");
         assert_eq!(snapshot.clone().content_id(options), expected);
         assert_ne!(
             super::ViewerDiffSnapshot::new(source).content_id(options),

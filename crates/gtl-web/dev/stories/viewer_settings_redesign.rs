@@ -238,6 +238,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     let (files, workspace) = preview_files(identity)?;
     let commits = preview_commits()?;
     let view = ViewerActiveView {
+        row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity,
         title: "diff".to_owned(),
@@ -368,6 +369,7 @@ fn preview_file(
         status,
         can_open_in_editor: true,
         initially_expanded,
+        row_count: 1,
     })
 }
 
@@ -671,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn mobile_preview_omits_repository_heading_and_keeps_panel_actions() {
+    fn mobile_preview_keeps_panel_triggers_and_defers_commit_details() {
         let html = dioxus_ssr::render_element(rsx! {
             ViewerPreview { mobile: true }
         });
@@ -680,7 +682,7 @@ mod tests {
         assert!(html.contains(r#"aria-label="Changed files""#));
         assert!(html.contains(r#"aria-label="Commits""#));
         assert!(html.contains("inline-flex size-5 flex-none items-center justify-center"));
-        assert!(html.contains(r#"data-gtl-action="copy-commit""#));
+        assert!(!html.contains(r#"data-gtl-action="copy-commit""#));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
     }
 }

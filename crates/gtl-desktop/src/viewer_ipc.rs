@@ -6,7 +6,7 @@ use gtl_wire::viewer::{
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
     SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
     ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
-    ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::Serialize;
@@ -14,7 +14,7 @@ use tauri::State;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
 const MAX_ACTIVE_STREAMS: usize = 10;
-const STREAM_BATCH_ITEMS_MAX: usize = 4;
+const STREAM_BATCH_ITEMS_MAX: usize = gtl_wire::proto::row_ipc::ROW_IPC_BATCH_ITEMS_MAX;
 const STREAM_BATCH_LINGER: Duration = Duration::from_millis(1);
 const STREAM_REQUEST_BUFFER: usize = 1;
 
@@ -27,7 +27,7 @@ pub(crate) struct ViewerConnectionPayload {
 
 pub(crate) struct ViewerIpcState {
     client: Mutex<Option<ViewerClient>>,
-    row_streams: PullStreamRegistry<ViewerRowStreamItem>,
+    row_streams: PullStreamRegistry<Vec<u8>>,
     version_streams: PullStreamRegistry<ViewerStateChanged>,
 }
 
@@ -209,6 +209,12 @@ viewer_request_command!(
     find_diff
 );
 viewer_request_command!(
+    viewer_read_diff_text,
+    gtl_wire::viewer::ReadViewerDiffText,
+    Vec<gtl_wire::viewer::ViewerDiffTextLine>,
+    read_diff_text
+);
+viewer_request_command!(
     viewer_list_history,
     ListViewerHistory,
     ViewerHistoryPage,
@@ -249,10 +255,7 @@ viewer_request_command!(
 // Tauri's command macro expands to an unreachable fallback arm.
 #[allow(clippy::unreachable)]
 mod stream_commands {
-    use super::{
-        State, StreamViewerRows, ViewerClientError, ViewerIpcState, ViewerRowStreamItem,
-        ViewerStateChanged,
-    };
+    use super::{State, StreamViewerRows, ViewerClientError, ViewerIpcState, ViewerStateChanged};
 
     #[tauri::command]
     pub(crate) async fn viewer_stream_rows_start(
@@ -273,8 +276,11 @@ mod stream_commands {
     pub(crate) async fn viewer_stream_rows_next_batch(
         state: State<'_, ViewerIpcState>,
         stream_id: u32,
-    ) -> Result<Vec<ViewerRowStreamItem>, ViewerClientError> {
-        state.row_streams.next_batch(stream_id).await
+    ) -> Result<tauri::ipc::Response, ViewerClientError> {
+        let frames = state.row_streams.next_batch(stream_id).await?;
+        let bytes = gtl_wire::proto::row_ipc::encode_batch(&frames)
+            .map_err(|_| ViewerClientError::Internal)?;
+        Ok(tauri::ipc::Response::new(bytes))
     }
 
     #[tauri::command]
@@ -331,12 +337,12 @@ trait PullStream: Send + 'static {
 }
 
 impl PullStream for ViewerRowStream {
-    type Item = ViewerRowStreamItem;
+    type Item = Vec<u8>;
 
     fn message(
         &mut self,
     ) -> impl Future<Output = Result<Option<Self::Item>, ViewerClientError>> + Send {
-        ViewerRowStream::message(self)
+        ViewerRowStream::message_bytes(self)
     }
 }
 

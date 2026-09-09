@@ -44,7 +44,7 @@ fn single_commit_panel_is_read_only_but_keeps_copy_action() -> TestResult {
 }
 
 #[test]
-fn hover_details_replace_the_body_title() -> TestResult {
+fn commit_details_content_waits_for_hover() -> TestResult {
     let mut commit = viewer_commit_summary()?;
     commit.body = "Explain the implementation constraints.".to_owned();
     let view = viewer_active_view(vec![commit])?;
@@ -63,12 +63,11 @@ fn hover_details_replace_the_body_title() -> TestResult {
 
     let html = dioxus_ssr::render(&panel);
 
-    assert!(html.contains("Explain the implementation constraints."));
-    assert!(!html.contains("title=\"Explain the implementation constraints.\""));
+    assert!(!html.contains("Explain the implementation constraints."));
     assert!(html.contains("Commit details"));
-    assert!(html.contains(">Date</dt>"));
+    assert!(!html.contains(">Date</dt>"));
     assert!(!html.contains(">Committed</dt>"));
     assert!(!html.contains(">2026-08-19T10:00:00Z<"));
-    assert!(html.contains("Commit ID"));
+    assert!(html.contains("Copy commit ID"));
     Ok(())
 }

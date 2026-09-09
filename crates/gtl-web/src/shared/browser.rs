@@ -153,30 +153,23 @@ pub(crate) fn scroll_diff_document_to_start() {
 }
 
 #[cfg(feature = "desktop")]
-pub(crate) fn show_diff_search_match(file_index: usize, row_index: usize) -> bool {
-    clear_diff_search_match();
-    let Some(container) = document()
+pub(crate) fn highlight_diff_search_match(file_index: usize, row_index: usize) -> bool {
+    let Some(element) = document()
         .and_then(|document| document.get_element_by_id(&format!("viewer-diff-{file_index}")))
+        .and_then(|container| {
+            container
+                .query_selector(&format!("[data-row-index='{row_index}']"))
+                .ok()
+                .flatten()
+        })
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
     else {
         return false;
     };
-    let Ok(rows) = container.query_selector_all("[data-gtl-diff-row]") else {
-        return false;
-    };
-    let Ok(row_index) = u32::try_from(row_index) else {
-        return false;
-    };
-    let Some(element) = rows
-        .item(row_index)
-        .and_then(|row| row.dyn_into::<HtmlElement>().ok())
-    else {
-        return false;
-    };
-    if let Ok(Some(details)) = element.closest("details")
-        && let Ok(details) = details.dyn_into::<HtmlDetailsElement>()
-    {
-        details.set_open(true);
+    if element.has_attribute("data-gtl-find-active") {
+        return true;
     }
+    clear_diff_search_match();
     let style = element.style();
     if style
         .set_property("outline", "2px solid var(--color-acc)")
@@ -193,7 +186,6 @@ pub(crate) fn show_diff_search_match(file_index: usize, row_index: usize) -> boo
         let _ = style.remove_property("outline-offset");
         return false;
     }
-    element.scroll_into_view_with_bool(true);
     true
 }
 

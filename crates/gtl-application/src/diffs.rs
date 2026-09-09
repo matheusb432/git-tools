@@ -20,6 +20,7 @@ mod range_view;
 pub mod render_diff;
 pub mod render_diff_subrepos;
 pub mod render_merge_diff;
+pub mod source_lines;
 mod target;
 mod unified_diff;
 mod view;

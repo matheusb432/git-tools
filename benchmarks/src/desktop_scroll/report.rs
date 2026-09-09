@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::DesktopScrollManifest;
 
-pub const REPORT_FORMAT_VERSION: u32 = 6;
+pub const REPORT_FORMAT_VERSION: u32 = 7;
 pub const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const DISTANCE_CSS_PIXELS: u32 = 160;
 const STEP_CSS_PIXELS: u32 = 8;

@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+mod cache;
+pub(crate) use cache::use_commit_page_cache_provider;
 use gtl_models::viewer::{ViewerRangeGeneration, ViewerTabId};
 use gtl_wire::viewer::{
     ListViewerCommits, ViewerCommitCursor, ViewerCommitPage, ViewerCommitSummary,
@@ -114,13 +116,20 @@ impl ViewerCommitPagesController {
 pub(crate) fn use_viewer_commit_pages(
     view: ReadSignal<gtl_wire::viewer::ViewerActiveView>,
 ) -> ViewerCommitPagesController {
+    let cache = use_context::<cache::CommitPageCache>();
+    let viewer = use_context::<crate::app::application_layout::ViewerContext>();
+    let mut instance = use_signal(move || viewer.server_instance_id());
     let list = use_memo(move || {
         let view = view.read();
-        (ViewerCommitListKey::from(view.identity), view.commit_count)
+        (
+            ViewerCommitListKey::from(view.identity),
+            view.commit_count,
+            viewer.server_instance_id(),
+        )
     });
     let mut pages = use_store(move || {
         let view = view.peek();
-        ViewerCommitPages::new(view.identity, view.commit_count)
+        cache.restore(instance.peek().as_deref(), view.identity, view.commit_count)
     });
     let mut request = use_action(move |command: ViewerCommitPageCommand| async move {
         let result = viewer_server::list_commits(ListViewerCommits {
@@ -143,14 +152,21 @@ pub(crate) fn use_viewer_commit_pages(
         });
     });
     use_effect(move || {
-        let (expected_key, expected_count) = list();
+        let (expected_key, expected_count, server_instance) = list();
         let identity = view.peek().identity;
-        if pages.peek().key != expected_key || pages.peek().expected_count != expected_count {
-            pages.set(ViewerCommitPages::new(identity, expected_count));
+        if pages.peek().key != expected_key
+            || pages.peek().expected_count != expected_count
+            || *instance.peek() != server_instance
+        {
+            request.cancel();
+            cache.retain(instance.peek().as_deref(), &pages.peek());
+            instance.set(server_instance);
+            pages.set(cache.restore(instance.peek().as_deref(), identity, expected_count));
         }
         load_next.call(());
     });
     let commits: ReadStore<Vec<ViewerCommitSummary>> = use_hook(move || pages.commits().into());
+    use_drop(move || cache.retain(instance.peek().as_deref(), &pages.peek()));
 
     ViewerCommitPagesController {
         pages,
@@ -221,7 +237,7 @@ mod tests {
     use super::*;
     use crate::test_support::{TestResult, viewer_tab_id};
 
-    fn identity(selection_generation: u64) -> TestResult<ViewerViewIdentity> {
+    pub(super) fn identity(selection_generation: u64) -> TestResult<ViewerViewIdentity> {
         Ok(ViewerViewIdentity {
             tab_id: viewer_tab_id(7)?,
             range_generation: ViewerRangeGeneration::new(11),
@@ -233,7 +249,7 @@ mod tests {
         })
     }
 
-    fn commit(digit: char) -> TestResult<ViewerCommitSummary> {
+    pub(super) fn commit(digit: char) -> TestResult<ViewerCommitSummary> {
         Ok(ViewerCommitSummary {
             id: CommitId::try_from(digit.to_string().repeat(40))?,
             subject: format!("Commit {digit}"),

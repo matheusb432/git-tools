@@ -196,9 +196,11 @@ fn WorkspaceFileItem(
     artifact_enhancement: bool,
 ) -> Element {
     let workspace = super::use_workspace_context();
-    let _data_generation = (workspace.data_generation)();
-    let view = workspace.view.peek();
-    let Some(file) = view.files.get(file_index) else {
+    let file = use_memo(use_reactive((&file_index,), move |(file_index,)| {
+        workspace.view.read().files.get(file_index).cloned()
+    }));
+    let file = file.read();
+    let Some(file) = file.as_ref() else {
         return rsx! {};
     };
     let file_name = file.path.as_path().file_name().map_or_else(
@@ -251,6 +253,7 @@ mod tests {
             status: ViewerFileStatus::Modified,
             can_open_in_editor: true,
             initially_expanded: true,
+            row_count: 1,
         })
     }
 

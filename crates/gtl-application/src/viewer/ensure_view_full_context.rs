@@ -37,6 +37,44 @@ pub enum EnsureViewFullContextError {
     Transition(#[from] FullContextDiffTransitionError),
 }
 
+pub struct ReservedFullContext {
+    snapshot: super::session::ActiveContentSnapshot,
+}
+
+pub fn reserve(
+    state: &ViewerState,
+    options: RenderOptions,
+) -> Result<Option<ReservedFullContext>, ViewerStateError> {
+    if options.density() != gtl_models::viewer::DiffDensity::Full {
+        return Ok(None);
+    }
+    state.inspect(|session| {
+        session
+            .reserve_full_context()
+            .map(|snapshot| ReservedFullContext { snapshot })
+    })
+}
+
+pub fn execute_reserved(
+    work: ReservedFullContext,
+    state: &ViewerState,
+    git: &impl GitClient,
+) -> Result<EnsureViewFullContextOk, EnsureViewFullContextError> {
+    let ReservedFullContext { snapshot } = work;
+    let current = state.inspect(super::session::ViewerSession::active_content_snapshot)?;
+    if current.as_ref().is_none_or(|current| {
+        current.identity() != snapshot.identity()
+            || !Arc::ptr_eq(&current.shared_view(), &snapshot.shared_view())
+    }) {
+        return Ok(EnsureViewFullContextOk::Stale);
+    }
+    let result = prepare_source(&snapshot, state, git);
+    if result.is_err() {
+        state.update(|session| session.fail_full_context_if_current(snapshot.identity()))?;
+    }
+    result
+}
+
 /// Ensures that a cached viewer snapshot can render Full-density rows.
 #[cqrsy::command]
 pub fn execute(
@@ -56,6 +94,14 @@ pub fn execute(
     let Some(snapshot) = snapshot else {
         return Ok(EnsureViewFullContextOk::Stale);
     };
+    prepare_source(&snapshot, state, git)
+}
+
+fn prepare_source(
+    snapshot: &super::session::ActiveContentSnapshot,
+    state: &ViewerState,
+    git: &impl GitClient,
+) -> Result<EnsureViewFullContextOk, EnsureViewFullContextError> {
     let expected = snapshot.shared_view();
     let source = match &expected.full_context {
         FullContextDiffState::Deferred(source) => source,
@@ -66,13 +112,19 @@ pub fn execute(
 
     let request = FetchFullContextDiff::new(&expected.repo_root, source);
     let full_context = fetch_full_context_diff::execute(&request, git)?;
-    let replacement = Arc::new((*expected).clone().with_full_context(full_context)?);
-    let published = state.inspect(|session| {
-        session.replace_active_content_if_current(
+    let replacement = state.prepare_snapshot(Arc::new(
+        (*expected).clone().with_full_context(full_context)?,
+    ))?;
+    let published = state.update(|session| {
+        let published = session.replace_active_content_if_current(
             snapshot.identity(),
             &expected,
-            Arc::clone(&replacement),
-        )
+            replacement.clone(),
+        );
+        if published.is_some() {
+            session.mark_shell_changed();
+        }
+        published
     })?;
     Ok(published.map_or(
         EnsureViewFullContextOk::Stale,
@@ -176,7 +228,9 @@ mod tests {
         let compact_before = project(DiffDensity::Compact);
         assert!(matches!(
             project(DiffDensity::Full),
-            gtl_wire::viewer::ViewerActiveState::Pending { .. }
+            gtl_wire::viewer::ViewerActiveState::Ready { view }
+                if view.row_source == gtl_wire::viewer::ViewerRowSourceState::Pending
+                    && !view.files.is_empty() && view.commit_count > 0
         ));
         let weight_before = state
             .inspect(|session| {
@@ -256,6 +310,93 @@ mod tests {
             matches!(cached, EnsureViewFullContextOk::Ready(view) if Arc::ptr_eq(&view, &loaded))
         );
         Ok(())
+    }
+
+    fn shell_for(state: &ViewerState) -> gtl_wire::viewer::ViewerShell {
+        state
+            .inspect(|session| {
+                shell::project(
+                    session,
+                    RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+                    super::super::Theme::Dark,
+                    gtl_models::viewer::ViewerKeybindings::default(),
+                    None,
+                )
+                .unwrap()
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn reserved_source_work_is_coalesced_and_notifies_when_ready()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let git = git();
+        let (state, _, _) = ready_state(deferred_view(&git));
+        let options = RenderOptions::new(DiffLayout::Unified, DiffDensity::Full);
+        let mut watch = state.subscribe();
+        let work = reserve(&state, options).unwrap().unwrap();
+        assert!(reserve(&state, options).unwrap().is_none());
+        let before = shell_for(&state);
+        let gtl_wire::viewer::ViewerActiveState::Ready { view: pending } = before.active else {
+            return Err(
+                "file and commit metadata must be available during source preparation".into(),
+            );
+        };
+        assert_eq!(
+            pending.row_source,
+            gtl_wire::viewer::ViewerRowSourceState::Pending
+        );
+        assert!(!pending.files.is_empty());
+        assert!(pending.commit_count > 0);
+        assert!(!watch.has_changed().unwrap());
+        assert!(matches!(
+            execute_reserved(work, &state, &git).unwrap(),
+            EnsureViewFullContextOk::Ready(_)
+        ));
+        assert!(watch.has_changed().unwrap());
+        let version = *watch.borrow_and_update();
+        let ready = shell_for(&state);
+        assert_eq!(ready.version, version);
+        assert!(
+            matches!(ready.active, gtl_wire::viewer::ViewerActiveState::Ready { view }
+            if view.row_source == gtl_wire::viewer::ViewerRowSourceState::Ready)
+        );
+        assert!(reserve(&state, options).unwrap().is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn failed_source_keeps_metadata_and_retries_only_after_refresh() {
+        let (state, identity, source) = ready_state(deferred_view(&git()));
+        let options = RenderOptions::new(DiffLayout::Unified, DiffDensity::Full);
+        let work = reserve(&state, options).unwrap().unwrap();
+        let invalid = FakeGitClient {
+            full_diff_output: "diff --git a/../invalid b/../invalid".into(),
+            ..Default::default()
+        };
+        assert!(execute_reserved(work, &state, &invalid).is_err());
+        let shell = shell_for(&state);
+        assert!(
+            matches!(shell.active, gtl_wire::viewer::ViewerActiveState::Ready { view }
+            if view.row_source == gtl_wire::viewer::ViewerRowSourceState::Failed
+                && !view.files.is_empty() && view.commit_count > 0)
+        );
+        assert!(reserve(&state, options).unwrap().is_none());
+        state
+            .update(|session| {
+                let ticket = session.refresh(identity.tab_id).unwrap();
+                session.publish_labeled_if_current(
+                    ticket,
+                    CachedView::new(source),
+                    "refreshed".into(),
+                );
+            })
+            .unwrap();
+        let retry = reserve(&state, options).unwrap().unwrap();
+        assert!(matches!(
+            execute_reserved(retry, &state, &git()).unwrap(),
+            EnsureViewFullContextOk::Ready(_)
+        ));
     }
 
     #[test]

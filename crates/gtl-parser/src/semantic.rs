@@ -61,6 +61,17 @@ pub(crate) fn semantic_text_spans(
     syntax_tokens: &[SyntaxToken],
     intraline_spans: &[CharacterSpan],
 ) -> Vec<SemanticTextSpan> {
+    if syntax_tokens.is_empty() && intraline_spans.is_empty() {
+        return (!text.is_empty())
+            .then_some(SemanticTextSpan {
+                byte_start: 0,
+                byte_end: text.len(),
+                syntax_class: None,
+                change: SemanticTextChange::Unchanged,
+            })
+            .into_iter()
+            .collect();
+    }
     let mut output = Vec::new();
     let mut syntax_index = 0usize;
     let mut intraline_index = 0usize;

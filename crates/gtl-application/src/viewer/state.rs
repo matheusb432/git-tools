@@ -4,11 +4,16 @@ use std::sync::{Arc, Mutex};
 
 use gtl_models::viewer::ViewerVersion;
 
-use super::session::{DEFAULT_VIEW_CACHE_WEIGHT, ViewerSession};
+use super::{
+    ViewerDiffSnapshot,
+    session::{DEFAULT_VIEW_CACHE_WEIGHT, ViewerSession},
+};
+use crate::diffs::{View, source_lines::DiffSourcePool};
 
 #[derive(Clone)]
 pub struct ViewerState {
     session: Arc<Mutex<ViewerSession>>,
+    sources: Arc<Mutex<DiffSourcePool>>,
     version_sender: tokio::sync::watch::Sender<ViewerVersion>,
 }
 
@@ -16,6 +21,8 @@ pub struct ViewerState {
 pub enum ViewerStateError {
     #[error("viewer state lock is poisoned")]
     LockPoisoned,
+    #[error("viewer source pool lock is poisoned")]
+    SourceLockPoisoned,
 }
 
 impl ViewerState {
@@ -27,7 +34,27 @@ impl ViewerState {
         Self {
             session: Arc::new(Mutex::new(ViewerSession::new(DEFAULT_VIEW_CACHE_WEIGHT))),
             version_sender,
+            sources: Arc::default(),
         }
+    }
+
+    /// Shares immutable sources and computes digests outside the session lock.
+    pub(super) fn prepare_snapshot(
+        &self,
+        mut view: Arc<View>,
+    ) -> Result<ViewerDiffSnapshot, ViewerStateError> {
+        let mut sources = self
+            .sources
+            .lock()
+            .map_err(|_| ViewerStateError::SourceLockPoisoned)?;
+        for file in &mut Arc::make_mut(&mut view).files {
+            sources.intern(&mut file.lines);
+            if let Some(full) = &mut file.full_lines {
+                sources.intern(full);
+            }
+        }
+        drop(sources);
+        Ok(ViewerDiffSnapshot::new(view))
     }
 
     /// Runs a read that may update cache recency but does not change visible shell output.
@@ -90,6 +117,44 @@ impl Default for ViewerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshots_share_equal_compact_and_full_sources_but_keep_view_metadata() {
+        let state = ViewerState::new();
+        let make_view = |title: &str| {
+            let mut view = crate::utils::diffs::view();
+            view.title = title.to_owned();
+            view.files = vec![crate::diffs::FileDiff {
+                path: crate::utils::repository_relative_path("f.txt"),
+                added: gtl_models::diffs::DiffLineCount::new(1),
+                removed: gtl_models::diffs::DiffLineCount::default(),
+                lines: ["@@ -0,0 +1 @@", "+same"].into_iter().collect(),
+                full_lines: None,
+            }];
+            view.files[0].full_lines = Some(view.files[0].lines.iter().collect());
+            Arc::new(view)
+        };
+        let first = state.prepare_snapshot(make_view("live")).unwrap();
+        let second = state.prepare_snapshot(make_view("snapshot")).unwrap();
+        let first_text = first.files[0].lines.iter().next().unwrap();
+        assert_eq!(
+            first_text.as_ptr(),
+            second.files[0].lines.iter().next().unwrap().as_ptr()
+        );
+        assert_eq!(
+            first_text.as_ptr(),
+            first.files[0]
+                .full_lines
+                .as_ref()
+                .unwrap()
+                .iter()
+                .next()
+                .unwrap()
+                .as_ptr()
+        );
+        assert_eq!(first.title, "live");
+        assert_eq!(second.title, "snapshot");
+    }
 
     #[test]
     fn watchers_receive_only_visible_version_changes() {

@@ -4,10 +4,12 @@
 //! computes intraline changes, and can optionally attach semantic syntax
 //! tokens. It performs no file system, process, network, or rendering work.
 
+pub mod cancellation;
 mod classify;
 mod coordinate;
 #[cfg(feature = "syntax")]
 mod highlight;
+pub mod index;
 mod intraline;
 mod model;
 mod semantic;

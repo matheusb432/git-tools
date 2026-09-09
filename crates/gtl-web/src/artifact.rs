@@ -344,10 +344,12 @@ mod tests {
                     status: ViewerFileStatus::Added,
                     can_open_in_editor: true,
                     initially_expanded: true,
+                    row_count: 1,
                 })
             })
             .collect::<crate::test_support::TestResult<Vec<_>>>()?;
         Ok(ViewerActiveView {
+            row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
             content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity: ViewerViewIdentity {
                 tab_id: viewer_tab_id(1)?,

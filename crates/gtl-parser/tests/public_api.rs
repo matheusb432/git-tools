@@ -9,7 +9,7 @@ fn lines(raw: &[&str]) -> Vec<String> {
 
 #[test]
 fn downstream_consumer_can_parse_unified_and_split_rows() {
-    let parsed = DiffParser::new().parse(&lines(&[
+    let parsed = DiffParser::new().parse(lines(&[
         "--- a/file.rs",
         "+++ b/file.rs",
         "@@ -4 +8 @@",
@@ -38,7 +38,7 @@ fn downstream_consumer_can_parse_unified_and_split_rows() {
 
 #[test]
 fn downstream_consumer_can_read_parser_coordinate_values() {
-    let parsed = DiffParser::new().parse(&lines(&["@@ -42 +42 @@", " keep"]));
+    let parsed = DiffParser::new().parse(lines(&["@@ -42 +42 @@", " keep"]));
 
     assert_eq!(
         parsed.rows()[1]
@@ -52,7 +52,7 @@ fn downstream_consumer_can_read_parser_coordinate_values() {
 #[test]
 fn downstream_consumer_receives_typed_offsets_counts_and_digit_widths() {
     let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
-        .parse(&lines(&["@@ -9999 +10000 @@", "-abcd", "+abce"]));
+        .parse(lines(&["@@ -9999 +10000 @@", "-abcd", "+abce"]));
     let split_rows = parsed.split_rows();
     let (old, new) = match &split_rows[1] {
         SplitDiffRow::Pair {
@@ -71,7 +71,7 @@ fn downstream_consumer_receives_typed_offsets_counts_and_digit_widths() {
     );
     assert_eq!(parsed.line_number_digits().get(), 5);
 
-    let parsed = DiffParser::new().parse(&lines(&["@@ -1 +1 @@", "-abcd", "+abce"]));
+    let parsed = DiffParser::new().parse(lines(&["@@ -1 +1 @@", "-abcd", "+abce"]));
     let split_rows = parsed.split_rows();
     let old = match &split_rows[1] {
         SplitDiffRow::Pair { old: Some(old), .. } => Some(old),
@@ -87,8 +87,8 @@ fn downstream_consumer_can_stream_parser_and_split_batches() {
     let parser = DiffParser::new();
     let mut parser_stream = parser.stream();
     let mut split_stream = SplitDiffStream::new();
-    let header = parser_stream.push(&lines(&["@@ -1 +1 @@", "-old"]));
-    let change = parser_stream.push(&lines(&["+new"]));
+    let header = parser_stream.push(lines(&["@@ -1 +1 @@", "-old"]));
+    let change = parser_stream.push(lines(&["+new"]));
     let mut rows = split_stream.push(header.into_rows());
 
     rows.extend(split_stream.push(change.into_rows()));
@@ -111,7 +111,7 @@ fn downstream_consumer_can_select_a_language_and_attach_semantic_tokens() {
 
     let parsed = DiffParser::new()
         .with_syntax(Some(SyntaxLanguage::Rust))
-        .parse(&lines(&["@@ -0,0 +1 @@", "+let value = 1;"]));
+        .parse(lines(&["@@ -0,0 +1 @@", "+let value = 1;"]));
 
     assert!(parsed.rows()[1].semantic_spans().iter().any(|span| {
         span.text(parsed.rows()[1].body()) == "1"

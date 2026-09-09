@@ -81,6 +81,7 @@ ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 indicatif = { version = "0.18.6", default-features = false }
 jiff = { version = "0.2", default-features = false }
+js-sys = { version = "0.3.102", default-features = false, features = ["std"] }
 lru = "0.18.1"
 libc = "0.2.186"
 natord = "1.0.9"

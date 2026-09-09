@@ -375,9 +375,12 @@ fn byte_count(view: &View, full: bool) -> Result<u64> {
         })
 }
 
-fn selected_lines(file: &gtl_application::diffs::FileDiff, full: bool) -> &[String] {
+fn selected_lines(
+    file: &gtl_application::diffs::FileDiff,
+    full: bool,
+) -> &gtl_application::diffs::source_lines::DiffSourceLines {
     if full {
-        file.full_lines.as_deref().unwrap_or(&file.lines)
+        file.full_lines.as_ref().unwrap_or(&file.lines)
     } else {
         &file.lines
     }

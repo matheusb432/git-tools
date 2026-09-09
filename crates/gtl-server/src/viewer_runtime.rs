@@ -55,6 +55,21 @@ pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
     });
 }
 
+pub(crate) fn spawn_full_context(
+    state: AppState,
+    work: gtl_application::viewer::ensure_view_full_context::ReservedFullContext,
+) {
+    tokio::task::spawn_blocking(move || {
+        if let Err(error) = gtl_application::viewer::ensure_view_full_context::execute_reserved(
+            work,
+            &state.viewer,
+            &state.git,
+        ) {
+            tracing::error!(error = ?error, "viewer full-context source preparation failed");
+        }
+    });
+}
+
 pub(crate) fn spawn_commit(state: AppState, work: ReservedCommitWork) {
     tokio::task::spawn_blocking(move || {
         let work = work::compute_commit(work, &state.user_settings, &state.git);

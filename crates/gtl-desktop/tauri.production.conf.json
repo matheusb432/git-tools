@@ -5,7 +5,7 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'none'; frame-src 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; base-uri 'self'; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; form-action 'none'; frame-src 'none'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'"
     }
   }
 }

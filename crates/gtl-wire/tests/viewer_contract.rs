@@ -194,6 +194,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         }],
         active: ViewerActiveState::Ready {
             view: Box::new(ViewerActiveView {
+                row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
                 identity,
                 content_id: ViewerRowContentId::from_digest([42; 32]),
                 title: "feature vs main".into(),
@@ -215,6 +216,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
                     status: ViewerFileStatus::Modified,
                     can_open_in_editor: true,
                     initially_expanded: true,
+                    row_count: 1,
                 }],
                 commits_label: "1 commit".into(),
                 commit_count: 1,
@@ -428,5 +430,28 @@ fn row_content_id_has_a_fixed_width_serde_contract() {
         json!(null),
     ] {
         assert!(serde_json::from_value::<ViewerRowContentId>(invalid).is_err());
+    }
+}
+
+#[test]
+fn row_windows_validate_bounds_when_constructed_and_deserialized() {
+    use gtl_wire::viewer::ViewerRowRange;
+
+    let range = ViewerRowRange::try_new(512, 64).unwrap();
+    assert_eq!(range.start(), 512);
+    assert_eq!(range.end(), 576);
+    let encoded = serde_json::to_string(&range).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ViewerRowRange>(&encoded).unwrap(),
+        range
+    );
+    for (start, count) in [(0, 0), (0, 65), (u32::MAX, 1)] {
+        assert!(ViewerRowRange::try_new(start, count).is_err());
+        assert!(
+            serde_json::from_value::<ViewerRowRange>(
+                serde_json::json!({ "start": start, "count": count })
+            )
+            .is_err()
+        );
     }
 }

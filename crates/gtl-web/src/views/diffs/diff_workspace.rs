@@ -1,12 +1,11 @@
 use dioxus::prelude::*;
+use gtl_models::diffs::CommitId;
 #[cfg(feature = "component-preview")]
 use gtl_models::viewer::ViewerKeybindingAction;
 #[cfg(feature = "component-preview")]
 use gtl_models::viewer::ViewerKeybindings;
-use gtl_models::{
-    diffs::CommitId,
-    viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
-};
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
 #[cfg(feature = "component-preview")]
 use gtl_wire::viewer::ViewerCommitSelection;
@@ -59,20 +58,24 @@ mod titlebar;
 #[cfg(feature = "desktop")]
 pub(crate) use desktop::DiffWorkspaceView;
 
+#[cfg(feature = "desktop")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct FileFoldCommand {
+    pub(super) tab_id: ViewerTabId,
+    pub(super) folded: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct DiffWorkspaceContext {
     pub(super) view: ReadSignal<ViewerActiveView>,
-    pub(super) data_generation: Memo<(
-        ViewerTabId,
-        ViewerRangeGeneration,
-        ViewerSelectionGeneration,
-    )>,
     commits: ReadStore<Vec<ViewerCommitSummary>>,
     files: Memo<WorkspaceFilesModel>,
     file_filter: Signal<String>,
     path_filter_open: Signal<bool>,
     file_matches: Memo<WorkspaceFileMatches>,
     pub(super) files_folded: Signal<Option<bool>>,
+    #[cfg(feature = "desktop")]
+    pub(super) fold_command: Signal<Option<FileFoldCommand>>,
     pub(super) flashing_file: Signal<Option<String>>,
     #[cfg(feature = "desktop")]
     pub(super) find_open: Signal<bool>,
@@ -104,29 +107,19 @@ fn use_diff_workspace_context(
         #[cfg(feature = "desktop")]
         find_open,
     } = signals;
-    let data_generation = use_memo(move || {
-        let identity = view.read().identity;
-        (
-            identity.tab_id,
-            identity.range_generation,
-            identity.selection_generation,
-        )
-    });
     let file_matches =
         use_workspace_file_matches(view, file_filter.into(), server_owned_file_search);
-    let files = use_memo(move || {
-        let _data_generation = data_generation();
-        WorkspaceFilesModel::new(&view.peek())
-    });
+    let files = use_memo(move || WorkspaceFilesModel::new(&view.read()));
     let context = DiffWorkspaceContext {
         view,
-        data_generation,
         commits,
         files,
         file_filter,
         path_filter_open,
         file_matches,
         files_folded,
+        #[cfg(feature = "desktop")]
+        fold_command: use_signal(|| None),
         flashing_file,
         #[cfg(feature = "desktop")]
         find_open,
@@ -559,7 +552,7 @@ pub(crate) fn ArtifactDiffWorkspace(
             title: "Commits",
             onclose: move |()| {},
             artifact_view_id: Some(markup.view_id()),
-            WorkspaceCommitsPanel { details_popover_id_prefix: commits_dialog }
+            WorkspaceCommitsPanel { details_popover_id_prefix: commits_dialog, artifact: true }
         }
     }
 }
@@ -616,6 +609,7 @@ fn DiffWorkspaceDocument(
                 aria_label: "Commits",
                 WorkspaceCommitsPanel {
                     details_popover_id_prefix,
+                    artifact: artifact_view_id.is_some(),
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,
                     onclear: onclear_commit,
@@ -688,6 +682,7 @@ mod artifact_tests {
             status: ViewerFileStatus::Modified,
             can_open_in_editor: true,
             initially_expanded: true,
+            row_count: 1,
         };
         let workspace = static_diff_workspace(
             identity,
@@ -700,6 +695,7 @@ mod artifact_tests {
             )],
         );
         let view = ViewerActiveView {
+            row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
             content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity,
             title: "diff".to_owned(),

@@ -46,6 +46,7 @@ pub fn CommitsPanel(
 #[component]
 pub(super) fn WorkspaceCommitsPanel(
     details_popover_id_prefix: String,
+    #[props(default)] artifact: bool,
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
@@ -101,6 +102,7 @@ pub(super) fn WorkspaceCommitsPanel(
                         CommitCard {
                             key: "{commit_id}",
                             commit_index,
+                            artifact,
                             details_popover_id_prefix: details_popover_id_prefix.clone(),
                             selected,
                             selection_pending,
@@ -213,6 +215,7 @@ const COMMIT_CARD_CLASSES: &str =
 #[component]
 fn CommitCard(
     commit_index: usize,
+    artifact: bool,
     details_popover_id_prefix: String,
     selected: bool,
     selection_pending: bool,
@@ -263,9 +266,10 @@ fn CommitCard(
             }
             CommitCardContent { commit, selectable }
             CommitDetailsPopover {
-                commit: commit.cloned(),
+                commit,
                 id: popover_id.clone(),
                 anchor_name,
+                active: artifact || (hover.active)(),
             }
         }
     }
@@ -293,43 +297,59 @@ fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selectable: bool) -
 }
 
 #[component]
-fn CommitDetailsPopover(commit: ViewerCommitSummary, id: String, anchor_name: String) -> Element {
-    let abbreviated_id = commit.id.abbreviated(CommitIdAbbreviation::TenCharacters);
+fn CommitDetailsPopover(
+    commit: ReadStore<ViewerCommitSummary>,
+    id: String,
+    anchor_name: String,
+    active: bool,
+) -> Element {
+    let abbreviated_id =
+        commit.with(|commit| commit.id.abbreviated(CommitIdAbbreviation::TenCharacters));
     let aria_label = format!("Commit details for {abbreviated_id}");
+    rsx! {
+        HoverPopover { id, anchor_name, aria_label,
+            if active {
+                CommitDetailsContent { commit }
+            }
+        }
+    }
+}
+
+#[component]
+fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
+    let commit = commit.read();
     let committed_at_display = commit.committed_at.display_minute();
     let committed_at_iso = commit.committed_at.to_string();
     rsx! {
-        HoverPopover { id, anchor_name, aria_label,
-            header { class: "flex items-center justify-between gap-2",
-                p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
-                    "Commit details"
-                }
-                if commit.is_merge {
-                    Badge { variant: BadgeVariant::Neutral, "merge" }
-                }
+        header { class: "flex items-center justify-between gap-2",
+            p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
+                "Commit details"
             }
-            h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
-            if !commit.body.is_empty() {
-                p { class: "mt-2 whitespace-pre-wrap break-words text-xs leading-normal text-ink-2",
-                    "{commit.body}"
-                }
+            if commit.is_merge {
+                Badge { variant: BadgeVariant::Neutral, "merge" }
             }
-            dl { class: "mt-3 divide-y divide-line border-t border-line",
-                div { class: "grid gap-1 py-2",
-                    dt { class: "text-xs font-semibold text-ink-3", "Date" }
-                    dd { class: "m-0 min-w-0",
-                        time {
-                            class: "block text-xs tabular-nums text-ink",
-                            datetime: committed_at_iso,
-                            "{committed_at_display}"
-                        }
+        }
+        h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
+        if !commit.body.is_empty() {
+            p { class: "mt-2 whitespace-pre-wrap break-words text-xs leading-normal text-ink-2",
+                "{commit.body}"
+            }
+        }
+        dl { class: "mt-3 divide-y divide-line border-t border-line",
+            div { class: "grid gap-1 py-2",
+                dt { class: "text-xs font-semibold text-ink-3", "Date" }
+                dd { class: "m-0 min-w-0",
+                    time {
+                        class: "block text-xs tabular-nums text-ink",
+                        datetime: committed_at_iso,
+                        "{committed_at_display}"
                     }
                 }
-                div { class: "grid gap-1 pt-2",
-                    dt { class: "text-xs font-semibold text-ink-3", "Commit ID" }
-                    dd { class: "m-0 min-w-0",
-                        code { class: "block break-all text-xs text-ink", "{commit.id}" }
-                    }
+            }
+            div { class: "grid gap-1 pt-2",
+                dt { class: "text-xs font-semibold text-ink-3", "Commit ID" }
+                dd { class: "m-0 min-w-0",
+                    code { class: "block break-all text-xs text-ink", "{commit.id}" }
                 }
             }
         }

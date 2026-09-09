@@ -184,6 +184,19 @@ impl ViewerClient {
             encode_open_viewer_history_request, open_viewer_history, decode_open_viewer_history_response;
     }
 
+    pub async fn read_diff_text(
+        &mut self,
+        request: gtl_wire::viewer::ReadViewerDiffText,
+    ) -> Result<Vec<gtl_wire::viewer::ViewerDiffTextLine>, ViewerClientError> {
+        let response = self
+            .client
+            .read_viewer_diff_text(proto::viewer::text::encode_request(&request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        proto::viewer::text::decode_response(response).map_err(Into::into)
+    }
+
     pub async fn get_history_copy(
         &mut self,
         request: GetViewerHistoryCopy,
@@ -294,6 +307,17 @@ pub struct ViewerRowStream {
 }
 
 impl ViewerRowStream {
+    pub async fn message_bytes(&mut self) -> Result<Option<Vec<u8>>, ViewerClientError> {
+        self.stream
+            .message()
+            .await
+            .map_err(|status| decode_status(&status))?
+            .as_ref()
+            .map(proto::row_ipc::encode_frame)
+            .transpose()
+            .map_err(Into::into)
+    }
+
     pub async fn message(&mut self) -> Result<Option<ViewerRowStreamItem>, ViewerClientError> {
         self.stream
             .message()

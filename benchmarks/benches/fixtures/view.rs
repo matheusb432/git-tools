@@ -35,8 +35,8 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
             ),
             added: gtl_models::diffs::DiffLineCount::default(),
             removed: gtl_models::diffs::DiffLineCount::default(),
-            full_lines: Some(lines.clone()),
-            lines,
+            full_lines: Some(lines.clone().into()),
+            lines: lines.into(),
         }],
         title: "Large diff".into(),
         cmd: Cmd {

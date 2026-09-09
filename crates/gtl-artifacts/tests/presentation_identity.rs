@@ -40,13 +40,16 @@ fn view(repo_root: &RepositoryRoot) -> View {
             path: RepositoryRelativePath::try_new("src/lib.rs".into()).unwrap(),
             added: DiffLineCount::new(1),
             removed: DiffLineCount::new(1),
-            lines: vec!["@@ -1 +1 @@".into(), "-old".into(), "+new".into()],
-            full_lines: Some(vec![
-                "@@ -1,2 +1,2 @@".into(),
-                "-old".into(),
-                "+new".into(),
-                " context".into(),
-            ]),
+            lines: vec!["@@ -1 +1 @@".into(), "-old".into(), "+new".into()].into(),
+            full_lines: Some(
+                vec![
+                    "@@ -1,2 +1,2 @@".into(),
+                    "-old".into(),
+                    "+new".into(),
+                    " context".into(),
+                ]
+                .into(),
+            ),
         }],
         title: "diff".into(),
         cmd: Cmd {

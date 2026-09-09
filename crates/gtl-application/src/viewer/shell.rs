@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use gtl_models::{
-    diffs::Commit,
     paths::RepositoryRelativePath,
     viewer::{self, RenderOptions, Theme, ViewerKeybindings},
 };
@@ -34,8 +33,6 @@ pub enum ProjectViewerShellError {
     ActiveTabMissing,
     #[error("the active viewer view is unavailable")]
     ActiveViewUnavailable,
-    #[error("the active viewer full-context source is pending")]
-    FullContextPending,
 }
 
 /// Projects one short-lived snapshot of the viewer shell.
@@ -79,14 +76,8 @@ pub fn project(
                 .ok_or(ProjectViewerShellError::ActiveTabMissing)?;
             match non_ready_active_state(tab_id, &state) {
                 Some(active) => active,
-                None => match ready_active_view(session, tab_id, options) {
-                    Ok(view) => ViewerActiveState::Ready {
-                        view: Box::new(view),
-                    },
-                    Err(ProjectViewerShellError::FullContextPending) => {
-                        ViewerActiveState::Pending { tab_id }
-                    }
-                    Err(error) => return Err(error),
+                None => ViewerActiveState::Ready {
+                    view: Box::new(ready_active_view(session, tab_id, options)?),
                 },
             }
         }
@@ -125,14 +116,6 @@ fn ready_active_view(
         | CommitSelectionSnapshot::Error { .. } => range.clone(),
     };
     let displayed = session.full_context_snapshot(identity).unwrap_or(displayed);
-    if options.density() == super::DiffDensity::Full
-        && matches!(
-            displayed.full_context,
-            crate::diffs::FullContextDiffState::Deferred(_)
-        )
-    {
-        return Err(ProjectViewerShellError::FullContextPending);
-    }
     let commit_selection = match &selection {
         CommitSelectionSnapshot::None => ViewerCommitSelection::None,
         CommitSelectionSnapshot::Pending { id } => {
@@ -146,13 +129,26 @@ fn ready_active_view(
             message: reason.clone(),
         },
     };
-    Ok(project_diff_view_with_content_id(
+    let mut view = project_diff_view_with_content_id(
         &displayed,
         &range,
         identity_for(identity, options),
         commit_selection,
         displayed.content_id(project_render_options(options)),
-    ))
+    );
+    if options.density() == super::DiffDensity::Full
+        && matches!(
+            displayed.full_context,
+            crate::diffs::FullContextDiffState::Deferred(_)
+        )
+    {
+        view.row_source = if session.full_context_failed(identity) {
+            gtl_wire::viewer::ViewerRowSourceState::Failed
+        } else {
+            gtl_wire::viewer::ViewerRowSourceState::Pending
+        };
+    }
+    Ok(view)
 }
 
 #[must_use]
@@ -187,11 +183,11 @@ pub fn content_snapshot_for_identity(
     })
 }
 
-pub fn commits_for_identity(
+pub fn commit_source_for_identity(
     state: &ViewerState,
     identity: ViewerViewIdentity,
     options: RenderOptions,
-) -> Result<Option<Vec<Commit>>, ViewerStateError> {
+) -> Result<Option<super::ViewerDiffSnapshot>, ViewerStateError> {
     state.inspect(|session| {
         let current = session.active_displayed_content_identity()?;
         if !identity_matches(identity, current, options) {
@@ -199,7 +195,7 @@ pub fn commits_for_identity(
         }
         session
             .cached_view_snapshot(identity.tab_id)
-            .map(|cached| cached.view.commits.clone())
+            .map(|cached| cached.view)
     })
 }
 

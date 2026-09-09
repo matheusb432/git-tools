@@ -83,6 +83,30 @@ pub struct DiffRow {
 }
 
 impl DiffRow {
+    pub(crate) fn indexed(
+        text: &str,
+        kind: DiffRowKind,
+        old_line_number: Option<SourceLineNumber>,
+        new_line_number: Option<SourceLineNumber>,
+        options: ParseOptions,
+    ) -> Self {
+        let semantic_spans = matches!(
+            kind,
+            DiffRowKind::Context | DiffRowKind::Added | DiffRowKind::Removed
+        )
+        .then(|| semantic_text_spans(diff_line_body(text), &[], &[]))
+        .unwrap_or_default();
+        Self {
+            kind,
+            old_line_number,
+            new_line_number,
+            text: text.to_owned(),
+            syntax_tokens: Vec::new(),
+            semantic_spans,
+            long_line_character_count: long_line_character_count(text, options.max_line_characters),
+        }
+    }
+
     #[cfg(feature = "syntax")]
     pub(crate) fn set_syntax_tokens(&mut self, syntax_tokens: Vec<SyntaxToken>) {
         self.syntax_tokens = syntax_tokens;
@@ -312,7 +336,7 @@ impl DiffParser {
 
     /// Parses the raw unified-diff lines for one file.
     #[must_use]
-    pub fn parse(&self, lines: &[String]) -> ParsedDiff {
+    pub fn parse(&self, lines: impl IntoIterator<Item = impl AsRef<str>>) -> ParsedDiff {
         let mut stream = self.stream();
         let batch = stream.push(lines);
         let finished = stream.finish();
@@ -342,7 +366,7 @@ pub struct DiffParserStream {
 
 impl DiffParserStream {
     /// Parses the next source-ordered batch of raw diff lines.
-    pub fn push(&mut self, lines: &[String]) -> ParsedDiffBatch {
+    pub fn push(&mut self, lines: impl IntoIterator<Item = impl AsRef<str>>) -> ParsedDiffBatch {
         let rows = derive_rows(
             lines,
             self.options,
@@ -405,13 +429,13 @@ impl DiffParserStream {
 }
 
 #[derive(Debug, Default)]
-struct LineNumberState {
+pub(crate) struct LineNumberState {
     old: u32,
     new: u32,
 }
 
 impl LineNumberState {
-    fn advance(
+    pub(crate) fn advance(
         &mut self,
         line_kind: UnifiedDiffLineKind,
     ) -> (
@@ -455,35 +479,29 @@ impl LineNumberState {
 }
 
 fn derive_rows(
-    lines: &[String],
+    lines: impl IntoIterator<Item = impl AsRef<str>>,
     options: ParseOptions,
     line_classifier: &mut UnifiedDiffLineClassifier,
     line_numbers: &mut LineNumberState,
 ) -> Vec<DiffRow> {
-    let mut rows = Vec::with_capacity(lines.len());
+    let lines = lines.into_iter();
+    let mut rows = Vec::with_capacity(lines.size_hint().0);
 
     for raw in lines {
+        let raw = raw.as_ref();
         if raw.is_empty() {
             continue;
         }
 
         let (kind, old_line_number, new_line_number) =
             line_numbers.advance(line_classifier.classify(raw));
-        let semantic_spans = matches!(
-            kind,
-            DiffRowKind::Context | DiffRowKind::Added | DiffRowKind::Removed
-        )
-        .then(|| semantic_text_spans(diff_line_body(raw), &[], &[]))
-        .unwrap_or_default();
-        rows.push(DiffRow {
+        rows.push(DiffRow::indexed(
+            raw,
             kind,
             old_line_number,
             new_line_number,
-            text: raw.clone(),
-            syntax_tokens: Vec::new(),
-            semantic_spans,
-            long_line_character_count: long_line_character_count(raw, options.max_line_characters),
-        });
+            options,
+        ));
     }
 
     rows
@@ -503,7 +521,7 @@ pub fn diff_line_body(raw: &str) -> &str {
     raw.get(1..).unwrap_or("")
 }
 
-fn long_line_character_count(
+pub(crate) fn long_line_character_count(
     raw: &str,
     max_line_characters: CharacterCount,
 ) -> Option<CharacterCount> {
@@ -522,7 +540,7 @@ mod tests {
 
     #[test]
     fn classifies_rows_and_tracks_gutter_numbers() {
-        let parsed = DiffParser::new().parse(&lines(&[
+        let parsed = DiffParser::new().parse(lines(&[
             "index 111..222 100644",
             "@@ -3,2 +7,2 @@",
             " keep",
@@ -562,7 +580,7 @@ mod tests {
 
     #[test]
     fn header_like_hunk_content_keeps_changed_rows_and_gutters() {
-        let parsed = DiffParser::new().parse(&lines(&[
+        let parsed = DiffParser::new().parse(lines(&[
             "--- a/a.sql",
             "+++ b/a.sql",
             "@@ -1,2 +1,3 @@",
@@ -585,7 +603,7 @@ mod tests {
 
     #[test]
     fn malformed_hunk_header_degrades_to_context() {
-        let parsed = DiffParser::new().parse(&lines(&["@@ garbage @@"]));
+        let parsed = DiffParser::new().parse(lines(&["@@ garbage @@"]));
         assert_eq!(parsed.rows()[0].kind(), DiffRowKind::Context);
         assert_eq!(
             parsed.rows()[0].old_line_number(),
@@ -595,7 +613,7 @@ mod tests {
 
     #[test]
     fn hunk_without_lengths_sets_absolute_starts() {
-        let parsed = DiffParser::new().parse(&lines(&["@@ -3 +7 @@", " keep"]));
+        let parsed = DiffParser::new().parse(lines(&["@@ -3 +7 @@", " keep"]));
 
         assert_eq!(parsed.rows()[0].kind(), DiffRowKind::Hunk);
         assert_eq!(
@@ -610,7 +628,7 @@ mod tests {
 
     #[test]
     fn digit_width_tracks_the_largest_source_line_number() {
-        let parsed = DiffParser::new().parse(&lines(&["@@ -9999 +10000 @@", " keep"]));
+        let parsed = DiffParser::new().parse(lines(&["@@ -9999 +10000 @@", " keep"]));
 
         assert_eq!(parsed.line_number_digits().get(), 5);
     }
@@ -630,14 +648,14 @@ mod tests {
             "similarity index 90%",
             "index 111..222",
         ] {
-            let parsed = DiffParser::new().parse(&lines(&[raw]));
+            let parsed = DiffParser::new().parse(lines(&[raw]));
             assert_eq!(parsed.rows()[0].kind(), DiffRowKind::Meta, "{raw}");
         }
     }
 
     #[test]
     fn skips_empty_lines_and_strips_source_markers() {
-        let parsed = DiffParser::new().parse(&lines(&["@@ -1 +1 @@", "", " x"]));
+        let parsed = DiffParser::new().parse(lines(&["@@ -1 +1 @@", "", " x"]));
         assert_eq!(parsed.rows().len(), 2);
         assert_eq!(parsed.rows()[1].body(), "x");
     }
@@ -645,7 +663,7 @@ mod tests {
     #[test]
     fn explicit_line_limit_marks_only_overlong_rows() {
         let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
-            .parse(&lines(&["@@ -1 +1 @@", "+abc", "+abcd"]));
+            .parse(lines(&["@@ -1 +1 @@", "+abc", "+abcd"]));
 
         assert_eq!(parsed.rows()[1].long_line_character_count(), None);
         assert_eq!(

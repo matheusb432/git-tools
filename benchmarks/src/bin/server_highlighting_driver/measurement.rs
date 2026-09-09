@@ -8,11 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use gtl_benchmarks::server_highlighting::{
     StreamMeasurement, StreamValidator, read_process_rss, read_process_sample,
 };
-use gtl_wire::v1::StreamViewerRowsRequest;
+use gtl_wire::v1::{StreamViewerRowsRequest, StreamViewerRowsResponse};
+use prost::Message as _;
 
 use super::server::BenchmarkViewerClient;
 
@@ -29,7 +30,15 @@ pub async fn measure_stream(
     let wall_time = started.elapsed();
     let after = read_process_sample(server_process_id).context("sample server after stream")?;
     let observed_peak = sampler.finish()?;
-    let evidence = stream_result?;
+    let mut validator = StreamValidator::new();
+    for message in stream_result? {
+        validator
+            .observe(&message)
+            .context("validate StreamViewerRows response")?;
+    }
+    let evidence = validator
+        .finish()
+        .context("finish StreamViewerRows validation")?;
     let server_cpu_clock_ticks = after
         .cpu_clock_ticks
         .checked_sub(before.cpu_clock_ticks)
@@ -60,13 +69,14 @@ pub async fn measure_stream(
 async fn consume_stream(
     client: &mut BenchmarkViewerClient,
     request: StreamViewerRowsRequest,
-) -> Result<gtl_benchmarks::server_highlighting::StreamEvidence> {
+) -> Result<Vec<StreamViewerRowsResponse>> {
     let mut stream = client
         .stream_viewer_rows(request)
         .await
         .context("start StreamViewerRows")?
         .into_inner();
-    let mut validator = StreamValidator::new();
+    let mut messages = Vec::new();
+    let mut encoded_bytes = 0usize;
     loop {
         let Some(message) = stream
             .message()
@@ -75,13 +85,14 @@ async fn consume_stream(
         else {
             break;
         };
-        validator
-            .observe(&message)
-            .context("validate StreamViewerRows response")?;
+        encoded_bytes = encoded_bytes.saturating_add(message.encoded_len());
+        ensure!(
+            encoded_bytes <= 64 * 1024 * 1024,
+            "benchmark row stream exceeds 64 MiB"
+        );
+        messages.push(message);
     }
-    validator
-        .finish()
-        .context("finish StreamViewerRows validation")
+    Ok(messages)
 }
 
 struct RssSampler {

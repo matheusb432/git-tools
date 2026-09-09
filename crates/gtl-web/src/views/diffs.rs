@@ -6,6 +6,10 @@ pub(crate) mod diff_workspace;
 mod file_status;
 mod line_changes;
 #[cfg(feature = "desktop")]
+mod presentation;
+#[cfg(feature = "desktop")]
+pub(crate) use presentation::use_diff_presentation_provider;
+#[cfg(feature = "desktop")]
 pub(crate) mod project_diff;
 mod search_keybindings;
 

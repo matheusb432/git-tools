@@ -41,7 +41,7 @@ const BENCHMARK_BOUNDS: WorkerBounds = WorkerBounds {
     process_niceness: 10,
     tasks_max: 512,
     termination_grace_seconds: 15,
-    wall_time_minutes: 20,
+    wall_time_minutes: 40,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -505,7 +505,7 @@ mod tests {
                 "/usr/bin/timeout",
                 "--signal=TERM",
                 "--kill-after=15s",
-                "20m",
+                "40m",
                 "/repo/target/debug/xtask",
                 "desktop-scroll-benchmark-worker",
             ]

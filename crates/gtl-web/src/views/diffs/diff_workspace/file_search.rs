@@ -125,8 +125,9 @@ fn use_workspace_file_search(
     file_filter: ReadSignal<String>,
     server_owned: bool,
 ) -> WorkspaceFileSearch {
+    let identity = use_memo(move || view.read().identity);
     use_resource(move || {
-        let identity = view.read().identity;
+        let identity = identity();
         let query = file_filter.read().clone();
         request_workspace_files(view, server_owned, identity, query)
     })

@@ -51,6 +51,7 @@ fn row_stream_events_carry_identity_sequence_file_and_typed_rows() {
         sequence: 11,
         event: Some(stream_viewer_rows_response::Event::UnifiedRows(
             ViewerUnifiedRows {
+                start_row: 0,
                 file_id: "file-4".to_owned(),
                 rows: vec![ViewerUnifiedRow {
                     row: Some(viewer_unified_row::Row::Added(
@@ -123,12 +124,14 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
 }
 
 #[test]
-fn ready_shell_content_id_survives_protobuf_and_rejects_missing_or_wrong_width()
+fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
 -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message as _;
     let active = v1::ViewerActiveView {
+        row_source: v1::ViewerRowSourceState::Ready as i32,
         identity: Some(encode_viewer_view_identity(viewer_identity().unwrap())),
         content_id: Some(vec![42; 32]),
+        commit_count: 17,
         repository_name: "repo".into(),
         branch: "main".into(),
         upstream: "HEAD".into(),
@@ -172,6 +175,8 @@ fn ready_shell_content_id_survives_protobuf_and_rejects_missing_or_wrong_width()
         view.content_id,
         viewer::ViewerRowContentId::from_digest([42; 32])
     );
+    assert_eq!(view.commit_count, 17);
+    assert!(view.commits.is_empty());
     assert_eq!(encode_viewer_shell(decoded).unwrap(), encoded);
     for content_id in [None, Some(vec![]), Some(vec![42; 31]), Some(vec![42; 33])] {
         let mut invalid = encoded.clone();
@@ -179,6 +184,7 @@ fn ready_shell_content_id_survives_protobuf_and_rejects_missing_or_wrong_width()
             state: Some(v1::viewer_active_state::State::Ready(Box::new(
                 v1::ViewerReadyState {
                     view: Some(v1::ViewerActiveView {
+                        row_source: v1::ViewerRowSourceState::Ready as i32,
                         content_id,
                         ..active.clone()
                     }),
@@ -269,6 +275,7 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
         sequence: 9,
         event: Some(stream_viewer_rows_response::Event::UnifiedRows(
             v1::ViewerUnifiedRows {
+                start_row: 0,
                 file_id: file.as_str().to_owned(),
                 rows: vec![encoded],
             },
@@ -281,6 +288,7 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
     assert_eq!(
         decoded.event,
         ViewerRowEvent::UnifiedRows {
+            start_row: 0,
             file,
             rows: vec![row],
         }

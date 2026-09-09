@@ -170,6 +170,12 @@ pub struct SessionTab {
     live_head: Option<super::refresh_live_view::LiveViewState>,
 }
 
+#[derive(Clone, Copy)]
+enum FullContextPreparation {
+    Pending,
+    Failed,
+}
+
 /// Authoritative recipe tabs plus their separately bounded computed views.
 pub struct ViewerSession {
     tabs: Vec<SessionTab>,
@@ -179,6 +185,7 @@ pub struct ViewerSession {
     version: ViewerVersion,
     focus_request_version: Option<ViewerVersion>,
     full_context_transient: Option<(ActiveContentIdentity, ViewerDiffSnapshot)>,
+    full_context_preparation: Option<(ActiveContentIdentity, FullContextPreparation)>,
 }
 
 impl ViewerSession {
@@ -192,6 +199,7 @@ impl ViewerSession {
             version: ViewerVersion::default(),
             focus_request_version: None,
             full_context_transient: None,
+            full_context_preparation: None,
         }
     }
 
@@ -217,7 +225,6 @@ impl ViewerSession {
         kind: ViewerTabKind,
         label: String,
     ) -> Option<ViewerTabId> {
-        self.clear_every_commit_selection();
         let unpinned = recipe.unpinned();
         if let Some(existing) = self
             .tabs
@@ -273,7 +280,15 @@ impl ViewerSession {
         // one ticket remains in flight before an old ticket could compare equal again.
         tab.generation = tab.generation.next();
         tab.selection_generation = tab.selection_generation.next();
-        tab.selection = CommitSelection::None;
+        tab.selection = match std::mem::replace(&mut tab.selection, CommitSelection::None) {
+            CommitSelection::None => CommitSelection::None,
+            CommitSelection::Pending { commit }
+            | CommitSelection::Ready { commit, .. }
+            | CommitSelection::Error { commit, .. } => CommitSelection::Ready {
+                commit,
+                transient: None,
+            },
+        };
         tab.tab = ViewerTab::new(
             id,
             tab.tab.label().into(),
@@ -307,6 +322,11 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
 
+        if let CommitSelection::Ready { commit, .. } = &tab.selection
+            && !value.view.commits.iter().any(|entry| entry.id == commit.id)
+        {
+            tab.selection = CommitSelection::None;
+        }
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_version();
@@ -445,6 +465,23 @@ impl ViewerSession {
         self.begin_compute(id)
     }
 
+    pub(super) fn selected_commit_to_reload(&mut self) -> Option<(ViewerTabId, CommitId)> {
+        let id = self.active?;
+        let tab = self.tab(id)?;
+        if !matches!(tab.tab.state(), ViewerTabState::Ready) {
+            return None;
+        }
+        let CommitSelection::Ready { commit, transient } = &tab.selection else {
+            return None;
+        };
+        if transient.is_some() {
+            return None;
+        }
+        let commit = commit.id.clone();
+        let cached = self.cache.get(id)?;
+        cached.selected.is_none().then_some((id, commit))
+    }
+
     pub fn begin_commit_selection(
         &mut self,
         id: ViewerTabId,
@@ -499,7 +536,7 @@ impl ViewerSession {
     pub(super) fn publish_commit_patch_if_current(
         &mut self,
         ticket: CommitPatchTicket,
-        patch: Arc<View>,
+        patch: ViewerDiffSnapshot,
     ) -> PublishOutcome {
         if !self.commit_patch_is_current(ticket) {
             return PublishOutcome::Stale;
@@ -511,7 +548,6 @@ impl ViewerSession {
             Some(CommitSelection::Pending { commit }) => commit.id.clone(),
             _ => return PublishOutcome::Stale,
         };
-        let patch = ViewerDiffSnapshot::new(patch);
         let selected = base.with_selected(patch.clone());
         let transient =
             if self.cache.insert(ticket.tab_id, selected) == cache::CacheDisposition::Oversize {
@@ -705,9 +741,6 @@ impl ViewerSession {
         if !self.tabs.iter().any(|tab| tab.tab.id() == id) {
             return false;
         }
-        if self.active != Some(id) {
-            self.clear_every_commit_selection();
-        }
         self.active = Some(id);
         self.bump_version();
         true
@@ -748,6 +781,38 @@ impl ViewerSession {
         })
     }
 
+    pub(super) fn reserve_full_context(&mut self) -> Option<ActiveContentSnapshot> {
+        let snapshot = self.active_content_snapshot()?;
+        if !matches!(
+            snapshot.view.full_context,
+            crate::diffs::FullContextDiffState::Deferred(_)
+        ) || self
+            .full_context_preparation
+            .as_ref()
+            .is_some_and(|(identity, _)| *identity == snapshot.identity)
+        {
+            return None;
+        }
+        self.full_context_preparation = Some((snapshot.identity, FullContextPreparation::Pending));
+        Some(snapshot)
+    }
+
+    pub(super) fn fail_full_context_if_current(&mut self, identity: ActiveContentIdentity) {
+        if self
+            .full_context_preparation
+            .as_ref()
+            .is_some_and(|(current, _)| *current == identity)
+        {
+            self.full_context_preparation = Some((identity, FullContextPreparation::Failed));
+            self.bump_version();
+        }
+    }
+
+    pub(super) fn full_context_failed(&self, identity: ActiveContentIdentity) -> bool {
+        matches!(self.full_context_preparation,
+            Some((current, FullContextPreparation::Failed)) if current == identity)
+    }
+
     pub fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
         let identity = self.active_content_identity()?;
         if let Some(view) = self.full_context_snapshot(identity) {
@@ -773,7 +838,7 @@ impl ViewerSession {
         &mut self,
         identity: ActiveContentIdentity,
         expected: &Arc<View>,
-        replacement: Arc<View>,
+        replacement: ViewerDiffSnapshot,
     ) -> Option<Arc<View>> {
         if self.active_content_identity() != Some(identity) {
             return None;
@@ -803,9 +868,10 @@ impl ViewerSession {
         &mut self,
         tab_id: ViewerTabId,
         cached: CachedView,
-        replacement: Arc<View>,
+        replacement: ViewerDiffSnapshot,
     ) -> Arc<View> {
-        let candidate = CachedView::new(Arc::clone(&replacement));
+        let shared = replacement.shared_view();
+        let candidate = CachedView::from_snapshot(replacement);
         let snapshot = candidate.view.clone();
         let disposition = self.cache.insert(tab_id, candidate);
         if disposition == CacheDisposition::Oversize {
@@ -814,7 +880,7 @@ impl ViewerSession {
                 .active_content_identity()
                 .map(|identity| (identity, snapshot));
         }
-        replacement
+        shared
     }
 
     pub(super) fn full_context_snapshot(
@@ -830,12 +896,12 @@ impl ViewerSession {
         &mut self,
         tab_id: ViewerTabId,
         cached: &CachedView,
-        replacement: Arc<View>,
+        replacement: ViewerDiffSnapshot,
     ) -> Option<Arc<View>> {
-        let snapshot = ViewerDiffSnapshot::new(Arc::clone(&replacement));
-        let enriched = cached.with_selected(snapshot.clone());
+        let shared = replacement.shared_view();
+        let enriched = cached.with_selected(replacement.clone());
         if self.cache.insert(tab_id, enriched) != CacheDisposition::Oversize {
-            return Some(replacement);
+            return Some(shared);
         }
 
         self.cache.insert(tab_id, cached.without_selected());
@@ -843,15 +909,15 @@ impl ViewerSession {
         let CommitSelection::Ready { transient, .. } = &mut tab.selection else {
             return None;
         };
-        *transient = Some(snapshot);
-        Some(replacement)
+        *transient = Some(replacement);
+        Some(shared)
     }
 
     fn replace_transient_selection(
         &mut self,
         tab_id: ViewerTabId,
         expected: &Arc<View>,
-        replacement: Arc<View>,
+        replacement: ViewerDiffSnapshot,
     ) -> Option<Arc<View>> {
         let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == tab_id)?;
         let CommitSelection::Ready {
@@ -864,8 +930,9 @@ impl ViewerSession {
         if !Arc::ptr_eq(&transient.shared_view(), expected) {
             return None;
         }
-        *transient = ViewerDiffSnapshot::new(Arc::clone(&replacement));
-        Some(replacement)
+        let shared = replacement.shared_view();
+        *transient = replacement;
+        Some(shared)
     }
 
     #[must_use]
@@ -889,6 +956,22 @@ impl ViewerSession {
 
     fn bump_version(&mut self) {
         if self
+            .full_context_preparation
+            .as_ref()
+            .is_some_and(|(identity, _)| {
+                self.active_displayed_content_identity() != Some(*identity)
+            })
+        {
+            self.full_context_preparation = None;
+        }
+        for tab in &mut self.tabs {
+            if Some(tab.tab.id()) != self.active
+                && let CommitSelection::Ready { transient, .. } = &mut tab.selection
+            {
+                *transient = None;
+            }
+        }
+        if self
             .full_context_transient
             .as_ref()
             .is_some_and(|(identity, _)| {
@@ -898,18 +981,6 @@ impl ViewerSession {
             self.full_context_transient = None;
         }
         self.version = self.version.next();
-    }
-
-    fn clear_every_commit_selection(&mut self) {
-        let selected = self
-            .tabs
-            .iter()
-            .filter(|tab| !matches!(tab.selection, CommitSelection::None))
-            .map(|tab| tab.tab.id())
-            .collect::<Vec<_>>();
-        for id in selected {
-            self.clear_commit_selection(id);
-        }
     }
 
     #[must_use]
@@ -1039,11 +1110,57 @@ mod tests {
     }
 
     #[test]
+    fn cache_eviction_preserves_commit_navigation_when_the_range_reloads() {
+        let (mut session, id, ids) = ready_session_with_commits();
+        let range = session.cached_view(id).unwrap().without_selected();
+        let (ticket, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
+        session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(view("patch")));
+        session.cache.remove(id);
+        let ticket = session.begin_compute(id).unwrap();
+        session.publish_labeled_if_current(ticket, range, "reloaded".into());
+        assert!(matches!(session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Pending { id: selected } if selected == ids[0]));
+        let (tab_id, commit_id) = session.selected_commit_to_reload().unwrap();
+        assert_eq!((tab_id, &commit_id), (id, &ids[0]));
+        let (ticket, _, _) = session.begin_commit_selection(tab_id, &commit_id).unwrap();
+        assert!(session.selected_commit_to_reload().is_none());
+        session.publish_commit_patch_if_current(
+            ticket,
+            ViewerDiffSnapshot::new(view("reloaded patch")),
+        );
+        assert!(session.selected_commit_to_reload().is_none());
+        assert!(matches!(session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Ready { id: selected, view }
+                if selected == ids[0] && view.title == "reloaded patch"));
+    }
+
+    #[test]
+    fn opening_and_activating_tabs_preserves_the_selected_patch() {
+        let (mut session, id, ids) = ready_session_with_commits();
+        let (ticket, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
+        let patch = view("selected patch");
+        session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(patch.clone()));
+        let identity = session.active_content_identity();
+        let mut other_recipe = recipe();
+        other_recipe.source = RecipeSource::LocalRepo(crate::utils::repository_root("/other"));
+        let other = session
+            .open(other_recipe, batch_id(2), ViewerTabKind::Snapshot)
+            .unwrap();
+        assert_ne!(id, other);
+        assert!(session.activate(id));
+        assert_eq!(session.active_content_identity(), identity);
+        assert!(matches!(session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Ready { id: selected, view }
+                if selected == ids[0] && Arc::ptr_eq(&view.shared_view(), &patch)));
+    }
+
+    #[test]
     fn live_publication_preserves_a_selected_commit_until_it_leaves_the_range() {
         let (mut session, id, ids) = ready_session_with_commits();
         let (selection, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
         let selected = view("selected patch");
-        session.publish_commit_patch_if_current(selection, selected.clone());
+        session
+            .publish_commit_patch_if_current(selection, ViewerDiffSnapshot::new(selected.clone()));
         let ticket = session.current_ticket(id).unwrap();
         let original_identity = session.active_content_identity().unwrap();
         let range = session.cached_view_snapshot(id).unwrap();
@@ -1149,7 +1266,7 @@ mod tests {
             CommitSelectionSnapshot::Pending { .. }
         ));
         assert_eq!(
-            session.publish_commit_patch_if_current(ticket, view("patch")),
+            session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(view("patch"))),
             PublishOutcome::Published
         );
         assert!(matches!(
@@ -1177,12 +1294,16 @@ mod tests {
             path: crate::utils::repository_relative_path("large.rs"),
             added: gtl_models::diffs::DiffLineCount::new(1),
             removed: gtl_models::diffs::DiffLineCount::default(),
-            lines: vec!["+compact".into()],
-            full_lines: Some(vec![format!("+{}", "x".repeat(2048))]),
+            lines: vec!["+compact".into()].into(),
+            full_lines: Some(vec![format!("+{}", "x".repeat(2048))].into()),
         }];
         let replacement = Arc::new(full);
         session
-            .replace_active_content_if_current(identity, &expected, Arc::clone(&replacement))
+            .replace_active_content_if_current(
+                identity,
+                &expected,
+                ViewerDiffSnapshot::new(Arc::clone(&replacement)),
+            )
             .unwrap();
         let options = super::super::project_render_options(super::super::RenderOptions::new(
             super::super::DiffLayout::Unified,
@@ -1225,13 +1346,17 @@ mod tests {
     fn active_content_replacement_updates_only_the_selected_patch() {
         let (mut session, id, ids) = ready_session_with_commits();
         let (ticket, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
-        session.publish_commit_patch_if_current(ticket, view("patch"));
+        session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(view("patch")));
         let identity = session.active_content_identity().unwrap();
         let expected = session.active_content_snapshot().unwrap().shared_view();
         let replacement = view("patch full");
 
         let published = session
-            .replace_active_content_if_current(identity, &expected, Arc::clone(&replacement))
+            .replace_active_content_if_current(
+                identity,
+                &expected,
+                ViewerDiffSnapshot::new(Arc::clone(&replacement)),
+            )
             .unwrap();
 
         assert!(Arc::ptr_eq(&published, &replacement));
@@ -1257,7 +1382,11 @@ mod tests {
 
         assert!(
             session
-                .replace_active_content_if_current(identity, &expected, view("stale"))
+                .replace_active_content_if_current(
+                    identity,
+                    &expected,
+                    ViewerDiffSnapshot::new(view("stale"))
+                )
                 .is_none()
         );
     }
@@ -1275,7 +1404,7 @@ mod tests {
         assert!(session.clear_commit_selection(id));
 
         assert_eq!(
-            session.publish_commit_patch_if_current(first, view("first")),
+            session.publish_commit_patch_if_current(first, ViewerDiffSnapshot::new(view("first"))),
             PublishOutcome::Stale
         );
         assert!(matches!(
@@ -1306,7 +1435,10 @@ mod tests {
         assert!(session.active_content_identity().is_none());
         assert_eq!(session.active_displayed_content_identity(), Some(range));
         assert_eq!(
-            session.publish_commit_patch_if_current(first_selection, view("selected")),
+            session.publish_commit_patch_if_current(
+                first_selection,
+                ViewerDiffSnapshot::new(view("selected"))
+            ),
             PublishOutcome::Published
         );
         let selected = session.active_content_identity().unwrap();
