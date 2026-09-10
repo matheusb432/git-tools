@@ -1,0 +1,12 @@
+input-info = "none"
+time-format = "%T.%3N"
+
+[fields]
+ignore = ["_*"]
+hide = ["spans", "span.method", "span.version"]
+
+[fields.predefined.message]
+names = ["msg", "message", "fields.message"]
+
+[fields.predefined.logger]
+names = ["logger", "target", "span.name"]

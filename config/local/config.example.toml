@@ -12,19 +12,29 @@ search_files = "ctrl+p"
 search_text_in_all_files = "ctrl+f"
 
 [push]
-# Plain current-repo push only; defaults to true when omitted.
+# Defaults to true when omitted.
 confirm = true
 
 # Default diff exclusions for projects without an explicit override.
-# Extensions are case-insensitive; a leading dot is optional.
 [diff]
 exclude = ["md", "lock"]
 
-# Named project settings use one array entry per exact, case-sensitive Git Tools project name.
-# Unknown project names are valid and remain inactive until Git Tools manages them.
+[tags]
+default = "semver"
+[tags.patterns]
+semver = "v{major}.{minor}.{patch}"
+bare = "{major}.{minor}.{patch}"
+release = "release-{major}.{minor}.{patch}"
+alpha = "{major}.{minor}.{patch}-alpha.{n}.{n}"
+
 [[projects]]
 name = "git-tools"
-# Omit this repository from gtl push --all before any Git operation.
 excluded_from_push_all = true
-# A project override replaces the default extension list instead of merging.
+# overrides [diff].exclude
 diff = { exclude = ["md", "lock", "js"] }
+# overrides [tags] and [tags.patterns]
+[projects.tags]
+default = "dev"
+[projects.tags.patterns]
+dev = "{major}.{minor}.{patch}"
+release = "release-{major}.{minor}.{patch}"

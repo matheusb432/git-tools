@@ -205,14 +205,19 @@ pub enum TagCommand {
         #[arg(short = 'l', long = "label")]
         label: Option<String>,
     },
-    /// Preview and create the next canonical `SemVer` tag.
+    /// Preview and create the next tag from the project's configured tag pattern.
     #[command(visible_alias = "b")]
     Bump {
-        /// `SemVer` component to advance.
-        level: TagBumpLevel,
         /// Annotated tag message.
         #[arg(allow_hyphen_values = true, value_parser = non_empty_message)]
         message: String,
+        /// `major`, `minor`, or `patch` or index of rightmost slot. Defaults to the rightmost
+        /// slot.
+        #[arg(short = 'n', long = "level", value_parser = parse_tag_bump_level, default_value = "0")]
+        level: TagBumpLevel,
+        /// Configured tag pattern name.
+        #[arg(long, alias = "pt")]
+        pattern: Option<String>,
         /// Push only the newly created tag to origin.
         #[arg(short = 'p', long)]
         push: bool,
@@ -225,12 +230,24 @@ pub enum TagCommand {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lower")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagBumpLevel {
+    Slot(u32),
     Major,
     Minor,
     Patch,
+}
+
+fn parse_tag_bump_level(value: &str) -> Result<TagBumpLevel, String> {
+    match value {
+        "major" => Ok(TagBumpLevel::Major),
+        "minor" => Ok(TagBumpLevel::Minor),
+        "patch" => Ok(TagBumpLevel::Patch),
+        index => index.parse::<u32>().map(TagBumpLevel::Slot).map_err(|_| {
+            "level must be a slot index counted from the right, or one of major, minor, patch"
+                .to_string()
+        }),
+    }
 }
 
 #[derive(Debug, Args)]
@@ -416,7 +433,10 @@ mod tests {
         let cli = Cli::parse_args(&[
             "tag".into(),
             "b".into(),
+            "release".into(),
+            "-n".into(),
             "patch".into(),
+            "--pt".into(),
             "release".into(),
             "-p".into(),
         ])
@@ -428,13 +448,60 @@ mod tests {
                 command: Some(TagCommand::Bump {
                     level: TagBumpLevel::Patch,
                     message,
+                    pattern: Some(pattern),
                     push: true,
                     dry: false,
                     yes: false,
                 }),
                 ..
-            }) if message == "release"
+            }) if message == "release" && pattern == "release"
         ));
+    }
+
+    #[test]
+    fn parse_args_tag_bump_defaults_to_the_rightmost_slot_and_accepts_indexes() {
+        let cli = Cli::parse_args(&["tag".into(), "bump".into(), "patch".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Bump {
+                    level: TagBumpLevel::Slot(0),
+                    message,
+                    pattern: None,
+                    ..
+                }),
+                ..
+            }) if message == "patch"
+        ));
+
+        let cli = Cli::parse_args(&[
+            "tag".into(),
+            "bump".into(),
+            "-n".into(),
+            "2".into(),
+            "msg".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Bump {
+                    level: TagBumpLevel::Slot(2),
+                    ..
+                }),
+                ..
+            })
+        ));
+        assert!(
+            Cli::parse_args(&[
+                "tag".into(),
+                "bump".into(),
+                "-n".into(),
+                "pre".into(),
+                "msg".into()
+            ])
+            .is_err()
+        );
     }
 
     #[test]

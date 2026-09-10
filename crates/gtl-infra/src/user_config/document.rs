@@ -7,6 +7,10 @@ use gtl_models::{
     diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
     settings::{ProjectsViewMode, PushAllExclusions, UserSettings},
+    tags::{
+        TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
+        TagTemplate, TagTemplateError,
+    },
     viewer::{
         DiffDensity, DiffLayout, InvalidViewerKeybindings, ParseRenderOptionError,
         ParseViewerKeybindingError, RenderOptions, ViewerKeybinding, ViewerKeybindingAction,
@@ -35,6 +39,12 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsSearchTextInAllFiles,
     #[strum(to_string = "diff.exclude")]
     DefaultDiffExclusions,
+    #[strum(to_string = "tags")]
+    DefaultTagPatterns,
+    #[strum(to_string = "tags.default")]
+    DefaultTagPatternName,
+    #[strum(to_string = "tags.patterns")]
+    DefaultTagPatternTable,
     #[strum(to_string = "projects")]
     Projects,
     #[strum(to_string = "projects[{index}].name")]
@@ -43,6 +53,12 @@ pub(super) enum UserSettingsDocumentKey {
     ProjectExcludedFromPushAll { index: usize },
     #[strum(to_string = "projects[{index}].diff.exclude")]
     ProjectDiffExclusions { index: usize },
+    #[strum(to_string = "projects[{index}].tags")]
+    ProjectTagPatterns { index: usize },
+    #[strum(to_string = "projects[{index}].tags.default")]
+    ProjectTagPatternName { index: usize },
+    #[strum(to_string = "projects[{index}].tags.patterns")]
+    ProjectTagPatternTable { index: usize },
 }
 
 impl UserSettingsDocumentKey {
@@ -55,10 +71,16 @@ impl UserSettingsDocumentKey {
             Self::PushConfirmation => "push",
             Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
             Self::DefaultDiffExclusions => "diff",
+            Self::DefaultTagPatterns
+            | Self::DefaultTagPatternName
+            | Self::DefaultTagPatternTable => "tags",
             Self::Projects
             | Self::ProjectName { .. }
             | Self::ProjectExcludedFromPushAll { .. }
-            | Self::ProjectDiffExclusions { .. } => "projects",
+            | Self::ProjectDiffExclusions { .. }
+            | Self::ProjectTagPatterns { .. }
+            | Self::ProjectTagPatternName { .. }
+            | Self::ProjectTagPatternTable { .. } => "projects",
         }
     }
 
@@ -75,6 +97,9 @@ impl UserSettingsDocumentKey {
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
             Self::ProjectExcludedFromPushAll { .. } => "excluded_from_push_all",
+            Self::DefaultTagPatterns | Self::ProjectTagPatterns { .. } => "tags",
+            Self::DefaultTagPatternName | Self::ProjectTagPatternName { .. } => "default",
+            Self::DefaultTagPatternTable | Self::ProjectTagPatternTable { .. } => "patterns",
         }
     }
 
@@ -87,6 +112,12 @@ impl UserSettingsDocumentKey {
             Self::PushConfirmation => "push",
             Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
             Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "diff",
+            Self::DefaultTagPatterns
+            | Self::DefaultTagPatternName
+            | Self::DefaultTagPatternTable
+            | Self::ProjectTagPatterns { .. }
+            | Self::ProjectTagPatternName { .. }
+            | Self::ProjectTagPatternTable { .. } => "tags",
             Self::Projects | Self::ProjectName { .. } | Self::ProjectExcludedFromPushAll { .. } => {
                 "projects"
             }
@@ -151,6 +182,32 @@ pub(super) enum UserSettingsDocumentError {
     DuplicateProjectName {
         key: UserSettingsDocumentKey,
         name: ProjectName,
+    },
+    #[error("`{key}` must be a table of tag templates")]
+    ExpectedTagPatternTable { key: UserSettingsDocumentKey },
+    #[error("`{key}` entry `{name}` must be a string")]
+    ExpectedTagTemplateString {
+        key: UserSettingsDocumentKey,
+        name: String,
+    },
+    #[error("`{key}` is invalid: {source}")]
+    InvalidTagPatternName {
+        key: UserSettingsDocumentKey,
+        #[source]
+        source: TagPatternNameError,
+    },
+    #[error("`{key}` entry `{name}` is invalid: {source}")]
+    InvalidTagTemplate {
+        key: UserSettingsDocumentKey,
+        name: String,
+        #[source]
+        source: TagTemplateError,
+    },
+    #[error("`{key}` is invalid: {source}")]
+    InvalidTagPatternSet {
+        key: UserSettingsDocumentKey,
+        #[source]
+        source: TagPatternSetError,
     },
 }
 
@@ -221,7 +278,18 @@ struct RawUserSettingsDocument {
     #[serde(default)]
     diff: Option<RawDiffSettingsDocument>,
     #[serde(default)]
+    tags: Option<RawTagSettingsDocument>,
+    #[serde(default)]
     projects: Vec<RawProjectSettingsDocument>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTagSettingsDocument {
+    #[serde(default)]
+    default: Option<RawSettingValue>,
+    #[serde(default)]
+    patterns: Option<RawSettingValue>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -256,6 +324,84 @@ struct RawProjectSettingsDocument {
     excluded_from_push_all: Option<RawSettingValue>,
     #[serde(default)]
     diff: Option<RawDiffSettingsDocument>,
+    #[serde(default)]
+    tags: Option<RawTagSettingsDocument>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TagPatternScope {
+    UserDefault,
+    Project { index: usize },
+}
+
+impl TagPatternScope {
+    const fn set_key(self) -> UserSettingsDocumentKey {
+        match self {
+            Self::UserDefault => UserSettingsDocumentKey::DefaultTagPatterns,
+            Self::Project { index } => UserSettingsDocumentKey::ProjectTagPatterns { index },
+        }
+    }
+
+    const fn default_key(self) -> UserSettingsDocumentKey {
+        match self {
+            Self::UserDefault => UserSettingsDocumentKey::DefaultTagPatternName,
+            Self::Project { index } => UserSettingsDocumentKey::ProjectTagPatternName { index },
+        }
+    }
+
+    const fn table_key(self) -> UserSettingsDocumentKey {
+        match self {
+            Self::UserDefault => UserSettingsDocumentKey::DefaultTagPatternTable,
+            Self::Project { index } => UserSettingsDocumentKey::ProjectTagPatternTable { index },
+        }
+    }
+}
+
+fn tag_pattern_set(
+    scope: TagPatternScope,
+    document: RawTagSettingsDocument,
+) -> Result<TagPatternSet, UserSettingsDocumentError> {
+    let default = optional_string(scope.default_key(), document.default)?
+        .map(|name| tag_pattern_name(scope.default_key(), name))
+        .transpose()?;
+    let table_key = scope.table_key();
+    let entries = match document.patterns {
+        Some(RawSettingValue::Table(entries)) => entries,
+        Some(_) => {
+            return Err(UserSettingsDocumentError::ExpectedTagPatternTable { key: table_key });
+        }
+        None => return Err(UserSettingsDocumentError::MissingField { key: table_key }),
+    };
+    let mut patterns = Vec::with_capacity(entries.len());
+    for (name, value) in entries {
+        let template = value
+            .as_str()
+            .ok_or_else(|| UserSettingsDocumentError::ExpectedTagTemplateString {
+                key: table_key,
+                name: name.clone(),
+            })?
+            .parse::<TagTemplate>()
+            .map_err(|source| UserSettingsDocumentError::InvalidTagTemplate {
+                key: table_key,
+                name: name.clone(),
+                source,
+            })?;
+        patterns.push((tag_pattern_name(table_key, name)?, template));
+    }
+    TagPatternSet::try_new(patterns, default).map_err(|source| {
+        UserSettingsDocumentError::InvalidTagPatternSet {
+            key: scope.set_key(),
+            source,
+        }
+    })
+}
+
+fn tag_pattern_name(
+    key: UserSettingsDocumentKey,
+    name: String,
+) -> Result<TagPatternName, UserSettingsDocumentError> {
+    TagPatternName::try_new(name)
+        .map_err(|source| UserSettingsDocumentError::InvalidTagPatternName { key, source })
 }
 
 fn parse_settings(
@@ -284,7 +430,11 @@ fn parse_settings(
         UserSettingsDocumentKey::DefaultDiffExclusions,
         document.diff.and_then(|diff| diff.exclude),
     )?;
-    let (diff_exclusions_projects, push_all_exclusions) = project_settings(document.projects)?;
+    let tag_patterns_default = document
+        .tags
+        .map(|tags| tag_pattern_set(TagPatternScope::UserDefault, tags))
+        .transpose()?;
+    let projects = project_settings(document.projects)?;
 
     Ok((
         UserSettings::new(
@@ -292,9 +442,13 @@ fn parse_settings(
             RenderOptions::new(layout, density),
             keybindings,
             push_confirmation_required,
-            DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default),
-            push_all_exclusions,
-        ),
+            DiffExclusions::new(projects.diff_exclusions, diff_exclusions_default),
+            projects.push_all_exclusions,
+        )
+        .with_tag_patterns(TagPatternSettings::new(
+            tag_patterns_default,
+            projects.tag_patterns,
+        )),
         document.projects_view,
     ))
 }
@@ -422,11 +576,18 @@ fn string_array(
         .collect()
 }
 
+struct ProjectSettingsDocuments {
+    diff_exclusions: BTreeMap<ProjectName, Vec<String>>,
+    push_all_exclusions: PushAllExclusions,
+    tag_patterns: BTreeMap<ProjectName, TagPatternSet>,
+}
+
 fn project_settings(
     projects: Vec<RawProjectSettingsDocument>,
-) -> Result<(BTreeMap<ProjectName, Vec<String>>, PushAllExclusions), UserSettingsDocumentError> {
+) -> Result<ProjectSettingsDocuments, UserSettingsDocumentError> {
     let mut diff_exclusions = BTreeMap::new();
     let mut push_all_exclusions = Vec::new();
+    let mut tag_patterns = BTreeMap::new();
     let mut project_names = std::collections::BTreeSet::new();
 
     for (index, project) in projects.into_iter().enumerate() {
@@ -452,6 +613,12 @@ fn project_settings(
         {
             diff_exclusions.insert(name.clone(), exclusions);
         }
+        if let Some(tags) = project.tags {
+            tag_patterns.insert(
+                name.clone(),
+                tag_pattern_set(TagPatternScope::Project { index }, tags)?,
+            );
+        }
         if optional_bool(
             UserSettingsDocumentKey::ProjectExcludedFromPushAll { index },
             project.excluded_from_push_all,
@@ -462,7 +629,11 @@ fn project_settings(
         }
     }
 
-    Ok((diff_exclusions, PushAllExclusions::new(push_all_exclusions)))
+    Ok(ProjectSettingsDocuments {
+        diff_exclusions,
+        push_all_exclusions: PushAllExclusions::new(push_all_exclusions),
+        tag_patterns,
+    })
 }
 
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
@@ -542,11 +713,15 @@ fn apply_projects(
 ) {
     match update {
         UserSettingsFieldUpdate::Update(projects) => {
+            let mut retained_tags = retained_project_tags(document);
             let mut tables = ArrayOfTables::new();
             for (index, project) in projects.into_iter().enumerate() {
                 let mut table = Table::new();
                 table[UserSettingsDocumentKey::ProjectName { index }.leaf()] =
                     toml_edit::value(project.name.to_string());
+                if let Some(tags) = retained_tags.remove(project.name.as_ref()) {
+                    table[UserSettingsDocumentKey::ProjectTagPatterns { index }.leaf()] = tags;
+                }
                 table[UserSettingsDocumentKey::ProjectExcludedFromPushAll { index }.leaf()] =
                     toml_edit::value(project.excluded_from_push_all);
                 let mut diff = Table::new();
@@ -563,6 +738,22 @@ fn apply_projects(
         }
         UserSettingsFieldUpdate::Unchanged => {}
     }
+}
+
+fn retained_project_tags(document: &DocumentMut) -> BTreeMap<String, Item> {
+    let name_key = UserSettingsDocumentKey::ProjectName { index: 0 }.leaf();
+    let tags_key = UserSettingsDocumentKey::ProjectTagPatterns { index: 0 }.leaf();
+    document
+        .get(UserSettingsDocumentKey::Projects.root())
+        .and_then(Item::as_array_of_tables)
+        .into_iter()
+        .flatten()
+        .filter_map(|table| {
+            let name = table.get(name_key)?.as_str()?.to_owned();
+            let tags = table.get(tags_key)?.clone();
+            Some((name, tags))
+        })
+        .collect()
 }
 
 fn extension_array(extensions: &ExcludedExtensions) -> Array {
@@ -619,6 +810,7 @@ mod tests {
     use gtl_models::{
         diffs::ExcludedExtensions,
         paths::ProjectName,
+        tags::TagPatternName,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
@@ -781,6 +973,166 @@ diff = { exclude = ["js"] }
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn parse_reads_user_and_project_tag_patterns() {
+        let document = UserSettingsDocument::parse(
+            br#"
+[tags]
+patterns = { bare = "{major}.{minor}.{patch}" }
+
+[[projects]]
+name = "sample_project"
+[projects.tags]
+default = "dev"
+[projects.tags.patterns]
+dev = "{major}.{minor}.{patch}"
+release = "release-{major}.{minor}.{patch}"
+"#
+            .to_vec(),
+        )
+        .unwrap();
+        let settings = document.into_settings();
+        let tag_patterns = settings.tag_patterns();
+
+        let (name, template) = tag_patterns
+            .for_project_or_default(&ProjectName::try_from("other").unwrap())
+            .select(None)
+            .unwrap();
+        assert_eq!(name.as_ref(), "bare");
+        assert_eq!(template.to_string(), "{major}.{minor}.{patch}");
+        let sample_project = tag_patterns.for_project_or_default(&ProjectName::try_from("sample_project").unwrap());
+        assert_eq!(sample_project.select(None).unwrap().0.as_ref(), "dev");
+        assert_eq!(
+            sample_project.select(Some(&TagPatternName::try_new("release").unwrap()))
+                .unwrap()
+                .1
+                .to_string(),
+            "release-{major}.{minor}.{patch}"
+        );
+    }
+
+    #[test]
+    fn parse_reports_each_tag_pattern_failure() {
+        assert!(matches!(
+            UserSettingsDocument::parse(b"[tags]\ndefault = \"dev\"\n".to_vec())
+                .err()
+                .unwrap(),
+            UserSettingsDocumentError::MissingField {
+                key: UserSettingsDocumentKey::DefaultTagPatternTable
+            }
+        ));
+        assert!(matches!(
+            UserSettingsDocument::parse(b"[tags]\npatterns = [\"{n}\"]\n".to_vec())
+                .err()
+                .unwrap(),
+            UserSettingsDocumentError::ExpectedTagPatternTable {
+                key: UserSettingsDocumentKey::DefaultTagPatternTable
+            }
+        ));
+        assert!(matches!(
+            UserSettingsDocument::parse(b"[tags.patterns]\ndev = 3\n".to_vec())
+                .err()
+                .unwrap(),
+            UserSettingsDocumentError::ExpectedTagTemplateString {
+                key: UserSettingsDocumentKey::DefaultTagPatternTable,
+                ..
+            }
+        ));
+        assert!(matches!(
+            UserSettingsDocument::parse(b"[tags.patterns]\ndev = \"release\"\n".to_vec())
+                .err()
+                .unwrap(),
+            UserSettingsDocumentError::InvalidTagTemplate {
+                key: UserSettingsDocumentKey::DefaultTagPatternTable,
+                ..
+            }
+        ));
+        assert!(matches!(
+            UserSettingsDocument::parse(
+                br#"
+[[projects]]
+name = "sample_project"
+[projects.tags]
+default = "release"
+patterns = { dev = "{n}" }
+"#
+                .to_vec()
+            )
+            .err()
+            .unwrap(),
+            UserSettingsDocumentError::InvalidTagPatternSet {
+                key: UserSettingsDocumentKey::ProjectTagPatterns { index: 0 },
+                ..
+            }
+        ));
+        assert!(matches!(
+            UserSettingsDocument::parse(b"[tags]\npatterns = {}\n".to_vec())
+                .err()
+                .unwrap(),
+            UserSettingsDocumentError::InvalidTagPatternSet {
+                key: UserSettingsDocumentKey::DefaultTagPatterns,
+                ..
+            }
+        ));
+        let error = UserSettingsDocument::parse(b"[tags.patterns]\ndev = \"{n}{n}\"\n".to_vec())
+            .err()
+            .unwrap();
+        assert_eq!(
+            error.to_string(),
+            "`tags.patterns` entry `dev` is invalid: tag template places two slots without a literal between them"
+        );
+    }
+
+    #[test]
+    fn project_replacement_retains_hand_edited_tag_patterns() {
+        let document = UserSettingsDocument::parse(
+            br#"
+[[projects]]
+name = "sample_project"
+[projects.tags]
+default = "dev"
+patterns = { dev = "{n}" }
+
+[[projects]]
+name = "gone"
+[projects.tags]
+patterns = { dev = "{n}" }
+"#
+            .to_vec(),
+        )
+        .unwrap();
+        let projects = ProjectSettingsUpdates::try_new([ProjectSettingsUpdate {
+            name: ProjectName::try_from("sample_project").unwrap(),
+            excluded_from_push_all: false,
+            diff_exclusions: ExcludedExtensions::new(["lock"]),
+        }])
+        .unwrap();
+        let patch = UserSettingsPatch {
+            projects: UserSettingsFieldUpdate::Update(projects),
+            ..UserSettingsPatch::default()
+        };
+
+        let edit = document.apply(patch);
+        assert!(matches!(&edit, UserSettingsDocumentEdit::Changed(_)));
+        let UserSettingsDocumentEdit::Changed(raw) = edit else {
+            return;
+        };
+        let reparsed = UserSettingsDocument::parse(raw.into_bytes())
+            .unwrap()
+            .into_settings();
+        let selected_default = |project: &str| {
+            reparsed
+                .tag_patterns()
+                .for_project_or_default(&ProjectName::try_from(project).unwrap())
+                .select(None)
+                .unwrap()
+                .0
+                .to_string()
+        };
+        assert_eq!(selected_default("sample_project"), "dev");
+        assert_eq!(selected_default("gone"), "semver");
     }
 
     #[test]

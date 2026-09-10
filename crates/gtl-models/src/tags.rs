@@ -1,5 +1,17 @@
 //! Structured local tag values independent of Git transport and presentation.
 
+pub mod patterns;
+pub mod template;
+
+pub use patterns::{
+    TagPatternName, TagPatternNameError, TagPatternSelectionError, TagPatternSet,
+    TagPatternSetError, TagPatternSettings,
+};
+pub use template::{
+    SemverComponent, TagSlot, TagSlotError, TagTemplate, TagTemplateError, TagVersion,
+    TagVersionBumpError,
+};
+
 use crate::{
     diffs::CommitId,
     git::{GitObjectId, TagName},

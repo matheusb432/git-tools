@@ -1,200 +1,194 @@
-//! Semantic-version selection shared by tag-bump operations.
+//! Selects the base and next tag for one template and bump level.
 
-use gtl_models::git::TagName;
-use semver::Version;
+use gtl_models::{
+    git::TagName,
+    tags::{SemverComponent, TagSlot, TagTemplate, TagVersionBumpError},
+};
 
-/// The `SemVer` component advanced by a tag bump.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BumpLevel {
-    Major,
-    Minor,
-    Patch,
+    Slot(TagSlot),
+    Component(SemverComponent),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TagVersionDecision {
-    pub(super) base_tag: TagName,
+    pub(super) slot: TagSlot,
+    pub(super) base_tag: Option<TagName>,
     pub(super) next_tag: TagName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum TagVersionRejection {
-    NoCanonicalTag { noncanonical_tag: Option<String> },
-    NewerNoncanonicalTag { base: Version, tag: String },
-    ComponentOverflow { component: &'static str },
+    ComponentAbsent {
+        component: SemverComponent,
+        template: TagTemplate,
+    },
+    Bump(TagVersionBumpError),
 }
 
 impl std::fmt::Display for TagVersionRejection {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoCanonicalTag {
-                noncanonical_tag: None,
-            } => formatter.write_str("cannot bump tags: no canonical vN.N.N tag exists"),
-            Self::NoCanonicalTag {
-                noncanonical_tag: Some(tag),
+            Self::ComponentAbsent {
+                component,
+                template,
             } => write!(
                 formatter,
-                "cannot bump tags: no canonical vN.N.N tag exists; found noncanonical tag {tag}"
+                "cannot bump {component}: template `{template}` has no `{{{component}}}` slot"
             ),
-            Self::NewerNoncanonicalTag { base, tag } => write!(
-                formatter,
-                "cannot bump from v{base}: newer noncanonical version tag {tag} is ambiguous"
-            ),
-            Self::ComponentOverflow { component } => {
-                write!(
-                    formatter,
-                    "cannot bump tags: {component} version component overflowed"
-                )
-            }
+            Self::Bump(error) => write!(formatter, "cannot bump tags: {error}"),
         }
     }
 }
 
 pub(super) fn decide_tag_version<'tag>(
     tag_names: impl IntoIterator<Item = &'tag str>,
+    template: &TagTemplate,
     level: BumpLevel,
 ) -> Result<TagVersionDecision, TagVersionRejection> {
-    let mut canonical = None::<Version>;
-    let mut noncanonical = None::<(Version, String)>;
-
-    for name in tag_names {
-        if let Some(version) = canonical_version(name) {
-            canonical = canonical.max(Some(version));
-        } else if let Some(version) = version_like(name) {
-            noncanonical = noncanonical.max(Some((version, name.to_string())));
+    let slot = match level {
+        BumpLevel::Slot(slot) => slot,
+        BumpLevel::Component(component) => {
+            template
+                .slot_of(component)
+                .ok_or_else(|| TagVersionRejection::ComponentAbsent {
+                    component,
+                    template: template.clone(),
+                })?
         }
-    }
-
-    let Some(base) = canonical else {
-        return Err(TagVersionRejection::NoCanonicalTag {
-            noncanonical_tag: noncanonical.map(|(_, name)| name),
-        });
     };
-    if let Some((version, tag)) = noncanonical
-        && version > base
-    {
-        return Err(TagVersionRejection::NewerNoncanonicalTag { base, tag });
-    }
-
-    let next = bump_version(base.clone(), level)?;
+    let base = tag_names
+        .into_iter()
+        .filter_map(|name| template.parse_version(name))
+        .max();
+    let next = base
+        .as_ref()
+        .map_or_else(|| template.zero_version(), Clone::clone)
+        .bump(slot)
+        .map_err(TagVersionRejection::Bump)?;
     Ok(TagVersionDecision {
-        base_tag: TagName::semantic_version(base.major, base.minor, base.patch),
-        next_tag: TagName::semantic_version(next.major, next.minor, next.patch),
+        slot,
+        base_tag: base.as_ref().map(|base| template.render(base)),
+        next_tag: template.render(&next),
     })
-}
-
-fn canonical_version(name: &str) -> Option<Version> {
-    let raw = name.strip_prefix('v')?;
-    let version = stable_version(raw)?;
-    (format!("v{version}") == name).then_some(version)
-}
-
-fn version_like(name: &str) -> Option<Version> {
-    stable_version(name.strip_prefix('v').unwrap_or(name))
-}
-
-fn stable_version(raw: &str) -> Option<Version> {
-    let version = Version::parse(raw).ok()?;
-    (version.pre.is_empty() && version.build.is_empty()).then_some(version)
-}
-
-fn bump_version(mut version: Version, level: BumpLevel) -> Result<Version, TagVersionRejection> {
-    match level {
-        BumpLevel::Major => {
-            version.major = checked_increment(version.major, "major")?;
-            version.minor = 0;
-            version.patch = 0;
-        }
-        BumpLevel::Minor => {
-            version.minor = checked_increment(version.minor, "minor")?;
-            version.patch = 0;
-        }
-        BumpLevel::Patch => {
-            version.patch = checked_increment(version.patch, "patch")?;
-        }
-    }
-    Ok(version)
-}
-
-fn checked_increment(
-    component: u64,
-    component_name: &'static str,
-) -> Result<u64, TagVersionRejection> {
-    component
-        .checked_add(1)
-        .ok_or(TagVersionRejection::ComponentOverflow {
-            component: component_name,
-        })
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::git::TagName;
+    use gtl_models::{
+        git::TagName,
+        tags::{SemverComponent, TagSlot, TagTemplate, TagVersionBumpError},
+    };
 
     use super::{BumpLevel, TagVersionDecision, TagVersionRejection, decide_tag_version};
 
+    fn template(source: &str) -> TagTemplate {
+        source.parse().unwrap()
+    }
+
+    fn slot(index: u32) -> TagSlot {
+        TagSlot::try_new(index).unwrap()
+    }
+
+    fn tag(name: &str) -> TagName {
+        TagName::try_new(name).unwrap()
+    }
+
     #[test]
-    fn bumps_each_semver_component_and_resets_lower_components() {
+    fn bumps_named_components_and_resets_the_slots_to_their_right() {
+        let semver = template("v{major}.{minor}.{patch}");
         let expected = [
-            (BumpLevel::Patch, "v0.30.1"),
-            (BumpLevel::Minor, "v0.31.0"),
-            (BumpLevel::Major, "v1.0.0"),
+            (SemverComponent::Patch, 0, "v0.30.1"),
+            (SemverComponent::Minor, 1, "v0.31.0"),
+            (SemverComponent::Major, 2, "v1.0.0"),
         ];
 
-        for (level, next_tag) in expected {
+        for (component, index, next_tag) in expected {
             assert_eq!(
-                decide_tag_version(["v0.30.0"], level),
+                decide_tag_version(["v0.30.0"], &semver, BumpLevel::Component(component)),
                 Ok(TagVersionDecision {
-                    base_tag: TagName::try_new("v0.30.0").unwrap(),
-                    next_tag: TagName::try_new(next_tag).unwrap(),
+                    slot: slot(index),
+                    base_tag: Some(tag("v0.30.0")),
+                    next_tag: tag(next_tag),
                 })
             );
         }
     }
 
     #[test]
-    fn selects_the_semantic_maximum_and_ignores_an_older_missing_v_typo() {
+    fn only_tags_matching_the_template_compete_for_the_base() {
+        let release = template("release-{major}.{minor}.{patch}");
+
         assert_eq!(
-            decide_tag_version(["v0.9.0", "0.29.1", "v0.30.0", "v0.10.0"], BumpLevel::Patch,),
+            decide_tag_version(
+                [
+                    "0.20.0",
+                    "release-0.3.0",
+                    "v9.9.9",
+                    "release-0.10.0",
+                    "handoff"
+                ],
+                &release,
+                BumpLevel::Slot(TagSlot::RIGHTMOST),
+            ),
             Ok(TagVersionDecision {
-                base_tag: TagName::try_new("v0.30.0").unwrap(),
-                next_tag: TagName::try_new("v0.30.1").unwrap(),
+                slot: TagSlot::RIGHTMOST,
+                base_tag: Some(tag("release-0.10.0")),
+                next_tag: tag("release-0.10.1"),
             })
         );
     }
 
     #[test]
-    fn rejects_a_newer_noncanonical_version_as_ambiguous() {
+    fn an_empty_lineage_seeds_from_zero() {
         assert_eq!(
-            decide_tag_version(["v0.30.0", "0.31.0"], BumpLevel::Patch),
-            Err(TagVersionRejection::NewerNoncanonicalTag {
-                base: semver::Version::new(0, 30, 0),
-                tag: "0.31.0".into(),
+            decide_tag_version(
+                ["0.19.1"],
+                &template("release-{major}.{minor}.{patch}"),
+                BumpLevel::Component(SemverComponent::Minor),
+            ),
+            Ok(TagVersionDecision {
+                slot: slot(1),
+                base_tag: None,
+                next_tag: tag("release-0.1.0"),
             })
         );
     }
 
     #[test]
-    fn requires_a_canonical_stable_version_tag() {
+    fn rejects_a_component_the_template_lacks_and_slots_out_of_range() {
+        let build = template("build-{n}");
+
         assert_eq!(
-            decide_tag_version(["0.29.1"], BumpLevel::Patch),
-            Err(TagVersionRejection::NoCanonicalTag {
-                noncanonical_tag: Some("0.29.1".into()),
+            decide_tag_version([], &build, BumpLevel::Component(SemverComponent::Patch)),
+            Err(TagVersionRejection::ComponentAbsent {
+                component: SemverComponent::Patch,
+                template: build.clone(),
             })
         );
         assert_eq!(
-            decide_tag_version(["v1.2.3-rc.1"], BumpLevel::Patch),
-            Err(TagVersionRejection::NoCanonicalTag {
-                noncanonical_tag: None,
-            })
+            decide_tag_version([], &build, BumpLevel::Slot(slot(1))),
+            Err(TagVersionRejection::Bump(
+                TagVersionBumpError::SlotOutOfRange {
+                    slot: slot(1),
+                    slot_count: 1,
+                }
+            ))
         );
     }
 
     #[test]
     fn rejects_component_overflow() {
         assert_eq!(
-            decide_tag_version(["v1.2.18446744073709551615"], BumpLevel::Patch),
-            Err(TagVersionRejection::ComponentOverflow { component: "patch" })
+            decide_tag_version(
+                ["v1.2.18446744073709551615"],
+                &template("v{major}.{minor}.{patch}"),
+                BumpLevel::Slot(TagSlot::RIGHTMOST),
+            ),
+            Err(TagVersionRejection::Bump(TagVersionBumpError::Overflow {
+                slot: TagSlot::RIGHTMOST
+            }))
         );
     }
 }

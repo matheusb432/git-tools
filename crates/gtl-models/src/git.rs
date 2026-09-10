@@ -156,14 +156,6 @@ impl BranchName {
 )]
 pub struct TagName(String);
 
-impl TagName {
-    /// Builds the canonical `vN.N.N` tag for a stable semantic version.
-    #[must_use]
-    pub fn semantic_version(major: u64, minor: u64, patch: u64) -> Self {
-        known_valid(Self::try_new(format!("v{major}.{minor}.{patch}")))
-    }
-}
-
 /// The configured name of a Git remote.
 #[nutype(
     validate(predicate = |value| !value.trim().is_empty()),
@@ -481,7 +473,7 @@ fn validate_object_id(value: &str) -> Result<(), GitObjectIdError> {
 }
 
 #[allow(clippy::unreachable)]
-fn known_valid<T, E>(result: Result<T, E>) -> T {
+pub(crate) fn known_valid<T, E>(result: Result<T, E>) -> T {
     match result {
         Ok(value) => value,
         Err(_) => unreachable!("a value assembled from validated parts remains valid"),

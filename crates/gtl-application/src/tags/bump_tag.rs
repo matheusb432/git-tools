@@ -3,14 +3,14 @@
 use gtl_models::git::{GitRevision, TagName};
 
 use super::{
-    DryRunTagBumpOk, TagBumpPreview,
+    BumpLevel, DryRunTagBumpOk, TagBumpPreview,
     add_tag::{self, AddTag},
     dry_run_tag_bump,
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagOperationProgress},
     push_tags,
 };
-use crate::ports::GitClient;
+use crate::ports::{GitClient, UserSettingsLoadError, UserSettingsReader};
 
 /// Result of applying one tag-bump proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,10 +24,12 @@ pub enum BumpTagOk {
     },
 }
 
-/// Reports an unexpected Git transport failure while applying a proposal.
+/// Reports a failure outside the proposal's own decision while applying it.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BumpTagError {
+    #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
     #[error("{source}")]
     Unexpected {
         progress: TagOperationProgress,
@@ -38,18 +40,27 @@ pub enum BumpTagError {
 
 /// Recomputes the current proposal, compares it with the displayed proposal, and applies it.
 #[cqrsy::command]
-pub fn execute(preview: TagBumpPreview, git: &impl GitClient) -> Result<BumpTagOk, BumpTagError> {
+pub fn execute(
+    preview: TagBumpPreview,
+    git: &impl GitClient,
+    settings: &impl UserSettingsReader,
+) -> Result<BumpTagOk, BumpTagError> {
     let current = match dry_run_tag_bump::execute_resolved(
         dry_run_tag_bump::DryRunResolvedTagBump {
             repo_root: preview.repo_path.clone(),
-            level: preview.level,
+            pattern: Some(preview.pattern.clone()),
+            level: BumpLevel::Slot(preview.slot),
             message: preview.message.clone(),
             push: preview.push,
         },
         git,
+        settings,
     ) {
         Ok(DryRunTagBumpOk::Ready(current)) => current,
         Ok(DryRunTagBumpOk::Rejected { .. }) => return Ok(stale_preview()),
+        Err(dry_run_tag_bump::DryRunTagBumpError::Settings(error)) => {
+            return Err(BumpTagError::Settings(error));
+        }
         Err(dry_run_tag_bump::DryRunTagBumpError::Unexpected { source }) => {
             return Err(BumpTagError::Unexpected {
                 progress: TagOperationProgress::default(),

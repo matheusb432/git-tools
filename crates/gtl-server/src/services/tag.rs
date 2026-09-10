@@ -5,8 +5,10 @@ use gtl_application::{
         TagRemotePushProgress,
         add_and_push_tag::{self, AddAndPushTag, AddAndPushTagError},
         add_tag::{self, AddTag, AddTagError},
-        bump_tag::{self, BumpTagOk},
-        dry_run_tag_bump::{self, DryRunTagBump, DryRunTagBumpOk, TagBumpPreview},
+        bump_tag::{self, BumpTagError, BumpTagOk},
+        dry_run_tag_bump::{
+            self, DryRunTagBump, DryRunTagBumpError, DryRunTagBumpOk, TagBumpPreview,
+        },
         label_tag::{self, LabelTag, LabelTagError},
         list_tags::{self, ListTags},
         push_tags::{self, PushTagsError},
@@ -16,12 +18,14 @@ use gtl_models::{
     diffs::CommitId,
     git::{BranchName, GitHead, TagName},
     paths::RepositoryRoot,
-    tags::{Tag, TagState},
+    tags::{SemverComponent, Tag, TagPatternName, TagSlot, TagState, TagTemplate},
 };
 use gtl_wire::v1::{self, tag_service_server::TagService};
 use tonic::{Request, Response, Status};
 
-use super::{absolute_path, repository_root, required, run_blocking, unexpected};
+use super::{
+    absolute_path, repository_root, required, run_blocking, unexpected, user_settings_load_error,
+};
 use crate::state::AppState;
 
 pub(crate) struct TagGrpcService {
@@ -42,9 +46,14 @@ impl TagService for TagGrpcService {
     ) -> Result<Response<v1::PlanTagBumpResponse>, Status> {
         let request = plan_request(request.into_inner())?;
         let state = self.state.clone();
-        let result = run_blocking(move || dry_run_tag_bump::execute(request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "plan tag bump"))?;
+        let result = run_blocking(move || {
+            dry_run_tag_bump::execute(request, &state.git, &state.user_settings)
+        })
+        .await?
+        .map_err(|error| match error {
+            DryRunTagBumpError::Settings(error) => user_settings_load_error(error),
+            error => unexpected(error, "plan tag bump"),
+        })?;
 
         Ok(Response::new(plan_response(result)))
     }
@@ -56,9 +65,13 @@ impl TagService for TagGrpcService {
         let preview = required(request.into_inner().preview, "preview")?;
         let request = tag_bump_preview(preview)?;
         let state = self.state.clone();
-        let result = run_blocking(move || bump_tag::execute(request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "execute tag bump"))?;
+        let result =
+            run_blocking(move || bump_tag::execute(request, &state.git, &state.user_settings))
+                .await?
+                .map_err(|error| match error {
+                    BumpTagError::Settings(error) => user_settings_load_error(error),
+                    error => unexpected(error, "execute tag bump"),
+                })?;
 
         Ok(Response::new(execute_response(result)))
     }
@@ -219,29 +232,48 @@ impl TagService for TagGrpcService {
 fn plan_request(request: v1::PlanTagBumpRequest) -> Result<DryRunTagBump, Status> {
     Ok(DryRunTagBump {
         repo_path: absolute_path(request.repository_path, "repository_path")?,
-        level: bump_level(request.level)?,
+        pattern: request
+            .pattern
+            .map(|pattern| pattern_name(pattern, "pattern"))
+            .transpose()?,
+        level: bump_level(required(request.level, "level")?)?,
         message: request.message,
         push: request.push,
     })
 }
 
-fn bump_level(raw: i32) -> Result<BumpLevel, Status> {
-    match v1::TagBumpLevel::try_from(raw)
-        .map_err(|_| Status::invalid_argument("level is not recognized"))?
-    {
-        v1::TagBumpLevel::Unspecified => Err(Status::invalid_argument("level is required")),
-        v1::TagBumpLevel::Major => Ok(BumpLevel::Major),
-        v1::TagBumpLevel::Minor => Ok(BumpLevel::Minor),
-        v1::TagBumpLevel::Patch => Ok(BumpLevel::Patch),
+fn bump_level(level: v1::TagBumpLevel) -> Result<BumpLevel, Status> {
+    match required(level.kind, "level.kind")? {
+        v1::tag_bump_level::Kind::SlotFromRight(index) => {
+            tag_slot(index, "level.slot_from_right").map(BumpLevel::Slot)
+        }
+        v1::tag_bump_level::Kind::Component(raw) => {
+            semver_component(raw, "level.component").map(BumpLevel::Component)
+        }
     }
 }
 
-fn wire_bump_level(level: BumpLevel) -> v1::TagBumpLevel {
-    match level {
-        BumpLevel::Major => v1::TagBumpLevel::Major,
-        BumpLevel::Minor => v1::TagBumpLevel::Minor,
-        BumpLevel::Patch => v1::TagBumpLevel::Patch,
+fn semver_component(raw: i32, field: &'static str) -> Result<SemverComponent, Status> {
+    match v1::SemverComponent::try_from(raw)
+        .map_err(|_| Status::invalid_argument(format!("{field} is not recognized")))?
+    {
+        v1::SemverComponent::Unspecified => {
+            Err(Status::invalid_argument(format!("{field} is required")))
+        }
+        v1::SemverComponent::Major => Ok(SemverComponent::Major),
+        v1::SemverComponent::Minor => Ok(SemverComponent::Minor),
+        v1::SemverComponent::Patch => Ok(SemverComponent::Patch),
     }
+}
+
+fn tag_slot(index_from_right: u32, field: &'static str) -> Result<TagSlot, Status> {
+    TagSlot::try_new(index_from_right)
+        .map_err(|error| Status::invalid_argument(format!("{field}: {error}")))
+}
+
+fn pattern_name(raw: String, field: &'static str) -> Result<TagPatternName, Status> {
+    TagPatternName::try_new(raw)
+        .map_err(|error| Status::invalid_argument(format!("{field}: {error}")))
 }
 
 fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Status> {
@@ -250,11 +282,17 @@ fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Statu
         branch: git_head(required(preview.head, "preview.head")?)?,
         target_id: CommitId::try_from(preview.target_commit_id)
             .map_err(|error| Status::invalid_argument(error.to_string()))?,
-        level: bump_level(preview.level)?,
-        base_tag: TagName::try_new(preview.base_tag)
-            .map_err(|_| Status::invalid_argument("preview.base_tag must not be empty"))?,
-        next_tag: TagName::try_new(preview.next_tag)
-            .map_err(|_| Status::invalid_argument("preview.next_tag must not be empty"))?,
+        pattern: pattern_name(preview.pattern, "preview.pattern")?,
+        template: preview
+            .template
+            .parse::<TagTemplate>()
+            .map_err(|error| Status::invalid_argument(format!("preview.template: {error}")))?,
+        slot: tag_slot(preview.slot_from_right, "preview.slot_from_right")?,
+        base_tag: preview
+            .base_tag
+            .map(|base_tag| tag_name(base_tag, "preview.base_tag"))
+            .transpose()?,
+        next_tag: tag_name(preview.next_tag, "preview.next_tag")?,
         message: preview.message,
         push: preview.push,
     })
@@ -278,8 +316,10 @@ fn wire_preview(preview: TagBumpPreview) -> v1::TagBumpPreview {
         repository_root: preview.repo_path.to_string(),
         head: Some(v1::GitHead { state: Some(state) }),
         target_commit_id: preview.target_id.to_string(),
-        level: wire_bump_level(preview.level) as i32,
-        base_tag: preview.base_tag.to_string(),
+        pattern: preview.pattern.to_string(),
+        template: preview.template.to_string(),
+        slot_from_right: preview.slot.index_from_right(),
+        base_tag: preview.base_tag.map(|base_tag| base_tag.to_string()),
         next_tag: preview.next_tag.to_string(),
         message: preview.message,
         push: preview.push,
@@ -515,21 +555,31 @@ mod tests {
 
     #[test]
     fn rejects_an_unspecified_bump_level_at_the_transport_boundary() {
-        let error = bump_level(v1::TagBumpLevel::Unspecified as i32).unwrap_err();
-
+        let error = bump_level(v1::TagBumpLevel { kind: None }).unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
-        assert_eq!(error.message(), "level is required");
+        assert_eq!(error.message(), "level.kind is required");
+
+        let error = bump_level(v1::TagBumpLevel {
+            kind: Some(v1::tag_bump_level::Kind::Component(
+                v1::SemverComponent::Unspecified as i32,
+            )),
+        })
+        .unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(error.message(), "level.component is required");
     }
 
     #[test]
-    fn preview_round_trip_preserves_detached_head() {
+    fn preview_round_trip_preserves_detached_head_and_an_empty_lineage() {
         let preview = TagBumpPreview {
             repo_path: repository_root("/repo".into(), "fixture").unwrap(),
             branch: GitHead::Detached,
             target_id: CommitId::try_from("a".repeat(40)).unwrap(),
-            level: BumpLevel::Patch,
-            base_tag: TagName::try_new("v1.0.0").unwrap(),
-            next_tag: TagName::try_new("v1.0.1").unwrap(),
+            pattern: TagPatternName::try_new("release").unwrap(),
+            template: "release-{major}.{minor}.{patch}".parse().unwrap(),
+            slot: TagSlot::RIGHTMOST,
+            base_tag: None,
+            next_tag: TagName::try_new("release-0.0.1").unwrap(),
             message: "release".into(),
             push: true,
         };

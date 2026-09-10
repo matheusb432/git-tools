@@ -4,6 +4,7 @@ set positional-arguments
 
 mod cli 'just/cli.justfile'
 mod desktop 'just/desktop.justfile'
+mod server 'just/server.justfile'
 mod web 'just/web.justfile'
 
 [private]

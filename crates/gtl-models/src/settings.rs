@@ -9,6 +9,7 @@ pub use setting_key::*;
 use crate::{
     diffs::DiffExclusions,
     paths::ProjectName,
+    tags::TagPatternSettings,
     viewer::{RenderOptions, Theme, ViewerKeybindings},
 };
 
@@ -58,6 +59,7 @@ pub struct UserSettings {
     push_confirmation_required: bool,
     diff_exclusions: DiffExclusions,
     push_all_exclusions: PushAllExclusions,
+    tag_patterns: TagPatternSettings,
 }
 
 impl UserSettings {
@@ -80,6 +82,15 @@ impl UserSettings {
             push_confirmation_required,
             diff_exclusions,
             push_all_exclusions,
+            tag_patterns: TagPatternSettings::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_tag_patterns(self, tag_patterns: TagPatternSettings) -> Self {
+        Self {
+            tag_patterns,
+            ..self
         }
     }
 
@@ -117,6 +128,11 @@ impl UserSettings {
     #[must_use]
     pub const fn push_all_exclusions(&self) -> &PushAllExclusions {
         &self.push_all_exclusions
+    }
+
+    #[must_use]
+    pub const fn tag_patterns(&self) -> &TagPatternSettings {
+        &self.tag_patterns
     }
 }
 

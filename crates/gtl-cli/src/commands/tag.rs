@@ -15,12 +15,20 @@ pub mod bump;
 pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
     match command {
         Some(TagCommand::Bump {
-            level,
             message,
+            level,
+            pattern,
             push,
             dry,
             yes,
-        }) => bump::run(level, message, push, dry, yes),
+        }) => bump::run(bump::BumpArgs {
+            message,
+            level,
+            pattern,
+            push,
+            dry,
+            yes,
+        }),
         other => run_non_bump(other, commits, state),
     }
 }
@@ -74,12 +82,20 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             commits,
         ),
         Some(TagCommand::Bump {
-            level,
             message,
+            level,
+            pattern,
             push,
             dry,
             yes,
-        }) => bump::run(level, message, push, dry, yes),
+        }) => bump::run(bump::BumpArgs {
+            message,
+            level,
+            pattern,
+            push,
+            dry,
+            yes,
+        }),
     }
 }
 

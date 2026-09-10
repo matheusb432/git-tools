@@ -14,11 +14,18 @@ service TagService {
   rpc LabelTag(LabelTagRequest) returns (LabelTagResponse);
 }
 
-enum TagBumpLevel {
-  TAG_BUMP_LEVEL_UNSPECIFIED = 0;
-  TAG_BUMP_LEVEL_MAJOR = 1;
-  TAG_BUMP_LEVEL_MINOR = 2;
-  TAG_BUMP_LEVEL_PATCH = 3;
+enum SemverComponent {
+  SEMVER_COMPONENT_UNSPECIFIED = 0;
+  SEMVER_COMPONENT_MAJOR = 1;
+  SEMVER_COMPONENT_MINOR = 2;
+  SEMVER_COMPONENT_PATCH = 3;
+}
+
+message TagBumpLevel {
+  oneof kind {
+    uint32 slot_from_right = 1;
+    SemverComponent component = 2;
+  }
 }
 
 message PlanTagBumpRequest {
@@ -26,6 +33,7 @@ message PlanTagBumpRequest {
   TagBumpLevel level = 2;
   string message = 3;
   bool push = 4;
+  optional string pattern = 5;
 }
 
 message GitHead {
@@ -39,11 +47,13 @@ message TagBumpPreview {
   string repository_root = 1;
   GitHead head = 2;
   string target_commit_id = 3;
-  TagBumpLevel level = 4;
-  string base_tag = 5;
-  string next_tag = 6;
-  string message = 7;
-  bool push = 8;
+  string pattern = 4;
+  string template = 5;
+  uint32 slot_from_right = 6;
+  optional string base_tag = 7;
+  string next_tag = 8;
+  string message = 9;
+  bool push = 10;
 }
 
 message TagBumpRejection {
