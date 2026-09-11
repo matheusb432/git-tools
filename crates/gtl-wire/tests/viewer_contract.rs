@@ -188,6 +188,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         version: ViewerVersion::new(23),
         focus_request_version: Some(ViewerVersion::new(20)),
         tabs: vec![ViewerTab {
+            pinned: false,
             id: tab_id(7)?,
             label: "git-tools".into(),
             kind: ViewerTabKind::Live,
@@ -195,6 +196,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         }],
         active: ViewerActiveState::Ready {
             view: Box::new(ViewerActiveView {
+                modified_files: false,
                 row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
                 identity,
                 content_id: ViewerRowContentId::from_digest([42; 32]),
@@ -337,6 +339,7 @@ fn commit_selection_compares_complete_typed_identities() -> TestResult {
 #[test]
 fn diff_history_and_settings_shapes_round_trip() -> TestResult {
     let history = ViewerHistoryPage {
+        projects: Vec::new(),
         entries: vec![ViewerHistoryEntry {
             id: render_id(31)?,
             title: "Release diff".into(),

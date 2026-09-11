@@ -1,5 +1,4 @@
 use gtl_models::{
-    live_views::LiveComparison,
     paths::{ProjectName, RepositoryRoot},
     repository::status::RepositoryStatus,
     timestamps::MachineTimestamp,
@@ -37,10 +36,17 @@ pub struct UpdateViewerProject {
     pub expected_comparison_branch: gtl_models::projects::comparison::ComparisonBranch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerProjectDiffMode {
+    Snapshot,
+    Live,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenViewerProject {
     pub path: RepositoryRoot,
-    pub comparison: LiveComparison,
+    pub mode: ViewerProjectDiffMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

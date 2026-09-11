@@ -1,12 +1,13 @@
 use dioxus::prelude::*;
-use gtl_models::live_views::LiveComparison;
-use gtl_wire::viewer::projects::ViewerProject;
+use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectDiffMode};
 use lucide_dioxus::{GitBranch, GitCompare};
 
 use super::{
     comparison_action::{ProjectActionShape, ProjectComparisonAction},
     comparison_editor::ProjectComparisonEditor,
-    presentation::{ProjectPresentation, ReviewStatusDot, project_presentation},
+    presentation::{
+        ProjectPresentation, ProjectSignalGlyph, ReviewStatusDot, project_presentation,
+    },
 };
 use crate::shared::ui::no_data::NoData;
 
@@ -35,6 +36,7 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                     "{project.name}"
                 }
                 div { class: "ml-auto",
+                    super::SnapshotHistoryButton { project: project.name.clone() }
                     ProjectComparisonEditor { project: project.clone(), disabled }
                 }
             }
@@ -50,22 +52,29 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                     span { class: "truncate", title: "Comparison branch", "{base}" }
                 }
             }
-            div { class: "project-card-actions",
+            div { class: "flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2",
+                span { class: "flex items-center gap-2",
+                    ProjectSignalGlyph { signal: local.clone() }
+                    "Local changes"
+                }
+                span { class: "flex items-center gap-2",
+                    ProjectSignalGlyph { signal: ahead.clone() }
+                    "{ahead_label}"
+                }
+            }
+            div { class: "flex items-center gap-2 border-t border-line pt-3",
                 ProjectComparisonAction {
                     path: project.path.clone(),
-                    comparison: LiveComparison::LocalChanges,
-                    signal: local,
-                    label: LiveComparison::LocalChanges.label(),
-                    shape: ProjectActionShape::SignalRow,
-                    disabled,
+                    mode: ViewerProjectDiffMode::Snapshot,
+                    shape: ProjectActionShape::Labeled,
+                    disabled: disabled || !ahead.is_available(),
+                    unavailable_reason: (!ahead.is_available()).then(|| ahead.description().into_owned()),
                 }
                 ProjectComparisonAction {
                     path: project.path.clone(),
-                    comparison: LiveComparison::UnpushedCommits,
-                    signal: ahead,
-                    label: ahead_label,
-                    shape: ProjectActionShape::SignalRow,
-                    disabled,
+                    mode: ViewerProjectDiffMode::Live,
+                    shape: ProjectActionShape::Labeled,
+                    disabled: disabled || !local.is_available(),
                 }
             }
             if let Some(issue) = issue {

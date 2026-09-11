@@ -702,12 +702,12 @@ async fn next_reflection_response(
 
 #[tokio::test]
 #[serial(server_tracing)]
-async fn rejects_invalid_project_comparisons_before_catalogue_access() -> TestResult {
+async fn rejects_invalid_project_modes_before_catalogue_access() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client =
         ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
-    for (path, comparison) in [
+    for (path, mode) in [
         ("relative", 1),
         ("/repos/project", 0),
         ("/repos/project", 99),
@@ -715,7 +715,7 @@ async fn rejects_invalid_project_comparisons_before_catalogue_access() -> TestRe
         let error = client
             .open_viewer_project(gtl_wire::v1::OpenViewerProjectRequest {
                 path: path.into(),
-                comparison,
+                mode,
             })
             .await
             .unwrap_err();

@@ -74,7 +74,7 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
             .is_empty(),
         "overview must not add search"
     );
-    let initial_unpushed = action(session.driver(), "Initial", "Branch changes").await?;
+    let initial_unpushed = action(session.driver(), "Initial", "Create snapshot").await?;
     ensure!(
         !initial_unpushed.is_enabled().await?,
         "initial repository must not offer unpushed commits"
@@ -88,7 +88,7 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
         "missing comparison branch must be explained"
     );
     ensure!(
-        !action(session.driver(), "Missing", "Local changes")
+        !action(session.driver(), "Missing", "Open live")
             .await?
             .is_enabled()
             .await?,
@@ -143,7 +143,7 @@ async fn exercise_local_comparison(
     support::evidence::capture(session.driver(), "project-comparison-settings-narrow", true)
         .await?;
     session.driver().set_window_rect(0, 0, 1600, 900).await?;
-    action(session.driver(), "Alpha", "Branch changes")
+    action(session.driver(), "Alpha", "Open live")
         .await?
         .click()
         .await?;
@@ -180,14 +180,34 @@ async fn exercise_local_comparison(
     Ok(())
 }
 
+async fn toggle_modified(driver: &WebDriver) -> Result<()> {
+    driver
+        .query(By::Css("button[aria-label='Modified files']"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?
+        .click()
+        .await?;
+    Ok(())
+}
+
 async fn review_comparisons(
     session: &support::session::TestSession,
     fixture: &support::fixture::ProjectsFixture,
 ) -> Result<()> {
-    action(session.driver(), "Alpha", "Local changes")
+    action(session.driver(), "Alpha", "Open live")
         .await?
         .click()
         .await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "committed-project-marker",
+    )
+    .await?;
+    let url = session.driver().current_url().await?;
+    toggle_modified(session.driver()).await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
@@ -202,26 +222,34 @@ async fn review_comparisons(
             .text()
             .await?
             .contains("local-project-marker"),
-        "local comparison omitted tracked work"
+        "working tree omitted tracked work"
+    );
+    ensure!(
+        session.driver().current_url().await? == url,
+        "modified files opened another tab"
     );
     fixture.change_untracked()?;
-    support::wait_for_active_diff(
-        session.driver(),
-        "projects-alpha",
-        "refreshed-project-marker",
-    )
-    .await?;
-    home(session.driver()).await?;
-    action(session.driver(), "Alpha", "Unpushed commits")
-        .await?
-        .click()
-        .await?;
+    toggle_modified(session.driver()).await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
         "committed-project-marker",
     )
     .await?;
+    toggle_modified(session.driver()).await?;
+    support::wait_for_active_diff(
+        session.driver(),
+        "projects-alpha",
+        "refreshed-project-marker",
+    )
+    .await?;
+    toggle_modified(session.driver()).await?;
+    home(session.driver()).await?;
+    action(session.driver(), "Alpha", "Create snapshot")
+        .await?
+        .click()
+        .await?;
+    support::wait_for_active_diff(session.driver(), "Alpha", "committed-project-marker").await?;
     ensure!(
         !session
             .driver()
@@ -230,10 +258,12 @@ async fn review_comparisons(
             .text()
             .await?
             .contains("refreshed-project-marker"),
-        "unpushed comparison included local changes"
+        "snapshot included working tree changes"
     );
+    pin_active_snapshot(session.driver()).await?;
     home(session.driver()).await?;
-    action(session.driver(), "Beta", "Local changes")
+    review_snapshot_dialog(session).await?;
+    action(session.driver(), "Beta", "Open live")
         .await?
         .click()
         .await?;
@@ -246,25 +276,11 @@ async fn review_comparisons(
         .first()
         .await?;
     home(session.driver()).await?;
-    support::wait::until(
-        "changes to review stay ahead of the most recently rendered clean project",
-        support::wait::ASSERTION_TIMEOUT,
-        || async {
-            let cards = session
-                .driver()
-                .find_all(By::Css("[data-project-card]"))
-                .await?;
-            let Some(first) = cards.first() else {
-                return Ok(None);
-            };
-            Ok((first.attr("aria-label").await?.as_deref() == Some("Alpha")).then_some(()))
-        },
-    )
-    .await?;
-    action(session.driver(), "Initial", "Local changes")
+    action(session.driver(), "Initial", "Open live")
         .await?
         .click()
         .await?;
+    toggle_modified(session.driver()).await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-initial",
@@ -274,16 +290,44 @@ async fn review_comparisons(
     Ok(())
 }
 
+async fn review_snapshot_dialog(session: &support::session::TestSession) -> Result<()> {
+    session
+        .driver()
+        .find(By::Css("button[aria-label='Snapshots for Alpha']"))
+        .await?
+        .click()
+        .await?;
+    let dialog = session
+        .driver()
+        .query(By::Css("dialog[open]"))
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    ensure!(
+        dialog
+            .find(By::Css("select"))
+            .await?
+            .value()
+            .await?
+            .as_deref()
+            == Some("project:Alpha"),
+        "project snapshots filter was not preselected"
+    );
+    support::evidence::capture(session.driver(), "project-snapshots-dialog", true).await?;
+    dialog.send_keys(thirtyfour::Key::Escape).await?;
+    Ok(())
+}
+
 async fn restore_comparisons(session: &mut support::session::TestSession) -> Result<()> {
     home(session.driver()).await?;
-    action(session.driver(), "Alpha", "Local changes")
+    action(session.driver(), "Alpha", "Open live")
         .await?
         .click()
         .await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
-        "refreshed-project-marker",
+        "committed-project-marker",
     )
     .await?;
     ensure!(
@@ -292,8 +336,8 @@ async fn restore_comparisons(session: &mut support::session::TestSession) -> Res
             .find_all(By::Css("[role='tab'][title*='projects-alpha']"))
             .await?
             .len()
-            == 2,
-        "reopening created a duplicate comparison tab"
+            == 1,
+        "reopening created a duplicate live comparison tab"
     );
     session.restart().await?;
     session.driver().set_window_rect(0, 0, 1600, 900).await?;
@@ -307,7 +351,7 @@ async fn restore_comparisons(session: &mut support::session::TestSession) -> Res
     session
         .driver()
         .query(By::Css(
-            "[role='tab'][title*='projects-alpha'][title*='Local changes']",
+            "[role='tab'][title*='projects-alpha'][title*='Unpushed commits']",
         ))
         .and_displayed()
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
@@ -318,9 +362,93 @@ async fn restore_comparisons(session: &mut support::session::TestSession) -> Res
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
-        "refreshed-project-marker",
+        "committed-project-marker",
     )
     .await?;
+    close_others_preserves_pins(session).await
+}
+
+async fn close_others_preserves_pins(session: &support::session::TestSession) -> Result<()> {
+    let pinned = session
+        .driver()
+        .query(By::Css("button[aria-label^='Unpin ']"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    ensure!(
+        pinned.is_displayed().await?,
+        "pinned snapshot did not survive restart"
+    );
+    let active = session
+        .driver()
+        .find(By::Css("[role='tab'][aria-selected='true']"))
+        .await?;
+    session
+        .driver()
+        .action_chain()
+        .context_click_element(&active)
+        .perform()
+        .await?;
+    session
+        .driver()
+        .query(By::Css("[role='menu']:popover-open [role='menuitem']"))
+        .with_text(StringMatch::new("Close others").partial())
+        .first()
+        .await?
+        .click()
+        .await?;
+    ensure!(
+        session
+            .driver()
+            .find_all(By::Css("button[aria-label^='Unpin ']"))
+            .await?
+            .len()
+            == 1,
+        "close others removed the pin"
+    );
+    pinned.click().await?;
+    support::wait::until(
+        "snapshot unpinned",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(session
+                .driver()
+                .find_all(By::Css("button[aria-label^='Unpin ']"))
+                .await?
+                .is_empty()
+                .then_some(()))
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+async fn pin_active_snapshot(driver: &WebDriver) -> Result<()> {
+    let active = driver
+        .find(By::Css("[role='tab'][aria-selected='true']"))
+        .await?;
+    driver
+        .action_chain()
+        .context_click_element(&active)
+        .perform()
+        .await?;
+    support::evidence::capture(driver, "tab-context-menu", true).await?;
+    driver
+        .query(By::Css("[role='menu']:popover-open [role='menuitem']"))
+        .with_text(StringMatch::new("Pin tab").partial())
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?
+        .click()
+        .await?;
+    driver
+        .query(By::Css("button[aria-label^='Unpin ']"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    support::evidence::capture(driver, "pinned-snapshot", true).await?;
     Ok(())
 }
 
@@ -575,6 +703,15 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
         alpha.text().await?.contains("[!?]"),
         "table changed the grid status glyphs"
     );
+    for label in ["Create snapshot", "Open live"] {
+        let button = alpha
+            .find(By::Css(format!("a[aria-label='{label}']")))
+            .await?;
+        ensure!(
+            button.text().await?.trim().is_empty(),
+            "table action {label} must be icon only"
+        );
+    }
     ensure!(
         std::fs::read_to_string(session.data_root().join("config.toml"))?
             .contains("projects_view = \"table\""),
@@ -583,7 +720,7 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     ensure!(
         !table_row(session.driver(), "Initial")
             .await?
-            .find(By::Css("button[aria-label='Branch changes']"))
+            .find(By::Css("button[aria-label='Create snapshot']"))
             .await?
             .is_enabled()
             .await?,
@@ -594,7 +731,7 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
         .await?;
     let destination = link.attr("href").await?.context("row link destination")?;
     ensure!(
-        destination.contains("/projects/unpushed?path="),
+        destination.contains("/projects/live?path="),
         "row must expose a stable comparison URL"
     );
     ensure!(
@@ -603,9 +740,7 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     );
     support::evidence::capture(session.driver(), "projects-table-desktop", true).await?;
     assert_comparison_editor(session.driver(), "project-comparison-table").await?;
-    let count = alpha
-        .find(By::Css("[data-testid='project-table-unpushed']"))
-        .await?;
+    let count = alpha.find(By::Css("a[aria-label='Open live']")).await?;
     count
         .click()
         .await
@@ -630,14 +765,14 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
     home(session.driver()).await?;
     table_row(session.driver(), "Alpha")
         .await?
-        .find(By::Css("a[aria-label='Local changes']"))
+        .find(By::Css("a[aria-label='Open live']"))
         .await?
         .click()
         .await?;
     support::wait_for_active_diff(
         session.driver(),
         "projects-alpha",
-        "untracked-project-marker",
+        "committed-project-marker",
     )
     .await?;
     home(session.driver()).await?;

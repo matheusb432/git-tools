@@ -7,6 +7,9 @@ import "gtl/v1/repository.proto";
 import "gtl/v1/settings.proto";
 
 service ViewerService {
+  rpc SetViewerTabPinned(SetViewerTabPinnedRequest) returns (SetViewerTabPinnedResponse);
+  rpc CloseOtherViewerTabs(CloseOtherViewerTabsRequest) returns (CloseOtherViewerTabsResponse);
+  rpc SetViewerModifiedFiles(SetViewerModifiedFilesRequest) returns (SetViewerModifiedFilesResponse);
   rpc ListViewerProjects(ListViewerProjectsRequest) returns (ListViewerProjectsResponse);
   rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
   rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
@@ -116,6 +119,7 @@ message ViewerTab {
   string label = 2;
   ViewerTabKind kind = 3;
   ViewerTabState state = 4;
+  bool pinned = 5;
 }
 
 enum ViewerFileStatus {
@@ -198,6 +202,7 @@ message ViewerActiveView {
   optional ViewerAppliedExclusions exclusions = 12;
   optional bytes content_id = 13;
   ViewerRowSourceState row_source = 14;
+  bool modified_files = 15;
 }
 
 message ViewerPendingState {
@@ -569,6 +574,11 @@ message StreamViewerRowsResponse {
 }
 
 message ListViewerHistoryRequest {
+  oneof filter {
+    Empty all_projects = 5;
+    Empty unassociated = 6;
+    string project_name = 7;
+  }
   oneof cursor {
     Empty newest = 1;
     ViewerHistoryPosition older_than = 2;
@@ -603,6 +613,7 @@ message ViewerHistoryPagePosition {
 }
 
 message ListViewerHistoryResponse {
+  repeated string projects = 6;
   repeated ViewerHistoryEntry entries = 1;
   uint64 total_count = 2;
   optional ViewerHistoryPagePosition position = 3;
@@ -644,7 +655,12 @@ enum ProjectsViewMode {
   PROJECTS_VIEW_MODE_GRID = 1;
   PROJECTS_VIEW_MODE_TABLE = 2;
 }
-message ProjectsViewFieldUpdate { oneof operation { ProjectsViewMode update = 1; ClearSetting clear = 2; } }
+message ProjectsViewFieldUpdate {
+  oneof operation {
+    ProjectsViewMode update = 1;
+    ClearSetting clear = 2;
+  }
+}
 
 message GetViewerSettingsResponse {
   ViewerSidebarVisibility sidebars = 9;
@@ -659,19 +675,53 @@ message GetViewerSettingsResponse {
 
 message ClearSetting {}
 
-message ThemeFieldUpdate { oneof operation { ViewerTheme update = 1; ClearSetting clear = 2; } }
-message LayoutFieldUpdate { oneof operation { ViewerDiffLayout update = 1; ClearSetting clear = 2; } }
-message DensityFieldUpdate { oneof operation { ViewerDiffDensity update = 1; ClearSetting clear = 2; } }
-message BoolFieldUpdate { oneof operation { bool update = 1; ClearSetting clear = 2; } }
-message ExtensionsValue { repeated string extensions = 1; }
-message ExtensionsFieldUpdate { oneof operation { ExtensionsValue update = 1; ClearSetting clear = 2; } }
+message ThemeFieldUpdate {
+  oneof operation {
+    ViewerTheme update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message LayoutFieldUpdate {
+  oneof operation {
+    ViewerDiffLayout update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message DensityFieldUpdate {
+  oneof operation {
+    ViewerDiffDensity update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message BoolFieldUpdate {
+  oneof operation {
+    bool update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message ExtensionsValue {
+  repeated string extensions = 1;
+}
+message ExtensionsFieldUpdate {
+  oneof operation {
+    ExtensionsValue update = 1;
+    ClearSetting clear = 2;
+  }
+}
 message ViewerProjectSettingsUpdate {
   string project_name = 1;
   bool excluded_from_push_all = 2;
   repeated string diff_exclusions = 3;
 }
-message ProjectSettingsValue { repeated ViewerProjectSettingsUpdate projects = 1; }
-message ProjectSettingsFieldUpdate { oneof operation { ProjectSettingsValue update = 1; ClearSetting clear = 2; } }
+message ProjectSettingsValue {
+  repeated ViewerProjectSettingsUpdate projects = 1;
+}
+message ProjectSettingsFieldUpdate {
+  oneof operation {
+    ProjectSettingsValue update = 1;
+    ClearSetting clear = 2;
+  }
+}
 
 message EditSettingsRequest {
   BoolFieldUpdate files_sidebar_visible = 9;
@@ -725,14 +775,16 @@ message UpdateViewerProjectRequest {
   string expected_comparison_branch = 3;
 }
 message UpdateViewerProjectResponse {}
-enum ViewerProjectComparison {
-  VIEWER_PROJECT_COMPARISON_UNSPECIFIED = 0;
-  VIEWER_PROJECT_COMPARISON_LOCAL_CHANGES = 1;
-  VIEWER_PROJECT_COMPARISON_UNPUSHED_COMMITS = 2;
+enum ViewerProjectDiffMode {
+  VIEWER_PROJECT_DIFF_MODE_UNSPECIFIED = 0;
+  VIEWER_PROJECT_DIFF_MODE_SNAPSHOT = 1;
+  VIEWER_PROJECT_DIFF_MODE_LIVE = 2;
 }
 message OpenViewerProjectRequest {
+  reserved 2;
+  reserved "comparison";
   string path = 1;
-  ViewerProjectComparison comparison = 2;
+  ViewerProjectDiffMode mode = 3;
 }
 message OpenViewerProjectResponse {
   uint64 tab_id = 1;
@@ -753,3 +805,19 @@ message ResetSettingsRequest {
 message ResetSettingsResponse {
   string backup_path = 1;
 }
+
+message SetViewerModifiedFilesRequest {
+  uint64 tab_id = 1;
+  bool visible = 2;
+}
+message SetViewerModifiedFilesResponse {}
+
+message SetViewerTabPinnedRequest {
+  uint64 tab_id = 1;
+  bool pinned = 2;
+}
+message SetViewerTabPinnedResponse {}
+message CloseOtherViewerTabsRequest {
+  uint64 tab_id = 1;
+}
+message CloseOtherViewerTabsResponse {}

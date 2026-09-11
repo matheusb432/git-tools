@@ -26,12 +26,21 @@ pub(super) async fn list_viewer_history(
     state: &AppState,
     request: Request<v1::ListViewerHistoryRequest>,
 ) -> Result<Response<v1::ListViewerHistoryResponse>, Status> {
-    let cursor = history_cursor(request.into_inner())?;
+    let request = request.into_inner();
+    let decoded = proto::viewer::decode_list_viewer_history_request(request)
+        .map_err(|_| Status::invalid_argument("invalid history filter"))?;
+    let cursor = history_cursor(decoded.cursor);
     let state = state.clone();
     let page = run_blocking(move || {
         let connection = state.database.connection_lock()?;
-        list_recent_render_page::execute(ListRecentRenderPage { cursor }, &connection)
-            .map_err(anyhow::Error::from)
+        list_recent_render_page::execute(
+            &ListRecentRenderPage {
+                cursor,
+                filter: decoded.filter,
+            },
+            &connection,
+        )
+        .map_err(anyhow::Error::from)
     })
     .await?
     .map_err(|error| unexpected(error, "list viewer history"))?;
@@ -61,12 +70,8 @@ pub(super) async fn get_viewer_history_copy(
     Ok(Response::new(v1::GetViewerHistoryCopyResponse { json }))
 }
 
-pub(super) fn history_cursor(
-    request: v1::ListViewerHistoryRequest,
-) -> Result<RecentRenderPageCursor, Status> {
-    let request = proto::viewer::decode_list_viewer_history_request(request)
-        .map_err(|_| Status::invalid_argument("history cursor is invalid"))?;
-    Ok(match request.cursor {
+fn history_cursor(cursor: ViewerHistoryCursor) -> RecentRenderPageCursor {
+    match cursor {
         ViewerHistoryCursor::Newest => RecentRenderPageCursor::Newest,
         ViewerHistoryCursor::Oldest => RecentRenderPageCursor::Oldest,
         ViewerHistoryCursor::OlderThan { render_id, page } => RecentRenderPageCursor::OlderThan {
@@ -77,13 +82,14 @@ pub(super) fn history_cursor(
             render: render_id,
             page,
         },
-    })
+    }
 }
 
 pub(super) fn project_history_page(
     page: ListRecentRenderPageOk,
 ) -> Result<v1::ListViewerHistoryResponse, Status> {
     let page = ViewerHistoryPage {
+        projects: page.projects,
         entries: page
             .entries
             .into_iter()

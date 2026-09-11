@@ -1,3 +1,4 @@
+use gtl_wire::viewer::{SetViewerModifiedFiles, SetViewerTabPinned};
 mod row_sessions;
 
 use gtl_local_auth::LocalAuth;
@@ -68,6 +69,43 @@ pub struct ViewerClient {
 }
 
 impl ViewerClient {
+    pub async fn close_other_tabs(
+        &mut self,
+        request: ViewerTabRequest,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .close_other_viewer_tabs(proto::viewer::encode_close_other_viewer_tabs_request(
+                request,
+            ))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
+    }
+
+    pub async fn set_tab_pinned(
+        &mut self,
+        request: SetViewerTabPinned,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .set_viewer_tab_pinned(proto::viewer::encode_set_viewer_tab_pinned_request(request))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
+    }
+
+    pub async fn set_modified_files(
+        &mut self,
+        request: SetViewerModifiedFiles,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .set_viewer_modified_files(proto::viewer::encode_set_viewer_modified_files_request(
+                request,
+            ))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
+    }
+
     pub async fn list_projects(&mut self) -> Result<Vec<ViewerProject>, ViewerClientError> {
         let response = self
             .client

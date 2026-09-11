@@ -132,7 +132,7 @@ fn public_operations_use_the_migrated_schema() {
     }
     let history = {
         let connection = state.connection_lock().unwrap();
-        list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap()
+        list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection).unwrap()
     };
     assert_eq!(history.entries.len(), 1);
     let id = history.entries[0].id;
@@ -347,12 +347,13 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         utils::{FixedClock, FixedUserSettingsStore},
     };
     use gtl_infra::git_client::HybridGitClient;
-    use gtl_models::{live_views::LiveComparison, projects::ProjectRepository};
-    use gtl_wire::viewer::projects::OpenViewerProject;
+    use gtl_models::projects::ProjectRepository;
+    use gtl_wire::viewer::projects::{OpenViewerProject, ViewerProjectDiffMode};
 
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("alpha");
     create_project_comparison_repository(&root);
+    commit_project_comparison(&root);
     let path = repository_root(&root);
     let repositories = vec![ProjectRepository {
         name: ProjectName::try_new("Alpha").unwrap(),
@@ -363,13 +364,10 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
     let viewer = ViewerState::new();
     let mut connection = state.connection_lock().unwrap();
     let mut ids = Vec::new();
-    for comparison in [
-        LiveComparison::LocalChanges,
-        LiveComparison::UnpushedCommits,
-    ] {
+    for mode in [ViewerProjectDiffMode::Snapshot, ViewerProjectDiffMode::Live] {
         let request = OpenViewerProject {
             path: path.clone(),
-            comparison,
+            mode,
         };
         let pending = open_viewer_project::execute(
             OpenProjectComparison {
@@ -393,7 +391,7 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         let work::RecipePublication::Published { history } =
             work::publish_recipe(&viewer, computed).unwrap()
         else {
-            anyhow::bail!("valid comparison must publish, including empty results");
+            anyhow::bail!("valid comparison must publish");
         };
         record_render::execute(
             &history,
@@ -437,8 +435,22 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         projects[0].last_rendered_at.as_ref().unwrap().as_ref(),
         "2026-09-06T11:00:00Z"
     );
-    assert_comparisons_restore_and_delete_independently(&connection, &viewer, ids[0]);
+    assert_live_restores_independently(&connection, &viewer, ids[1]);
     Ok(())
+}
+
+fn commit_project_comparison(root: &std::path::Path) {
+    for args in [&["add", "."][..], &["commit", "-qm", "feature"][..]] {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
 }
 
 fn create_project_comparison_repository(root: &std::path::Path) {
@@ -467,21 +479,22 @@ fn create_project_comparison_repository(root: &std::path::Path) {
     std::fs::write(root.join("new.txt"), "new\n").unwrap();
 }
 
-fn assert_comparisons_restore_and_delete_independently(
+fn assert_live_restores_independently(
     connection: &rusqlite::Connection,
     viewer: &ViewerState,
-    local_tab: gtl_models::viewer::ViewerTabId,
+    live_tab: gtl_models::viewer::ViewerTabId,
 ) {
-    use gtl_models::live_views::LiveComparison;
     let saved = list_live_views::execute(ListLiveViews, connection).unwrap();
-    assert_eq!(saved.len(), 2);
+    assert_eq!(saved.len(), 1);
     let restored = ViewerState::new();
     work::reserve_restored_live_views(&restored, saved).unwrap();
-    assert_eq!(restored.inspect(|session| session.tabs().len()).unwrap(), 2);
-    delete_live_viewer_tab::execute(local_tab, connection, viewer).unwrap();
-    let remaining = list_live_views::execute(ListLiveViews, connection).unwrap();
-    assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining[0].comparison, LiveComparison::UnpushedCommits);
+    assert_eq!(restored.inspect(|session| session.tabs().len()).unwrap(), 1);
+    delete_live_viewer_tab::execute(live_tab, connection, viewer).unwrap();
+    assert!(
+        list_live_views::execute(ListLiveViews, connection)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

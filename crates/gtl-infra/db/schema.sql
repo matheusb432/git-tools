@@ -25,6 +25,12 @@ CREATE TABLE "live_views" (
   UNIQUE (source_kind, source_value, comparison)
 ) STRICT;
 
+CREATE TABLE pinned_viewer_tabs (
+    position INTEGER PRIMARY KEY,
+    recipe_json TEXT NOT NULL CHECK (json_valid(recipe_json)),
+    live INTEGER NOT NULL CHECK (live IN (0, 1))
+) STRICT;
+
 CREATE TABLE project_groups (
     [project_id] TEXT NOT NULL
         REFERENCES projects ([id]) ON DELETE CASCADE,
@@ -96,7 +102,7 @@ CREATE TABLE "recent_renders" (
   title        TEXT NOT NULL,
   repo_name    TEXT NOT NULL,
   range_label  TEXT NOT NULL,
-  rendered_at  TEXT NOT NULL,
+  rendered_at  TEXT NOT NULL, project_id TEXT REFERENCES projects (id),
   CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
   -- Only the diff operation (seeded id 1) takes a target.
   CHECK ((operation_id = 1) = (target_id IS NOT NULL))
@@ -109,6 +115,8 @@ ON recent_renders (
   coalesce(pinned_base, X''),
   coalesce(pinned_head, X'')
 );
+
+CREATE INDEX recent_renders_project_id_idx ON recent_renders (project_id, id DESC);
 
 CREATE INDEX recent_renders_repo_name_idx
 ON recent_renders (repo_name);

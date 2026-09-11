@@ -232,7 +232,6 @@ fn WorkspaceMobileNavigation(
                     GitCommitHorizontal { size: 20 }
                 }
                 span { class: "font-semibold", "Commits" }
-                CountBadge { count: commit_count }
             }
         }
     }
@@ -306,9 +305,6 @@ pub(crate) fn PreviewDiffWorkspace(
             | ViewerCommitSelection::Ready { .. }
             | ViewerCommitSelection::Error { .. } => ViewerCommitSelection::Ready { id },
         };
-    });
-    let onclear_commit = use_callback(move |()| {
-        view.write().commit_selection = ViewerCommitSelection::None;
     });
     let open_all_files_search = use_callback(move |()| {
         path_filter_open.set(false);
@@ -392,7 +388,6 @@ pub(crate) fn PreviewDiffWorkspace(
                 WorkspaceCommitsPanel {
                     details_popover_id_prefix: "preview-mobile-commits-panel",
                     onselect: onselect_commit,
-                    onclear: onclear_commit,
                 }
             }
         } else {
@@ -431,7 +426,6 @@ pub(crate) fn PreviewDiffWorkspace(
                     WorkspaceCommitsPanel {
                         details_popover_id_prefix: "preview-desktop-commits-panel",
                         onselect: onselect_commit,
-                        onclear: onclear_commit,
                     }
                 }
             }
@@ -625,7 +619,6 @@ fn DiffWorkspaceDocument(
                     artifact: artifact_view_id.is_some(),
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,
-                    onclear: onclear_commit,
                     loading: commits_loading,
                     load_error: commits_error,
                     has_more: commits_has_more,
@@ -646,10 +639,6 @@ enum MobilePanel {
 // TODO: refactor these to cleaner, intl compatible shape
 const fn file_label(count: usize) -> &'static str {
     if count == 1 { "file" } else { "files" }
-}
-
-const fn commit_label(count: usize) -> &'static str {
-    if count == 1 { "commit" } else { "commits" }
 }
 
 #[cfg(all(test, feature = "artifact"))]
@@ -709,6 +698,7 @@ mod artifact_tests {
             )],
         );
         let view = ViewerActiveView {
+            modified_files: false,
             row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
             content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity,

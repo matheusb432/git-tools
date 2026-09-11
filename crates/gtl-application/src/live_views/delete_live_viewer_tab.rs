@@ -28,6 +28,9 @@ pub fn execute(
     viewer_state: &ViewerState,
 ) -> Result<Option<ReservedRecipeWork>, DeleteLiveViewerTabError> {
     viewer_state.update(|session| {
+        if session.tab(tab_id).is_some_and(|tab| tab.pinned) {
+            return Err(DeleteLiveViewerTabError::UnknownTab);
+        }
         let (source, comparison) = session
             .live_source(tab_id)
             .ok_or(DeleteLiveViewerTabError::UnknownTab)?;

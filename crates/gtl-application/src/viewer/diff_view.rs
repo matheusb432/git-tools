@@ -196,6 +196,7 @@ pub(super) fn project_diff_view_with_content_id(
     content_id: ViewerRowContentId,
 ) -> ViewerActiveView {
     ViewerActiveView {
+        modified_files: false,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity,
         content_id,

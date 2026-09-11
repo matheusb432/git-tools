@@ -156,6 +156,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
 
 fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
     v1::ViewerTab {
+        pinned: tab.pinned,
         id: u64::from(tab.id),
         label: tab.label,
         kind: match tab.kind {
@@ -228,6 +229,7 @@ fn encode_viewer_active_view(
     view: ViewerActiveView,
 ) -> Result<v1::ViewerActiveView, ViewerCodecError> {
     Ok(v1::ViewerActiveView {
+        modified_files: view.modified_files,
         identity: Some(encode_viewer_view_identity(view.identity)),
         content_id: Some(view.content_id.into_digest().to_vec()),
         row_source: match view.row_source {
@@ -408,7 +410,7 @@ pub fn decode_list_viewer_commits_response(
 pub fn encode_list_viewer_history_request(
     request: ListViewerHistory,
 ) -> Result<v1::ListViewerHistoryRequest, ViewerCodecError> {
-    use v1::list_viewer_history_request::Cursor;
+    use v1::list_viewer_history_request::{Cursor, Filter};
 
     let cursor = match request.cursor {
         ViewerHistoryCursor::Newest => Cursor::Newest(v1::Empty {}),
@@ -420,7 +422,15 @@ pub fn encode_list_viewer_history_request(
         }
         ViewerHistoryCursor::Oldest => Cursor::Oldest(v1::Empty {}),
     };
+    let filter = match request.filter {
+        crate::viewer::ViewerHistoryFilter::All => Filter::AllProjects(v1::Empty {}),
+        crate::viewer::ViewerHistoryFilter::Unassociated => Filter::Unassociated(v1::Empty {}),
+        crate::viewer::ViewerHistoryFilter::Project { name } => {
+            Filter::ProjectName(name.to_string())
+        }
+    };
     Ok(v1::ListViewerHistoryRequest {
+        filter: Some(filter),
         cursor: Some(cursor),
     })
 }
@@ -429,7 +439,7 @@ pub fn encode_list_viewer_history_request(
 pub fn decode_list_viewer_history_request(
     request: v1::ListViewerHistoryRequest,
 ) -> Result<ListViewerHistory, ViewerCodecError> {
-    use v1::list_viewer_history_request::Cursor;
+    use v1::list_viewer_history_request::{Cursor, Filter};
 
     let cursor = match required(request.cursor)? {
         Cursor::Newest(_) => ViewerHistoryCursor::Newest,
@@ -445,7 +455,16 @@ pub fn decode_list_viewer_history_request(
         },
         Cursor::Oldest(_) => ViewerHistoryCursor::Oldest,
     };
-    Ok(ListViewerHistory { cursor })
+    let filter = match required(request.filter)? {
+        Filter::AllProjects(_) => crate::viewer::ViewerHistoryFilter::All,
+        Filter::Unassociated(_) => crate::viewer::ViewerHistoryFilter::Unassociated,
+        Filter::ProjectName(name) => crate::viewer::ViewerHistoryFilter::Project {
+            name: name
+                .try_into()
+                .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        },
+    };
+    Ok(ListViewerHistory { cursor, filter })
 }
 
 pub fn decode_list_viewer_history_response(
@@ -469,7 +488,18 @@ pub fn decode_list_viewer_history_response(
         None if entries.is_empty() => HistoryPagePosition::Empty,
         None => return Err(ViewerCodecError::InvalidMessage),
     };
+    if response.projects.len() > crate::viewer::projects::VIEWER_PROJECTS_MAX {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
     Ok(ViewerHistoryPage {
+        projects: response
+            .projects
+            .into_iter()
+            .map(|name| {
+                name.try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)
+            })
+            .collect::<Result<_, _>>()?,
         entries,
         total_count: HistoryRenderCount::new(response.total_count),
         position,
@@ -483,6 +513,11 @@ pub fn encode_list_viewer_history_response(
     page: ViewerHistoryPage,
 ) -> Result<v1::ListViewerHistoryResponse, ViewerCodecError> {
     Ok(v1::ListViewerHistoryResponse {
+        projects: page
+            .projects
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect(),
         entries: page
             .entries
             .into_iter()
@@ -1075,6 +1110,7 @@ fn decode_viewer_keybindings(
 
 fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> {
     Ok(ViewerTab {
+        pinned: tab.pinned,
         id: ViewerTabId::try_new(tab.id).map_err(|_| ViewerCodecError::InvalidMessage)?,
         label: tab.label,
         kind: match v1::ViewerTabKind::try_from(tab.kind) {
@@ -1156,6 +1192,7 @@ fn decode_viewer_active_view(
     view: v1::ViewerActiveView,
 ) -> Result<ViewerActiveView, ViewerCodecError> {
     Ok(ViewerActiveView {
+        modified_files: view.modified_files,
         identity: decode_viewer_view_identity(required(view.identity)?)?,
         row_source: match v1::ViewerRowSourceState::try_from(view.row_source)
             .map_err(|_| ViewerCodecError::InvalidMessage)?
@@ -1846,4 +1883,32 @@ fn decode_bool_field_update(
             v1::bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
         },
     })
+}
+
+#[must_use]
+pub fn encode_set_viewer_modified_files_request(
+    request: crate::viewer::SetViewerModifiedFiles,
+) -> v1::SetViewerModifiedFilesRequest {
+    v1::SetViewerModifiedFilesRequest {
+        tab_id: request.tab_id.into(),
+        visible: request.visible,
+    }
+}
+
+#[must_use]
+pub fn encode_set_viewer_tab_pinned_request(
+    request: crate::viewer::SetViewerTabPinned,
+) -> v1::SetViewerTabPinnedRequest {
+    v1::SetViewerTabPinnedRequest {
+        tab_id: u64::from(request.tab_id),
+        pinned: request.pinned,
+    }
+}
+#[must_use]
+pub fn encode_close_other_viewer_tabs_request(
+    request: crate::viewer::ViewerTabRequest,
+) -> v1::CloseOtherViewerTabsRequest {
+    v1::CloseOtherViewerTabsRequest {
+        tab_id: u64::from(request.tab_id),
+    }
 }

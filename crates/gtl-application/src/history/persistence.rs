@@ -17,6 +17,7 @@ pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
 /// One persisted render recipe with its stable row identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentRenderRecord {
+    pub project_id: Option<gtl_models::projects::catalogue::ProjectId>,
     pub id: RenderHistoryId,
     pub recipe: Recipe,
     pub title: String,
@@ -77,6 +78,7 @@ fn target_columns(target: &RecipeTarget) -> (&'static str, Option<String>, Optio
 
 /// One raw joined `recent_renders` row, before identity and recipe validation.
 pub(super) struct RecentRenderRow {
+    project_id: Option<String>,
     id: i64,
     source_kind: String,
     source_value: String,
@@ -97,7 +99,7 @@ pub(super) struct RecentRenderRow {
 pub(super) const RECENT_RENDER_SELECT: &str = "
 SELECT r.id, s.kind, s.value, o.name, t.name, r.argument,
        r.pinned_base, r.pinned_head, r.recipe_name,
-       r.title, r.repo_name, r.range_label, r.rendered_at
+       r.title, r.repo_name, r.range_label, r.rendered_at, r.project_id
 FROM recent_renders r
 JOIN render_sources s ON s.id = r.source_id
 JOIN render_operations o ON o.id = r.operation_id
@@ -119,6 +121,7 @@ impl RecentRenderRow {
             repo_name: row.get(10)?,
             range_label: row.get(11)?,
             rendered_at: row.get(12)?,
+            project_id: row.get(13)?,
         })
     }
 
@@ -131,7 +134,16 @@ impl RecentRenderRow {
                 id: self.id,
                 reason,
             })?;
+        let project_id = self
+            .project_id
+            .map(gtl_models::projects::catalogue::ProjectId::try_new)
+            .transpose()
+            .map_err(|error| RecentRenderRowError::Project {
+                id: self.id,
+                reason: error.to_string(),
+            })?;
         Ok(RecentRenderRecord {
+            project_id,
             id,
             recipe,
             title: self.title,
@@ -242,6 +254,8 @@ impl RecentRenderRow {
 /// validation, for the recent-render operations to wrap.
 #[derive(Debug, thiserror::Error)]
 pub enum RecentRenderRowError {
+    #[error("recent_renders row id {id} has an invalid project: {reason}")]
+    Project { id: i64, reason: String },
     #[error("recent_renders row id {id} violates the positive-ID invariant")]
     Id { id: i64 },
     #[error("recent_renders row id {id} holds an undecodable recipe: {reason}")]
@@ -311,6 +325,11 @@ pub(super) fn store_test() -> Connection {
         ON render_sources (value);",
         )
         .unwrap();
+    connection.execute_batch(
+        "CREATE TABLE project_sources (source_id INTEGER PRIMARY KEY, source_kind TEXT NOT NULL, source_value TEXT NOT NULL UNIQUE) STRICT;
+         CREATE TABLE projects (id TEXT PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES project_sources(source_id), title TEXT NOT NULL UNIQUE) STRICT;
+         ALTER TABLE recent_renders ADD COLUMN project_id TEXT REFERENCES projects(id);"
+    ).unwrap();
     connection
 }
 
@@ -358,7 +377,7 @@ mod tests {
         .unwrap();
 
         let entries = list_recent_render_page::execute(
-            list_recent_render_page::ListRecentRenderPage::default(),
+            &list_recent_render_page::ListRecentRenderPage::default(),
             &connection,
         )
         .unwrap()

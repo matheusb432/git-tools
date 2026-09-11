@@ -1,10 +1,11 @@
 use dioxus::{prelude::*, router::Navigator};
 use gtl_models::{
-    live_views::LiveComparison,
     paths::RepositoryRoot,
     viewer::{ViewerTabId, ViewerVersion},
 };
-use gtl_wire::viewer::{ViewerActiveState, ViewerShell, ViewerTabRequest};
+use gtl_wire::viewer::{
+    ViewerActiveState, ViewerShell, ViewerTabRequest, projects::ViewerProjectDiffMode,
+};
 
 use crate::{
     app::application_layout::{ApplicationLayout, ViewerContext, ViewerShellLoad},
@@ -13,7 +14,7 @@ use crate::{
         browser,
         ui::{ToastHandle, use_toast},
     },
-    views::{DiffHistoryView, DiffWorkspaceView, UserSettingsView},
+    views::{DiffWorkspaceView, UserSettingsView},
 };
 
 #[derive(Debug, Clone, Routable, PartialEq, Eq)]
@@ -23,16 +24,14 @@ pub(crate) enum Route {
         #[redirect("/", || Route::Projects {})]
         #[route("/projects")]
         Projects {},
-        #[route("/projects/local?:..query")]
-        ProjectLocalDiff { query: ProjectDiffQuery },
-        #[route("/projects/unpushed?:..query")]
-        ProjectUnpushedDiff { query: ProjectDiffQuery },
+        #[route("/projects/snapshot?:..query")]
+        ProjectSnapshotDiff { query: ProjectDiffQuery },
+        #[route("/projects/live?:..query")]
+        ProjectLiveDiff { query: ProjectDiffQuery },
         #[route("/diffs")]
         CurrentDiff {},
         #[route("/diffs/:tab_id")]
         Diff { tab_id: ViewerTabId },
-        #[route("/history")]
-        History {},
         #[route("/settings")]
         Settings {},
 }
@@ -66,11 +65,11 @@ impl From<&str> for ProjectDiffQuery {
 }
 
 impl Route {
-    pub(crate) fn project_diff(path: &RepositoryRoot, comparison: LiveComparison) -> Self {
+    pub(crate) fn project_diff(path: &RepositoryRoot, mode: ViewerProjectDiffMode) -> Self {
         let query = ProjectDiffQuery(Some(path.clone()));
-        match comparison {
-            LiveComparison::LocalChanges => Self::ProjectLocalDiff { query },
-            LiveComparison::UnpushedCommits => Self::ProjectUnpushedDiff { query },
+        match mode {
+            ViewerProjectDiffMode::Snapshot => Self::ProjectSnapshotDiff { query },
+            ViewerProjectDiffMode::Live => Self::ProjectLiveDiff { query },
         }
     }
 
@@ -83,10 +82,9 @@ impl Route {
             Self::Diff { tab_id } => Some(*tab_id),
             Self::Projects {}
             | Self::CurrentDiff {}
-            | Self::History {}
             | Self::Settings {}
-            | Self::ProjectLocalDiff { .. }
-            | Self::ProjectUnpushedDiff { .. } => None,
+            | Self::ProjectSnapshotDiff { .. }
+            | Self::ProjectLiveDiff { .. } => None,
         }
     }
 }
@@ -140,7 +138,7 @@ impl ViewerRouteObservation {
         // The project route resolves its own open response into the canonical tab URL.
         if matches!(
             route,
-            Route::ProjectLocalDiff { .. } | Route::ProjectUnpushedDiff { .. }
+            Route::ProjectSnapshotDiff { .. } | Route::ProjectLiveDiff { .. }
         ) {
             return (next, ViewerRouteAction::None);
         }
@@ -160,10 +158,9 @@ impl ViewerRouteObservation {
             },
             Route::Projects {}
             | Route::Diff { .. }
-            | Route::History {}
             | Route::Settings {}
-            | Route::ProjectLocalDiff { .. }
-            | Route::ProjectUnpushedDiff { .. } => ViewerRouteAction::None,
+            | Route::ProjectSnapshotDiff { .. }
+            | Route::ProjectLiveDiff { .. } => ViewerRouteAction::None,
         };
         (next, action)
     }
@@ -246,16 +243,16 @@ fn Projects() -> Element {
 }
 
 #[component]
-fn ProjectLocalDiff(query: ProjectDiffQuery) -> Element {
+fn ProjectSnapshotDiff(query: ProjectDiffQuery) -> Element {
     rsx! {
-        crate::views::diffs::ProjectDiffView { path: query.0, comparison: LiveComparison::LocalChanges }
+        crate::views::diffs::ProjectDiffView { path: query.0, mode: ViewerProjectDiffMode::Snapshot }
     }
 }
 
 #[component]
-fn ProjectUnpushedDiff(query: ProjectDiffQuery) -> Element {
+fn ProjectLiveDiff(query: ProjectDiffQuery) -> Element {
     rsx! {
-        crate::views::diffs::ProjectDiffView { path: query.0, comparison: LiveComparison::UnpushedCommits }
+        crate::views::diffs::ProjectDiffView { path: query.0, mode: ViewerProjectDiffMode::Live }
     }
 }
 
@@ -268,13 +265,6 @@ fn CurrentDiff() -> Element {
 fn Diff(tab_id: ViewerTabId) -> Element {
     rsx! {
         DiffWorkspaceView { tab_id }
-    }
-}
-
-#[component]
-fn History() -> Element {
-    rsx! {
-        DiffHistoryView {}
     }
 }
 
@@ -305,6 +295,7 @@ mod tests {
             tabs: active
                 .into_iter()
                 .map(|id| ViewerTab {
+                    pinned: false,
                     id,
                     label: "diff".to_owned(),
                     kind: ViewerTabKind::Snapshot,
@@ -363,7 +354,7 @@ mod tests {
         assert_eq!(Route::Projects {}.to_string(), "/projects");
         assert_eq!("/".parse::<Route>().ok(), Some(Route::Projects {}));
         assert_eq!("/projects".parse::<Route>().ok(), Some(Route::Projects {}));
-        for route in [Route::Projects {}, Route::History {}, Route::Settings {}] {
+        for route in [Route::Projects {}, Route::Settings {}] {
             assert_eq!(route.tab_id(), None);
         }
     }
@@ -390,11 +381,8 @@ mod tests {
             &Route::Projects {},
             &initial,
         );
-        for comparison in [
-            LiveComparison::LocalChanges,
-            LiveComparison::UnpushedCommits,
-        ] {
-            let route = Route::project_diff(&path, comparison);
+        for mode in [ViewerProjectDiffMode::Snapshot, ViewerProjectDiffMode::Live] {
+            let route = Route::project_diff(&path, mode);
             assert_eq!(route.to_string().parse::<Route>().ok(), Some(route.clone()));
             let (_, action) = observed.next(
                 "server".to_owned(),
@@ -420,10 +408,8 @@ mod tests {
         assert_eq!(action, ViewerRouteAction::Focus(Route::Diff { tab_id }));
 
         shell.version = shell.version.next();
-        for route in [Route::Settings {}, Route::History {}] {
-            let (_, action) = observed.next("server".to_owned(), &route, &shell);
-            assert_eq!(action, ViewerRouteAction::None);
-        }
+        let (_, action) = observed.next("server".to_owned(), &Route::Settings {}, &shell);
+        assert_eq!(action, ViewerRouteAction::None);
         Ok(())
     }
 
@@ -433,6 +419,7 @@ mod tests {
         let second = viewer_tab_id(8)?;
         let mut shell = shell(Some(second), Some(ViewerVersion::new(1)));
         shell.tabs.push(ViewerTab {
+            pinned: false,
             id: first,
             label: "first".to_owned(),
             kind: ViewerTabKind::Snapshot,

@@ -172,7 +172,7 @@ mod tests {
 
     fn list_recent(connection: &Connection) -> Vec<RecentRenderRecord> {
         list_recent_render_page::execute(
-            list_recent_render_page::ListRecentRenderPage::default(),
+            &list_recent_render_page::ListRecentRenderPage::default(),
             connection,
         )
         .unwrap()
@@ -200,6 +200,7 @@ mod tests {
         assert_eq!(
             renders[0],
             RecentRenderRecord {
+                project_id: None,
                 id: gtl_models::viewer::RenderHistoryId::try_new(1).unwrap(),
                 recipe: recipe("/repos/gt"),
                 title: "gt · unpushed".into(),

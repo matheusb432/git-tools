@@ -32,3 +32,7 @@ pub use gtl_models::viewer::{
     ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
 };
 pub use state::{ViewerState, ViewerStateError};
+
+pub mod set_modified_files;
+
+pub mod pinned_tabs;

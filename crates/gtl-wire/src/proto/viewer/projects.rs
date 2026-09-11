@@ -1,6 +1,5 @@
 use gtl_models::{
     git::CommitCount,
-    live_views::LiveComparison,
     repository::{
         PathCount,
         status::{RepositoryStatus, StatusChanges, StatusHead, StatusResult, StatusUpstream},
@@ -12,7 +11,7 @@ use crate::{
     v1,
     viewer::projects::{
         OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, VIEWER_PROJECTS_MAX,
-        ViewerProject, ViewerProjectBranchComparison,
+        ViewerProject, ViewerProjectBranchComparison, ViewerProjectDiffMode,
     },
 };
 
@@ -119,9 +118,9 @@ fn decode_changes(changes: v1::RepositoryStatusChanges) -> Result<StatusChanges,
 pub fn encode_open(request: &OpenViewerProject) -> v1::OpenViewerProjectRequest {
     v1::OpenViewerProjectRequest {
         path: request.path.to_string(),
-        comparison: match request.comparison {
-            LiveComparison::LocalChanges => v1::ViewerProjectComparison::LocalChanges,
-            LiveComparison::UnpushedCommits => v1::ViewerProjectComparison::UnpushedCommits,
+        mode: match request.mode {
+            ViewerProjectDiffMode::Snapshot => v1::ViewerProjectDiffMode::Snapshot,
+            ViewerProjectDiffMode::Live => v1::ViewerProjectDiffMode::Live,
         }
         .into(),
     }
@@ -130,15 +129,15 @@ pub fn encode_open(request: &OpenViewerProject) -> v1::OpenViewerProjectRequest 
 pub fn decode_open(
     request: v1::OpenViewerProjectRequest,
 ) -> Result<OpenViewerProject, ViewerCodecError> {
-    let comparison = match v1::ViewerProjectComparison::try_from(request.comparison) {
-        Ok(v1::ViewerProjectComparison::LocalChanges) => LiveComparison::LocalChanges,
-        Ok(v1::ViewerProjectComparison::UnpushedCommits) => LiveComparison::UnpushedCommits,
+    let mode = match v1::ViewerProjectDiffMode::try_from(request.mode) {
+        Ok(v1::ViewerProjectDiffMode::Snapshot) => ViewerProjectDiffMode::Snapshot,
+        Ok(v1::ViewerProjectDiffMode::Live) => ViewerProjectDiffMode::Live,
         _ => return Err(ViewerCodecError::InvalidMessage),
     };
     Ok(OpenViewerProject {
         path: gtl_models::paths::RepositoryRoot::try_new(request.path.into())
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        comparison,
+        mode,
     })
 }
 

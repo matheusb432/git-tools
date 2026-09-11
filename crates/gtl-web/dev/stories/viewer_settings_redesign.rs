@@ -209,12 +209,7 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
                 }
             },
             trailing: rsx! {
-                ViewerMenu {
-                    id: menu_id,
-                    history_count: tabs.len(),
-                    onhistory: move |()| {},
-                    onsettings: move |()| {},
-                }
+                ViewerMenu { id: menu_id, onsettings: move |()| {} }
             },
         }
     }
@@ -243,6 +238,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     let (files, workspace) = preview_files(identity)?;
     let commits = preview_commits()?;
     let view = ViewerActiveView {
+        modified_files: false,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity,
@@ -267,12 +263,14 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     };
     let tabs = vec![
         ViewerTab {
+            pinned: false,
             id: tab_id,
             label: "git-tools".to_owned(),
             kind: ViewerTabKind::Live,
             state: ViewerTabState::Ready,
         },
         ViewerTab {
+            pinned: false,
             id: ViewerTabId::try_new(2)?,
             label: "config-cleanup".to_owned(),
             kind: ViewerTabKind::Snapshot,
@@ -658,7 +656,8 @@ mod tests {
             ViewerPreview { initial_selected_commit_index: Some(1) }
         });
 
-        assert!(html.contains("commits in range"));
+        assert!(html.contains("Commits"));
+        assert!(!html.contains("commits in range"));
         assert!(html.contains(r#"aria-pressed="true""#));
         assert!(html.contains("bg-acc-soft"));
         assert!(html.contains("mb-2 block min-w-0 text-wrap font-medium"));

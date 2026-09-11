@@ -60,6 +60,7 @@ mod tests {
     #[test]
     fn navigation_uses_page_edge_ids_for_adjacent_pages() -> TestResult {
         let page = ViewerHistoryPage {
+            projects: Vec::new(),
             entries: vec![entry(90)?, entry(81)?],
             total_count: HistoryRenderCount::new(42),
             position: HistoryPagePosition::Page(history_page(3, 5)?),

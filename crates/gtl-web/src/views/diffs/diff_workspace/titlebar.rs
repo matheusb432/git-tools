@@ -31,7 +31,14 @@ pub(super) fn ViewTitlebar(
             div { class: "min-w-0 mobile:hidden",
                 RepositoryIdentity { repository_name: view.repository_name.clone() }
             }
-            BranchRange { branch: view.branch.clone(), upstream: view.upstream.clone() }
+            if view.modified_files {
+                span { class: "text-xs text-acc", "Working tree · HEAD" }
+            } else {
+                BranchRange {
+                    branch: view.branch.clone(),
+                    upstream: view.upstream.clone(),
+                }
+            }
             if let Some(exclusions) = &view.exclusions {
                 div { class: "mobile:hidden",
                     ExclusionsBadge { exclusions: exclusions.clone() }

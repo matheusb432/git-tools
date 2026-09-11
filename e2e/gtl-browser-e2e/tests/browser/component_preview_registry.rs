@@ -209,13 +209,15 @@ async fn assert_commits_panel_preview(page: &Page, base_url: &str) -> anyhow::Re
         .to_have_count(1)
         .await
         .context("show one selected commit through its surface tone")?;
-    expect(commits_panel.get_by_role(
-        AriaRole::Button,
-        Some(GetByRoleOptions::default().name("Range").exact(true)),
-    ))
-    .to_be_visible()
-    .await
-    .context("keep the selected-commit range action available")?;
+    commits_panel
+        .locator("[aria-pressed='true']")
+        .click(None)
+        .await
+        .context("click the selected commit again")?;
+    expect(commits_panel.locator("[aria-pressed='true']"))
+        .to_have_count(0)
+        .await
+        .context("return to the full comparison without a range button")?;
     expect(commits_panel.locator("svg"))
         .to_have_count(0)
         .await

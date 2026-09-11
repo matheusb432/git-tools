@@ -26,6 +26,7 @@ pub fn viewer_commit_summary() -> TestResult<ViewerCommitSummary> {
 
 pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<ViewerActiveView> {
     Ok(ViewerActiveView {
+        modified_files: false,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity: ViewerViewIdentity {

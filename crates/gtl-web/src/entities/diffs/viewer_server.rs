@@ -1,9 +1,9 @@
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
-    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
-    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabPinned, StreamViewerRows,
+    ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
+    ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 
@@ -161,3 +161,13 @@ where
 }
 
 viewer_request!(update_project, UpdateViewerProject, (), update_project);
+
+viewer_request!(
+    set_modified_files,
+    SetViewerModifiedFiles,
+    (),
+    set_modified_files
+);
+
+viewer_request!(set_tab_pinned, SetViewerTabPinned, (), set_tab_pinned);
+viewer_request!(close_other_tabs, ViewerTabRequest, (), close_other_tabs);

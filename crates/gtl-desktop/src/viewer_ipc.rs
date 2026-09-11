@@ -4,9 +4,10 @@ use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersion
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
-    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
-    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference, SetViewerTabPinned,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
+    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
+    ViewerUserSettings,
     projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::Serialize;
@@ -745,4 +746,24 @@ viewer_request_command!(
     UpdateViewerProject,
     (),
     update_project
+);
+
+viewer_request_command!(
+    viewer_set_modified_files,
+    SetViewerModifiedFiles,
+    (),
+    set_modified_files
+);
+
+viewer_request_command!(
+    viewer_set_tab_pinned,
+    SetViewerTabPinned,
+    (),
+    set_tab_pinned
+);
+viewer_request_command!(
+    viewer_close_other_tabs,
+    ViewerTabRequest,
+    (),
+    close_other_tabs
 );

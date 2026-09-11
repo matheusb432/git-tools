@@ -228,6 +228,12 @@ const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(include_str!(
         "../../db/migrations/0008_project_comparison_branch.sql"
     )),
+    M::up(include_str!(
+        "../../db/migrations/0009_snapshot_projects.sql"
+    )),
+    M::up(include_str!(
+        "../../db/migrations/0010_pinned_viewer_tabs.sql"
+    )),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -300,6 +306,27 @@ mod tests {
             barrier.wait();
             open_app_db(&root).map(|_| ())
         })
+    }
+
+    #[test]
+    fn migration_retires_saved_standalone_working_tree_views() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..8])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch("INSERT INTO live_views (source_kind, source_value, display_name, created_at, comparison) VALUES
+            ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'local_changes'),
+            ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+            ('LocalRepo', '/repos/two', 'two', '2026-09-10T00:00:00Z', 'local_changes');").unwrap();
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        let comparisons = connection
+            .prepare("SELECT comparison FROM live_views ORDER BY source_value")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(comparisons, ["unpushed_commits", "unpushed_commits"]);
     }
 
     #[test]
@@ -416,7 +443,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 8);
+        assert_eq!(user_version, 10);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -651,7 +678,7 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 8);
+        assert_eq!(user_version, 10);
     }
 
     /// Two processes can open a fresh database concurrently; both

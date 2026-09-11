@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 19;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 20;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -153,6 +153,8 @@ pub enum ViewerTabState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTab {
+    #[serde(default)]
+    pub pinned: bool,
     pub id: ViewerTabId,
     pub label: String,
     pub kind: ViewerTabKind,
@@ -391,6 +393,8 @@ pub enum ViewerRowSourceState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerActiveView {
+    #[serde(default)]
+    pub modified_files: bool,
     pub identity: ViewerViewIdentity,
     pub content_id: ViewerRowContentId,
     pub row_source: ViewerRowSourceState,
@@ -508,9 +512,21 @@ pub enum ViewerHistoryCursor {
     Oldest,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "filter", rename_all = "snake_case")]
+pub enum ViewerHistoryFilter {
+    #[default]
+    All,
+    Unassociated,
+    Project {
+        name: ProjectName,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListViewerHistory {
     pub cursor: ViewerHistoryCursor,
+    pub filter: ViewerHistoryFilter,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -537,6 +553,7 @@ pub struct ViewerHistoryCopyPayload {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryPage {
+    pub projects: Vec<ProjectName>,
     pub entries: Vec<ViewerHistoryEntry>,
     pub total_count: HistoryRenderCount,
     pub position: HistoryPagePosition,
@@ -933,4 +950,16 @@ pub struct ResetSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResetSettingsOk {
     pub backup_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetViewerModifiedFiles {
+    pub tab_id: ViewerTabId,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SetViewerTabPinned {
+    pub tab_id: ViewerTabId,
+    pub pinned: bool,
 }

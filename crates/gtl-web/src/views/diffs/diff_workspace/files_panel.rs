@@ -5,7 +5,7 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
 use crate::{
-    shared::ui::{Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
+    shared::ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
     views::diffs::{
         DiffFileStatus, DiffLineChangeBadge, DiffLineChangeKind, file_status_text_class,
     },
@@ -97,7 +97,7 @@ pub(super) fn FilesPanel(
             class: "diff-files-scroll-panel h-full min-h-0 p-3 compact:p-2.5",
             "data-testid": test_id,
             FilesPanelHeading { file_count: model.file_count, artifact_view_id }
-            FilesPanelSummary { commit_count: model.commit_count, totals: model.totals }
+            FilesPanelSummary { totals: model.totals }
             if model.file_count == 0 {
                 EmptyNotice { "No changed files" }
             } else {
@@ -122,26 +122,14 @@ fn FilesPanelHeading(file_count: usize, artifact_view_id: Option<String>) -> Ele
 }
 
 #[component]
-fn FilesPanelSummary(commit_count: usize, totals: WorkspaceLineTotals) -> Element {
+fn FilesPanelSummary(totals: WorkspaceLineTotals) -> Element {
     rsx! {
         div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
-            CommitCountBadge { count: commit_count }
             DiffLineChangeBadge { kind: DiffLineChangeKind::Added, count: totals.added.value() }
             DiffLineChangeBadge {
                 kind: DiffLineChangeKind::Removed,
                 count: totals.removed.value(),
             }
-        }
-    }
-}
-
-#[component]
-fn CommitCountBadge(count: usize) -> Element {
-    let commit_label = super::commit_label(count);
-    rsx! {
-        Badge { class: "px-2 py-0.5",
-            b { class: "font-bold text-ink", "{count}" }
-            span { class: "ml-1", {commit_label} }
         }
     }
 }

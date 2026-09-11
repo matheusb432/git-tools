@@ -1,13 +1,12 @@
-mod keyboard;
-
 use dioxus::prelude::*;
-use lucide_dioxus::{Ellipsis, History, Settings};
+use lucide_dioxus::{Ellipsis, Settings};
 
 use crate::shared::{
     browser,
     ui::{
-        ButtonSize, CountBadge, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+        ButtonSize, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
         icon_popover::IconPopoverTrigger,
+        menu_keyboard,
         popover::{PopoverPlacement, PopoverSurface},
     },
 };
@@ -15,18 +14,19 @@ use crate::shared::{
 #[component]
 pub(crate) fn ViewerMenu(
     id: String,
-    history_count: usize,
     #[props(default = ButtonSize::IconSmall)] trigger_size: ButtonSize,
     trigger_test_id: Option<String>,
-    history_test_id: Option<String>,
-    onhistory: EventHandler<()>,
     onsettings: EventHandler<()>,
 ) -> Element {
     let keyboard_id = id.clone();
     rsx! {
         span {
             class: "icon-popover group/icon-popover",
-            onkeydown: move |event| keyboard::keydown(&keyboard_id, &event),
+            onkeydown: move |event| menu_keyboard::keydown(
+                &keyboard_id,
+                &format!("{keyboard_id}-trigger"),
+                &event,
+            ),
             IconPopoverTrigger {
                 id: id.clone(),
                 aria_label: "Viewer menu",
@@ -51,31 +51,6 @@ pub(crate) fn ViewerMenu(
                         role: "menuitem",
                         tabindex: "-1",
                         autofocus: true,
-                        aria_label: "History",
-                        "data-testid": history_test_id,
-                        onclick: {
-                            let popover_id = id.clone();
-                            move |_| {
-                                browser::hide_popover(&popover_id);
-                                onhistory.call(());
-                            }
-                        },
-                        MenuActionContent {
-                            icon: rsx! {
-                                History { size: 15 }
-                            },
-                            label: "History",
-                            description: "Browse saved renders",
-                            if history_count > 0 {
-                                CountBadge { count: history_count }
-                            }
-                        }
-                    }
-                    button {
-                        class: MENU_ACTION_HOST_CLASSES,
-                        r#type: "button",
-                        role: "menuitem",
-                        tabindex: "-1",
                         aria_label: "User settings",
                         onclick: move |_| {
                             browser::hide_popover(&id);
@@ -104,22 +79,17 @@ mod tests {
     #[component]
     fn ViewerMenuTestView() -> Element {
         rsx! {
-            ViewerMenu {
-                id: "viewer-menu-test",
-                history_count: 2,
-                onhistory: move |()| {},
-                onsettings: move |()| {},
-            }
+            ViewerMenu { id: "viewer-menu-test", onsettings: move |()| {} }
         }
     }
 
     #[test]
-    fn contains_only_history_and_settings_actions() {
+    fn contains_only_settings_action() {
         let html = dioxus_ssr::render_element(rsx! {
             ViewerMenuTestView {}
         });
 
-        assert!(html.contains("History"));
+        assert!(!html.contains("History"));
         assert!(html.contains("Settings"));
         assert!(!html.contains("Theme"));
         assert!(!html.contains("<select"));

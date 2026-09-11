@@ -47,6 +47,7 @@ pub fn project(
     let tabs = session
         .tabs()
         .map(|entry| ViewerTab {
+            pinned: entry.pinned,
             id: entry.tab.id(),
             label: entry.tab.label().to_owned(),
             kind: match session
@@ -75,7 +76,12 @@ pub fn project(
                 .tab(tab_id)
                 .map(|entry| entry.tab.state().clone())
                 .ok_or(ProjectViewerShellError::ActiveTabMissing)?;
-            match non_ready_active_state(tab_id, &state) {
+            let modified = session.modified_files_snapshot(tab_id).is_some();
+            match if modified {
+                None
+            } else {
+                non_ready_active_state(tab_id, &state)
+            } {
                 Some(active) => active,
                 None => ViewerActiveState::Ready {
                     view: Box::new(ready_active_view(session, tab_id, options)?),
@@ -108,8 +114,9 @@ fn ready_active_view(
         .ok_or(ProjectViewerShellError::ActiveViewUnavailable)?;
     let range = session
         .cached_view_snapshot(tab_id)
-        .ok_or(ProjectViewerShellError::ActiveViewUnavailable)?
-        .view;
+        .map(|cached| cached.view)
+        .or_else(|| session.modified_files_snapshot(tab_id))
+        .ok_or(ProjectViewerShellError::ActiveViewUnavailable)?;
     let selection = session.commit_selection_snapshot(tab_id);
     let displayed = match &selection {
         CommitSelectionSnapshot::Ready { view, .. } => view.clone(),
@@ -117,6 +124,9 @@ fn ready_active_view(
         | CommitSelectionSnapshot::Pending { .. }
         | CommitSelectionSnapshot::Error { .. } => range.clone(),
     };
+    let modified = session.modified_files_snapshot(tab_id);
+    let modified_files = modified.is_some();
+    let displayed = modified.unwrap_or(displayed);
     let displayed = session.full_context_snapshot(identity).unwrap_or(displayed);
     let commit_selection = match &selection {
         CommitSelectionSnapshot::None => ViewerCommitSelection::None,
@@ -131,6 +141,11 @@ fn ready_active_view(
             message: reason.clone(),
         },
     };
+    let commit_selection = if modified_files {
+        ViewerCommitSelection::None
+    } else {
+        commit_selection
+    };
     let mut view = project_diff_view_with_content_id(
         &displayed,
         &range,
@@ -138,6 +153,7 @@ fn ready_active_view(
         commit_selection,
         displayed.content_id(project_render_options(options)),
     );
+    view.modified_files = modified_files;
     if options.density() == super::DiffDensity::Full
         && matches!(
             displayed.full_context,

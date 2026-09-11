@@ -3,9 +3,10 @@ use std::{cell::RefCell, collections::VecDeque};
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
-    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
-    ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference, SetViewerTabPinned,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
+    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
+    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -118,6 +119,9 @@ impl ViewerClient {
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
         delete_live_tab(ViewerTabRequest) -> ViewerShell => "viewer_delete_live_tab";
         select_commit(SelectViewerCommit) -> ViewerShell => "viewer_select_commit";
+        set_tab_pinned(SetViewerTabPinned) -> () => "viewer_set_tab_pinned";
+        close_other_tabs(ViewerTabRequest) -> () => "viewer_close_other_tabs";
+        set_modified_files(SetViewerModifiedFiles) -> () => "viewer_set_modified_files";
         clear_commit_selection(ViewerTabRequest) -> ViewerShell => "viewer_clear_commit_selection";
         set_preference(SetViewerPreference) -> ViewerShell => "viewer_set_preference";
         list_commits(ListViewerCommits) -> ViewerCommitPage => "viewer_list_commits";

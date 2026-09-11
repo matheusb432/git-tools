@@ -168,6 +168,8 @@ pub struct SessionTab {
     selection_generation: ViewerSelectionGeneration,
     selection: CommitSelection,
     live_head: Option<super::refresh_live_view::LiveViewState>,
+    modified_files_active: bool,
+    pub pinned: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -185,6 +187,7 @@ pub struct ViewerSession {
     version: ViewerVersion,
     focus_request_version: Option<ViewerVersion>,
     full_context_transient: Option<(ActiveContentIdentity, ViewerDiffSnapshot)>,
+    modified_files_transient: Option<(ViewerTabId, ViewerDiffSnapshot)>,
     full_context_preparation: Option<(ActiveContentIdentity, FullContextPreparation)>,
 }
 
@@ -199,6 +202,7 @@ impl ViewerSession {
             version: ViewerVersion::default(),
             focus_request_version: None,
             full_context_transient: None,
+            modified_files_transient: None,
             full_context_preparation: None,
         }
     }
@@ -226,19 +230,20 @@ impl ViewerSession {
         label: String,
     ) -> Option<ViewerTabId> {
         let unpinned = recipe.unpinned();
-        if let Some(existing) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.recipe.unpinned() == unpinned)
-        {
+        if let Some(existing) = self.tabs.iter_mut().find(|tab| {
+            tab.tab.kind() == kind
+                && if tab.pinned && kind == ViewerTabKind::Snapshot {
+                    tab.recipe == recipe
+                } else {
+                    tab.recipe.unpinned() == unpinned
+                }
+        }) {
             existing.tab = ViewerTab::new(
                 existing.tab.id(),
                 existing.tab.label().into(),
                 kind,
                 existing.tab.state().clone(),
             );
-            // Intentionally symmetric: reopening an unpinned (legacy/history) recipe
-            // replaces a pinned one too, since the tab shows what was most recently opened.
             existing.recipe = recipe;
             existing.batch_id = batch_id;
             self.active = Some(existing.tab.id());
@@ -266,6 +271,8 @@ impl ViewerSession {
             selection_generation: ViewerSelectionGeneration::default(),
             selection: CommitSelection::None,
             live_head: None,
+            modified_files_active: false,
+            pinned: false,
         });
         self.active = Some(id);
         self.bump_version();
@@ -275,6 +282,7 @@ impl ViewerSession {
     pub fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
         let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
         self.cache.remove(id);
+        tab.modified_files_active = false;
         tab.live_head = None;
         // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
         // one ticket remains in flight before an old ticket could compare equal again.
@@ -417,6 +425,9 @@ impl ViewerSession {
         {
             return PublishOutcome::Stale;
         }
+        if let Some(modified) = self.modified_files_snapshot(ticket.tab_id) {
+            value = value.with_modified(Some(modified));
+        }
         let selection = self.commit_selection_snapshot(ticket.tab_id);
         if matches!(selection, CommitSelectionSnapshot::Pending { .. }) {
             return PublishOutcome::Stale;
@@ -456,7 +467,12 @@ impl ViewerSession {
             ViewerTabKind::Live,
             ViewerTabState::Ready,
         );
-        self.cache.insert(ticket.tab_id, value);
+        let modified = value.modified.clone();
+        let base = value.with_modified(None);
+        if self.cache.insert(ticket.tab_id, value) == CacheDisposition::Oversize {
+            self.cache.insert(ticket.tab_id, base);
+            self.modified_files_transient = modified.map(|view| (ticket.tab_id, view));
+        }
         self.bump_version();
         PublishOutcome::Published
     }
@@ -519,6 +535,7 @@ impl ViewerSession {
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(BeginCommitSelectionError::StaleRange);
         }
+        tab.modified_files_active = false;
         tab.selection_generation = tab.selection_generation.next();
         tab.selection = CommitSelection::Pending {
             commit: commit.clone(),
@@ -599,10 +616,98 @@ impl ViewerSession {
         PublishOutcome::Published
     }
 
+    pub(super) fn begin_modified_files(
+        &mut self,
+        id: ViewerTabId,
+    ) -> Option<(CommitPatchTicket, Recipe)> {
+        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
+        if matches!(tab.selection, CommitSelection::Pending { .. }) {
+            return None;
+        }
+        tab.selection_generation = tab.selection_generation.next();
+        let ticket = CommitPatchTicket {
+            tab_id: id,
+            range_generation: tab.generation,
+            selection_generation: tab.selection_generation,
+        };
+        let recipe = tab.recipe.clone();
+        self.bump_version();
+        Some((ticket, recipe))
+    }
+
+    pub(super) fn publish_modified_files(
+        &mut self,
+        ticket: CommitPatchTicket,
+        view: ViewerDiffSnapshot,
+    ) -> PublishOutcome {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| {
+            tab.tab.id() == ticket.tab_id
+                && tab.generation == ticket.range_generation
+                && tab.selection_generation == ticket.selection_generation
+        }) else {
+            return PublishOutcome::Stale;
+        };
+        tab.modified_files_active = true;
+        let base = self
+            .cache
+            .get(ticket.tab_id)
+            .cloned()
+            .unwrap_or_else(|| CachedView::from_snapshot(view.clone()));
+        if self
+            .cache
+            .insert(ticket.tab_id, base.with_modified(Some(view.clone())))
+            == CacheDisposition::Oversize
+        {
+            self.cache.insert(ticket.tab_id, base);
+            self.modified_files_transient = Some((ticket.tab_id, view));
+        }
+        self.bump_version();
+        PublishOutcome::Published
+    }
+
+    pub(super) fn hide_modified_files(&mut self, id: ViewerTabId) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        tab.modified_files_active = false;
+        tab.selection_generation = tab.selection_generation.next();
+        if let Some(base) = self.cache.get(id).cloned() {
+            self.cache.insert(id, base.with_modified(None));
+        }
+        if self
+            .modified_files_transient
+            .as_ref()
+            .is_some_and(|(tab, _)| *tab == id)
+        {
+            self.modified_files_transient = None;
+        }
+        self.bump_version();
+        true
+    }
+
+    pub(super) fn modified_files_snapshot(
+        &mut self,
+        id: ViewerTabId,
+    ) -> Option<ViewerDiffSnapshot> {
+        if !self.tab(id)?.modified_files_active {
+            return None;
+        }
+        self.cache
+            .get(id)
+            .and_then(|entry| entry.modified.clone())
+            .or_else(|| {
+                self.modified_files_transient
+                    .as_ref()
+                    .filter(|(tab, _)| *tab == id)
+                    .map(|(_, view)| view.clone())
+            })
+    }
+
     pub fn clear_commit_selection(&mut self, id: ViewerTabId) -> bool {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
             return false;
         };
+        tab.modified_files_active = false;
         tab.selection_generation = tab.selection_generation.next();
         tab.selection = CommitSelection::None;
         if let Some(cached) = self.cache.get(id).cloned()
@@ -660,8 +765,21 @@ impl ViewerSession {
         PublishOutcome::Published
     }
 
+    pub(crate) fn set_pinned(&mut self, id: ViewerTabId, pinned: bool) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        tab.pinned = pinned;
+        self.tabs.sort_by_key(|tab| !tab.pinned);
+        self.bump_version();
+        true
+    }
+
     pub fn close(&mut self, id: ViewerTabId) -> Option<CloseOutcome> {
         let index = self.tabs.iter().position(|tab| tab.tab.id() == id)?;
+        if self.tabs[index].pinned {
+            return Some(CloseOutcome::ActiveUnchanged);
+        }
         let outcome = if self.active == Some(id) {
             self.active = self
                 .tabs
@@ -687,7 +805,7 @@ impl ViewerSession {
     ) -> Option<MoveOutcome> {
         let from = self.tabs.iter().position(|tab| tab.tab.id() == id)?;
         let target = self.tabs.iter().position(|tab| tab.tab.id() == target_id)?;
-        if from == target {
+        if from == target || self.tabs[from].pinned != self.tabs[target].pinned {
             return Some(MoveOutcome::Unchanged);
         }
 
@@ -759,7 +877,7 @@ impl ViewerSession {
     #[must_use]
     pub fn content_identity(&self, tab_id: ViewerTabId) -> Option<ActiveContentIdentity> {
         let tab = self.tab(tab_id)?;
-        if !matches!(tab.tab.state(), ViewerTabState::Ready)
+        if (!matches!(tab.tab.state(), ViewerTabState::Ready) && !tab.modified_files_active)
             || matches!(tab.selection, CommitSelection::Pending { .. })
         {
             return None;
@@ -774,7 +892,7 @@ impl ViewerSession {
     #[must_use]
     pub fn active_displayed_content_identity(&self) -> Option<ActiveContentIdentity> {
         let tab = self.active.and_then(|id| self.tab(id))?;
-        if !matches!(tab.tab.state(), ViewerTabState::Ready) {
+        if !matches!(tab.tab.state(), ViewerTabState::Ready) && !tab.modified_files_active {
             return None;
         }
 
@@ -830,6 +948,12 @@ impl ViewerSession {
                 view: view.shared_view(),
             });
         }
+        if let Some(view) = self.modified_files_snapshot(identity.tab_id()) {
+            return Some(ActiveContentSnapshot {
+                identity,
+                view: view.shared_view(),
+            });
+        }
         let cached = self.cache.get(identity.tab_id()).cloned()?;
         let view = match self.commit_selection_snapshot(identity.tab_id()) {
             CommitSelectionSnapshot::None | CommitSelectionSnapshot::Error { .. } => cached.view,
@@ -857,6 +981,11 @@ impl ViewerSession {
             return None;
         }
 
+        if self.modified_files_snapshot(identity.tab_id()).is_some() {
+            let shared = replacement.shared_view();
+            self.full_context_transient = Some((identity, replacement));
+            return Some(shared);
+        }
         let cached = self.cache.get(identity.tab_id()).cloned()?;
         if Arc::ptr_eq(&cached.view.shared_view(), expected) {
             return Some(self.replace_cached_range(identity.tab_id(), cached, replacement));
@@ -988,6 +1117,13 @@ impl ViewerSession {
             })
         {
             self.full_context_transient = None;
+        }
+        if self
+            .modified_files_transient
+            .as_ref()
+            .is_some_and(|(id, _)| !self.tab(*id).is_some_and(|tab| tab.modified_files_active))
+        {
+            self.modified_files_transient = None;
         }
         self.version = self.version.next();
     }
@@ -1141,6 +1277,79 @@ mod tests {
         assert!(matches!(session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Ready { id: selected, view }
                 if selected == ids[0] && view.title == "reloaded patch"));
+    }
+
+    #[test]
+    fn modified_files_restore_selection_and_reject_late_results() {
+        let (mut session, id, ids) = ready_session_with_commits();
+        let recipe = session.tab(id).unwrap().recipe.clone();
+        let (selection, _, _) = session.begin_commit_selection(id, &ids[0]).unwrap();
+        session
+            .publish_commit_patch_if_current(selection, ViewerDiffSnapshot::new(view("selected")));
+        let original_identity = session.active_content_identity().unwrap();
+        let (ticket, _) = session.begin_modified_files(id).unwrap();
+        assert_eq!(
+            session.publish_modified_files(ticket, ViewerDiffSnapshot::new(view("working tree"))),
+            PublishOutcome::Published
+        );
+        assert_eq!(
+            session.active_content_snapshot().unwrap().view().title,
+            "working tree"
+        );
+        assert_ne!(
+            session.active_content_identity().unwrap(),
+            original_identity
+        );
+        assert_eq!(session.tab(id).unwrap().recipe, recipe);
+        session.hide_modified_files(id);
+        assert_eq!(
+            session.active_content_snapshot().unwrap().view().title,
+            "selected"
+        );
+        assert_eq!(
+            session.publish_modified_files(ticket, ViewerDiffSnapshot::new(view("late"))),
+            PublishOutcome::Stale
+        );
+        let (ticket, _) = session.begin_modified_files(id).unwrap();
+        session.publish_modified_files(
+            ticket,
+            ViewerDiffSnapshot::new(view("refreshed working tree")),
+        );
+        session.clear_commit_selection(id);
+        assert_eq!(
+            session.active_content_snapshot().unwrap().view().title,
+            "range"
+        );
+    }
+
+    #[test]
+    fn pinning_protects_snapshots_and_keeps_pins_before_other_tabs() {
+        let mut session = ViewerSession::new(cache_weight(1024 * 1024));
+        let first_recipe = pinned_unpushed_recipe("b");
+        let first = session
+            .open(first_recipe.clone(), batch_id(1), ViewerTabKind::Snapshot)
+            .unwrap();
+        session.set_pinned(first, true);
+        let second = session
+            .open(
+                pinned_unpushed_recipe("c"),
+                batch_id(2),
+                ViewerTabKind::Snapshot,
+            )
+            .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(session.tab(first).unwrap().recipe, first_recipe);
+        assert_eq!(
+            session.open(first_recipe, batch_id(3), ViewerTabKind::Snapshot),
+            Some(first)
+        );
+        session.close(first);
+        assert!(session.tab(first).is_some());
+        session.move_tab(second, first, ViewerTabPlacement::Before);
+        assert_eq!(session.tabs().next().unwrap().tab.id(), first);
+        session.set_pinned(first, false);
+        session.close(first);
+        assert!(session.tab(first).is_none());
     }
 
     #[test]
@@ -1511,7 +1720,7 @@ mod tests {
     }
 
     #[test]
-    fn reopening_a_recipe_updates_its_authoritative_kind() {
+    fn snapshot_and_live_comparisons_have_independent_tabs() {
         let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
             .open(recipe(), batch_id(3), ViewerTabKind::Snapshot)
@@ -1521,8 +1730,9 @@ mod tests {
             .open(recipe(), batch_id(4), ViewerTabKind::Live)
             .unwrap();
 
-        assert_eq!(reopened, id);
-        let tab = session.tab(id).unwrap();
+        assert_ne!(reopened, id);
+        assert_eq!(session.tab(id).unwrap().tab.kind(), ViewerTabKind::Snapshot);
+        let tab = session.tab(reopened).unwrap();
         assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
         assert_eq!(tab.batch_id, batch_id(4));
     }

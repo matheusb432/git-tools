@@ -10,7 +10,8 @@ mod view_mode;
 
 use dioxus::prelude::*;
 use gtl_models::settings::ProjectsViewMode;
-use lucide_dioxus::RefreshCw;
+use gtl_wire::viewer::ViewerHistoryFilter;
+use lucide_dioxus::{History, RefreshCw};
 
 use self::{
     card::ProjectCard,
@@ -23,7 +24,10 @@ use crate::{
     app::application_layout::ViewerContext,
     shared::{
         browser,
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Skeleton},
+        ui::{
+            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, PanelDialog, ScrollArea,
+            Skeleton,
+        },
     },
 };
 
@@ -31,6 +35,9 @@ const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
 pub(crate) fn ProjectsView() -> Element {
+    let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
+    let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
+    use_context_provider(|| OpenSnapshots(open_snapshots));
     let projects = use_projects();
     use_context_provider(|| projects);
     let presentation = use_projects_presentation();
@@ -60,6 +67,7 @@ pub(crate) fn ProjectsView() -> Element {
                 }
                 ProjectsSummary { load: projects.load }
                 div { class: "projects-header-actions ml-auto gap-3",
+                    SnapshotHistoryButton {}
                     ProjectsViewToggle { presentation }
                     Button {
                         variant: ButtonVariant::Outline,
@@ -71,6 +79,16 @@ pub(crate) fn ProjectsView() -> Element {
                         },
                         span { class: "hidden sm:inline", "Refresh" }
                     }
+                }
+            }
+            if let Some((filter, trigger)) = snapshots() {
+                PanelDialog {
+                    id: "project-snapshots-dialog",
+                    trigger_id: trigger,
+                    title: "Snapshots",
+                    open: true,
+                    onclose: move |()| snapshots.set(None),
+                    crate::views::SnapshotHistory { initial_filter: filter }
                 }
             }
             ScrollArea {
@@ -131,6 +149,49 @@ pub(crate) fn ProjectsView() -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OpenSnapshots(Callback<(ViewerHistoryFilter, String)>);
+
+#[component]
+fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Element {
+    let open = use_context::<OpenSnapshots>();
+    let id = project.as_ref().map_or_else(
+        || "all-snapshots".to_owned(),
+        |name| {
+            format!(
+                "project-snapshots-{}",
+                name.as_str().bytes().fold(String::new(), |mut text, byte| {
+                    use std::fmt::Write as _;
+                    let _ = write!(text, "{byte:02x}");
+                    text
+                })
+            )
+        },
+    );
+    let label = project.as_ref().map_or_else(
+        || "All snapshots".to_owned(),
+        |name| format!("Snapshots for {name}"),
+    );
+    let filter = project.map_or(ViewerHistoryFilter::All, |name| {
+        ViewerHistoryFilter::Project { name }
+    });
+    let trigger = id.clone();
+    rsx! {
+        Button {
+            "data-testid": (filter == ViewerHistoryFilter::All)
+                .then_some(gtl_web_contracts::test_ids::VIEWER_HISTORY_OPEN.value()),
+            id,
+            size: ButtonSize::IconSmall,
+            variant: ButtonVariant::Ghost,
+            aria_label: label.clone(),
+            title: label,
+            aria_haspopup: "dialog",
+            onclick: move |_| open.0.call((filter.clone(), trigger.clone())),
+            History { size: 15 }
         }
     }
 }

@@ -4,7 +4,8 @@ use gtl_models::viewer::{
     HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
     RenderHistoryId,
 };
-use rusqlite::{Connection, params_from_iter};
+use gtl_wire::viewer::ViewerHistoryFilter;
+use rusqlite::{Connection, params_from_iter, types::Value};
 
 use crate::history::{
     RecentRenderRecord, RecentRenderRowError,
@@ -29,13 +30,15 @@ pub enum RecentRenderPageCursor {
     Oldest,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ListRecentRenderPage {
+    pub filter: ViewerHistoryFilter,
     pub cursor: RecentRenderPageCursor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListRecentRenderPageOk {
+    pub projects: Vec<gtl_models::paths::ProjectName>,
     pub entries: Vec<RecentRenderRecord>,
     pub total_count: HistoryRenderCount,
     pub position: HistoryPagePosition,
@@ -52,18 +55,35 @@ pub enum ListRecentRenderPageError {
 }
 
 pub fn execute(
-    query: ListRecentRenderPage,
+    query: &ListRecentRenderPage,
     connection: &Connection,
 ) -> Result<ListRecentRenderPageOk, ListRecentRenderPageError> {
+    let mut parameters = Vec::new();
+    let filter = history_filter(&query.filter, &mut parameters);
     let total_count = connection
-        .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            &format!("SELECT COUNT(*) FROM recent_renders r WHERE {filter}"),
+            params_from_iter(parameters),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(anyhow::Error::from)?;
+    let mut statement = connection
+        .prepare_cached("SELECT title FROM projects ORDER BY title LIMIT 4096")
+        .map_err(anyhow::Error::from)?;
+    let projects = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(anyhow::Error::from)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(anyhow::Error::from)?
+        .into_iter()
+        .map(gtl_models::paths::ProjectName::try_new)
+        .collect::<Result<Vec<_>, _>>()
         .map_err(anyhow::Error::from)?;
     let total_count = u64::try_from(total_count).map_err(anyhow::Error::from)?;
     let query_total_count = usize::try_from(total_count).map_err(anyhow::Error::from)?;
     let page_count = query_total_count.div_ceil(RECENT_RENDER_PAGE_SIZE);
-    let (entries, has_newer, has_older) = list_page(connection, query.cursor, query_total_count)?;
+    let (entries, has_newer, has_older) =
+        list_page(connection, query.cursor, &query.filter, query_total_count)?;
     let page_number = match query.cursor {
         RecentRenderPageCursor::Newest => usize::from(query_total_count > 0),
         RecentRenderPageCursor::OlderThan { page, .. }
@@ -74,6 +94,7 @@ pub fn execute(
     };
     let position = history_page_position(page_number, page_count)?;
     Ok(ListRecentRenderPageOk {
+        projects,
         entries,
         total_count: HistoryRenderCount::new(total_count),
         position,
@@ -97,9 +118,24 @@ fn history_page_position(
     Ok(HistoryPagePosition::Page(page))
 }
 
+fn history_filter(filter: &ViewerHistoryFilter, parameters: &mut Vec<Value>) -> String {
+    match filter {
+        ViewerHistoryFilter::All => "1 = 1".to_owned(),
+        ViewerHistoryFilter::Unassociated => "r.project_id IS NULL".to_owned(),
+        ViewerHistoryFilter::Project { name } => {
+            parameters.push(Value::Text(name.to_string()));
+            format!(
+                "r.project_id = (SELECT id FROM projects WHERE title = ?{})",
+                parameters.len()
+            )
+        }
+    }
+}
+
 fn list_page(
     connection: &Connection,
     cursor: RecentRenderPageCursor,
+    project_filter: &ViewerHistoryFilter,
     total_count: usize,
 ) -> Result<(Vec<RecentRenderRecord>, bool, bool), ListRecentRenderPageError> {
     let last_page_size = match total_count % RECENT_RENDER_PAGE_SIZE {
@@ -111,27 +147,30 @@ fn list_page(
             ("", "DESC", vec![], false, RECENT_RENDER_PAGE_QUERY_SIZE)
         }
         RecentRenderPageCursor::OlderThan { render, .. } => (
-            "WHERE r.id < ?1",
+            "AND r.id < ?1",
             "DESC",
-            vec![i64::from(render)],
+            vec![Value::Integer(i64::from(render))],
             false,
             RECENT_RENDER_PAGE_QUERY_SIZE,
         ),
         RecentRenderPageCursor::NewerThan { render, .. } => (
-            "WHERE r.id > ?1",
+            "AND r.id > ?1",
             "ASC",
-            vec![i64::from(render)],
+            vec![Value::Integer(i64::from(render))],
             true,
             RECENT_RENDER_PAGE_QUERY_SIZE,
         ),
         RecentRenderPageCursor::Oldest => ("", "ASC", vec![], true, last_page_size),
     };
+    let mut parameters = parameters;
+    let project_filter = history_filter(project_filter, &mut parameters);
     let limit_parameter = parameters.len() + 1;
     let sql = format!(
-        "{RECENT_RENDER_SELECT} {filter} ORDER BY r.id {direction} LIMIT ?{limit_parameter}"
+        "{RECENT_RENDER_SELECT} WHERE {project_filter} {filter} ORDER BY r.id {direction} LIMIT ?{limit_parameter}"
     );
-    let mut parameters = parameters;
-    parameters.push(i64::try_from(query_size).map_err(anyhow::Error::from)?);
+    parameters.push(Value::Integer(
+        i64::try_from(query_size).map_err(anyhow::Error::from)?,
+    ));
     let mut statement = connection
         .prepare_cached(&sql)
         .map_err(anyhow::Error::from)?;
@@ -203,8 +242,8 @@ mod tests {
         let connection = store_test();
         seed_history(&connection, 65);
 
-        let first =
-            list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap();
+        let first = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)
+            .unwrap();
         assert_eq!(ids(&first), (36..=65).rev().collect::<Vec<_>>());
         assert_eq!(first.position, page_position(1, 3));
         assert_eq!(first.total_count, HistoryRenderCount::new(65));
@@ -212,7 +251,8 @@ mod tests {
         assert!(first.has_older);
 
         let second = list_recent_render_page::execute(
-            ListRecentRenderPage {
+            &ListRecentRenderPage {
+                filter: ViewerHistoryFilter::All,
                 cursor: RecentRenderPageCursor::OlderThan {
                     render: first.entries.last().unwrap().id,
                     page: page_number(2),
@@ -226,7 +266,8 @@ mod tests {
         assert!(second.has_older);
 
         let last = list_recent_render_page::execute(
-            ListRecentRenderPage {
+            &ListRecentRenderPage {
+                filter: ViewerHistoryFilter::All,
                 cursor: RecentRenderPageCursor::Oldest,
             },
             &connection,
@@ -238,7 +279,8 @@ mod tests {
         assert!(!last.has_older);
 
         let previous = list_recent_render_page::execute(
-            ListRecentRenderPage {
+            &ListRecentRenderPage {
+                filter: ViewerHistoryFilter::All,
                 cursor: RecentRenderPageCursor::NewerThan {
                     render: last.entries.first().unwrap().id,
                     page: page_number(2),
@@ -251,11 +293,71 @@ mod tests {
     }
 
     #[test]
+    fn filters_apply_to_counts_and_every_page() {
+        let connection = store_test();
+        seed_history(&connection, 65);
+        connection
+            .execute_batch(
+                "INSERT INTO project_sources VALUES (1, 'directory', '~/gt');
+            INSERT INTO projects VALUES ('GT', 1, 'git-tools');
+            UPDATE recent_renders SET project_id = 'GT' WHERE id % 2 = 1;",
+            )
+            .unwrap();
+        let filter = ViewerHistoryFilter::Project {
+            name: crate::utils::project_name("git-tools"),
+        };
+        let first = list_recent_render_page::execute(
+            &ListRecentRenderPage {
+                filter: filter.clone(),
+                ..Default::default()
+            },
+            &connection,
+        )
+        .unwrap();
+        assert_eq!(first.total_count.into_inner(), 33);
+        assert_eq!(first.entries.len(), 30);
+        assert!(
+            first
+                .entries
+                .iter()
+                .all(|entry| i64::from(entry.id) % 2 == 1)
+        );
+        let last = list_recent_render_page::execute(
+            &ListRecentRenderPage {
+                filter,
+                cursor: RecentRenderPageCursor::OlderThan {
+                    render: first.entries.last().unwrap().id,
+                    page: page_number(2),
+                },
+            },
+            &connection,
+        )
+        .unwrap();
+        assert_eq!(ids(&last), [5, 3, 1]);
+        assert!(!last.has_older);
+        let unassociated = list_recent_render_page::execute(
+            &ListRecentRenderPage {
+                filter: ViewerHistoryFilter::Unassociated,
+                ..Default::default()
+            },
+            &connection,
+        )
+        .unwrap();
+        assert_eq!(unassociated.total_count.into_inner(), 32);
+        assert!(
+            unassociated
+                .entries
+                .iter()
+                .all(|entry| i64::from(entry.id) % 2 == 0)
+        );
+    }
+
+    #[test]
     fn empty_history_has_no_pages_or_navigation() {
         let connection = store_test();
 
-        let page =
-            list_recent_render_page::execute(ListRecentRenderPage::default(), &connection).unwrap();
+        let page = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)
+            .unwrap();
 
         assert!(page.entries.is_empty());
         assert_eq!(page.total_count, HistoryRenderCount::default());
@@ -293,7 +395,7 @@ mod tests {
         let connection = store_test();
         seed_recent_render(&connection, 0, "invalid");
 
-        let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+        let error = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)
             .unwrap_err();
 
         assert!(matches!(
@@ -313,7 +415,7 @@ mod tests {
             )
             .unwrap();
 
-        let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+        let error = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)
             .unwrap_err();
 
         assert!(matches!(

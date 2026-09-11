@@ -15,7 +15,7 @@ use std::pin::Pin;
 
 use gtl_application::{
     live_views::delete_live_viewer_tab,
-    viewer::{self, move_viewer_tab, work},
+    viewer::{self, move_viewer_tab, pinned_tabs, set_modified_files, work},
 };
 use gtl_models::{diffs::CommitId, viewer::ViewerTabId};
 use gtl_wire::{
@@ -161,9 +161,50 @@ impl ViewerService for ViewerGrpcService {
         let request = proto::viewer::decode_move_viewer_tab_request(request.into_inner())
             .map_err(|_| Status::invalid_argument("move viewer tab request is invalid"))?;
         move_viewer_tab::execute(request, &self.state.viewer).map_err(move_viewer_tab_error)?;
+        let state = self.state.clone();
+        run_blocking(move || {
+            let mut connection = state.database.connection_lock()?;
+            viewer::pinned_tabs::save_order(&state.viewer, &mut connection)
+                .map_err(anyhow::Error::from)
+        })
+        .await?
+        .map_err(|error| unexpected(error, "save pinned tab order"))?;
         Ok(Response::new(v1::MoveViewerTabResponse {
             shell: Some(project_shell(&self.state, None)?),
         }))
+    }
+
+    async fn set_viewer_tab_pinned(
+        &self,
+        request: Request<v1::SetViewerTabPinnedRequest>,
+    ) -> Result<Response<v1::SetViewerTabPinnedResponse>, Status> {
+        let request = request.into_inner();
+        let request = gtl_wire::viewer::SetViewerTabPinned {
+            tab_id: tab_id(request.tab_id)?,
+            pinned: request.pinned,
+        };
+        let state = self.state.clone();
+        run_blocking(move || {
+            let mut connection = state.database.connection_lock()?;
+            pinned_tabs::execute(request, &state.viewer, &mut connection)
+                .map_err(anyhow::Error::from)
+        })
+        .await?
+        .map_err(|error| unexpected(error, "pin viewer tab"))?;
+        Ok(Response::new(v1::SetViewerTabPinnedResponse {}))
+    }
+
+    async fn close_other_viewer_tabs(
+        &self,
+        request: Request<v1::CloseOtherViewerTabsRequest>,
+    ) -> Result<Response<v1::CloseOtherViewerTabsResponse>, Status> {
+        let tab_id = tab_id(request.into_inner().tab_id)?;
+        if let Some(work) = work::close_other_tabs(&self.state.viewer, tab_id)
+            .map_err(|error| map_reserve_recipe(error, "close other viewer tabs"))?
+        {
+            viewer_runtime::spawn_recipe(self.state.clone(), work);
+        }
+        Ok(Response::new(v1::CloseOtherViewerTabsResponse {}))
     }
 
     async fn close_viewer_tab(
@@ -235,6 +276,38 @@ impl ViewerService for ViewerGrpcService {
         Ok(Response::new(v1::SelectViewerCommitResponse {
             shell: Some(project_shell(&self.state, None)?),
         }))
+    }
+
+    async fn set_viewer_modified_files(
+        &self,
+        request: Request<v1::SetViewerModifiedFilesRequest>,
+    ) -> Result<Response<v1::SetViewerModifiedFilesResponse>, Status> {
+        let request = request.into_inner();
+        let request = gtl_wire::viewer::SetViewerModifiedFiles {
+            tab_id: tab_id(request.tab_id)?,
+            visible: request.visible,
+        };
+        let state = self.state.clone();
+        super::run_blocking(move || {
+            set_modified_files::execute(
+                request,
+                &state.viewer,
+                &state.user_settings,
+                &state.git,
+                &state.database,
+            )
+        })
+        .await?
+        .map_err(|error| match error {
+            viewer::set_modified_files::SetModifiedFilesError::Unavailable => {
+                Status::failed_precondition(error.to_string())
+            }
+            viewer::set_modified_files::SetModifiedFilesError::Changed => {
+                Status::aborted(error.to_string())
+            }
+            error => super::unexpected(error, "show modified files"),
+        })?;
+        Ok(Response::new(v1::SetViewerModifiedFilesResponse {}))
     }
 
     async fn clear_viewer_commit_selection(

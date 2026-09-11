@@ -50,6 +50,7 @@ mod tests {
     #[test]
     fn copied_json_keeps_the_established_explicit_shape() {
         let record = RecentRenderRecord {
+            project_id: None,
             id: gtl_models::viewer::RenderHistoryId::try_new(31).unwrap(),
             title: "Release diff".to_owned(),
             repo_name: crate::utils::project_name("git-tools"),

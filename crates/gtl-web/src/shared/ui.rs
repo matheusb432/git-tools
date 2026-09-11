@@ -105,3 +105,6 @@ mod hover_popover;
 pub(crate) use hover_popover::HoverPopoverPlacement;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use hover_popover::{HoverPopover, use_hover_popover};
+
+#[cfg(feature = "interactive-ui")]
+pub(crate) mod menu_keyboard;

@@ -325,6 +325,7 @@ fn assert_loading(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView
 
 fn view(content: u8) -> TestResult<ViewerActiveView> {
     Ok(ViewerActiveView {
+        modified_files: false,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity: ViewerViewIdentity {
             tab_id: viewer_tab_id(1)?,

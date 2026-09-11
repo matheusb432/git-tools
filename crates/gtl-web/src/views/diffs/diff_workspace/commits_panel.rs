@@ -18,7 +18,6 @@ pub fn CommitsPanel(
     mut view: gtl_wire::viewer::ViewerActiveView,
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
-    onclear: Option<EventHandler<()>>,
     #[props(default)] loading: bool,
     load_error: Option<String>,
     #[props(default)] has_more: bool,
@@ -34,7 +33,6 @@ pub fn CommitsPanel(
             details_popover_id_prefix: "standalone-commits-panel",
             test_id,
             onselect,
-            onclear,
             loading,
             load_error,
             has_more,
@@ -49,7 +47,6 @@ pub(super) fn WorkspaceCommitsPanel(
     #[props(default)] artifact: bool,
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
-    onclear: Option<EventHandler<()>>,
     #[props(default)] loading: bool,
     load_error: Option<String>,
     #[props(default)] has_more: bool,
@@ -67,7 +64,8 @@ pub(super) fn WorkspaceCommitsPanel(
         &view.commit_selection,
         ViewerCommitSelection::Pending { .. }
     );
-    let onselect = onselect.filter(|_| commit_selection_enabled(view.commit_count));
+    let onselect =
+        onselect.filter(|_| view.modified_files || commit_selection_enabled(view.commit_count));
 
     rsx! {
         ScrollArea {
@@ -81,18 +79,12 @@ pub(super) fn WorkspaceCommitsPanel(
                     onloadmore.call(());
                 }
             },
-            CommitsPanelHeader {
-                label: view.commits_label.clone(),
-                commit_count: view.commit_count,
-                selection_active: selected_id.is_some(),
-                selection_pending,
-                onclear,
-            }
+            CommitsPanelHeader {}
             if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
                 CommitSelectionError { message: message.clone() }
             }
             if view.commit_count == 0 {
-                EmptyNotice { class: "m-3 compact:m-2.5", "no commits in range" }
+                EmptyNotice { class: "m-3 compact:m-2.5", "No commits" }
             }
             for (commit_index, commit) in workspace.commits.iter().enumerate() {
                 {
@@ -149,45 +141,15 @@ fn scroll_is_near_bottom(scroll: &ScrollData) -> bool {
 }
 
 #[component]
-fn CommitsPanelHeader(
-    label: String,
-    commit_count: usize,
-    selection_active: bool,
-    selection_pending: bool,
-    onclear: Option<EventHandler<()>>,
-) -> Element {
-    let heading = commit_panel_heading(&label);
+fn CommitsPanelHeader() -> Element {
     rsx! {
         header { class: "diff-commits-header px-3 py-2 compact:px-2.5",
-            div { class: "diff-commits-header-content gap-2",
-                div { class: "min-w-0 flex-1",
-                    h3 {
-                        class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
-                        title: "{heading}: {commit_count}",
-                        span { class: "truncate first-letter:uppercase", "{heading}" }
-                        span { class: "flex-none tabular-nums", ": {commit_count}" }
-                    }
-                }
-                if selection_active {
-                    if let Some(onclear) = onclear {
-                        Button {
-                            class: "min-h-7 text-acc hover:text-acc-2 active:text-ink",
-                            size: ButtonSize::Content,
-                            variant: ButtonVariant::Bare,
-                            state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
-                            onclick: move |_| onclear.call(()),
-                            "Range"
-                        }
-                    }
-                }
+            h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
+                "Commits"
             }
             CommitPanelHint {}
         }
     }
-}
-
-fn commit_panel_heading(label: &str) -> &str {
-    label.strip_prefix("# ").unwrap_or(label)
 }
 
 #[component]
@@ -406,19 +368,7 @@ const fn commit_selection_enabled(commit_count: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        COMMIT_CARD_CLASSES, commit_card_tone_classes, commit_panel_heading,
-        commit_selection_enabled,
-    };
-
-    #[test]
-    fn commit_heading_omits_the_shell_comment_prefix() {
-        assert_eq!(
-            commit_panel_heading("# commits in range"),
-            "commits in range"
-        );
-        assert_eq!(commit_panel_heading("4 commits"), "4 commits");
-    }
+    use super::{COMMIT_CARD_CLASSES, commit_card_tone_classes, commit_selection_enabled};
 
     #[test]
     fn commit_rows_use_surface_tone_without_timeline_geometry() {

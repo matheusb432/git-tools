@@ -1,5 +1,5 @@
 use gtl_models::{projects::ProjectRepository, recipes::RecipeBatchId, viewer::ViewerTabKind};
-use gtl_wire::viewer::projects::OpenViewerProject;
+use gtl_wire::viewer::projects::{OpenViewerProject, ViewerProjectDiffMode};
 use rusqlite::Connection;
 
 use crate::{
@@ -35,7 +35,7 @@ pub fn execute(
     clock: &impl Clock,
     viewer: &ViewerState,
 ) -> Result<ReservedRecipeWork, OpenViewerProjectError> {
-    let mut matched = false;
+    let mut matched = None;
     for repository in request.repositories {
         let path = if git.repo_present(&repository.path) {
             git.discover_top(repository.path.as_ref())
@@ -46,17 +46,31 @@ pub fn execute(
             repository.path
         };
         if path == request.project.path {
-            matched = true;
+            matched = Some(repository.name);
             break;
         }
     }
-    if !matched {
-        return Err(OpenViewerProjectError::NotFound);
+    let name = matched.ok_or(OpenViewerProjectError::NotFound)?;
+    if request.project.mode == ViewerProjectDiffMode::Snapshot {
+        return work::reserve_open(
+            viewer,
+            crate::recipes::Recipe {
+                source: crate::recipes::RecipeSource::LocalRepo(request.project.path),
+                op: crate::recipes::RecipeOp::Diff {
+                    target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
+                },
+                name: Some(name),
+            },
+            RecipeBatchId::generate(),
+            ViewerTabKind::Snapshot,
+        )
+        .map_err(anyhow::Error::from)
+        .map_err(Into::into);
     }
     let result = save_live_view::execute(
         SaveLiveView {
             path: request.project.path.as_ref().to_path_buf(),
-            comparison: request.project.comparison,
+            comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
         },
         git,
         connection,

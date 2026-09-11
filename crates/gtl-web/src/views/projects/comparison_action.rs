@@ -1,62 +1,62 @@
 use dioxus::prelude::*;
-use gtl_models::{live_views::LiveComparison, paths::RepositoryRoot};
-use lucide_dioxus::{ArrowUp, FileDiff};
+use gtl_models::paths::RepositoryRoot;
+use gtl_wire::viewer::projects::ViewerProjectDiffMode;
+use lucide_dioxus::{Activity, FileText};
 
-use super::status::ProjectSignal;
 use crate::{
     app::application_router::Route,
     shared::ui::{ButtonLayout, ButtonSize, ButtonVariant, button_classes},
 };
-const SIGNAL_ROW_CLASSES: &str = "project-signal-row h-9 min-w-0 gap-3 px-3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProjectActionShape {
-    SignalRow,
+    Labeled,
     Icon,
 }
 
 #[component]
 pub(super) fn ProjectComparisonAction(
     path: RepositoryRoot,
-    comparison: LiveComparison,
-    signal: ProjectSignal,
-    label: &'static str,
+    mode: ViewerProjectDiffMode,
     shape: ProjectActionShape,
     disabled: bool,
+    unavailable_reason: Option<String>,
 ) -> Element {
-    let available = signal.is_available() && !disabled;
-    let classes = match shape {
-        ProjectActionShape::SignalRow => SIGNAL_ROW_CLASSES.to_owned(),
-        ProjectActionShape::Icon => button_classes(
-            ButtonLayout::Inline,
-            ButtonVariant::Ghost,
-            ButtonSize::IconSmall,
-        ),
+    let label = match mode {
+        ViewerProjectDiffMode::Snapshot => "Create snapshot",
+        ViewerProjectDiffMode::Live => "Open live",
     };
-    let content = match shape {
-        ProjectActionShape::SignalRow => rsx! {
-            span {
-                class: "project-signal-value font-medium tabular-nums {signal.text_classes()}",
-                aria_hidden: "true",
-                "{signal.glyph()}"
-            }
+    let classes = button_classes(
+        ButtonLayout::Inline,
+        if shape == ProjectActionShape::Icon {
+            ButtonVariant::Ghost
+        } else {
+            ButtonVariant::Outline
+        },
+        if shape == ProjectActionShape::Icon {
+            ButtonSize::IconSmall
+        } else {
+            ButtonSize::Small
+        },
+    );
+    let title = unavailable_reason.unwrap_or_else(|| label.to_owned());
+    let content = rsx! {
+        if mode == ViewerProjectDiffMode::Snapshot {
+            FileText { size: 15 }
+        } else {
+            Activity { size: 15 }
+        }
+        if shape == ProjectActionShape::Labeled {
             span { class: "whitespace-nowrap", "{label}" }
-        },
-        ProjectActionShape::Icon => rsx! {
-            if comparison == LiveComparison::LocalChanges {
-                FileDiff { size: 15 }
-            } else {
-                ArrowUp { size: 15 }
-            }
-        },
+        }
     };
     rsx! {
-        if available {
+        if !disabled {
             Link {
-                to: Route::project_diff(&path, comparison),
+                to: Route::project_diff(&path, mode),
                 draggable: "false",
                 class: classes,
-                title: signal.description().into_owned(),
+                title,
                 aria_label: label,
                 {content}
             }
@@ -65,7 +65,7 @@ pub(super) fn ProjectComparisonAction(
                 r#type: "button",
                 disabled: true,
                 class: classes,
-                title: signal.description().into_owned(),
+                title,
                 aria_label: label,
                 {content}
             }

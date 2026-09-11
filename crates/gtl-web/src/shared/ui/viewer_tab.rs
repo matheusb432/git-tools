@@ -1,13 +1,14 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
-use lucide_dioxus::{ArrowUp, FileDiff, Radio, TriangleAlert, X};
+use lucide_dioxus::{ArrowUp, FileDiff, Pin, Radio, TriangleAlert, X};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use lucide_dioxus::{Check, ChevronDown};
 
 use super::{Button, ButtonSize, ButtonVariant, LoadingSpinner};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use super::{CountBadge, ScrollArea};
+use crate::shared::browser;
 
 mod pointer_drag;
 
@@ -44,17 +45,41 @@ pub(crate) fn ViewerTabItem(
     onkeydown: EventHandler<KeyboardEvent>,
     onclose: EventHandler<MouseEvent>,
     #[props(default)] onmove: Option<EventHandler<MoveViewerTab>>,
+    #[props(default)] onpin: Option<EventHandler<bool>>,
+    #[props(default)] oncloseothers: Option<EventHandler<()>>,
 ) -> Element {
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(onmove);
+    let menu_id = format!("viewer-tab-{tab_id}-menu");
+    let context_menu_id = menu_id.clone();
+    let keyboard_menu_id = menu_id.clone();
+    let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
         div {
             class: "viewer-tab group/viewer-tab",
             "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "horizontal",
+            oncontextmenu: move |event| {
+                if onpin.is_some() {
+                    event.prevent_default();
+                    let point = event.client_coordinates();
+                    menu_position.set((point.x, point.y));
+                    browser::show_popover(&context_menu_id);
+                }
+            },
+            onkeydown: move |event: KeyboardEvent| {
+                if onpin.is_some()
+                    && (event.key() == Key::ContextMenu
+                        || (event.key() == Key::F10
+                            && event.modifiers().contains(Modifiers::SHIFT)))
+                {
+                    event.prevent_default();
+                    browser::show_popover(&keyboard_menu_id);
+                }
+            },
             button {
                 id: viewer_tab_element_id(tab_id),
                 class: "viewer-tab-trigger",
@@ -105,10 +130,36 @@ pub(crate) fn ViewerTabItem(
                 },
                 {viewer_tab_rail_content(&tab, presentation_state)}
             }
-            ViewerTabCloseButton {
-                label: tab.label.clone(),
-                test_id: gtl_web_contracts::test_ids::VIEWER_TAB_CLOSE.value().to_owned(),
-                onclick: onclose,
+            if tab.pinned {
+                Button {
+                    size: ButtonSize::IconCompact,
+                    variant: ButtonVariant::Bare,
+                    class: "mr-1 text-acc",
+                    aria_label: "Unpin {tab.label}",
+                    title: "Unpin tab",
+                    onclick: move |_| {
+                        if let Some(onpin) = onpin {
+                            onpin.call(false);
+                        }
+                    },
+                    Pin { size: 14 }
+                }
+            } else {
+                ViewerTabCloseButton {
+                    label: tab.label.clone(),
+                    test_id: gtl_web_contracts::test_ids::VIEWER_TAB_CLOSE.value().to_owned(),
+                    onclick: onclose,
+                }
+            }
+            if let Some(onpin) = onpin {
+                ViewerTabContextMenu {
+                    id: menu_id,
+                    trigger_id: viewer_tab_element_id(tab_id),
+                    pinned: tab.pinned,
+                    position: menu_position(),
+                    onpin,
+                    oncloseothers,
+                }
             }
             ViewerTabSelectionIndicator { active }
         }
@@ -240,6 +291,8 @@ pub(crate) fn ViewerTabOverflowMenu(
     onactivate: EventHandler<ViewerTabId>,
     onclose: EventHandler<ViewerTabId>,
     onmove: EventHandler<MoveViewerTab>,
+    #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
+    #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
 ) -> Element {
     let active_tab_state = tab_presentation_state(
         &active_tab.state,
@@ -321,6 +374,8 @@ pub(crate) fn ViewerTabOverflowMenu(
                                         onactivate,
                                         onclose,
                                         onmove,
+                                        onpin,
+                                        oncloseothers,
                                     }
                                 }
                             }
@@ -343,17 +398,42 @@ fn ViewerTabOverflowMenuItem(
     onactivate: EventHandler<ViewerTabId>,
     onclose: EventHandler<ViewerTabId>,
     onmove: EventHandler<MoveViewerTab>,
+    #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
+    #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
 ) -> Element {
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(Some(onmove));
+    let menu_id = format!("viewer-overflow-tab-{tab_id}-menu");
+    let context_menu_id = menu_id.clone();
+    let keyboard_menu_id = menu_id.clone();
+    let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
         li {
             class: "viewer-tab-menu-item group/viewer-tab-menu",
             "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "vertical",
+            oncontextmenu: move |event| {
+                if onpin.is_some() {
+                    event.prevent_default();
+                    let point = event.client_coordinates();
+                    menu_position.set((point.x, point.y));
+                    browser::show_popover(&context_menu_id);
+                }
+            },
+            onkeydown: move |event: KeyboardEvent| {
+                if onpin.is_some()
+                    && (event.key() == Key::ContextMenu
+                        || (event.key() == Key::F10
+                            && event.modifiers().contains(Modifiers::SHIFT)))
+                {
+                    event.prevent_default();
+                    browser::show_popover(&keyboard_menu_id);
+                }
+            },
             button {
+                id: format!("viewer-overflow-tab-{tab_id}-trigger"),
                 class: "viewer-tab-menu-trigger",
                 "data-reorderable": reorderable.to_string(),
                 r#type: "button",
@@ -416,9 +496,37 @@ fn ViewerTabOverflowMenuItem(
                     }
                 }
             }
-            ViewerTabCloseButton {
-                label: tab.label.clone(),
-                onclick: move |_| onclose.call(tab_id),
+            if tab.pinned {
+                Button {
+                    size: ButtonSize::IconCompact,
+                    variant: ButtonVariant::Bare,
+                    aria_label: "Unpin {tab.label}",
+                    onclick: move |_| {
+                        if let Some(onpin) = onpin {
+                            onpin.call((tab_id, false));
+                        }
+                    },
+                    Pin { size: 14 }
+                }
+            } else {
+                ViewerTabCloseButton {
+                    label: tab.label.clone(),
+                    onclick: move |_| onclose.call(tab_id),
+                }
+            }
+            if let Some(onpin) = onpin {
+                ViewerTabContextMenu {
+                    id: menu_id,
+                    trigger_id: format!("viewer-overflow-tab-{tab_id}-trigger"),
+                    pinned: tab.pinned,
+                    position: menu_position(),
+                    onpin: move |pinned| onpin.call((tab_id, pinned)),
+                    oncloseothers: move |()| {
+                        if let Some(close) = oncloseothers {
+                            close.call(tab_id);
+                        }
+                    },
+                }
             }
         }
     }
@@ -563,7 +671,10 @@ mod tests {
         let tab_id = viewer_tab_id(1)?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            onpin: None,
+            oncloseothers: None,
             tab: ViewerTab {
+                pinned: false,
                 id: tab_id,
                 label: "Working tree".to_owned(),
                 kind: ViewerTabKind::Live,
@@ -604,7 +715,10 @@ mod tests {
         let tab_id = viewer_tab_id(1)?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            onpin: None,
+            oncloseothers: None,
             tab: ViewerTab {
+                pinned: false,
                 id: tab_id,
                 label: "Working tree".to_owned(),
                 kind: ViewerTabKind::Live,
@@ -648,6 +762,7 @@ mod tests {
         let html = dioxus_ssr::render_element(rsx! {
             ViewerTabRailMeasurementItem {
                 tab: ViewerTab {
+                    pinned: false,
                     id: viewer_tab_id(1)?,
                     label: "Working tree".to_owned(),
                     kind: ViewerTabKind::Live,
@@ -683,12 +798,14 @@ mod tests {
     #[test]
     fn overflow_menu_names_the_current_tab_and_exposes_every_close_action() -> TestResult {
         let active_tab = ViewerTab {
+            pinned: false,
             id: viewer_tab_id(1)?,
             label: "Working tree".to_owned(),
             kind: ViewerTabKind::Live,
             state: ViewerTabState::Ready,
         };
         let pending_tab = ViewerTab {
+            pinned: false,
             id: viewer_tab_id(2)?,
             label: "Saved comparison".to_owned(),
             kind: ViewerTabKind::Snapshot,
@@ -696,6 +813,8 @@ mod tests {
         };
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabOverflowMenuProps {
+            onpin: None,
+            oncloseothers: None,
             id: "viewer-tab-overflow-test".to_owned(),
             tabs: vec![active_tab.clone(), pending_tab],
             active_tab,
@@ -723,5 +842,62 @@ mod tests {
         );
         assert!(!html.contains("Snapshot"));
         Ok(())
+    }
+}
+
+#[component]
+fn ViewerTabContextMenu(
+    id: String,
+    trigger_id: String,
+    pinned: bool,
+    position: (f64, f64),
+    onpin: EventHandler<bool>,
+    oncloseothers: Option<EventHandler<()>>,
+) -> Element {
+    let keyboard_id = id.clone();
+    let close_id = id.clone();
+    let (x, y) = position;
+    rsx! {
+        div {
+            id: id.clone(),
+            class: "viewer-tab-context-menu",
+            style: "left:min({x}px, calc(100vw - 13rem));top:min({y}px, calc(100vh - 6rem));",
+            popover: "auto",
+            role: "menu",
+            aria_label: "Tab actions",
+            onkeydown: move |event| super::menu_keyboard::keydown(&keyboard_id, &trigger_id, &event),
+            button {
+                class: super::MENU_ACTION_HOST_CLASSES,
+                r#type: "button",
+                role: "menuitem",
+                autofocus: true,
+                tabindex: "-1",
+                onclick: move |_| {
+                    browser::hide_popover(&id);
+                    onpin.call(!pinned);
+                },
+                if pinned {
+                    Pin { size: 15 }
+                    "Unpin tab"
+                } else {
+                    Pin { size: 15 }
+                    "Pin tab"
+                }
+            }
+            button {
+                class: super::MENU_ACTION_HOST_CLASSES,
+                r#type: "button",
+                role: "menuitem",
+                tabindex: "-1",
+                onclick: move |_| {
+                    browser::hide_popover(&close_id);
+                    if let Some(close) = oncloseothers {
+                        close.call(());
+                    }
+                },
+                X { size: 15 }
+                "Close others"
+            }
+        }
     }
 }

@@ -90,6 +90,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
         version: ViewerVersion::new(4),
         focus_request_version: Some(ViewerVersion::new(3)),
         tabs: vec![ViewerTab {
+            pinned: false,
             id: ViewerTabId::try_new(7).unwrap(),
             label: "git-tools".into(),
             kind: ViewerTabKind::Live,
@@ -134,6 +135,7 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
 -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message as _;
     let active = v1::ViewerActiveView {
+        modified_files: false,
         row_source: v1::ViewerRowSourceState::Ready as i32,
         identity: Some(encode_viewer_view_identity(viewer_identity().unwrap())),
         content_id: Some(vec![42; 32]),
@@ -191,6 +193,7 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
             state: Some(v1::viewer_active_state::State::Ready(Box::new(
                 v1::ViewerReadyState {
                     view: Some(v1::ViewerActiveView {
+                        modified_files: false,
                         row_source: v1::ViewerRowSourceState::Ready as i32,
                         content_id,
                         ..active.clone()
@@ -451,6 +454,7 @@ fn move_tab_codec_preserves_identity_and_rejects_unspecified_placement() {
 #[test]
 fn history_page_codec_round_trips_navigation_and_identity() {
     let page = ViewerHistoryPage {
+        projects: Vec::new(),
         entries: vec![ViewerHistoryEntry {
             id: RenderHistoryId::try_new(11).unwrap(),
             title: "git-tools · unpushed".into(),
@@ -550,9 +554,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
 
 #[test]
 fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
-    use gtl_models::{
-        live_views::LiveComparison, paths::RepositoryRoot, repository::status::RepositoryStatus,
-    };
+    use gtl_models::{paths::RepositoryRoot, repository::status::RepositoryStatus};
     use gtl_wire::{
         proto::viewer::projects,
         viewer::projects::{OpenViewerProject, ViewerProject, ViewerProjectBranchComparison},
@@ -572,24 +574,24 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
         projects::decode_projects(response).unwrap(),
         vec![project.clone()]
     );
-    for comparison in [
-        LiveComparison::LocalChanges,
-        LiveComparison::UnpushedCommits,
+    for mode in [
+        gtl_wire::viewer::projects::ViewerProjectDiffMode::Snapshot,
+        gtl_wire::viewer::projects::ViewerProjectDiffMode::Live,
     ] {
         let request = OpenViewerProject {
             path: project.path.clone(),
-            comparison,
+            mode,
         };
         assert_eq!(
             projects::decode_open(projects::encode_open(&request)).unwrap(),
             request
         );
     }
-    for (path, comparison) in [("relative", 1), ("/repos/alpha", 0), ("/repos/alpha", 99)] {
+    for (path, mode) in [("relative", 1), ("/repos/alpha", 0), ("/repos/alpha", 99)] {
         assert!(
             projects::decode_open(v1::OpenViewerProjectRequest {
                 path: path.into(),
-                comparison
+                mode
             })
             .is_err()
         );

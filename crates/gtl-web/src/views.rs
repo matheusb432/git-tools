@@ -9,7 +9,7 @@ pub(crate) mod viewer_menu;
 pub(crate) mod viewer_settings_form;
 
 #[cfg(feature = "desktop")]
-pub(crate) use diffs::{DiffHistoryView, DiffWorkspaceView};
+pub(crate) use diffs::{DiffWorkspaceView, SnapshotHistory};
 #[cfg(feature = "desktop")]
 pub(crate) use user_settings::UserSettingsView;
 

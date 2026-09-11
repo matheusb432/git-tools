@@ -18,7 +18,7 @@ pub(crate) use client_diff_document::ClientDiffDocument;
 #[cfg(feature = "artifact")]
 pub(crate) use client_diff_document::StaticDiffDocument;
 #[cfg(feature = "desktop")]
-pub(crate) use diff_history::DiffHistoryView;
+pub(crate) use diff_history::SnapshotHistory;
 pub(crate) use diff_rows::{SplitDiffRowBatch, UnifiedDiffRowBatch};
 #[cfg(feature = "artifact")]
 pub(crate) use diff_workspace::ArtifactDiffWorkspace;

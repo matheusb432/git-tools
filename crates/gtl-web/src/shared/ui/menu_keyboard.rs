@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::HtmlElement;
 
-pub(super) fn keydown(id: &str, event: &KeyboardEvent) {
+pub(crate) fn keydown(id: &str, trigger_id: &str, event: &KeyboardEvent) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;
     };
@@ -13,7 +13,7 @@ pub(super) fn keydown(id: &str, event: &KeyboardEvent) {
         return;
     };
     let Some(trigger) = document
-        .get_element_by_id(&format!("{id}-trigger"))
+        .get_element_by_id(trigger_id)
         .and_then(|element| element.dyn_into::<HtmlElement>().ok())
     else {
         return;

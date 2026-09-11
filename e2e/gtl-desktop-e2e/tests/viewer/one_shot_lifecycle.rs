@@ -31,7 +31,7 @@ search_text_in_all_files = "alt+f"
     fixture.forward()?;
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker")
         .await?;
-    assert_cli_reopen_navigates_from_settings_and_history(session.driver(), &fixture).await?;
+    assert_cli_reopen_navigates_from_settings_and_projects(session.driver(), &fixture).await?;
     assert_menu_covers_active_scrollbar(session.driver()).await?;
     assert_menu_keyboard_navigation(session.driver()).await?;
     assert_server_owned_searches(session.driver()).await?;
@@ -85,11 +85,6 @@ search_text_in_all_files = "alt+f"
         "closing a snapshot enqueued a toast"
     );
 
-    support::selectors::by_test_id(session.driver(), test_ids::VIEWER_MENU_TRIGGER)
-        .await?
-        .click()
-        .await
-        .context("open the viewer menu")?;
     support::selectors::by_test_id(session.driver(), test_ids::VIEWER_HISTORY_OPEN)
         .await?
         .click()
@@ -104,7 +99,7 @@ search_text_in_all_files = "alt+f"
     support::wait_for_active_diff(session.driver(), "one-shot-alpha", "alpha-one-shot-marker").await
 }
 
-async fn assert_cli_reopen_navigates_from_settings_and_history(
+async fn assert_cli_reopen_navigates_from_settings_and_projects(
     driver: &WebDriver,
     fixture: &OneShotFixture,
 ) -> Result<()> {
@@ -113,13 +108,17 @@ async fn assert_cli_reopen_navigates_from_settings_and_history(
         diff_url.path().starts_with("/diffs/"),
         "the diff has no tab route: {diff_url}"
     );
-    for (label, route) in [("User settings", "/settings"), ("History", "/history")] {
-        support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER)
-            .await?
-            .click()
-            .await?;
+    for (label, route) in [("User settings", "/settings"), ("Projects", "/projects")] {
+        if route == "/settings" {
+            support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER)
+                .await?
+                .click()
+                .await?;
+        }
         driver
-            .find(By::Css(format!("button[aria-label='{label}']")))
+            .find(By::Css(format!(
+                "button[aria-label='{label}'], a[aria-label='{label}']"
+            )))
             .await?
             .click()
             .await?;
@@ -219,9 +218,9 @@ async fn assert_menu_keyboard_navigation(driver: &WebDriver) -> Result<()> {
     let trigger = support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER).await?;
     trigger.send_keys(Key::Up).await?;
     for (key, label) in [
-        (Key::Home, "History"),
+        (Key::Home, "User settings"),
         (Key::Down, "User settings"),
-        (Key::Down, "History"),
+        (Key::Down, "User settings"),
         (Key::End, "User settings"),
     ] {
         driver.active_element().await?.send_keys(key).await?;
@@ -236,7 +235,7 @@ async fn assert_menu_keyboard_navigation(driver: &WebDriver) -> Result<()> {
             "menu keyboard navigation did not focus {label}"
         );
     }
-    driver.active_element().await?.send_keys("h").await?;
+    driver.active_element().await?.send_keys("s").await?;
     ensure!(
         driver
             .active_element()
@@ -244,8 +243,8 @@ async fn assert_menu_keyboard_navigation(driver: &WebDriver) -> Result<()> {
             .attr("aria-label")
             .await?
             .as_deref()
-            == Some("History"),
-        "menu letter navigation did not focus History"
+            == Some("User settings"),
+        "menu letter navigation did not focus Settings"
     );
     driver
         .active_element()
@@ -264,7 +263,7 @@ async fn assert_menu_keyboard_navigation(driver: &WebDriver) -> Result<()> {
             .attr("aria-label")
             .await?
             .as_deref()
-            == Some("History"),
+            == Some("User settings"),
         "Enter did not focus the first menu action"
     );
     driver.active_element().await?.send_keys(Key::Tab).await?;

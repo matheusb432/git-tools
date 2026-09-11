@@ -757,6 +757,7 @@ mod tests {
                 .into_iter()
                 .map(|id| {
                     Ok(gtl_wire::viewer::ViewerTab {
+                        pinned: false,
                         id: viewer_tab_id(id)?,
                         label: format!("Diff {id}"),
                         kind: gtl_wire::viewer::ViewerTabKind::Snapshot,

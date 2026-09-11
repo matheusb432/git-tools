@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
-use gtl_models::live_views::LiveComparison;
-use gtl_wire::viewer::projects::ViewerProject;
+use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectDiffMode};
 use lucide_dioxus::GitBranch;
 
 use super::{
@@ -49,12 +48,11 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
         review,
         local,
         ahead,
-        ahead_label,
         rendered,
         ..
     } = project_presentation(&project);
-    let destination = (!disabled && ahead.is_available())
-        .then(|| Route::project_diff(&project.path, LiveComparison::UnpushedCommits));
+    let destination = (!disabled && local.is_available())
+        .then(|| Route::project_diff(&project.path, ViewerProjectDiffMode::Live));
     rsx! {
         DataTableRow {
             "data-testid": "project-table-row",
@@ -128,20 +126,18 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 div { class: "flex justify-end gap-1",
                     ProjectComparisonAction {
                         path: project.path.clone(),
-                        comparison: LiveComparison::LocalChanges,
-                        signal: local,
-                        label: LiveComparison::LocalChanges.label(),
+                        mode: ViewerProjectDiffMode::Snapshot,
                         shape: ProjectActionShape::Icon,
-                        disabled,
+                        disabled: disabled || !ahead.is_available(),
+                        unavailable_reason: (!ahead.is_available()).then(|| ahead.description().into_owned()),
                     }
                     ProjectComparisonAction {
                         path: project.path.clone(),
-                        comparison: LiveComparison::UnpushedCommits,
-                        signal: ahead,
-                        label: ahead_label,
+                        mode: ViewerProjectDiffMode::Live,
                         shape: ProjectActionShape::Icon,
-                        disabled,
+                        disabled: disabled || !local.is_available(),
                     }
+                    super::SnapshotHistoryButton { project: project.name.clone() }
                     ProjectComparisonEditor { project: project.clone(), disabled }
                 }
             }

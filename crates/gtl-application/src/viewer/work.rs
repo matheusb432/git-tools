@@ -147,6 +147,20 @@ pub fn reserve_recipe_batch(
         .collect()
 }
 
+pub(crate) fn reserve_restored_pin(
+    state: &ViewerState,
+    recipe: Recipe,
+    kind: ViewerTabKind,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    state.update(|session| {
+        let id = session
+            .open(recipe, RecipeBatchId::generate(), kind)
+            .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
+        session.set_pinned(id, true);
+        reserve_refresh_in_session(session, id)
+    })?
+}
+
 pub fn reserve_restored_live_views(
     state: &ViewerState,
     records: impl IntoIterator<Item = LiveViewRecord>,
@@ -433,6 +447,26 @@ pub fn clear_commit_selection(
     tab_id: ViewerTabId,
 ) -> Result<bool, ViewerStateError> {
     state.update(|session| session.clear_commit_selection(tab_id))
+}
+
+pub fn close_other_tabs(
+    state: &ViewerState,
+    tab_id: ViewerTabId,
+) -> Result<Option<ReservedRecipeWork>, ReserveRecipeError> {
+    state.update(|session| {
+        if session.tab(tab_id).is_none() {
+            return Err(ReserveRecipeError::UnknownTab);
+        }
+        let ids = session
+            .tabs()
+            .filter(|tab| tab.tab.id() != tab_id && !tab.pinned)
+            .map(|tab| tab.tab.id())
+            .collect::<Vec<_>>();
+        for id in ids {
+            session.close(id);
+        }
+        reserve_active_if_needed(session)
+    })?
 }
 
 #[cfg(test)]

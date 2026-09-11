@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
-use gtl_models::{live_views::LiveComparison, paths::RepositoryRoot, viewer::ViewerTabId};
-use gtl_wire::viewer::{ViewerTab, projects::OpenViewerProject};
+use gtl_models::{paths::RepositoryRoot, viewer::ViewerTabId};
+use gtl_wire::viewer::{
+    ViewerTab,
+    projects::{OpenViewerProject, ViewerProjectDiffMode},
+};
 
 use crate::{
     app::{
@@ -65,8 +68,11 @@ pub(crate) fn use_project_diff_destinations_provider() {
 }
 
 #[component]
-pub(crate) fn ProjectDiffView(path: Option<RepositoryRoot>, comparison: LiveComparison) -> Element {
-    let mut opening = use_project_diff(path.as_ref(), comparison);
+pub(crate) fn ProjectDiffView(
+    path: Option<RepositoryRoot>,
+    mode: ViewerProjectDiffMode,
+) -> Element {
+    let mut opening = use_project_diff(path.as_ref(), mode);
     rsx! {
         main { class: "h-full",
             match &*opening.read() {
@@ -83,7 +89,7 @@ pub(crate) fn ProjectDiffView(path: Option<RepositoryRoot>, comparison: LiveComp
                     PageNotice {
                         class: "h-full",
                         role: "status",
-                        title: "Opening comparison",
+                        title: "Opening mode",
                         message: "Loading diff...",
                     }
                 },
@@ -94,23 +100,20 @@ pub(crate) fn ProjectDiffView(path: Option<RepositoryRoot>, comparison: LiveComp
 
 fn use_project_diff(
     path: Option<&RepositoryRoot>,
-    comparison: LiveComparison,
+    mode: ViewerProjectDiffMode,
 ) -> Resource<Result<(), ViewerClientError>> {
     let viewer = use_context::<ViewerContext>();
     let destinations = use_context::<Signal<ProjectDiffDestinations>>();
     let navigator = use_navigator();
     let path = path.cloned();
-    use_resource(use_reactive(
-        (&path, &comparison),
-        move |(path, comparison)| {
-            open_project_diff(path, comparison, viewer, navigator, destinations)
-        },
-    ))
+    use_resource(use_reactive((&path, &mode), move |(path, mode)| {
+        open_project_diff(path, mode, viewer, navigator, destinations)
+    }))
 }
 
 async fn open_project_diff(
     path: Option<RepositoryRoot>,
-    comparison: LiveComparison,
+    mode: ViewerProjectDiffMode,
     viewer: ViewerContext,
     navigator: dioxus::router::Navigator,
     mut destinations: Signal<ProjectDiffDestinations>,
@@ -122,7 +125,7 @@ async fn open_project_diff(
         return Ok(());
     }
     let path = path.ok_or(ViewerClientError::InvalidRequest)?;
-    let request = OpenViewerProject { path, comparison };
+    let request = OpenViewerProject { path, mode };
     let cached = match &*viewer.shell().peek() {
         ViewerShellLoad::Ready(shell) => {
             destinations
@@ -131,7 +134,9 @@ async fn open_project_diff(
         }
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
     };
-    if let Some(tab_id) = cached {
+    if request.mode == ViewerProjectDiffMode::Live
+        && let Some(tab_id) = cached
+    {
         navigator.replace(Route::Diff { tab_id });
         return Ok(());
     }
@@ -158,15 +163,16 @@ mod tests {
     use super::*;
     use crate::test_support::{TestResult, viewer_tab_id};
 
-    fn request(path: &str, comparison: LiveComparison) -> TestResult<OpenViewerProject> {
+    fn request(path: &str, mode: ViewerProjectDiffMode) -> TestResult<OpenViewerProject> {
         Ok(OpenViewerProject {
             path: RepositoryRoot::try_new(path.into())?,
-            comparison,
+            mode,
         })
     }
 
     fn tab(id: u64) -> TestResult<ViewerTab> {
         Ok(ViewerTab {
+            pinned: false,
             id: viewer_tab_id(id)?,
             label: "Project".to_owned(),
             kind: ViewerTabKind::Snapshot,
@@ -175,11 +181,11 @@ mod tests {
     }
 
     #[test]
-    fn destinations_resolve_by_repository_and_comparison() -> TestResult {
+    fn destinations_resolve_by_repository_and_mode() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let local = request("/tmp/alpha", LiveComparison::LocalChanges)?;
-        let unpushed = request("/tmp/alpha", LiveComparison::UnpushedCommits)?;
-        let other = request("/tmp/beta", LiveComparison::LocalChanges)?;
+        let local = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
+        let unpushed = request("/tmp/alpha", ViewerProjectDiffMode::Live)?;
+        let other = request("/tmp/beta", ViewerProjectDiffMode::Snapshot)?;
         let tabs = [tab(1)?, tab(2)?, tab(3)?];
         for (request, tab) in [
             (&local, &tabs[0]),
@@ -203,7 +209,7 @@ mod tests {
         assert_eq!(
             destinations.resolve(
                 "server",
-                &request("/tmp/beta", LiveComparison::UnpushedCommits)?,
+                &request("/tmp/beta", ViewerProjectDiffMode::Live)?,
                 &tabs,
             ),
             None
@@ -214,7 +220,7 @@ mod tests {
     #[test]
     fn closed_destinations_are_discarded_before_reopening() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let request = request("/tmp/alpha", LiveComparison::LocalChanges)?;
+        let request = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
         let closed = tab(1)?;
         let remaining = tab(2)?;
         destinations.record("server".to_owned(), request.clone(), closed.id);
@@ -233,7 +239,7 @@ mod tests {
     #[test]
     fn server_replacement_discards_destinations_even_when_tab_ids_match() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let request = request("/tmp/alpha", LiveComparison::LocalChanges)?;
+        let request = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
         let tabs = [tab(1)?];
         destinations.record("old".to_owned(), request.clone(), tabs[0].id);
         assert_eq!(destinations.resolve("new", &request, &tabs), None);

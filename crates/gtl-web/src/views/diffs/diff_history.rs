@@ -3,16 +3,19 @@ use gtl_models::viewer::RenderHistoryId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
-    ViewerHistoryEntry, ViewerHistoryPage,
+    ViewerHistoryEntry, ViewerHistoryFilter, ViewerHistoryPage,
 };
-use lucide_dioxus::{Check, ChevronLeft, ChevronRight, Copy, ExternalLink, History};
+use lucide_dioxus::{Check, ChevronLeft, ChevronRight, Copy, ExternalLink};
 
 use crate::{
     app::application_layout::ViewerContext,
     entities::diffs::{history_navigation, recipe_kind_label, viewer_server},
     shared::{
         browser,
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Skeleton},
+        ui::{
+            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Select,
+            SelectOption, Skeleton,
+        },
         viewer_client::ViewerClientError,
     },
 };
@@ -77,55 +80,79 @@ fn use_history_actions() -> HistoryActions {
 }
 
 #[component]
-pub(crate) fn DiffHistoryView() -> Element {
+pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
+    let mut filter = use_signal(move || initial_filter);
     let mut cursor = use_signal(|| ViewerHistoryCursor::Newest);
     let mut history = use_resource(move || {
         let cursor = cursor();
-        async move { viewer_server::list_history(ListViewerHistory { cursor }).await }
+        let filter = filter();
+        async move { viewer_server::list_history(ListViewerHistory { cursor, filter }).await }
     });
     let actions = use_history_actions();
 
-    use_effect(move || {
-        browser::focus_element("history-heading".into());
-    });
     let pending = history.state().cloned() == UseResourceState::Pending;
     let load = history.read();
     let action_error = (actions.error)();
     let opening_id = (actions.opening_id)();
     let copied_id = (actions.copied_id)();
 
+    let mut options = vec![
+        SelectOption::new("all", "All projects"),
+        SelectOption::new("unassociated", "Unassociated"),
+    ];
+    if let Some(Ok(page)) = &*load {
+        options.extend(
+            page.projects
+                .iter()
+                .map(|name| SelectOption::new(format!("project:{name}"), name.to_string())),
+        );
+    } else if let ViewerHistoryFilter::Project { name } = filter() {
+        options.push(SelectOption::new(
+            format!("project:{name}"),
+            name.to_string(),
+        ));
+    }
+    let selected = match filter() {
+        ViewerHistoryFilter::All => "all".to_owned(),
+        ViewerHistoryFilter::Unassociated => "unassociated".to_owned(),
+        ViewerHistoryFilter::Project { name } => format!("project:{name}"),
+    };
     rsx! {
-        document::Title { "History - git-tools" }
-        main { class: "history-shell h-full min-h-0",
-            header { class: "history-header gap-3 px-4 py-4",
-                div { class: "min-w-0",
-                    div { class: "flex items-center gap-2 text-acc",
-                        span { aria_hidden: "true",
-                            History { size: 16 }
-                        }
-                        p { class: "font-mono font-semibold tracking-widest uppercase",
-                            "Render archive"
-                        }
-                    }
-                    h1 {
-                        id: "history-heading",
-                        class: "history-header-title mt-1 text-lg font-semibold tracking-tight",
-                        tabindex: "-1",
-                        "Diff history"
-                    }
-                    p { class: "mt-1 text-ink-2",
-                        "Reopen a durable render or copy its complete recipe."
-                    }
-                }
-                if !pending && let Some(Ok(page)) = &*load {
-                    p { class: "font-mono tabular-nums text-ink-3", "{page.total_count} renders" }
+        div { class: "history-shell h-[min(32rem,calc(100vh-10rem))] min-h-0",
+            div { class: "flex items-center gap-3 pb-4",
+                label { r#for: "snapshot-project-filter", "Project" }
+                Select {
+                    id: "snapshot-project-filter",
+                    aria_label: "Snapshot project",
+                    value: selected,
+                    options,
+                    onchange: move |event: FormEvent| {
+                        let value = event.value();
+                        let next = match value.as_str() {
+                            "all" => ViewerHistoryFilter::All,
+                            "unassociated" => ViewerHistoryFilter::Unassociated,
+                            value => {
+                                let Some(name) = value
+                                    .strip_prefix("project:")
+                                    .and_then(|name| {
+                                        gtl_models::paths::ProjectName::try_new(name.to_owned()).ok()
+                                    }) else {
+                                    return;
+                                };
+                                ViewerHistoryFilter::Project {
+                                    name,
+                                }
+                            }
+                        };
+                        cursor.set(ViewerHistoryCursor::Newest);
+                        filter.set(next);
+                    },
                 }
             }
-
             section {
                 class: "history-content min-h-0",
                 aria_label: "Recent diff renders",
-                ScrollArea { class: "overflow-auto min-h-0 p-3 sm:p-4",
+                ScrollArea { class: "overflow-auto min-h-0",
                     if let Some(error) = action_error {
                         div {
                             class: "history-error mb-3 px-3 py-2",
@@ -143,7 +170,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                 PageNotice {
                                     class: "min-h-64",
                                     role: "alert",
-                                    title: "History is unavailable",
+                                    title: "Snapshots are unavailable",
                                     message,
                                     Button {
                                         class: "mx-auto mt-4",
@@ -157,8 +184,8 @@ pub(crate) fn DiffHistoryView() -> Element {
                         (false, Some(Ok(page))) if page.entries.is_empty() => rsx! {
                             PageNotice {
                                 class: "min-h-64",
-                                title: "No history yet",
-                                message: "Rendered diffs appear here after they are opened.",
+                                title: "No snapshots yet",
+                                message: "Create a snapshot to save this project's comparison.",
                             }
                         },
                         (false, Some(Ok(page))) => rsx! {
@@ -218,7 +245,7 @@ fn HistoryRow(
     oncopy: EventHandler<RenderHistoryId>,
 ) -> Element {
     rsx! {
-        article { class: "history-row min-w-0 gap-3 px-3 py-3",
+        article { class: "snapshot-history-row min-w-0 gap-3 py-3",
             div { class: "min-w-0",
                 div { class: "history-row-title-line min-w-0 gap-2",
                     h2 { class: "history-row-title font-semibold", "{entry.title}" }

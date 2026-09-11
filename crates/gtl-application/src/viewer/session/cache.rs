@@ -62,6 +62,7 @@ impl Sum for ViewCacheWeight {
 pub struct CachedView {
     pub view: ViewerDiffSnapshot,
     pub selected: Option<ViewerDiffSnapshot>,
+    pub modified: Option<ViewerDiffSnapshot>,
     weight: ViewCacheWeight,
     base_weight: ViewCacheWeight,
 }
@@ -77,6 +78,7 @@ impl CachedView {
         Self {
             view,
             selected: None,
+            modified: None,
             weight,
             base_weight: weight,
         }
@@ -85,7 +87,13 @@ impl CachedView {
     #[must_use]
     pub fn with_selected(&self, selected: ViewerDiffSnapshot) -> Self {
         Self {
-            weight: self.base_weight + view_weight(&selected),
+            weight: self.base_weight
+                + view_weight(&selected)
+                + self
+                    .modified
+                    .as_ref()
+                    .map_or(ViewCacheWeight::default(), |view| view_weight(view)),
+            modified: self.modified.clone(),
             base_weight: self.base_weight,
             view: self.view.clone(),
             selected: Some(selected),
@@ -97,8 +105,30 @@ impl CachedView {
         Self {
             view: self.view.clone(),
             selected: None,
-            weight: self.base_weight,
+            weight: self.base_weight
+                + self
+                    .modified
+                    .as_ref()
+                    .map_or(ViewCacheWeight::default(), |view| view_weight(view)),
+            modified: self.modified.clone(),
             base_weight: self.base_weight,
+        }
+    }
+
+    pub(in crate::viewer) fn with_modified(&self, modified: Option<ViewerDiffSnapshot>) -> Self {
+        Self {
+            view: self.view.clone(),
+            selected: self.selected.clone(),
+            weight: self.base_weight
+                + self
+                    .selected
+                    .as_ref()
+                    .map_or(ViewCacheWeight::default(), |view| view_weight(view))
+                + modified
+                    .as_ref()
+                    .map_or(ViewCacheWeight::default(), |view| view_weight(view)),
+            base_weight: self.base_weight,
+            modified,
         }
     }
 

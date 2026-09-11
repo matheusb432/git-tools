@@ -139,6 +139,7 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                                 role: "alert",
                                 title: format!("Render stopped ({})", code.as_str()),
                                 message: message.clone(),
+                                ModifiedFilesButton { tab_id, visible: false }
                                 Button {
                                     class: "mx-auto mt-4",
                                     variant: ButtonVariant::Outline,
@@ -156,6 +157,7 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                                 role: "alert",
                                 title: "Render failed",
                                 message: message.clone(),
+                                ModifiedFilesButton { tab_id, visible: false }
                                 Button {
                                     class: "mx-auto mt-4",
                                     variant: ButtonVariant::Outline,
@@ -273,12 +275,11 @@ fn ReadyWorkspace(
         let ViewerShellLoad::Ready(shell) = shell else {
             return None;
         };
-        Some(
-            shell
-                .tabs
-                .iter()
-                .any(|tab| tab.id == tab_id && tab.kind.is_live()),
-        )
+        shell
+            .tabs
+            .iter()
+            .find(|tab| tab.id == tab_id)
+            .map(|tab| (tab.kind.is_live(), tab.pinned))
     });
     let commits_loading = commit_pages.is_loading();
     let commits_error = commit_pages.error().map(|error| error.message().to_owned());
@@ -355,7 +356,7 @@ fn ReadyWorkspace(
             }
         });
     };
-    let Some(is_live) = ready_shell else {
+    let Some((is_live, pinned)) = ready_shell else {
         return rsx! {};
     };
     let (file_count, commit_count) = workspace
@@ -375,10 +376,12 @@ fn ReadyWorkspace(
             oncommits: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
         }
     };
-    let live_actions = is_live.then(|| {
-        rsx! {
+    let live_actions = Some(rsx! {
+        ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+        if is_live {
             LiveViewTitlebarActions {
                 tab_id,
+                pinned,
                 ondelete: move |_| {
                     browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
                     delete_open.set(true);
@@ -434,7 +437,6 @@ fn ReadyWorkspace(
             WorkspaceCommitsPanel {
                 details_popover_id_prefix: "mobile-commits-panel",
                 onselect: onselect_commit,
-                onclear: onclear_commit,
                 loading: commits_loading,
                 load_error: commits_error,
                 has_more: commits_has_more,
@@ -466,7 +468,11 @@ fn ReadyWorkspace(
 }
 
 #[component]
-fn LiveViewTitlebarActions(tab_id: ViewerTabId, ondelete: EventHandler<MouseEvent>) -> Element {
+fn LiveViewTitlebarActions(
+    tab_id: ViewerTabId,
+    pinned: bool,
+    ondelete: EventHandler<MouseEvent>,
+) -> Element {
     rsx! {
         div { class: "flex flex-none items-center gap-1",
             LiveViewWarning { tab_id }
@@ -480,6 +486,8 @@ fn LiveViewTitlebarActions(tab_id: ViewerTabId, ondelete: EventHandler<MouseEven
                 div { class: "grid gap-0.5 p-1.5",
                     button {
                         id: DELETE_LIVE_VIEW_TRIGGER_ID,
+                        disabled: pinned,
+                        title: pinned.then_some("Unpin this tab before deleting it"),
                         class: MENU_ACTION_HOST_CLASSES,
                         r#type: "button",
                         onclick: ondelete,
@@ -557,6 +565,45 @@ fn LiveViewWarningPopover(
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
+    let viewer = use_context::<ViewerContext>();
+    let toast = use_toast();
+    let mut action = use_action(move |visible: bool| async move {
+        let result = async {
+            viewer_server::set_modified_files(gtl_wire::viewer::SetViewerModifiedFiles {
+                tab_id,
+                visible,
+            })
+            .await?;
+            viewer_server::get_shell().await
+        }
+        .await;
+        match result {
+            Ok(shell) => viewer.replace_shell(shell),
+            Err(error) => toast.error(error.message()),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    rsx! {
+        Button {
+            size: ButtonSize::Small,
+            variant: ButtonVariant::Outline,
+            state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            aria_label: "Modified files",
+            aria_pressed: visible.to_string(),
+            title: "Inspect current staged, unstaged, and untracked changes against HEAD",
+            onclick: move |_| {
+                if !action.pending() {
+                    action.call(!visible);
+                }
+            },
+            lucide_dioxus::FilePenLine { size: 15 }
+            span { class: "mobile:hidden", "Modified files" }
         }
     }
 }

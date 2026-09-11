@@ -24,11 +24,19 @@ pub(crate) fn open_recipe_batch(
 }
 
 pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
+    state.database.associate_render_projects()?;
     let records = {
         let connection = state.database.connection_lock()?;
         list_live_views::execute(list_live_views::ListLiveViews, &connection)?
     };
     if let Some(work) = work::reserve_restored_live_views(&state.viewer, records)? {
+        spawn_recipe(state.clone(), work);
+    }
+    let restored = {
+        let connection = state.database.connection_lock()?;
+        gtl_application::viewer::pinned_tabs::restore(&state.viewer, &connection)?
+    };
+    for work in restored {
         spawn_recipe(state.clone(), work);
     }
     Ok(())
@@ -89,6 +97,7 @@ fn record_history(state: &AppState, history: &record_render::RecordRender) {
     let result = state.database.connection_lock().and_then(|mut connection| {
         record_render::execute(history, &mut connection, &state.clock).map_err(anyhow::Error::from)
     });
+    let result = result.and_then(|()| state.database.associate_render_projects());
     if let Err(error) = result {
         tracing::error!(error = ?error, "viewer history recording failed");
     }

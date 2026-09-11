@@ -134,6 +134,33 @@ pub(crate) fn ApplicationNavigation() -> Element {
         pending_tab_order.set(None);
         Ok::<(), std::convert::Infallible>(())
     });
+    let pin_tab = use_callback(move |(tab_id, pinned)| {
+        spawn(async move {
+            match viewer_server::set_tab_pinned(gtl_wire::viewer::SetViewerTabPinned {
+                tab_id,
+                pinned,
+            })
+            .await
+            {
+                Ok(()) => match viewer_server::get_shell().await {
+                    Ok(shell) => viewer.replace_shell(shell),
+                    Err(error) => toast.error(error.message()),
+                },
+                Err(error) => toast.error(error.message()),
+            }
+        });
+    });
+    let close_others = use_callback(move |tab_id| {
+        spawn(async move {
+            match viewer_server::close_other_tabs(ViewerTabRequest { tab_id }).await {
+                Ok(()) => match viewer_server::get_shell().await {
+                    Ok(shell) => viewer.replace_shell(shell),
+                    Err(error) => toast.error(error.message()),
+                },
+                Err(error) => toast.error(error.message()),
+            }
+        });
+    });
     let shell_state = shell.read();
     let tabs = match &*shell_state {
         ViewerShellLoad::Ready(shell) => shell.tabs.as_slice(),
@@ -161,6 +188,12 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let projects_active = matches!(route, Route::Projects {});
     let overflow_close_tabs = displayed_tab_ids.clone();
     let overflow_drop_tabs = displayed_tab_ids.clone();
+    let pinned_tab_ids = displayed_tabs
+        .iter()
+        .filter(|tab| tab.pinned)
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
+    let overflow_pinned_tabs = pinned_tab_ids.clone();
     let reorderable = pending_order.is_none();
     let activate_viewer_tab = use_callback(move |activation: ViewerTabActivation| {
         let target = Route::Diff {
@@ -230,11 +263,14 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     let focus_tab_id = close_focus_target(&displayed_tab_ids, tab_id);
                                     let key_tabs = displayed_tab_ids.clone();
                                     let drop_tabs = displayed_tab_ids.clone();
+                                    let pinned_tabs = pinned_tab_ids.clone();
                                     rsx! {
                                         ViewerTabItem {
                                             key: "{tab.id}",
                                             tab: tab.clone(),
                                             active,
+                                            onpin: move |pinned| pin_tab.call((tab_id, pinned)),
+                                            oncloseothers: move |()| close_others.call(tab_id),
                                             rows_loading: diff_rows_loading_tab_id == Some(tab_id),
                                             reorderable,
                                             onactivate: move |()| {
@@ -278,12 +314,14 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                     }
                                                 });
                                             },
-                                            onmove: move |request| {
-                                                let Some(order) = moved_tab_ids(&drop_tabs, request) else {
-                                                    return;
-                                                };
-                                                pending_tab_order.set(Some(order));
-                                                move_tab.call(request);
+                                            onmove: move |request: MoveViewerTab| {
+                                                if pinned_tabs.contains(&request.tab_id)
+                                                    == pinned_tabs.contains(&request.target_tab_id)
+                                                    && let Some(order) = moved_tab_ids(&drop_tabs, request)
+                                                {
+                                                    pending_tab_order.set(Some(order));
+                                                    move_tab.call(request);
+                                                }
                                             },
                                         }
                                     }
@@ -298,6 +336,8 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             ViewerTabOverflowMenu {
                                 id: VIEWER_TAB_OVERFLOW_MENU_ID,
                                 tabs: overflow_tabs,
+                                onpin: pin_tab,
+                                oncloseothers: close_others,
                                 active_tab,
                                 diff_rows_loading_tab_id,
                                 reorderable,
@@ -327,7 +367,12 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         }
                                     });
                                 },
-                                onmove: move |request| {
+                                onmove: move |request: MoveViewerTab| {
+                                    if overflow_pinned_tabs.contains(&request.tab_id)
+                                        != overflow_pinned_tabs.contains(&request.target_tab_id)
+                                    {
+                                        return;
+                                    }
                                     let Some(order) = moved_tab_ids(&overflow_drop_tabs, request) else {
                                         return;
                                     };
@@ -343,12 +388,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 WindowDragExcluded {
                     ViewerMenu {
                         id: VIEWER_MENU_ID,
-                        history_count: tabs.len(),
                         trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value().to_owned(),
-                        history_test_id: test_ids::VIEWER_HISTORY_OPEN.value().to_owned(),
-                        onhistory: move |()| {
-                            navigator.push(Route::History {});
-                        },
                         onsettings: move |()| {
                             navigator.push(Route::Settings {});
                         },
