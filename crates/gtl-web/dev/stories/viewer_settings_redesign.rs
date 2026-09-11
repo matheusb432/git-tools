@@ -22,7 +22,7 @@ use lucide_dioxus::Settings;
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{ButtonSize, ScrollArea, ScrollAreaVariant, ViewerTabItem},
+    shared::ui::{NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem},
     views::{
         diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
         viewer_menu::ViewerMenu,
@@ -33,7 +33,7 @@ use crate::{
 #[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
     rsx! {
-        div { class: "overflow-hidden rounded-panel border border-line bg-bg",
+        div { class: "story-thumbnail-frame",
             div { class: "flex items-center gap-2 border-b border-line bg-surface px-3 py-2",
                 span { class: "font-semibold text-ink", "~/git-tools" }
                 span { class: "ml-auto text-ink-3", "main -> 9f904e7" }
@@ -101,6 +101,8 @@ fn alternate_preview_keybindings() -> Option<ViewerKeybindings> {
     ViewerKeybindings::try_from_fn(ViewerKeybindingPlatform::Linux, |action| match action {
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+        ViewerKeybindingAction::ToggleFilesSidebar
+        | ViewerKeybindingAction::ToggleCommitsSidebar => ViewerKeybindings::default()[action],
     })
     .ok()
 }
@@ -145,9 +147,9 @@ fn ViewerPreview(
         };
     }
     let shell_classes = if mobile {
-        "mx-auto flex h-[844px] w-[390px] max-w-full flex-col overflow-hidden rounded-panel border border-line bg-bg shadow-floating"
+        "story-viewer-shell-mobile mx-auto max-w-full"
     } else {
-        "mx-auto flex h-[760px] min-w-[70rem] max-w-[90rem] flex-col overflow-hidden rounded-panel border border-line bg-bg shadow-floating"
+        "story-viewer-shell-desktop mx-auto"
     };
 
     rsx! {
@@ -155,7 +157,7 @@ fn ViewerPreview(
             class: "{shell_classes}",
             aria_label: if mobile { "Mobile viewer redesign mockup" } else { "Desktop viewer redesign mockup" },
             PreviewApplicationTabs { tabs: fixture.tabs, mobile }
-            div { class: "min-h-0 flex-1 overflow-hidden",
+            div { class: "story-viewer-body min-h-0",
                 PreviewDiffWorkspace {
                     view: fixture.view,
                     workspace: fixture.workspace,
@@ -179,39 +181,41 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
     };
 
     rsx! {
-        nav {
-            class: if mobile { "z-70 flex min-w-0 shrink-0 items-end gap-1 border-b border-line bg-surface pr-2" } else { "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2" },
+        NavigationBar {
             aria_label: "Viewer navigation",
-            ScrollArea {
-                variant: ScrollAreaVariant::Rail,
-                class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
-                role: "tablist",
-                aria_label: "Open diffs",
-                for (index, tab) in tabs.iter().enumerate() {
-                    if !mobile || index == 0 {
-                        {
-                            let tab_id = tab.id;
-                            rsx! {
-                                ViewerTabItem {
-                                    key: "{tab.id}",
-                                    tab: tab.clone(),
-                                    active: active_tab_id() == Some(tab_id),
-                                    onactivate: move |()| active_tab_id.set(Some(tab_id)),
-                                    onkeydown: move |_| {},
-                                    onclose: move |_| {},
+            rail: rsx! {
+                ScrollArea {
+                    variant: ScrollAreaVariant::Rail,
+                    class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
+                    role: "tablist",
+                    aria_label: "Open diffs",
+                    for (index, tab) in tabs.iter().enumerate() {
+                        if !mobile || index == 0 {
+                            {
+                                let tab_id = tab.id;
+                                rsx! {
+                                    ViewerTabItem {
+                                        key: "{tab.id}",
+                                        tab: tab.clone(),
+                                        active: active_tab_id() == Some(tab_id),
+                                        onactivate: move |()| active_tab_id.set(Some(tab_id)),
+                                        onkeydown: move |_| {},
+                                        onclose: move |_| {},
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            ViewerMenu {
-                id: menu_id,
-                history_count: tabs.len(),
-                trigger_size: if mobile { ButtonSize::IconTouch } else { ButtonSize::IconSmall },
-                onhistory: move |()| {},
-                onsettings: move |()| {},
-            }
+            },
+            trailing: rsx! {
+                ViewerMenu {
+                    id: menu_id,
+                    history_count: tabs.len(),
+                    onhistory: move |()| {},
+                    onsettings: move |()| {},
+                }
+            },
         }
     }
 }
@@ -231,6 +235,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
         range_generation: ViewerRangeGeneration::new(1),
         selection_generation: ViewerSelectionGeneration::new(1),
         render_options: ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Unified,
             density: ViewerDiffDensity::Compact,
         },
@@ -480,7 +485,7 @@ fn source_row(
 fn SettingsMock() -> Element {
     rsx! {
         main {
-            class: "mx-auto h-[800px] w-full max-w-5xl overflow-auto rounded-panel border border-line bg-bg px-4 py-5 shadow-floating sm:px-6",
+            class: "story-settings-preview mx-auto w-full px-4 py-5 sm:px-6",
             aria_label: "Editable settings redesign mockup",
             div { class: "grid gap-5",
                 header { class: "border-b border-line pb-4",
@@ -508,6 +513,7 @@ fn SettingsFormPreview() -> Element {
     let initial = ViewerSettingsSelection::new(
         Some(gtl_wire::viewer::ViewerTheme::Mirage),
         ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Compact,
         },
@@ -538,10 +544,8 @@ fn SettingsFormPreview() -> Element {
 #[component]
 fn SettingsResolved() -> Element {
     rsx! {
-        section {
-            class: "overflow-hidden rounded-panel border border-line bg-surface",
-            aria_label: "Resolved viewer settings",
-            header { class: "border-b border-line bg-surface-2 px-4 py-3",
+        section { class: "settings-card", aria_label: "Resolved viewer settings",
+            header { class: "settings-card-header px-4 py-3",
                 h2 { class: "font-semibold text-ink", "Resolved configuration" }
                 p { class: "mt-0.5 text-xs text-ink-3", "Current sources and effective values." }
             }
@@ -561,10 +565,8 @@ fn SettingsResolved() -> Element {
 #[component]
 fn SettingsProjects() -> Element {
     rsx! {
-        section {
-            class: "overflow-hidden rounded-panel border border-line bg-surface",
-            aria_label: "Project exclusions",
-            header { class: "border-b border-line bg-surface-2 px-4 py-3",
+        section { class: "settings-card", aria_label: "Project exclusions",
+            header { class: "settings-card-header px-4 py-3",
                 h2 { class: "font-semibold text-ink", "Project exclusions" }
                 p { class: "mt-0.5 text-xs text-ink-3", "Repository-specific extension filters." }
             }
@@ -579,7 +581,7 @@ fn SettingsProjects() -> Element {
 #[component]
 fn SettingsRow(term: String, value: String) -> Element {
     rsx! {
-        div { class: "grid gap-2 px-4 py-3 sm:grid-cols-[14rem_minmax(0,1fr)]",
+        div { class: "settings-row gap-2 px-4 py-3",
             dt { class: "font-semibold text-ink-2", "{term}" }
             dd { class: "m-0 min-w-0 break-words text-ink", "{value}" }
         }
@@ -627,9 +629,14 @@ mod tests {
             ViewerPreview {}
         });
 
-        assert!(html.contains("min-w-24 max-w-72 shrink-0"));
-        assert!(html.contains("bg-surface-2 text-ink"));
-        assert!(html.contains("bg-acc opacity-100 transition-opacity"));
+        assert!(html.contains(r#"class="viewer-tab group/viewer-tab" data-active="true""#));
+        assert!(html.contains(r#"class="viewer-tab-selection-indicator" data-active="true""#));
+        let styles = include_str!("../../src/app/assets/styles/viewer-tabs.css");
+        assert!(styles.contains("min-w-24 max-w-72 shrink-0"));
+        assert!(
+            styles.contains(r#".viewer-tab[data-active="true"] { @apply bg-surface-2 text-ink; }"#)
+        );
+        assert!(styles.contains(r#".viewer-tab-selection-indicator[data-active="true"] { @apply opacity-100 transition-opacity"#));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
         assert!(html.contains(r#"data-gtl-action="copy-commit""#));
         assert!(html.contains(r#"aria-pressed="false""#));

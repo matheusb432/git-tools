@@ -68,6 +68,7 @@ fn identity() -> TestResult<ViewerViewIdentity> {
         range_generation: ViewerRangeGeneration::new(11),
         selection_generation: ViewerSelectionGeneration::new(13),
         render_options: ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Full,
         },
@@ -238,6 +239,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
             }),
         },
         preferences: ViewerPreferences {
+            sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: identity.render_options,
             keybindings: gtl_models::viewer::ViewerKeybindings::default(),
@@ -349,11 +351,16 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         has_older: false,
     };
     let settings = ViewerUserSettings {
+        sidebars: gtl_models::viewer::ViewerSidebarVisibility {
+            files: false,
+            commits: true,
+        },
         projects_view: gtl_models::settings::ProjectsViewMode::Table,
         configuration_path: Some("/home/user/.config/git-tools/config.toml".into()),
         configured_theme: None,
         effective_theme: ViewerTheme::Dark,
         render_options: ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Unified,
             density: ViewerDiffDensity::Compact,
         },
@@ -445,7 +452,7 @@ fn row_windows_validate_bounds_when_constructed_and_deserialized() {
         serde_json::from_str::<ViewerRowRange>(&encoded).unwrap(),
         range
     );
-    for (start, count) in [(0, 0), (0, 65), (u32::MAX, 1)] {
+    for (start, count) in [(0, 0), (0, 513), (u32::MAX, 1)] {
         assert!(ViewerRowRange::try_new(start, count).is_err());
         assert!(
             serde_json::from_value::<ViewerRowRange>(

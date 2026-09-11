@@ -218,6 +218,7 @@ mod tests {
                         RenderOptions::new(DiffLayout::Unified, density),
                         super::super::Theme::Dark,
                         gtl_models::viewer::ViewerKeybindings::default(),
+                        gtl_models::viewer::ViewerSidebarVisibility::default(),
                         None,
                     )
                     .unwrap()
@@ -320,6 +321,7 @@ mod tests {
                     RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
                     super::super::Theme::Dark,
                     gtl_models::viewer::ViewerKeybindings::default(),
+                    gtl_models::viewer::ViewerSidebarVisibility::default(),
                     None,
                 )
                 .unwrap()

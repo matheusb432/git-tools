@@ -3,6 +3,8 @@ use dioxus::prelude::*;
 pub(crate) mod application_layout;
 pub(crate) mod application_navigation;
 pub(crate) mod application_router;
+mod window_chrome;
+mod window_header;
 
 use application_router::Route;
 

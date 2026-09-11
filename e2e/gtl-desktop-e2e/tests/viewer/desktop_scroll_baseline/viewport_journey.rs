@@ -38,6 +38,18 @@ async fn run(session: &mut support::session::TestSession) -> Result<()> {
     wait_for_marker(driver, "single-file-benchmark-20000").await?;
     assert_bounded_rows(driver).await?;
     assert_binary_row_ipc(driver).await?;
+    rapid_scroll_cleans_up_delayed_starts(driver).await?;
+    driver
+        .find(By::Id("viewer-diff-find-input"))
+        .await?
+        .clear()
+        .await?;
+    driver
+        .find(By::Id("viewer-diff-find-input"))
+        .await?
+        .send_keys("single-file-benchmark-20000")
+        .await?;
+    wait_for_marker(driver, "single-file-benchmark-20000").await?;
     retain_tab_presentation(session, &repository).await?;
     support::evidence::capture(driver, "viewer-virtualized-selection", true).await?;
     Ok(())
@@ -233,7 +245,7 @@ async fn assert_binary_row_ipc(driver: &WebDriver) -> Result<()> {
         const invoke = window.__TAURI_INTERNALS__.invoke;
         (async () => {
             const streamId = await invoke('viewer_stream_rows_start', { request: {
-                identity: { tab_id: Number(tab), range_generation: Number(range), selection_generation: Number(selection), render_options: { layout, density } },
+                identity: { tab_id: Number(tab), range_generation: Number(range), selection_generation: Number(selection), render_options: { layout, density, wrap_lines: document.querySelector('[data-gtl-diff-document]').dataset.wrapLines === 'true' } },
                 file: 'file-0', row_range: { start: 0, count: 1 },
             } });
             try {
@@ -262,6 +274,99 @@ async fn assert_bounded_rows(driver: &WebDriver) -> Result<()> {
     ensure!(
         counts[0] == 20_005 && (1..=512).contains(&counts[1]),
         "unbounded or incomplete diff geometry: {counts:?}"
+    );
+    Ok(())
+}
+
+async fn rapid_scroll_cleans_up_delayed_starts(driver: &WebDriver) -> Result<()> {
+    let observation: serde_json::Value = driver
+        .execute_async(
+            r"
+        const done = arguments[0];
+        const original = window.fetch;
+        let starts = 0;
+        let loading = false;
+        const busy = () => document.querySelector('[role=tab][aria-selected=true]')?.getAttribute('aria-busy') === 'true';
+        const observe = setInterval(() => { loading ||= busy(); }, 20);
+        const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+        window.fetch = async function(input, options) {
+            const response = await original.apply(this, arguments);
+            if (String(input).includes('viewer_stream_rows_start')) {
+                starts++;
+                await sleep(400);
+            }
+            return response;
+        };
+        (async () => {
+            try {
+                const root = document.querySelector('[data-gtl-diff-document]');
+                for (let index = 0; index < 30; index++) {
+                    root.scrollTop = 10000 + index * 8000;
+                    await sleep(32);
+                }
+                await sleep(3000);
+                done({ starts, loading });
+            } catch (error) { done({ error: String(error) }); }
+            finally { window.fetch = original; clearInterval(observe); }
+        })();
+    ",
+            Vec::new(),
+        )
+        .await?
+        .convert()?;
+    ensure!(
+        observation["starts"]
+            .as_u64()
+            .is_some_and(|starts| starts >= 10),
+        "rapid scroll did not exercise enough delayed starts: {observation}"
+    );
+    ensure!(
+        observation["loading"] == true,
+        "slow row retrieval never showed its loading state: {observation}"
+    );
+    wait::until("rapid scroll recovers without exhausted streams", wait::ASSERTION_TIMEOUT, || async {
+        let usable: bool = driver.execute(r"
+            const root = document.querySelector('[data-gtl-diff-document]');
+            const box = root.getBoundingClientRect();
+            const windows = [...root.querySelectorAll('[data-gtl-row-window]')].filter(element => {
+                const row = element.getBoundingClientRect();
+                return row.height > 0 && row.bottom > box.top && row.top < box.bottom;
+            });
+            return windows.length > 0 && windows.every(element => element.getAttribute('aria-busy') === 'false') &&
+                document.querySelector('[role=tab][aria-selected=true]')?.getAttribute('aria-busy') === 'false' &&
+                !root.innerText.includes('temporarily busy') && !root.innerText.includes('too many active streams');
+        ", Vec::new()).await?.convert()?;
+        Ok(usable.then_some(()))
+    }).await?;
+    assert_cached_scroll_stays_idle(driver).await?;
+    assert_bounded_rows(driver).await
+}
+
+async fn assert_cached_scroll_stays_idle(driver: &WebDriver) -> Result<()> {
+    let observation: serde_json::Value = driver.execute_async(r"
+        const done = arguments[0];
+        const original = window.fetch;
+        const tab = document.querySelector('[role=tab][aria-selected=true]');
+        let starts = 0;
+        let loading = false;
+        const observer = new MutationObserver(records => {
+            loading ||= records.some(record => record.oldValue === 'true') || tab.getAttribute('aria-busy') === 'true';
+        });
+        observer.observe(tab, { attributes: true, attributeFilter: ['aria-busy'], attributeOldValue: true });
+        window.fetch = function(input, options) {
+            if (String(input).includes('viewer_stream_rows_start')) starts++;
+            return original.apply(this, arguments);
+        };
+        document.querySelector('[data-gtl-diff-document]').scrollTop -= 1;
+        setTimeout(() => {
+            window.fetch = original;
+            observer.disconnect();
+            done({ starts, loading });
+        }, 350);
+    ", Vec::new()).await?.convert()?;
+    ensure!(
+        observation["starts"] == 0 && observation["loading"] == false,
+        "cached scrolling started retrieval or flashed its spinner: {observation}"
     );
     Ok(())
 }

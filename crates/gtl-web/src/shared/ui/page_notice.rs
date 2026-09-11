@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-const PAGE_NOTICE_CLASSES: &str = "grid place-content-center text-center";
+const PAGE_NOTICE_CLASSES: &str = "control-page-notice";
 
 #[component]
 pub(crate) fn PageNotice(
@@ -50,7 +50,7 @@ mod tests {
         });
 
         assert!(html.contains(r#"role="alert""#));
-        assert!(html.contains("grid place-content-center text-center"));
+        assert!(html.contains("control-page-notice"));
         assert!(html.contains("min-h-64"));
         assert!(html.contains("<h2"));
         assert!(html.contains("Viewer unavailable"));

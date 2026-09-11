@@ -18,6 +18,7 @@
     --r:6px; --r-sm:4px;
     --mono:'Maple Mono','Maple Mono NF',ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,monospace;
     --elevation-floating:0 6px 18px rgba(0,0,0,.22);
+    --scrollbar-thumb:#343434; --scrollbar-thumb-hover:#484848; --scrollbar-thumb-active:#585858;
     color-scheme:dark;
   }
   :host([data-theme="light"]),[data-theme="light"]{

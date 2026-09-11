@@ -23,10 +23,7 @@ impl WindowRequest {
         file: &ViewerFileSummary,
     ) -> Option<Self> {
         let start = window.batch.checked_mul(CLIENT_LINE_BATCH_SIZE)?;
-        let count = file
-            .row_count
-            .checked_sub(start)?
-            .min(CLIENT_LINE_BATCH_SIZE);
+        let count = file.row_count.checked_sub(start)?.min(super::FETCH_ROWS);
         Some(Self {
             identity,
             file: file.id.clone(),
@@ -37,7 +34,9 @@ impl WindowRequest {
     }
 }
 
-pub(super) async fn read(request: WindowRequest) -> Result<LoadedRowWindow, ClientDiffFileError> {
+pub(super) async fn read(
+    request: WindowRequest,
+) -> Result<Vec<LoadedRowWindow>, ClientDiffFileError> {
     let mut stream = viewer_server::stream_rows(StreamViewerRows {
         identity: request.identity,
         file: Some(request.file.clone()),
@@ -63,11 +62,30 @@ pub(super) async fn read(request: WindowRequest) -> Result<LoadedRowWindow, Clie
             .ok_or(ClientDiffFileError::InvalidResponse)?;
         rows.accept(response.event)?;
         if let Some(line_number_digits) = rows.finished {
-            return Ok(LoadedRowWindow {
-                rows: rows.rows,
-                line_number_digits,
-            });
+            return Ok(split_windows(rows.rows, line_number_digits));
         }
+    }
+}
+
+fn split_windows(rows: ViewerRows, line_number_digits: u32) -> Vec<LoadedRowWindow> {
+    fn split<Row>(
+        rows: Vec<Row>,
+        wrap: fn(Vec<Row>) -> ViewerRows,
+        digits: u32,
+    ) -> Vec<LoadedRowWindow> {
+        let mut rows = rows.into_iter();
+        std::iter::from_fn(move || {
+            let batch: Vec<_> = rows.by_ref().take(CLIENT_LINE_BATCH_SIZE).collect();
+            (!batch.is_empty()).then(|| LoadedRowWindow {
+                rows: wrap(batch),
+                line_number_digits: digits,
+            })
+        })
+        .collect()
+    }
+    match rows {
+        ViewerRows::Unified(rows) => split(rows, ViewerRows::Unified, line_number_digits),
+        ViewerRows::Split(rows) => split(rows, ViewerRows::Split, line_number_digits),
     }
 }
 
@@ -209,6 +227,7 @@ mod tests {
                 range_generation: gtl_models::viewer::ViewerRangeGeneration::new(1),
                 selection_generation: gtl_models::viewer::ViewerSelectionGeneration::default(),
                 render_options: gtl_wire::viewer::ViewerRenderOptions {
+                    wrap_lines: false,
                     layout,
                     density: gtl_wire::viewer::ViewerDiffDensity::Compact,
                 },

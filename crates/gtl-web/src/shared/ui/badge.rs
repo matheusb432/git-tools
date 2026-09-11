@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-const BADGE_CLASSES: &str = "inline-flex min-h-5 items-center justify-center rounded-sm border px-1.5 font-mono text-xs font-medium";
+const BADGE_CLASSES: &str = "control-badge min-h-5 px-1.5 font-mono text-xs font-medium";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum BadgeVariant {
@@ -16,10 +16,10 @@ pub(crate) enum BadgeVariant {
 impl BadgeVariant {
     const fn classes(self) -> &'static str {
         match self {
-            Self::Neutral => "border-line-2 bg-sunk text-ink-2",
+            Self::Neutral => "control-badge-neutral",
             // Self::Selected => "border-acc bg-acc text-bg",
-            Self::Addition => "border-add-line bg-add-bg text-add",
-            Self::Deletion => "border-del-line bg-del-bg text-del",
+            Self::Addition => "control-badge-addition",
+            Self::Deletion => "control-badge-deletion",
         }
     }
 }

@@ -7,8 +7,8 @@ use lucide_dioxus::ExternalLink;
 use crate::shared::{
     browser,
     ui::{
-        Button, ButtonSize, ButtonVariant, IconPopover, IconPopoverPlacement,
-        MENU_ACTION_HOST_CLASSES, MenuActionContent,
+        Button, ButtonSize, ButtonVariant, IconPopover, MENU_ACTION_HOST_CLASSES,
+        MenuActionContent, popover::PopoverPlacement,
     },
 };
 
@@ -22,7 +22,7 @@ pub(super) fn DiffFileActions(
     let (file_id, can_open_in_editor) =
         summary.with(|summary| (summary.id.clone(), summary.can_open_in_editor));
     rsx! {
-        span { class: "flex flex-none items-center gap-1 mobile:hidden",
+        span { class: "diff-file-actions",
             DiffPathCopyMenu {
                 summary,
                 popover_id: copy_popover_id,
@@ -54,12 +54,12 @@ fn DiffPathCopyMenu(
 
     rsx! {
         span {
-            class: "flex flex-none print:hidden!",
+            class: "diff-file-copy-menu print:hidden!",
             onclick: move |event: MouseEvent| event.stop_propagation(),
             IconPopover {
                 id: popover_id.clone(),
                 aria_label: "Copy file path",
-                placement: IconPopoverPlacement::TriggerEnd,
+                placement: PopoverPlacement::TriggerEnd,
                 icon: rsx! {
                     CopyMark {}
                 },
@@ -215,7 +215,7 @@ fn CopyActionFeedback(state: CopyState, artifact_enhancement: bool) -> Element {
 
     rsx! {
         span {
-            class: "min-w-12 flex-none text-right text-[0.6875rem] font-semibold text-ink-3 data-[state=success]:text-add data-[state=failure]:text-del",
+            class: "diff-file-copy-feedback",
             role: "status",
             aria_live: "polite",
             aria_atomic: "true",

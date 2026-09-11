@@ -96,8 +96,8 @@ pub(crate) fn DiffHistoryView() -> Element {
 
     rsx! {
         document::Title { "History - git-tools" }
-        main { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
-            header { class: "flex flex-col gap-3 border-b border-line bg-surface px-4 py-4 sm:flex-row sm:items-end sm:justify-between",
+        main { class: "history-shell h-full min-h-0",
+            header { class: "history-header gap-3 px-4 py-4",
                 div { class: "min-w-0",
                     div { class: "flex items-center gap-2 text-acc",
                         span { aria_hidden: "true",
@@ -109,7 +109,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                     }
                     h1 {
                         id: "history-heading",
-                        class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
+                        class: "history-header-title mt-1 text-lg font-semibold tracking-tight",
                         tabindex: "-1",
                         "Diff history"
                     }
@@ -123,12 +123,12 @@ pub(crate) fn DiffHistoryView() -> Element {
             }
 
             section {
-                class: "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-bg",
+                class: "history-content min-h-0",
                 aria_label: "Recent diff renders",
-                ScrollArea { class: "min-h-0 overflow-auto p-3 sm:p-4",
+                ScrollArea { class: "overflow-auto min-h-0 p-3 sm:p-4",
                     if let Some(error) = action_error {
                         div {
-                            class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-del",
+                            class: "history-error mb-3 px-3 py-2",
                             role: "alert",
                             "{error.message()}"
                         }
@@ -197,7 +197,7 @@ fn HistoryLoading() -> Element {
             role: "status",
             aria_label: "Loading history",
             for _ in 0..6 {
-                div { class: "grid gap-2 rounded-sm border border-line bg-surface p-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(8rem,1fr)_auto]",
+                div { class: "history-loading-row gap-2 p-3",
                     Skeleton { class: "h-4 w-3/5" }
                     Skeleton { class: "h-4 w-4/5" }
                     Skeleton { class: "h-8 w-24" }
@@ -218,25 +218,25 @@ fn HistoryRow(
     oncopy: EventHandler<RenderHistoryId>,
 ) -> Element {
     rsx! {
-        article { class: "grid min-w-0 gap-3 rounded-sm border border-line bg-surface px-3 py-3 hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center",
+        article { class: "history-row min-w-0 gap-3 px-3 py-3",
             div { class: "min-w-0",
-                div { class: "flex min-w-0 items-center gap-2",
-                    h2 { class: "truncate font-semibold text-ink", "{entry.title}" }
-                    span { class: "shrink-0 rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 font-mono text-xs font-semibold tracking-widest text-acc uppercase",
+                div { class: "history-row-title-line min-w-0 gap-2",
+                    h2 { class: "history-row-title font-semibold", "{entry.title}" }
+                    span { class: "history-kind-badge px-1.5 py-0.5 font-mono text-xs font-semibold tracking-widest",
                         "{recipe_kind_label(entry.kind)}"
                     }
                 }
-                p { class: "mt-1 truncate font-mono text-ink-2", "{entry.range_label}" }
+                p { class: "history-row-range mt-1 font-mono", "{entry.range_label}" }
             }
             div { class: "min-w-0 text-ink-2",
                 p { class: "truncate", "{entry.repository_name}" }
                 time {
-                    class: "mt-1 block truncate font-mono tabular-nums text-ink-3",
+                    class: "history-row-time mt-1 font-mono tabular-nums",
                     datetime: entry.rendered_at.to_string(),
                     "{entry.rendered_at}"
                 }
             }
-            div { class: "flex items-center justify-end gap-1",
+            div { class: "history-row-actions gap-1",
                 Button {
                     size: ButtonSize::Small,
                     variant: ButtonVariant::Outline,
@@ -284,10 +284,8 @@ fn HistoryFooter(
     let item_count_label = format!("{} renders", page.total_count);
 
     rsx! {
-        footer { class: "flex min-h-14 items-center justify-between gap-3 border-t border-line bg-surface px-3 sm:px-4",
-            p { class: "hidden font-mono text-xs tabular-nums text-ink-3 sm:block",
-                "{item_count_label}"
-            }
+        footer { class: "history-footer min-h-14 gap-3 px-3 sm:px-4",
+            p { class: "history-footer-count font-mono text-xs tabular-nums", "{item_count_label}" }
             nav {
                 class: "ml-auto flex items-center gap-1",
                 aria_label: "History pages",
@@ -306,7 +304,7 @@ fn HistoryFooter(
                     }
                 }
                 output {
-                    class: "min-w-20 px-2 text-center font-mono text-xs tabular-nums text-ink",
+                    class: "history-page-number min-w-20 px-2 font-mono text-xs tabular-nums",
                     aria_label: "History page {page_number} of {page_count}",
                     "{page_number:02} / {page_count:02}"
                 }

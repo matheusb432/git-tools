@@ -10,7 +10,7 @@ _default:
 build:
     cargo run --quiet -p xtask -- web-build
 
-# Regenerate the tracked shared Tailwind stylesheet.
+# Regenerate the tracked desktop and artifact Tailwind stylesheets.
 [group('web')]
 styles:
     cargo run --quiet -p xtask -- web-styles

@@ -23,8 +23,9 @@ use crate::{
         browser,
         ui::{
             AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover,
-            HoverPopoverPlacement, IconPopover, IconPopoverPlacement, MENU_ACTION_HOST_CLASSES,
-            MenuActionContent, PageNotice, Popover, Skeleton, use_hover_popover, use_toast,
+            HoverPopoverPlacement, IconPopover, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+            PageNotice, PanelDialog, Skeleton, popover::PopoverPlacement, use_hover_popover,
+            use_toast,
         },
     },
     views::diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
@@ -43,7 +44,7 @@ pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
     rsx! {
         document::Title { "Viewer - git-tools" }
         main {
-            class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
+            class: "diff-workspace-main h-full min-h-0",
             aria_busy: activating.to_string(),
             "inert": activating.then_some(""),
             h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
@@ -80,7 +81,7 @@ pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
 fn WorkspaceLoading() -> Element {
     rsx! {
         div {
-            class: "grid h-full min-h-0 grid-rows-[2.75rem_3rem_minmax(0,1fr)]",
+            class: "diff-workspace-loading h-full min-h-0",
             role: "status",
             aria_label: "Loading viewer",
             div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
@@ -91,7 +92,7 @@ fn WorkspaceLoading() -> Element {
                 Skeleton { class: "h-7 w-52" }
                 Skeleton { class: "ml-auto h-7 w-28" }
             }
-            div { class: "grid min-h-0 grid-cols-1 gap-px bg-line xl:grid-cols-[15rem_minmax(0,1fr)_16rem]",
+            div { class: "diff-workspace-loading-columns min-h-0 gap-px xl:grid-cols-[15rem_minmax(0,1fr)_16rem]",
                 Skeleton { class: "hidden h-full rounded-none xl:block" }
                 Skeleton { class: "h-full rounded-none" }
                 Skeleton { class: "hidden h-full rounded-none xl:block" }
@@ -112,10 +113,10 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
     rsx! {
         section {
             id: "viewer-active-view",
-            class: "flex h-full min-h-0 flex-col overflow-hidden",
+            class: "diff-workspace-shell h-full min-h-0",
             role: "tabpanel",
             aria_label: "Active diff",
-            div { class: "min-h-0 flex-1 overflow-hidden",
+            div { class: "diff-workspace-shell-content min-h-0",
                 match &shell_state.active {
                     ViewerActiveState::Empty => rsx! {
                         PageNotice {
@@ -194,6 +195,7 @@ fn ReadyWorkspace(
     let toast = use_toast();
     let mut delete_open = use_signal(|| false);
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
+    let sidebars = super::sidebars::use_sidebar_controls();
     let mut file_filter = use_signal(String::new);
     let mut path_filter_open = use_signal(|| false);
     let presentation = use_context::<crate::views::diffs::presentation::DiffPresentation>();
@@ -218,6 +220,34 @@ fn ReadyWorkspace(
         true,
     );
     browser::use_window_keydown(move |event| {
+        for (action, sidebar, panel) in [
+            (
+                ViewerKeybindingAction::ToggleFilesSidebar,
+                super::sidebars::Sidebar::Files,
+                MobilePanel::Files,
+            ),
+            (
+                ViewerKeybindingAction::ToggleCommitsSidebar,
+                super::sidebars::Sidebar::Commits,
+                MobilePanel::Commits,
+            ),
+        ] {
+            if native_keyboard_event_matches(&event, keybindings, action) {
+                event.prevent_default();
+                if !event.repeat() {
+                    if browser::workspace_is_wide() {
+                        sidebars.toggle.call(sidebar);
+                    } else {
+                        mobile_panel.set(if mobile_panel() == Some(panel) {
+                            None
+                        } else {
+                            Some(panel)
+                        });
+                    }
+                }
+                return;
+            }
+        }
         if native_keyboard_event_matches(&event, keybindings, ViewerKeybindingAction::SearchFiles) {
             event.prevent_default();
             super::path_filter::open_path_filter(workspace);
@@ -359,6 +389,10 @@ fn ReadyWorkspace(
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
+                sidebars: (sidebars.visibility)(),
+                sidebar_pending: (sidebars.pending)(),
+                keybindings,
+                ontoggle_sidebar: sidebars.toggle,
                 diff_document: rsx! {
                     if file_count == 0 {
                         PageNotice {
@@ -382,7 +416,7 @@ fn ReadyWorkspace(
             }
         }
 
-        Popover {
+        PanelDialog {
             id: "mobile-files-panel",
             trigger_id: "mobile-files-trigger",
             open: mobile_panel() == Some(MobilePanel::Files),
@@ -390,7 +424,7 @@ fn ReadyWorkspace(
             onclose: move |()| mobile_panel.set(None),
             FilesPanel { onnavigate }
         }
-        Popover {
+        PanelDialog {
             // TODO: organize this more intuitively. not obvious that this is where the mobile view is.
             id: "mobile-commits-panel",
             trigger_id: "mobile-commits-trigger",
@@ -439,7 +473,7 @@ fn LiveViewTitlebarActions(tab_id: ViewerTabId, ondelete: EventHandler<MouseEven
             IconPopover {
                 id: LIVE_VIEW_ACTIONS_POPOVER_ID,
                 aria_label: "Live view actions",
-                placement: IconPopoverPlacement::TriggerEnd,
+                placement: PopoverPlacement::TriggerEnd,
                 icon: rsx! {
                     Ellipsis { size: 18 }
                 },

@@ -1,0 +1,10 @@
+@import "./foundation.css";
+@import "./controls.css";
+@import "./overlays.css";
+@import "./diff-rows.css";
+@import "./diff-workspace.css";
+@import "./document-shell.css";
+@import "./scrollbars.css";
+@source "../../../artifact.rs";
+@source "../../../views/diffs/**/*.rs";
+@source "../../../shared/ui/**/*.rs";

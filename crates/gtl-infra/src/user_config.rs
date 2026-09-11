@@ -484,6 +484,9 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let settings_patch = UserSettingsPatch {
+            files_sidebar_visible: UserSettingsFieldUpdate::Update(false),
+            commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
+            wrap_lines: UserSettingsFieldUpdate::Update(false),
             projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
             theme: UserSettingsFieldUpdate::Clear,
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
@@ -526,6 +529,95 @@ excluded_from_push_all = true
                 .push_all_exclusions()
                 .contains(&ProjectName::try_from("git-tools").unwrap())
         );
+    }
+
+    #[test]
+    fn sidebar_edits_preserve_each_other_and_clear_restores_visibility() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path));
+        assert_eq!(
+            store.load().unwrap().sidebar_visibility(),
+            gtl_models::viewer::ViewerSidebarVisibility {
+                files: true,
+                commits: true
+            }
+        );
+        store
+            .edit(UserSettingsPatch {
+                files_sidebar_visible: UserSettingsFieldUpdate::Update(false),
+                ..UserSettingsPatch::default()
+            })
+            .unwrap();
+        store
+            .edit(UserSettingsPatch {
+                commits_sidebar_visible: UserSettingsFieldUpdate::Update(false),
+                ..UserSettingsPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store.load().unwrap().sidebar_visibility(),
+            gtl_models::viewer::ViewerSidebarVisibility {
+                files: false,
+                commits: false
+            }
+        );
+        store
+            .edit(UserSettingsPatch {
+                files_sidebar_visible: UserSettingsFieldUpdate::Clear,
+                ..UserSettingsPatch::default()
+            })
+            .unwrap();
+        let settings = store.load().unwrap();
+        assert_eq!(
+            settings.sidebar_visibility(),
+            gtl_models::viewer::ViewerSidebarVisibility {
+                files: true,
+                commits: false
+            }
+        );
+        assert_eq!(settings.theme(), Some(Theme::Dark));
+    }
+
+    #[test]
+    fn line_wrapping_defaults_off_and_round_trips_explicit_false_and_clear() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "theme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert!(!store.load().unwrap().viewer_render_options().wrap_lines());
+        for (update, expected) in [
+            (UserSettingsFieldUpdate::Update(true), true),
+            (UserSettingsFieldUpdate::Update(false), false),
+            (UserSettingsFieldUpdate::Update(true), true),
+            (UserSettingsFieldUpdate::Clear, false),
+        ] {
+            store
+                .edit(UserSettingsPatch {
+                    wrap_lines: update,
+                    ..Default::default()
+                })
+                .unwrap();
+            let settings = store.load().unwrap();
+            assert_eq!(settings.viewer_render_options().wrap_lines(), expected);
+            assert_eq!(
+                settings
+                    .viewer_render_options()
+                    .with_layout(DiffLayout::Split)
+                    .with_density(DiffDensity::Full)
+                    .wrap_lines(),
+                expected
+            );
+            assert_eq!(settings.theme(), Some(Theme::Dark));
+        }
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("wrap_lines")
+        );
+        std::fs::write(&path, "wrap_lines = \"true\"\n").unwrap();
+        assert!(store.load().is_err());
     }
 
     #[test]

@@ -283,3 +283,39 @@ pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
 pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
     dioxus::prelude::use_signal(|| true).into()
 }
+
+#[cfg(feature = "desktop")]
+pub(crate) fn workspace_is_wide() -> bool {
+    web_sys::window()
+        .and_then(|window| window.inner_width().ok())
+        .and_then(|width| width.as_f64())
+        .is_some_and(|width| width >= 1025.0)
+}
+
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn use_window_resize(handler: impl FnMut() + 'static) {
+    let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
+        || {
+            let window = web_sys::window()?;
+            let callback = Rc::new(wasm_bindgen::closure::Closure::<dyn FnMut()>::new(handler));
+            window
+                .add_event_listener_with_callback(
+                    "resize",
+                    callback.as_ref().as_ref().unchecked_ref(),
+                )
+                .ok()?;
+            Some((window, callback))
+        },
+        |listener| {
+            if let Some((window, callback)) = listener {
+                let _ = window.remove_event_listener_with_callback(
+                    "resize",
+                    callback.as_ref().as_ref().unchecked_ref(),
+                );
+            }
+        },
+    );
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn use_window_resize(_handler: impl FnMut() + 'static) {}

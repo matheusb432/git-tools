@@ -11,18 +11,22 @@ serde.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio-stream.workspace = true
 gtl-local-auth.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-channel = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 serde-wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
 
 [dev-dependencies]
+futures-channel.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = [
@@ -41,6 +45,7 @@ workspace = true
 viewer-ipc = [
   "gtl-wire/protobuf",
   "dep:js-sys",
+  "dep:futures-channel",
   "dep:serde-wasm-bindgen",
   "dep:wasm-bindgen",
   "dep:wasm-bindgen-futures",

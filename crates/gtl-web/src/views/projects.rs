@@ -1,106 +1,33 @@
+mod card;
+mod comparison_action;
+mod comparison_editor;
+mod loading;
 mod motion;
-
-use std::time::Duration;
+mod presentation;
+mod status;
+mod table;
+mod view_mode;
 
 use dioxus::prelude::*;
-use gtl_models::{
-    live_views::LiveComparison,
-    paths::RepositoryRoot,
-    repository::status::{
-        RepositoryStatus, StatusChanges, StatusClass, StatusHead, StatusUpstream,
-    },
-    settings::ProjectsViewMode,
-};
-use gtl_wire::viewer::{
-    EditSettingsRequest, FieldUpdate,
-    projects::{UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison},
-};
-use lucide_dioxus::{ArrowUp, FileDiff, GitBranch, LayoutGrid, List, RefreshCw};
+use gtl_models::settings::ProjectsViewMode;
+use lucide_dioxus::RefreshCw;
 
+use self::{
+    card::ProjectCard,
+    loading::use_projects,
+    presentation::ProjectsSummary,
+    table::ProjectTable,
+    view_mode::{ProjectsViewToggle, use_projects_presentation},
+};
 use crate::{
-    app::{application_layout::ViewerContext, application_router::Route},
-    entities::diffs::viewer_server,
+    app::application_layout::ViewerContext,
     shared::{
         browser,
-        ui::{
-            Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea,
-            Skeleton, button_classes, no_data::NoData,
-        },
-        viewer_client::ViewerClientError,
+        ui::{Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Skeleton},
     },
 };
 
-#[derive(Clone, Default, PartialEq)]
-struct ProjectLoad {
-    instance_id: Option<String>,
-    projects: Option<Vec<ViewerProject>>,
-    error: Option<ViewerClientError>,
-    refreshing: bool,
-}
-
-#[derive(Clone, Copy)]
-struct Projects {
-    load: ReadSignal<ProjectLoad>,
-    refresh: Callback<()>,
-}
-
-fn use_projects() -> Projects {
-    let viewer = use_context::<ViewerContext>();
-    let load = use_signal(ProjectLoad::default);
-    use_future(move || poll_projects(load, viewer));
-    use_effect(move || {
-        if viewer.actions_enabled() {
-            spawn(refresh_projects(load, viewer));
-        }
-    });
-    let refresh = use_callback(move |()| {
-        spawn(refresh_projects(load, viewer));
-    });
-    Projects {
-        load: load.into(),
-        refresh,
-    }
-}
-
-async fn poll_projects(load: Signal<ProjectLoad>, viewer: ViewerContext) {
-    loop {
-        dioxus_sdk_time::sleep(Duration::from_secs(30)).await;
-        if motion::visible() {
-            refresh_projects(load, viewer).await;
-        }
-    }
-}
-
-async fn refresh_projects(mut load: Signal<ProjectLoad>, viewer: ViewerContext) {
-    if !viewer.actions_enabled() || load.peek().refreshing {
-        return;
-    }
-    let instance_id = viewer.server_instance_id();
-    if load.peek().instance_id != instance_id {
-        load.set(ProjectLoad {
-            instance_id: instance_id.clone(),
-            ..Default::default()
-        });
-    }
-    load.write().refreshing = true;
-    let result = viewer_server::list_projects().await;
-    if viewer.server_instance_id() != instance_id {
-        load.set(ProjectLoad::default());
-        return;
-    }
-    let positions = motion::positions();
-    let mut next = load.peek().clone();
-    next.refreshing = false;
-    match result {
-        Ok(projects) => {
-            next.projects = Some(projects);
-            next.error = None;
-        }
-        Err(error) => next.error = Some(error),
-    }
-    load.set(next);
-    motion::animate(positions).await;
-}
+const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
 pub(crate) fn ProjectsView() -> Element {
@@ -117,29 +44,22 @@ pub(crate) fn ProjectsView() -> Element {
     });
     use_effect(move || browser::focus_element("projects-heading".into()));
     let load = projects.load.read();
-    let count = load.projects.as_ref().map(Vec::len);
     let mode = (presentation.mode)();
     let disabled = !viewer.actions_enabled();
     rsx! {
         document::Title { "Projects - git-tools" }
         main {
-            class: "flex h-full min-h-0 flex-col overflow-hidden",
+            class: "projects-shell h-full min-h-0",
             "data-testid": "projects-view",
-            header { class: "flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-5 sm:px-8 sm:py-7",
-                div {
-                    p { class: "mb-2 flex items-center gap-2 font-mono text-xs tracking-widest text-ink-3 uppercase",
-                        LayoutGrid { size: 14 }
-                        "Your workspace"
-                    }
-                    h1 {
-                        id: "projects-heading",
-                        tabindex: "-1",
-                        class: "text-2xl font-semibold tracking-tight text-ink focus:outline-none",
-                        "Projects"
-                    }
-                    p { class: "mt-2 text-ink-2", "Review local changes and unpushed commits." }
+            header { class: "projects-header h-14 gap-4 px-4 sm:px-6",
+                h1 {
+                    id: "projects-heading",
+                    tabindex: "-1",
+                    class: "projects-title text-xl font-semibold tracking-tight",
+                    "Projects"
                 }
-                div { class: "flex shrink-0 items-center gap-3",
+                ProjectsSummary { load: projects.load }
+                div { class: "projects-header-actions ml-auto gap-3",
                     ProjectsViewToggle { presentation }
                     Button {
                         variant: ButtonVariant::Outline,
@@ -154,32 +74,27 @@ pub(crate) fn ProjectsView() -> Element {
                 }
             }
             ScrollArea {
-                class: "min-h-0 flex-1 overflow-auto px-5 py-5 sm:px-8 sm:py-6",
+                class: "projects-content min-h-0 p-4 sm:p-6",
                 "data-testid": "projects-content",
                 div { class: "mx-auto max-w-7xl",
                     if let Some(error) = load.error.or((presentation.error)()) {
                         div {
-                            class: "mb-5 rounded-sm border border-warn-line bg-warn-bg p-3 text-warn",
+                            class: "projects-error mb-4 gap-3 px-3 py-2",
                             role: "alert",
-                            "{error.message()} "
-                            if load.projects.is_some() {
-                                "Showing the last known status."
+                            span { class: "min-w-0",
+                                "{error.message()} "
+                                if load.projects.is_some() {
+                                    "Showing the last known status."
+                                }
                             }
                             Button {
                                 variant: ButtonVariant::Ghost,
                                 size: ButtonSize::Small,
+                                class: "ml-auto text-warn hover:text-ink active:text-ink",
                                 onclick: move |_| try_again(()),
                                 "Try again"
                             }
                         }
-                    }
-                    div { class: "mb-5 flex items-center justify-between gap-3 font-mono text-xs text-ink-3",
-                        if let Some(count) = count {
-                            span { "{count} projects" }
-                        } else {
-                            span { "Loading projects" }
-                        }
-                        span { "Changes to review first" }
                     }
                     match &load.projects {
                         None if load.error.is_some() => rsx! {
@@ -190,11 +105,9 @@ pub(crate) fn ProjectsView() -> Element {
                             }
                         },
                         None => rsx! {
-                            div {
-                                class: "grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3",
-                                aria_label: "Loading projects",
+                            div { class: PROJECT_GRID_CLASSES, aria_label: "Loading projects",
                                 for index in 0..6 {
-                                    Skeleton { key: "{index}", class: "h-60 rounded-panel" }
+                                    Skeleton { key: "{index}", class: "h-52 rounded-panel" }
                                 }
                             }
                         },
@@ -209,9 +122,7 @@ pub(crate) fn ProjectsView() -> Element {
                             ProjectTable { projects: items.clone(), disabled }
                         },
                         Some(items) => rsx! {
-                            div {
-                                class: "grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3",
-                                aria_label: "Managed projects",
+                            div { class: PROJECT_GRID_CLASSES, aria_label: "Managed projects",
                                 for project in items {
                                     ProjectCard { key: "{project.path}", project: project.clone(), disabled }
                                 }
@@ -220,630 +131,6 @@ pub(crate) fn ProjectsView() -> Element {
                     }
                 }
             }
-        }
-    }
-}
-
-struct ProjectStatusPresentation<'a> {
-    branch: Option<&'a str>,
-    local_available: bool,
-    ahead: Option<u64>,
-    issue: Option<&'a str>,
-    symbols: String,
-    symbols_description: &'static str,
-    status_label: &'a str,
-    status_color: &'static str,
-}
-
-fn project_status(project: &ViewerProject) -> ProjectStatusPresentation<'_> {
-    let status = &project.status;
-    let (branch, changes, mut ahead, mut issue) = match status {
-        RepositoryStatus::Absent => (
-            None,
-            StatusChanges::Unavailable,
-            None,
-            Some("Repository not found"),
-        ),
-        RepositoryStatus::Present { head, changes } => {
-            let (branch, ahead, issue) = match head {
-                StatusHead::Unavailable => (None, None, Some("Branch status unavailable")),
-                StatusHead::Detached => {
-                    (Some("Detached HEAD"), None, Some("No upstream configured"))
-                }
-                StatusHead::Branch { name, upstream } => match upstream {
-                    StatusUpstream::Missing => {
-                        (Some(name.as_str()), None, Some("No upstream configured"))
-                    }
-                    StatusUpstream::Tracking { ahead, .. } => {
-                        (Some(name.as_str()), Some(ahead.into_inner()), None)
-                    }
-                },
-            };
-            let issue = if matches!(changes, StatusChanges::Unavailable) {
-                Some("Working-tree status unavailable")
-            } else {
-                issue
-            };
-            (branch, *changes, ahead, issue)
-        }
-    };
-    match &project.branch_comparison {
-        ViewerProjectBranchComparison::Branch { commits_ahead } => {
-            ahead = Some(commits_ahead.into_inner());
-            issue = None;
-        }
-        ViewerProjectBranchComparison::Unavailable { reason } => {
-            ahead = None;
-            issue = Some(reason.as_str());
-        }
-        ViewerProjectBranchComparison::Upstream => {}
-    }
-    let local_available = !matches!(changes, StatusChanges::Unavailable);
-    let symbols = changes.symbols();
-    let symbols_description = match changes {
-        StatusChanges::Clean => "Working tree clean",
-        StatusChanges::Unavailable => "Working-tree status unavailable",
-        StatusChanges::Changed { tracked, untracked } => {
-            match (!tracked.is_zero(), !untracked.is_zero()) {
-                (true, true) => "Modified and untracked files",
-                (true, false) => "Modified files",
-                (false, true) => "Untracked files",
-                (false, false) => "Working tree clean",
-            }
-        }
-    };
-    let (status_label, status_color) = match project.review_class() {
-        StatusClass::Pending => ("Changes to review", "text-acc"),
-        StatusClass::Clean => ("Up to date", "text-add"),
-        StatusClass::Warn if local_available && ahead.is_none() => {
-            ("Comparison unavailable", "text-warn")
-        }
-        StatusClass::Warn => ("Status unavailable", "text-warn"),
-        StatusClass::Absent => ("Repository not found", "text-warn"),
-    };
-    ProjectStatusPresentation {
-        branch,
-        local_available,
-        ahead,
-        issue,
-        symbols: symbols.to_string(),
-        symbols_description,
-        status_label,
-        status_color,
-    }
-}
-
-#[component]
-fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
-    let ProjectStatusPresentation {
-        branch,
-        local_available,
-        ahead,
-        issue,
-        symbols,
-        symbols_description,
-        status_label,
-        status_color,
-    } = project_status(&project);
-    let rendered = project
-        .last_rendered_at
-        .as_ref()
-        .map(|time| format!("Rendered {}", time.display_minute()));
-    rsx! {
-        article {
-            class: "flex min-w-0 flex-col rounded-panel border border-line bg-surface p-5 transition-[border-color,box-shadow] duration-150 hover:border-line-2 motion-reduce:transition-none",
-            "data-project-card": "{project.path}",
-            aria_label: "{project.name}",
-            div { class: "flex min-w-0 items-start justify-between gap-3",
-                h2 {
-                    class: "min-w-0 truncate text-lg font-semibold tracking-tight text-ink",
-                    title: "{project.path}",
-                    "{project.name}"
-                }
-                span { class: "shrink-0 font-mono text-[10px] {status_color}", "{status_label}" }
-            }
-            p { class: "mt-2 flex min-w-0 items-center gap-1.5 font-mono text-xs text-ink-3",
-                if let Some(branch) = branch {
-                    GitBranch { size: 13 }
-                    span { class: "truncate", title: branch, "{branch}" }
-                } else {
-                    NoData {}
-                }
-                if local_available {
-                    span {
-                        class: "shrink-0 {status_color}",
-                        role: "img",
-                        title: symbols_description,
-                        aria_label: symbols_description,
-                        "[{symbols}]"
-                    }
-                } else {
-                    NoData {}
-                }
-            }
-            p { class: "mt-5 flex items-baseline gap-2 border-y border-line py-3 text-xs text-ink-2",
-                span { class: "font-mono text-lg font-medium tabular-nums text-ink",
-                    if let Some(count) = ahead {
-                        "{count}"
-                    } else {
-                        NoData {}
-                    }
-                }
-                "{comparison_label(&project)}"
-            }
-            div { class: "mt-5 grid grid-cols-1 gap-2 min-[420px]:grid-cols-2",
-                for comparison in [LiveComparison::LocalChanges, LiveComparison::UnpushedCommits] {
-                    ProjectComparisonAction {
-                        path: project.path.clone(),
-                        comparison,
-                        branch_changes: is_branch_comparison(&project),
-                        available: match comparison {
-                            LiveComparison::LocalChanges => local_available,
-                            LiveComparison::UnpushedCommits => ahead.is_some(),
-                        },
-                        disabled,
-                        issue: issue.map(str::to_owned),
-                    }
-                }
-            }
-
-            ProjectComparisonEditor { project: project.clone(), disabled }
-            p { class: "mt-4 truncate font-mono text-[10px] text-ink-3",
-                if let Some(rendered) = rendered {
-                    span { title: rendered.clone(), "{rendered}" }
-                } else {
-                    NoData {}
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectComparisonAction(
-    path: RepositoryRoot,
-    comparison: LiveComparison,
-    available: bool,
-    disabled: bool,
-    issue: Option<String>,
-    #[props(default)] branch_changes: bool,
-    #[props(default)] compact: bool,
-) -> Element {
-    let label = if comparison == LiveComparison::UnpushedCommits && branch_changes {
-        "Branch changes"
-    } else {
-        comparison.label()
-    };
-    let size = if compact {
-        ButtonSize::IconMedium
-    } else {
-        ButtonSize::Small
-    };
-    let content = rsx! {
-        if comparison == LiveComparison::LocalChanges {
-            FileDiff { size: 14 }
-        } else {
-            ArrowUp { size: 14 }
-        }
-        if !compact {
-            "{label}"
-        }
-    };
-    rsx! {
-        if available && !disabled {
-            Link {
-                to: Route::project_diff(&path, comparison),
-                draggable: "false",
-                class: "{button_classes(ButtonLayout::Inline, ButtonVariant::Outline, size)} min-h-9 select-text max-sm:min-h-11",
-                title: label,
-                aria_label: label,
-                {content}
-            }
-        } else {
-            Button {
-                variant: ButtonVariant::Outline,
-                size,
-                class: "min-h-9 max-sm:min-h-11",
-                state: ButtonState::Disabled,
-                title: issue.as_deref().unwrap_or(label),
-                aria_label: label,
-                {content}
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct ProjectsPresentation {
-    mode: Memo<ProjectsViewMode>,
-    pending: Memo<bool>,
-    error: Memo<Option<ViewerClientError>>,
-    select: Callback<ProjectsViewMode>,
-    retry: Callback<()>,
-}
-
-fn use_projects_presentation() -> ProjectsPresentation {
-    let viewer = use_context::<ViewerContext>();
-    let mut settings = use_resource(move || {
-        let _ = viewer.server_instance_id();
-        viewer_server::get_settings()
-    });
-    let mut saving = use_signal(|| false);
-    let mut save_error = use_signal(|| None);
-    let mut attempted = use_signal(|| None);
-    let mode = use_memo(move || {
-        settings
-            .read()
-            .as_ref()
-            .and_then(|result| result.as_ref().ok())
-            .map_or(ProjectsViewMode::Grid, |settings| settings.projects_view)
-    });
-    let pending =
-        use_memo(move || saving() || settings.read().is_none() || !viewer.actions_enabled());
-    let error = use_memo(move || {
-        save_error().or_else(|| {
-            settings
-                .read()
-                .as_ref()
-                .and_then(|result| result.as_ref().err())
-                .copied()
-        })
-    });
-    let mut save = use_action(move |mode: ProjectsViewMode| async move {
-        let instance_id = viewer.server_instance_id();
-        let result = viewer_server::edit_settings(EditSettingsRequest {
-            projects_view: FieldUpdate::Update(mode),
-            ..Default::default()
-        })
-        .await;
-        saving.set(false);
-        if viewer.server_instance_id() != instance_id {
-            return Ok::<(), std::convert::Infallible>(());
-        }
-        match result {
-            Ok(()) => settings.restart(),
-            Err(error) => save_error.set(Some(error)),
-        }
-        Ok(())
-    });
-    let select = use_callback(move |mode: ProjectsViewMode| {
-        if *pending.peek() {
-            return;
-        }
-        attempted.set(Some(mode));
-        saving.set(true);
-        save_error.set(None);
-        save.call(mode);
-    });
-    let retry = use_callback(move |()| {
-        if let Some(mode) = *attempted.peek() {
-            select(mode);
-        } else {
-            settings.restart();
-        }
-    });
-    ProjectsPresentation {
-        mode,
-        pending,
-        error,
-        select,
-        retry,
-    }
-}
-
-#[component]
-fn ProjectsViewToggle(presentation: ProjectsPresentation) -> Element {
-    let mode = (presentation.mode)();
-    rsx! {
-        div {
-            class: "flex items-center gap-0.5 rounded-sm border border-line-2 bg-sunk p-0.5",
-            role: "group",
-            aria_label: "Projects view",
-            for (value, label) in [(ProjectsViewMode::Grid, "Grid view"), (ProjectsViewMode::Table, "List view")] {
-                Button {
-                    variant: if mode == value { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
-                    size: ButtonSize::IconMedium,
-                    class: "max-sm:size-11",
-                    state: if (presentation.pending)() { ButtonState::Disabled } else { ButtonState::Enabled },
-                    aria_label: label,
-                    title: label,
-                    aria_pressed: (mode == value).to_string(),
-                    onclick: move |_| (presentation.select)(value),
-                    if value == ProjectsViewMode::Grid {
-                        LayoutGrid { size: 16 }
-                    } else {
-                        List { size: 16 }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectTable(projects: Vec<ViewerProject>, disabled: bool) -> Element {
-    use crate::shared::ui::data_table::{DataTable, TableHeading};
-    rsx! {
-        DataTable {
-            caption: "Managed projects",
-            header: rsx! {
-                TableHeading { "Project" }
-                TableHeading { "Branch" }
-                TableHeading { "Changes" }
-                TableHeading {
-                    span { class: "block text-right", "Commits" }
-                }
-                TableHeading { "Last rendered" }
-                TableHeading {
-                    span { class: "block text-right", "Open diff" }
-                }
-            },
-            for project in projects {
-                ProjectTableRow { key: "{project.path}", project, disabled }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
-    use crate::shared::ui::data_table::{DataTableRow, TableColumn};
-    let status = project_status(&project);
-    let destination = (!disabled && status.ahead.is_some())
-        .then(|| Route::project_diff(&project.path, LiveComparison::UnpushedCommits));
-    let rendered = project
-        .last_rendered_at
-        .as_ref()
-        .map(gtl_models::timestamps::MachineTimestamp::display_minute);
-    rsx! {
-        DataTableRow {
-            "data-testid": "project-table-row",
-            "data-project-row": "{project.path}",
-            aria_label: "{project.name}",
-            TableColumn {
-                ProjectTableLink {
-                    destination: destination.clone(),
-                    tabindex: "0",
-                    test_id: "project-table-name",
-                    div { class: "min-w-36 max-w-64",
-                        span {
-                            class: "block truncate font-semibold text-ink",
-                            title: "{project.path}",
-                            "{project.name}"
-                        }
-                        span { class: "mt-1 block truncate text-[10px] {status.status_color}",
-                            "{status.status_label}"
-                        }
-                    }
-                }
-            }
-            TableColumn {
-                ProjectTableLink {
-                    destination: destination.clone(),
-                    test_id: "project-table-branch",
-                    span { class: "flex max-w-48 items-center gap-1.5 font-mono text-xs",
-                        if let Some(branch) = status.branch {
-                            GitBranch { size: 13, class: "shrink-0 text-ink-3" }
-                            span {
-                                class: "truncate select-text",
-                                title: branch,
-                                "data-testid": "project-table-branch-text",
-                                "{branch}"
-                            }
-                        } else {
-                            NoData {}
-                        }
-                    }
-                }
-            }
-            TableColumn {
-                ProjectTableLink {
-                    destination: destination.clone(),
-                    test_id: "project-table-changes",
-                    if status.local_available {
-                        span {
-                            class: "font-mono text-xs {status.status_color}",
-                            role: "img",
-                            title: status.symbols_description,
-                            aria_label: status.symbols_description,
-                            "[{status.symbols}]"
-                        }
-                    } else {
-                        NoData {}
-                    }
-                }
-            }
-            TableColumn {
-                ProjectTableLink {
-                    destination: destination.clone(),
-                    test_id: "project-table-unpushed",
-                    span {
-                        class: "w-full text-right font-mono text-sm tabular-nums text-ink",
-                        title: comparison_label(&project),
-                        if let Some(count) = status.ahead {
-                            "{count}"
-                        } else {
-                            NoData {}
-                        }
-                    }
-                }
-            }
-            TableColumn {
-                ProjectTableLink {
-                    destination: destination.clone(),
-                    test_id: "project-table-rendered",
-                    span { class: "whitespace-nowrap font-mono text-[10px] text-ink-3",
-                        if let Some(rendered) = rendered {
-                            "{rendered}"
-                        } else {
-                            NoData {}
-                        }
-                    }
-                }
-            }
-            TableColumn {
-                ProjectComparisonEditor { project: project.clone(), disabled }
-                div { class: "flex justify-end gap-1",
-                    for comparison in [LiveComparison::LocalChanges, LiveComparison::UnpushedCommits] {
-                        ProjectComparisonAction {
-                            path: project.path.clone(),
-                            comparison,
-                            branch_changes: is_branch_comparison(&project),
-                            available: match comparison {
-                                LiveComparison::LocalChanges => status.local_available,
-                                LiveComparison::UnpushedCommits => status.ahead.is_some(),
-                            },
-                            disabled,
-                            issue: status.issue.map(str::to_owned),
-                            compact: true,
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProjectTableLink(
-    destination: Option<Route>,
-    test_id: &'static str,
-    #[props(default = "-1")] tabindex: &'static str,
-    children: Element,
-) -> Element {
-    let class = "-mx-4 -my-3 flex h-full min-h-20 items-center px-4 py-3 select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc";
-    rsx! {
-        if let Some(destination) = destination {
-            Link {
-                to: destination,
-                "data-testid": test_id,
-                draggable: "false",
-                tabindex,
-                class,
-                {children}
-            }
-        } else {
-            div { class, "data-testid": test_id, {children} }
-        }
-    }
-}
-
-fn is_branch_comparison(project: &ViewerProject) -> bool {
-    !matches!(
-        project.branch_comparison,
-        ViewerProjectBranchComparison::Upstream
-    )
-}
-
-fn comparison_label(project: &ViewerProject) -> &'static str {
-    if is_branch_comparison(project) {
-        "Branch changes"
-    } else {
-        "Unpushed commits"
-    }
-}
-
-struct ProjectComparisonEdit {
-    draft: ReadSignal<Option<String>>,
-    pending: Memo<bool>,
-    error: Memo<Option<String>>,
-    change: Callback<String>,
-    save: Callback<()>,
-}
-
-fn use_project_comparison_edit(project: &ViewerProject) -> ProjectComparisonEdit {
-    let projects = use_context::<Projects>();
-    let mut draft = use_signal(|| None::<String>);
-    let mut validation_error = use_signal(|| None::<String>);
-    let mut action = use_action(move |request: UpdateViewerProject| async move {
-        viewer_server::update_project(request).await?;
-        draft.set(None);
-        (projects.refresh)(());
-        Ok::<(), ViewerClientError>(())
-    });
-    let change = use_callback(move |value| {
-        draft.set(Some(value));
-        validation_error.set(None);
-    });
-    let path = project.path.clone();
-    let previous = project.comparison_branch.clone();
-    let save = use_callback(move |()| {
-        let Some(value) = draft.peek().clone() else {
-            return;
-        };
-        match gtl_models::projects::comparison::ComparisonBranch::try_new(value) {
-            Ok(branch) => {
-                validation_error.set(None);
-                action.call(UpdateViewerProject {
-                    path: path.clone(),
-                    comparison_branch: FieldUpdate::Update(branch),
-                    expected_comparison_branch: previous.clone(),
-                });
-            }
-            Err(_) => validation_error.set(Some(
-                "Enter a local branch name, such as main or release/next.".to_owned(),
-            )),
-        }
-    });
-    ProjectComparisonEdit {
-        draft: draft.into(),
-        pending: use_memo(move || action.pending()),
-        error: use_memo(move || {
-            validation_error().or_else(|| {
-                action
-                    .value()
-                    .and_then(Result::err)
-                    .map(|error| error.to_string())
-            })
-        }),
-        change,
-        save,
-    }
-}
-
-#[component]
-fn ProjectComparisonEditor(project: ViewerProject, disabled: bool) -> Element {
-    use crate::shared::ui::{ButtonType, TextInput};
-    let edit = use_project_comparison_edit(&project);
-    let value = (edit.draft)().unwrap_or_else(|| project.comparison_branch.to_string());
-    let pending = (edit.pending)();
-    let error = (edit.error)();
-    rsx! {
-        details { class: "my-3 min-w-0 text-xs",
-            summary { class: "cursor-pointer break-all text-ink-2 focus-visible:outline-2 focus-visible:outline-acc",
-                "Comparison: {project.comparison_branch}"
-            }
-            form {
-                class: "mt-3 grid gap-2",
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    (edit.save)(());
-                },
-                TextInput {
-                    label: "Local comparison branch",
-                    value,
-                    disabled: disabled || pending,
-                    maxlength: "1024",
-                    aria_invalid: error.is_some().to_string(),
-                    oninput: move |event: FormEvent| (edit.change)(event.value()),
-                    supporting_content: rsx! { "Used when the current branch has no upstream." },
-                }
-                if let Some(error) = error {
-                    p { class: "break-words text-del", role: "alert", "{error}" }
-                }
-                Button {
-                    button_type: ButtonType::Submit,
-                    size: ButtonSize::Small,
-                    variant: ButtonVariant::Outline,
-                    state: if pending { ButtonState::Loading } else if disabled || (edit.draft)().is_none() { ButtonState::Disabled } else { ButtonState::Enabled },
-                    "Save comparison"
-                }
-            }
-        }
-        if let ViewerProjectBranchComparison::Unavailable { reason } = &project
-            .branch_comparison
-        {
-            p { class: "mt-2 max-w-sm break-words text-xs text-del", "{reason}" }
         }
     }
 }

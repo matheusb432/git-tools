@@ -42,6 +42,14 @@ pub fn settings_patch(
         FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     };
     Ok(UserSettingsPatch {
+        files_sidebar_visible: application_field_update(request.files_sidebar_visible, |value| {
+            value
+        }),
+        commits_sidebar_visible: application_field_update(
+            request.commits_sidebar_visible,
+            |value| value,
+        ),
+        wrap_lines: application_field_update(request.wrap_lines, |value| value),
         projects_view: application_field_update(request.projects_view, |value| value),
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Light => Theme::Light,
@@ -103,6 +111,7 @@ pub fn project_settings(
     let configured_theme = settings.theme().map(super::project_theme);
     let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
+        sidebars: settings.sidebar_visibility(),
         projects_view,
         configuration_path,
         configured_theme,

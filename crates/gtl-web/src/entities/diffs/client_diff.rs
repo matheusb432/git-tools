@@ -5,11 +5,11 @@ use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerFileRows, ViewerRows};
 use gtl_wire::viewer::{ViewerFileSummary, ViewerViewIdentity};
 #[cfg(feature = "desktop")]
+pub(super) use loading::{ClientDiffFetch, LoadedRowWindow, window_too_large};
+#[cfg(feature = "desktop")]
 pub(crate) use loading::{
     ClientDiffWindow, ClientDiffWorkspaceController, use_client_diff_workspace,
 };
-#[cfg(feature = "desktop")]
-pub(super) use loading::{LoadedRowWindow, window_too_large};
 
 use super::{ViewerSplitRow, ViewerUnifiedRow};
 #[cfg(feature = "desktop")]
@@ -59,9 +59,7 @@ pub(crate) enum ClientDiffFileError {
 impl ClientDiffFileError {
     pub(crate) fn message(&self) -> &str {
         match self {
-            Self::Transport(ViewerClientError::Unavailable) => {
-                "The diff row stream disconnected. Retrying automatically."
-            }
+            Self::Transport(ViewerClientError::Unavailable) => "The diff row stream disconnected.",
             Self::Transport(error) => error.message(),
             Self::InvalidResponse => {
                 "The server returned invalid diff rows. Retry this view to load it again."
@@ -78,7 +76,10 @@ impl ClientDiffFileError {
     }
 
     const fn retries_automatically(&self) -> bool {
-        matches!(self, Self::Transport(ViewerClientError::Unavailable))
+        matches!(
+            self,
+            Self::Transport(ViewerClientError::Unavailable | ViewerClientError::ResourceExhausted)
+        )
     }
 }
 

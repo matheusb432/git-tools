@@ -1,0 +1,7 @@
+@layer components {
+  .viewer-shell { @apply flex flex-col overflow-hidden bg-bg text-ink; }
+  .artifact-empty { @apply grid place-content-center bg-bg text-center text-ink; }
+  .artifact-tabs { @apply flex flex-none items-center; }
+  .artifact-tab { @apply max-w-[280px] overflow-hidden text-ellipsis border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
+  .artifact-tab[aria-selected="true"] { @apply border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg; }
+}

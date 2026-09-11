@@ -1,3 +1,4 @@
+use crate::shared::ui::ScrollArea;
 mod browser;
 pub(in crate::views::diffs) mod geometry;
 
@@ -10,7 +11,10 @@ use self::{
     browser::ViewportBrowser,
     geometry::{DiffGeometry, FileWindow},
 };
-use super::file::{DiffFileCard, DiffFileControls};
+use super::{
+    file::{DiffFileCard, DiffFileControls},
+    scroll_area::DiffRowsScrollArea,
+};
 use crate::{
     entities::diffs::{
         ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWindow,
@@ -137,7 +141,11 @@ pub(super) fn DiffViewport(
     let (mut geometry, mut retained_width) = use_hook(move || {
         presentation.ensure_tab(identity.tab_id);
         let (width, geometry) = presentation
-            .take_geometry(identity.tab_id, content_id)
+            .take_geometry(
+                identity.tab_id,
+                content_id,
+                identity.render_options.wrap_lines,
+            )
             .unwrap_or_else(|| (0.0, make_geometry(workspace, presentation, identity)));
         (Signal::new(geometry), Signal::new(width))
     });
@@ -230,6 +238,7 @@ pub(super) fn DiffViewport(
         presentation.keep_geometry(
             identity.tab_id,
             content_id,
+            identity.render_options.wrap_lines,
             *retained_width.peek(),
             geometry.peek().clone(),
         );
@@ -276,13 +285,14 @@ pub(super) fn DiffViewport(
         .map(|file| file.summary.row_count)
         .sum::<usize>();
     rsx! {
-        div {
-            class: "h-full min-h-0 overflow-auto bg-bg pb-[60px] text-ink tablet:pb-12",
+        ScrollArea {
+            class: "diff-document-scroll h-full min-h-0",
             style: "overflow-anchor: none;",
             role: "region",
             aria_label: "Rendered diff for {title}",
             aria_busy: is_loading.to_string(),
             "data-gtl-diff-document": "",
+            "data-wrap-lines": identity.render_options.wrap_lines.to_string(),
             "data-view-state": if is_loading { "streaming" } else { "complete" },
             "data-chunks-complete": (!is_loading).to_string(),
             "data-view-identity": format!(
@@ -318,6 +328,7 @@ pub(super) fn DiffViewport(
                 }
             }
             div { style: "height: {after}px;", aria_hidden: "true" }
+            div { class: "h-15 tablet:h-12 print:hidden", aria_hidden: "true" }
         }
     }
 }
@@ -381,12 +392,11 @@ fn ViewportFile(
     let before_file = window.before_file;
     let after = window.after_rows;
     let body = rsx! {
-        div {
+        DiffRowsScrollArea {
             id: "viewer-diff-{index}",
-            class: "overflow-x-hidden text-sm leading-5",
-            style: "--unified-line-number-width:calc({digits}ch + 8px)",
-            "data-layout": layout.as_str(),
-            "data-density": context.identity.render_options.density.as_str(),
+            layout,
+            density: context.identity.render_options.density,
+            line_number_digits: digits,
             for placement in window.windows {
                 div { key: "{placement.index}",
                     div {

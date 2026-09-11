@@ -504,8 +504,8 @@ async fn run_stream<Stream>(
         };
         let (result, finished) =
             collect_ready_batch(&mut stream, first, &mut items, &mut pending_terminal).await;
-        let _ = reply.send(result);
-        if finished {
+        let abandoned = reply.send(result).is_err();
+        if finished || abandoned {
             break;
         }
     }

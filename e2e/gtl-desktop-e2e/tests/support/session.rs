@@ -107,14 +107,19 @@ impl TestSession {
         Ok(())
     }
 
-    pub async fn restart_server(&mut self) -> Result<()> {
+    pub async fn stop_server(&mut self) -> Result<()> {
         let mut server = self
             .server_child
             .take()
             .ok_or_else(|| anyhow!("gtl-server is not running"))?;
         terminate_child("gtl-server", &mut server)
             .await
-            .context("stop gtl-server before restart")?;
+            .context("stop gtl-server")?;
+        Ok(())
+    }
+
+    pub async fn restart_server(&mut self) -> Result<()> {
+        self.stop_server().await?;
         self.server_child = Some(
             start_server(&self.data_root)
                 .await

@@ -4,7 +4,7 @@ use gtl_wire::viewer::ResetSettings;
 use crate::{
     app::application_layout::ViewerContext,
     entities::diffs::viewer_server,
-    shared::ui::{Button, ButtonVariant, PageNotice, ToastHandle, use_toast},
+    shared::ui::{Button, ButtonVariant, PageNotice, ScrollArea, ToastHandle, use_toast},
 };
 
 fn use_settings_reset(onretry: EventHandler<()>) -> (ReadSignal<bool>, Callback<String>) {
@@ -63,53 +63,53 @@ pub(crate) fn SettingsRecovery(onretry: EventHandler<()>) -> Element {
     let load = recovery.read();
 
     rsx! {
-        PageNotice {
-            class: "h-full overflow-auto px-4 py-6",
-            role: "alert",
-            aria_label: "Settings recovery",
-            title: "User settings are invalid",
-            message: "Repair the file and retry, or restore defaults. Reset saves the original file as config.yyyymmdd-hhmmss-backup.toml before replacing it. Backup timestamps use UTC.",
-            match &*load {
-                None => rsx! {
-                    p { role: "status", "Loading settings details..." }
-                },
-                Some(Err(error)) => rsx! {
-                    p { "{error.message()}" }
-                },
-                Some(Ok(recovery)) => rsx! {
-                    p { class: "mt-4 max-w-3xl break-all font-mono text-ink", "{recovery.configuration_path}" }
-                    if let Some(diagnostic) = &recovery.diagnostic {
-                        pre { class: "mt-3 max-w-3xl whitespace-pre-wrap break-words text-left text-ink-2",
-                            "{diagnostic}"
-                        }
-                        Button {
-                            class: "mx-auto mt-4",
-                            variant: ButtonVariant::Outline,
-                            disabled: pending(),
-                            onclick: {
-                                let revision = recovery.revision.clone();
-                                move |_| reset.call(revision.clone())
-                            },
-                            if pending() {
-                                "Backing up and resetting..."
-                            } else {
-                                "Back up and reset settings"
+        ScrollArea { class: "h-full",
+            PageNotice {
+                class: "min-h-full px-4 py-6",
+                role: "alert",
+                aria_label: "Settings recovery",
+                title: "User settings are invalid",
+                message: "Repair the file and retry, or restore defaults. Reset saves the original file as config.yyyymmdd-hhmmss-backup.toml before replacing it. Backup timestamps use UTC.",
+                match &*load {
+                    None => rsx! {
+                        p { role: "status", "Loading settings details..." }
+                    },
+                    Some(Err(error)) => rsx! {
+                        p { "{error.message()}" }
+                    },
+                    Some(Ok(recovery)) => rsx! {
+                        p { class: "settings-recovery-path mt-4 font-mono", "{recovery.configuration_path}" }
+                        if let Some(diagnostic) = &recovery.diagnostic {
+                            pre { class: "settings-recovery-diagnostic mt-3", "{diagnostic}" }
+                            Button {
+                                class: "mx-auto mt-4",
+                                variant: ButtonVariant::Outline,
+                                disabled: pending(),
+                                onclick: {
+                                    let revision = recovery.revision.clone();
+                                    move |_| reset.call(revision.clone())
+                                },
+                                if pending() {
+                                    "Backing up and resetting..."
+                                } else {
+                                    "Back up and reset settings"
+                                }
                             }
+                        } else {
+                            p { class: "mt-3 text-ink-2", "The settings file is valid now. Retry to continue." }
                         }
-                    } else {
-                        p { class: "mt-3 text-ink-2", "The settings file is valid now. Retry to continue." }
-                    }
-                },
-            }
-            Button {
-                class: "mx-auto mt-4",
-                variant: ButtonVariant::Outline,
-                disabled: pending(),
-                onclick: move |_| {
-                    recovery.restart();
-                    onretry.call(());
-                },
-                "Retry"
+                    },
+                }
+                Button {
+                    class: "mx-auto mt-4",
+                    variant: ButtonVariant::Outline,
+                    disabled: pending(),
+                    onclick: move |_| {
+                        recovery.restart();
+                        onretry.call(());
+                    },
+                    "Retry"
+                }
             }
         }
     }

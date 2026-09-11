@@ -94,7 +94,7 @@ pub(super) fn FilesPanel(
 
     rsx! {
         ScrollArea {
-            class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+            class: "diff-files-scroll-panel h-full min-h-0 p-3 compact:p-2.5",
             "data-testid": test_id,
             FilesPanelHeading { file_count: model.file_count, artifact_view_id }
             FilesPanelSummary { commit_count: model.commit_count, totals: model.totals }
@@ -157,11 +157,9 @@ fn render_file_tree(
             for (directory_name, directory) in &tree.directories {
                 li { class: "min-w-0",
                     details { class: "group", open: true,
-                        summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
+                        summary { class: "diff-files-directory-summary",
                             WorkspaceDirectoryCaret {}
-                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-                                "{directory_name}"
-                            }
+                            span { class: "diff-files-directory-name min-w-0", "{directory_name}" }
                         }
                         {render_file_tree(directory, true, onnavigate, artifact_enhancement)}
                     }
@@ -182,7 +180,7 @@ fn render_file_tree(
 fn WorkspaceDirectoryCaret() -> Element {
     rsx! {
         span {
-            class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none",
+            class: "diff-files-directory-caret group-open:rotate-90 motion-reduce:transition-none",
             aria_hidden: "true",
             ChevronRight { size: 12 }
         }
@@ -211,7 +209,7 @@ fn WorkspaceFileItem(
     let color = file_status_text_class(file.status);
     let artifact_action = artifact_enhancement.then_some("navigate-file");
     let item_attributes = merge_attributes(vec![attributes!(div {
-        class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug bg-transparent hover:bg-surface-2 active:bg-surface-2",
+        class: "diff-files-file-button gap-1.5 px-1.5 py-0.5 leading-snug",
     })]);
 
     rsx! {
@@ -225,9 +223,7 @@ fn WorkspaceFileItem(
                 "data-gtl-action": artifact_action,
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
-                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap {color}",
-                    "{file_name}"
-                }
+                span { class: "diff-files-file-name min-w-0 {color}", "{file_name}" }
                 DiffFileStatus { status: file.status }
             }
         }

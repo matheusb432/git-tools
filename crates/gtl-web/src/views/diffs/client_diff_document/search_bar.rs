@@ -65,7 +65,7 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                     _ => {}
                 }
             },
-            div { class: "grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1.5 p-2",
+            div { class: "diff-search-layout gap-x-2 gap-y-1.5 p-2",
                 div { class: "relative min-w-0",
                     span {
                         class: "pointer-events-none absolute top-1/2 left-2.5 z-2 -translate-y-1/2 text-ink-3",

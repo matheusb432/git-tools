@@ -15,7 +15,7 @@ type Client = v1::viewer_service_client::ViewerServiceClient<
     InterceptedService<Channel, ServerHarnessAuthorization>,
 >;
 
-fn git(path: &Path, args: &[&str]) -> TestResult {
+pub(super) fn git(path: &Path, args: &[&str]) -> TestResult {
     let output = Command::new("git")
         .arg("-C")
         .arg(path)
@@ -36,7 +36,7 @@ async fn shell(client: &mut Client) -> TestResult<ViewerShell> {
     )?)
 }
 
-async fn ready_shell(client: &mut Client) -> TestResult<ViewerShell> {
+pub(super) async fn ready_shell(client: &mut Client) -> TestResult<ViewerShell> {
     loop {
         let shell = shell(client).await?;
         if matches!(&shell.active, ViewerActiveState::Ready { view }

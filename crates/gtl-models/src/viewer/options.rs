@@ -201,6 +201,7 @@ pub enum ParseRenderOptionError {
 pub struct RenderOptions {
     layout: DiffLayout,
     density: DiffDensity,
+    wrap_lines: bool,
 }
 
 impl RenderOptions {
@@ -210,7 +211,21 @@ impl RenderOptions {
     /// Creates rendering options from validated closed-set values.
     #[must_use]
     pub const fn new(layout: DiffLayout, density: DiffDensity) -> Self {
-        Self { layout, density }
+        Self {
+            layout,
+            density,
+            wrap_lines: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn wrap_lines(self) -> bool {
+        self.wrap_lines
+    }
+
+    #[must_use]
+    pub const fn with_wrap_lines(self, wrap_lines: bool) -> Self {
+        Self { wrap_lines, ..self }
     }
 
     /// Returns the selected diff layout.
@@ -241,7 +256,7 @@ impl RenderOptions {
     /// ```
     #[must_use]
     pub const fn with_layout(self, layout: DiffLayout) -> Self {
-        Self::new(layout, self.density)
+        Self { layout, ..self }
     }
 
     /// Returns a copy with a different validated density.
@@ -260,7 +275,7 @@ impl RenderOptions {
     /// ```
     #[must_use]
     pub const fn with_density(self, density: DiffDensity) -> Self {
-        Self::new(self.layout, density)
+        Self { density, ..self }
     }
 }
 

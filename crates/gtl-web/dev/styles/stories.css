@@ -1,0 +1,10 @@
+@layer components {
+  .story-viewer-frame { @apply max-w-4xl overflow-hidden rounded-panel border border-line bg-bg shadow-floating; }
+  .story-viewer-frame-narrow { @apply w-[23rem] overflow-hidden rounded-panel border border-line bg-bg shadow-floating; }
+  .story-viewer-shell-mobile { @apply flex h-[844px] w-[390px] flex-col overflow-hidden rounded-panel border border-line bg-bg shadow-floating; }
+  .story-viewer-shell-desktop { @apply flex h-[760px] min-w-[70rem] max-w-[90rem] flex-col overflow-hidden rounded-panel border border-line bg-bg shadow-floating; }
+  .story-viewer-body { @apply flex-1 overflow-hidden; }
+  .story-active-view { @apply grid place-items-center text-center; }
+  .story-settings-preview { @apply h-[800px] max-w-5xl overflow-auto rounded-panel border border-line bg-bg shadow-floating; }
+  .story-thumbnail-frame { @apply overflow-hidden rounded-panel border border-line bg-bg; }
+}

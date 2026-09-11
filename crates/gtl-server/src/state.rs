@@ -25,6 +25,8 @@ pub(crate) struct AppState {
     pub(crate) text_editor: GitTextEditorClient,
     pub(crate) viewer: gtl_application::viewer::ViewerState,
     pub(crate) viewer_row_streams: ViewerWorkRequests,
+    pub(crate) viewer_row_sessions: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_row_workers: Arc<tokio::sync::Semaphore>,
     pub(crate) viewer_searches: ViewerWorkRequests,
     pub(crate) live_refresh_permits: Arc<tokio::sync::Semaphore>,
 }
@@ -52,6 +54,12 @@ impl AppState {
             text_editor: GitTextEditorClient,
             viewer: gtl_application::viewer::ViewerState::new(),
             viewer_row_streams: ViewerWorkRequests::default(),
+            viewer_row_workers: Arc::new(tokio::sync::Semaphore::new(
+                gtl_wire::viewer::VIEWER_ROW_SESSIONS_MAX,
+            )),
+            viewer_row_sessions: Arc::new(tokio::sync::Semaphore::new(
+                gtl_wire::viewer::VIEWER_ROW_SESSIONS_MAX,
+            )),
             viewer_searches: ViewerWorkRequests::default(),
             live_refresh_permits: Arc::new(tokio::sync::Semaphore::new(1)),
         })
@@ -64,6 +72,17 @@ pub(crate) struct ViewerWorkRequests {
 }
 
 impl ViewerWorkRequests {
+    pub(crate) fn current_stream(
+        &self,
+    ) -> Result<gtl_application::viewer::rows::ViewerWorkCancellation, ViewerWorkStateError> {
+        Ok(self
+            .current
+            .lock()
+            .map_err(|_| ViewerWorkStateError)?
+            .get_or_insert_default()
+            .clone())
+    }
+
     pub(crate) fn start_stream(
         &self,
     ) -> Result<gtl_application::viewer::rows::ViewerWorkCancellation, ViewerWorkStateError> {

@@ -10,7 +10,7 @@ use super::{PointerDrag, TabDragLayout, TabSlot};
 
 const CANCEL_EVENTS: [&str; 3] = ["blur", "resize", "scroll"];
 const DRAG_THRESHOLD_PX: f64 = 5.0;
-const FLOATING_CLASSES: &str = "pointer-events-none fixed inset-auto m-0 flex min-w-0 max-w-none select-none items-center rounded-sm border-0 bg-surface-2 p-0 text-ink shadow-floating outline outline-1 outline-acc-line";
+const FLOATING_CLASSES: &str = "viewer-tab-floating m-0 min-w-0 max-w-none p-0";
 
 #[derive(Clone, Copy)]
 enum Axis {

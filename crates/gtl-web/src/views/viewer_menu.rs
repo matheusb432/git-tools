@@ -1,11 +1,14 @@
+mod keyboard;
+
 use dioxus::prelude::*;
 use lucide_dioxus::{Ellipsis, History, Settings};
 
 use crate::shared::{
     browser,
     ui::{
-        ButtonSize, CountBadge, IconPopover, IconPopoverIconMotion, IconPopoverPlacement,
-        MENU_ACTION_HOST_CLASSES, MenuActionContent,
+        ButtonSize, CountBadge, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+        icon_popover::IconPopoverTrigger,
+        popover::{PopoverPlacement, PopoverSurface},
     },
 };
 
@@ -19,56 +22,72 @@ pub(crate) fn ViewerMenu(
     onhistory: EventHandler<()>,
     onsettings: EventHandler<()>,
 ) -> Element {
+    let keyboard_id = id.clone();
     rsx! {
-        IconPopover {
-            id: id.clone(),
-            aria_label: "Viewer menu",
-            placement: IconPopoverPlacement::TriggerEnd,
-            trigger_size,
-            trigger_test_id,
-            wrapper_class: "my-0.5",
-            icon_motion: IconPopoverIconMotion::QuarterTurn,
-            icon: rsx! {
-                Ellipsis { size: 18 }
-            },
-            div { class: "grid gap-0.5 p-1.5",
-                button {
-                    class: MENU_ACTION_HOST_CLASSES,
-                    r#type: "button",
-                    aria_label: "History",
-                    "data-testid": history_test_id,
-                    onclick: {
-                        let popover_id = id.clone();
-                        move |_| {
-                            browser::hide_popover(&popover_id);
-                            onhistory.call(());
-                        }
-                    },
-                    MenuActionContent {
-                        icon: rsx! {
-                            History { size: 15 }
+        span {
+            class: "icon-popover group/icon-popover",
+            onkeydown: move |event| keyboard::keydown(&keyboard_id, &event),
+            IconPopoverTrigger {
+                id: id.clone(),
+                aria_label: "Viewer menu",
+                aria_haspopup: "menu",
+                trigger_size,
+                trigger_test_id,
+                icon_motion: IconPopoverIconMotion::QuarterTurn,
+                icon: rsx! {
+                    Ellipsis { size: 18 }
+                },
+            }
+            PopoverSurface {
+                id: id.clone(),
+                placement: PopoverPlacement::TriggerEnd,
+                role: "menu",
+                aria_label: "Viewer menu",
+                aria_labelledby: format!("{id}-trigger"),
+                div { class: "grid gap-0.5 p-1.5",
+                    button {
+                        class: MENU_ACTION_HOST_CLASSES,
+                        r#type: "button",
+                        role: "menuitem",
+                        tabindex: "-1",
+                        autofocus: true,
+                        aria_label: "History",
+                        "data-testid": history_test_id,
+                        onclick: {
+                            let popover_id = id.clone();
+                            move |_| {
+                                browser::hide_popover(&popover_id);
+                                onhistory.call(());
+                            }
                         },
-                        label: "History",
-                        description: "Browse saved renders",
-                        if history_count > 0 {
-                            CountBadge { count: history_count }
+                        MenuActionContent {
+                            icon: rsx! {
+                                History { size: 15 }
+                            },
+                            label: "History",
+                            description: "Browse saved renders",
+                            if history_count > 0 {
+                                CountBadge { count: history_count }
+                            }
                         }
                     }
-                }
-                button {
-                    class: MENU_ACTION_HOST_CLASSES,
-                    r#type: "button",
-                    aria_label: "User settings",
-                    onclick: move |_| {
-                        browser::hide_popover(&id);
-                        onsettings.call(());
-                    },
-                    MenuActionContent {
-                        icon: rsx! {
-                            Settings { size: 15 }
+                    button {
+                        class: MENU_ACTION_HOST_CLASSES,
+                        r#type: "button",
+                        role: "menuitem",
+                        tabindex: "-1",
+                        aria_label: "User settings",
+                        onclick: move |_| {
+                            browser::hide_popover(&id);
+                            onsettings.call(());
                         },
-                        label: "Settings",
-                        description: "Viewer defaults",
+                        MenuActionContent {
+                            icon: rsx! {
+                                Settings { size: 15 }
+                            },
+                            label: "Settings",
+                            description: "Viewer defaults",
+                        }
                     }
                 }
             }
@@ -104,15 +123,5 @@ mod tests {
         assert!(html.contains("Settings"));
         assert!(!html.contains("Theme"));
         assert!(!html.contains("<select"));
-    }
-
-    #[test]
-    fn trigger_inset_keeps_the_navigation_height_flush_with_tabs() {
-        let html = dioxus_ssr::render_element(rsx! {
-            ViewerMenuTestView {}
-        });
-
-        assert!(html.contains("my-0.5"));
-        assert!(!html.contains("my-1"));
     }
 }

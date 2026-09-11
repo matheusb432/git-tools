@@ -1,5 +1,6 @@
 use dioxus::{dioxus_core::Task, prelude::*};
 
+use super::{ScrollArea, scroll_area::ScrollAreaVariant};
 use crate::shared::browser;
 
 #[derive(Default)]
@@ -103,12 +104,15 @@ pub(crate) fn HoverPopover(
     rsx! {
         span {
             id,
-            class: "fixed inset-auto z-70 m-0 w-[min(19rem,calc(100vw-1rem))] border-0 bg-transparent p-0 {placement_class}",
+            class: "hover-popover-shell m-0 p-0 {placement_class}",
             style: "position-anchor: {anchor_name};",
             popover: "auto",
             role: "tooltip",
             aria_label,
-            div { class: "max-h-[min(18rem,calc(100vh-1rem))] overflow-x-hidden overflow-y-auto rounded-panel border border-line-2 bg-surface p-3 text-ink shadow-floating animate-commit-popover-enter motion-reduce:animate-none",
+            ScrollArea {
+                variant: ScrollAreaVariant::Vertical,
+                class: "hover-popover-content p-3",
+                "data-testid": gtl_web_contracts::test_ids::HOVER_POPOVER_CONTENT.value(),
                 {children}
             }
         }

@@ -1,15 +1,12 @@
 use dioxus::prelude::*;
 
 use super::{
-    HEADER_CODE_CLASSES, HeaderTone,
+    HeaderTone,
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
     ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerUnifiedRow,
 };
-
-const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
-const UNIFIED_ROW_SHELL_CLASSES: &str = "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnifiedSourceTone {
@@ -124,7 +121,7 @@ fn UnifiedHeaderRow(tone: HeaderTone, text: String) -> Element {
         UnifiedHeaderRowShell { tone,
             UnifiedGutter { number: None, tone: UnifiedGutterTone::Hidden }
             UnifiedGutter { number: None, tone: UnifiedGutterTone::Hidden }
-            UnifiedHeaderCode { tone, text }
+            UnifiedHeaderCode { text }
         }
     }
 }
@@ -175,14 +172,14 @@ fn UnifiedSourceRow(
 
 #[component]
 fn UnifiedHeaderRowShell(tone: HeaderTone, children: Element) -> Element {
-    let tone_classes = match tone {
-        HeaderTone::Meta => "opacity-60",
-        HeaderTone::Hunk => "bg-sunk",
+    let tone = match tone {
+        HeaderTone::Meta => "meta",
+        HeaderTone::Hunk => "hunk",
     };
     rsx! {
         div {
-            class: "{UNIFIED_ROW_SHELL_CLASSES}",
-            class: "{tone_classes}",
+            class: "diff-row-unified",
+            "data-diff-tone": tone,
             "data-gtl-diff-row": "",
             {children}
         }
@@ -195,17 +192,17 @@ fn UnifiedSourceRowShell(
     copy_line_number: Option<u32>,
     children: Element,
 ) -> Element {
-    let tone_classes = match tone {
-        UnifiedSourceTone::Context => "",
-        UnifiedSourceTone::Added => "bg-[color-mix(in_srgb,var(--add-bg)_50%,transparent)]",
-        UnifiedSourceTone::Removed => "bg-[color-mix(in_srgb,var(--del-bg)_50%,transparent)]",
+    let tone = match tone {
+        UnifiedSourceTone::Context => "context",
+        UnifiedSourceTone::Added => "added",
+        UnifiedSourceTone::Removed => "removed",
     };
     let copy_line = copy_line_number.map(|_| "");
     let new_line_number = copy_line_number.map(|number| number.to_string());
     rsx! {
         div {
-            class: "{UNIFIED_ROW_SHELL_CLASSES}",
-            class: "{tone_classes}",
+            class: "diff-row-unified",
+            "data-diff-tone": tone,
             "data-gtl-diff-row": "",
             "data-gtl-copy-line": copy_line,
             "data-gtl-new-line": new_line_number,
@@ -220,32 +217,24 @@ fn UnifiedGutter(number: Option<u32>, tone: UnifiedGutterTone) -> Element {
     let gutter_classes = match tone {
         UnifiedGutterTone::Hidden => "hidden",
         UnifiedGutterTone::Neutral | UnifiedGutterTone::Added | UnifiedGutterTone::Removed => {
-            UNIFIED_GUTTER_CLASSES
+            "diff-row-unified-gutter"
         }
     };
-    let tone_classes = match tone {
-        UnifiedGutterTone::Hidden => "",
-        UnifiedGutterTone::Neutral => "bg-transparent text-ink-3",
-        UnifiedGutterTone::Added => "bg-add-gut text-add",
-        UnifiedGutterTone::Removed => "bg-del-gut text-del",
+    let tone = match tone {
+        UnifiedGutterTone::Hidden => None,
+        UnifiedGutterTone::Neutral => Some("neutral"),
+        UnifiedGutterTone::Added => Some("added"),
+        UnifiedGutterTone::Removed => Some("removed"),
     };
     rsx! {
-        span { class: "{gutter_classes}", class: "{tone_classes}", {line_number} }
+        span { class: "{gutter_classes}", "data-diff-tone": tone, {line_number} }
     }
 }
 
 #[component]
-fn UnifiedHeaderCode(tone: HeaderTone, text: String) -> Element {
-    let tone_classes = match tone {
-        HeaderTone::Meta => "",
-        HeaderTone::Hunk => "font-semibold",
-    };
+fn UnifiedHeaderCode(text: String) -> Element {
     rsx! {
-        code {
-            class: "{HEADER_CODE_CLASSES} col-[1/-1]",
-            class: "{tone_classes}",
-            "{text}"
-        }
+        code { class: "diff-row-header-code diff-row-code col-[1/-1]", "{text}" }
     }
 }
 
@@ -256,7 +245,7 @@ fn UnifiedCodeCell(
     copy_text: bool,
 ) -> Element {
     rsx! {
-        code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] print:text-[#111]",
+        code { class: "diff-row-unified-code min-w-0 py-0 pr-1 pl-3 text-sm diff-row-code",
             CodeCellContent {
                 source: CodeLineSource::Unified(row),
                 marker: None,
@@ -326,7 +315,8 @@ mod tests {
         assert!(html.contains(r#"data-gtl-expanded="false""#));
         assert!(html.contains(r#"data-gtl-action="toggle-long-line""#));
         assert!(html.contains(r#"data-gtl-long-line-text="""#));
-        assert!(html.contains(r#"data-gtl-expanded-classes="overflow-x-auto text-clip""#));
-        assert!(html.contains(r#"data-gtl-collapsed-classes="overflow-hidden text-ellipsis""#));
+        assert!(html.contains(r#"class="diff-long-line-text""#));
+        assert!(!html.contains("data-gtl-expanded-classes"));
+        assert!(!html.contains("data-gtl-collapsed-classes"));
     }
 }

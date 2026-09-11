@@ -41,6 +41,7 @@ pub fn project(
     options: RenderOptions,
     theme: Theme,
     keybindings: ViewerKeybindings,
+    sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     feedback: Option<ViewerFeedback>,
 ) -> Result<ViewerShell, ProjectViewerShellError> {
     let tabs = session
@@ -88,6 +89,7 @@ pub fn project(
         tabs,
         active,
         preferences: ViewerPreferences {
+            sidebars,
             theme: project_theme(theme),
             render_options: project_render_options(options),
             keybindings,
@@ -226,6 +228,18 @@ pub fn identity_is_current(
     state.inspect(|session| {
         session
             .active_content_identity()
+            .is_some_and(|current| identity_matches(identity, current, options))
+    })
+}
+
+pub fn tab_identity_is_current(
+    state: &ViewerState,
+    identity: ViewerViewIdentity,
+    options: RenderOptions,
+) -> Result<bool, ViewerStateError> {
+    state.inspect(|session| {
+        session
+            .content_identity(identity.tab_id)
             .is_some_and(|current| identity_matches(identity, current, options))
     })
 }

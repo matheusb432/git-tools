@@ -71,7 +71,7 @@ pub(super) fn WorkspaceCommitsPanel(
 
     rsx! {
         ScrollArea {
-            class: "h-full min-h-0 overflow-auto bg-surface",
+            class: "diff-commits-scroll-panel h-full min-h-0",
             "data-testid": test_id,
             onscroll: move |event: ScrollEvent| {
                 if has_more
@@ -112,11 +112,9 @@ pub(super) fn WorkspaceCommitsPanel(
                 }
             }
             if loading {
-                p { class: "px-3 py-3 text-center text-ink-3", role: "status", "Loading commits..." }
+                p { class: "diff-commits-loading px-3 py-3", role: "status", "Loading commits..." }
             } else if let Some(message) = load_error {
-                div {
-                    class: "mx-3 mt-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del compact:mx-2.5",
-                    role: "alert",
+                div { class: "diff-commits-error", role: "alert",
                     p { "{message}" }
                     if let Some(onloadmore) = onloadmore {
                         Button {
@@ -160,11 +158,11 @@ fn CommitsPanelHeader(
 ) -> Element {
     let heading = commit_panel_heading(&label);
     rsx! {
-        header { class: "border-b border-line px-3 py-2 compact:px-2.5",
-            div { class: "flex items-start justify-between gap-2",
+        header { class: "diff-commits-header px-3 py-2 compact:px-2.5",
+            div { class: "diff-commits-header-content gap-2",
                 div { class: "min-w-0 flex-1",
                     h3 {
-                        class: "m-0 flex whitespace-nowrap text-sm font-semibold leading-snug text-ink",
+                        class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
                         title: "{heading}: {commit_count}",
                         span { class: "truncate first-letter:uppercase", "{heading}" }
                         span { class: "flex-none tabular-nums", ": {commit_count}" }
@@ -202,16 +200,11 @@ fn CommitPanelHint() -> Element {
 #[component]
 fn CommitSelectionError(message: String) -> Element {
     rsx! {
-        p {
-            class: "m-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del compact:m-2.5",
-            role: "alert",
-            "{message}"
-        }
+        p { class: "diff-commits-selection-error", role: "alert", "{message}" }
     }
 }
 
-const COMMIT_CARD_CLASSES: &str =
-    "relative w-full border-0 border-b border-line px-3 py-3 text-left compact:px-2.5";
+const COMMIT_CARD_CLASSES: &str = "diff-commit-card w-full px-3 py-3 compact:px-2.5";
 #[component]
 fn CommitCard(
     commit_index: usize,
@@ -321,7 +314,7 @@ fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
     let committed_at_display = commit.committed_at.display_minute();
     let committed_at_iso = commit.committed_at.to_string();
     rsx! {
-        header { class: "flex items-center justify-between gap-2",
+        header { class: "diff-commit-details-header gap-2",
             p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
                 "Commit details"
             }
@@ -331,11 +324,9 @@ fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
         }
         h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
         if !commit.body.is_empty() {
-            p { class: "mt-2 whitespace-pre-wrap break-words text-xs leading-normal text-ink-2",
-                "{commit.body}"
-            }
+            p { class: "diff-commit-details-body mt-2 text-xs leading-normal", "{commit.body}" }
         }
-        dl { class: "mt-3 divide-y divide-line border-t border-line",
+        dl { class: "diff-commit-details-metadata mt-3",
             div { class: "grid gap-1 py-2",
                 dt { class: "text-xs font-semibold text-ink-3", "Date" }
                 dd { class: "m-0 min-w-0",
@@ -436,15 +427,19 @@ mod tests {
             commit_card_tone_classes(false),
             "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
         );
-        assert!(COMMIT_CARD_CLASSES.contains("border-b"));
+        assert!(COMMIT_CARD_CLASSES.contains("diff-commit-card w-full px-3 py-3"));
+        let stylesheet = include_str!("../../../app/assets/styles/diff-workspace.css");
+        let (_, styles) = stylesheet.split_once(".diff-commit-card {").unwrap();
+        let styles = styles.split('}').next().unwrap();
+        assert!(styles.contains("border-b"));
         assert!(
-            COMMIT_CARD_CLASSES
-                .split_ascii_whitespace()
+            styles
+                .split_whitespace()
                 .all(|class| !class.starts_with("border-l-"))
         );
         assert!(
-            COMMIT_CARD_CLASSES
-                .split_ascii_whitespace()
+            styles
+                .split_whitespace()
                 .all(|class| !class.starts_with("rounded"))
         );
     }

@@ -1,13 +1,18 @@
+#[cfg(feature = "artifact")]
+use crate::shared::ui::ScrollArea;
 #[cfg(feature = "desktop")]
 mod copy_context;
 mod file;
 #[cfg(feature = "desktop")]
 mod find;
+mod scroll_area;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(super) mod search_bar;
 #[cfg(feature = "desktop")]
 pub(super) mod viewport;
 
+#[cfg(feature = "desktop")]
+use dioxus::core::Task;
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerViewIdentity};
@@ -42,13 +47,7 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     let row_source = view.read().row_source;
     let workspace_store = workspace.workspace();
     let stream_active = workspace.row_stream_active();
-    let is_loading = row_source == gtl_wire::viewer::ViewerRowSourceState::Pending
-        || stream_active
-            && workspace_store.is_some_and(|store| {
-                store.files().iter().any(|file| {
-                    *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
-                })
-            });
+    let is_loading = stream_active;
     let retry_allowed = !stream_active && workspace_store.is_some_and(|store| {
         store.files().iter().any(|file| {
             matches!(&*file.state().read(), crate::entities::diffs::ClientDiffFileState::Error(error) if error.retryable())
@@ -132,7 +131,7 @@ fn LoadedDiffDocument(
             // Dioxus reconciles keys in lists; each tab owns these hook lifetimes.
             for identity in [identity] {
                 find::DiffFindBar {
-                    key: "{identity.tab_id}:{content_id:?}",
+                    key: "{identity.tab_id}:{content_id:?}:{identity.render_options.wrap_lines}",
                     open: diff.find_open,
                     identity,
                     workspace,
@@ -162,19 +161,31 @@ fn LoadedDiffDocument(
 fn use_diff_rows_loading_tab(tab_id: ViewerTabId, loading: bool) {
     let viewer = use_context::<ViewerContext>();
     let mut reported_tab_id = use_signal(|| None::<ViewerTabId>);
+    let mut delay = use_signal(|| None::<Task>);
     use_effect(use_reactive(
         (&tab_id, &loading),
         move |(tab_id, loading)| {
-            let previous = *reported_tab_id.peek();
-            if let Some(previous) = previous.filter(|previous| *previous != tab_id) {
+            if let Some(task) = delay.take() {
+                task.cancel();
+            }
+            if let Some(previous) = reported_tab_id.take() {
                 viewer.set_diff_rows_loading(previous, false);
             }
-            viewer.set_diff_rows_loading(tab_id, loading);
-            reported_tab_id.set(loading.then_some(tab_id));
+            if !loading {
+                return;
+            }
+            delay.set(Some(spawn(async move {
+                dioxus_sdk_time::sleep(std::time::Duration::from_millis(150)).await;
+                viewer.set_diff_rows_loading(tab_id, true);
+                reported_tab_id.set(Some(tab_id));
+            })));
         },
     ));
     use_drop(move || {
-        if let Some(tab_id) = *reported_tab_id.peek() {
+        if let Some(task) = delay.take() {
+            task.cancel();
+        }
+        if let Some(tab_id) = reported_tab_id.take() {
             viewer.set_diff_rows_loading(tab_id, false);
         }
     });
@@ -238,12 +249,13 @@ fn DiffDocumentBody(
         density.as_str(),
     );
     rsx! {
-        div {
-            class: "h-full min-h-0 overflow-auto bg-bg pb-[60px] text-ink tablet:pb-12 print:overflow-visible print:p-0",
+        ScrollArea {
+            class: "diff-document-scroll h-full min-h-0 print:overflow-visible",
             role: "region",
             aria_label: "Rendered diff for {title}",
             aria_busy: is_loading.to_string(),
             "data-gtl-diff-document": "",
+            "data-wrap-lines": identity.render_options.wrap_lines.to_string(),
             "data-view-state": if is_loading { "streaming" } else { "complete" },
             "data-chunks-complete": (!is_loading).to_string(),
             "data-view-identity": view_identity,
@@ -260,6 +272,7 @@ fn DiffDocumentBody(
                 onretry,
                 artifact_tab_id,
             }
+            div { class: "h-15 tablet:h-12 print:hidden", aria_hidden: "true" }
         }
     }
 }

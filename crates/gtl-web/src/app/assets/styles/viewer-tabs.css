@@ -1,0 +1,55 @@
+@layer components {
+  .viewer-tab {
+    @apply relative flex h-9 min-w-24 max-w-72 shrink-0 select-none items-center duration-[160ms] ease-out motion-reduce:transition-none;
+  }
+
+  .viewer-tab[data-active="true"] { @apply bg-surface-2 text-ink; }
+  .viewer-tab[data-active="false"] { @apply bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink; }
+  .viewer-tab[data-drag-state="shifting"] { @apply transition-transform will-change-transform motion-reduce:transition-none; }
+  .viewer-tab[data-drag-state="dragging"] { @apply opacity-0; }
+
+  .viewer-tab-trigger {
+    @apply flex h-full min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent pr-1 pl-2 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
+  }
+  .viewer-tab-trigger[data-reorderable="true"] { @apply touch-none cursor-default; }
+  .viewer-tab-trigger[data-reorderable="false"] { @apply cursor-default; }
+
+  .viewer-tab-pinned {
+    @apply relative flex h-9 shrink-0 cursor-default select-none items-center gap-2 border-r border-line-2 px-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
+  }
+  .viewer-tab-pinned[aria-current="page"] { @apply bg-surface-2 text-ink; }
+  .viewer-tab-pinned:not([aria-current="page"]) { @apply bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink; }
+
+  .viewer-tab-selection-indicator {
+    @apply pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-acc;
+  }
+  .viewer-tab-selection-indicator[data-active="true"] { @apply opacity-100 transition-opacity ease-out motion-reduce:transition-none; }
+  .viewer-tab-selection-indicator[data-active="false"] { @apply opacity-0; }
+
+  .viewer-tab-close { @apply relative flex-none text-white; }
+  .viewer-tab-close-surface { @apply pointer-events-none absolute inset-0 rounded-full opacity-0 transition-opacity ease-out group-hover/viewer-tab-close:opacity-100 group-focus-visible/viewer-tab-close:opacity-100 motion-reduce:transition-none; }
+  .viewer-tab-close-icon { @apply pointer-events-none absolute inset-0 z-2 grid place-items-center text-white; }
+
+  .viewer-tab-kind-indicator { @apply inline-flex flex-none items-center justify-center text-add; }
+
+  .viewer-tab-overflow { @apply flex flex-1 items-end; }
+  .viewer-tab-overflow-trigger { @apply relative flex max-w-[30rem] cursor-default select-none items-center border-0 bg-surface-2 text-left text-ink hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-has-[:popover-open]/viewer-tab-overflow:bg-line; }
+  .viewer-tab-overflow-chevron {
+    @apply flex-none text-ink-3 transition-transform ease-out group-has-[:popover-open]/viewer-tab-overflow:rotate-180 motion-reduce:transition-none;
+  }
+  .viewer-tab-overflow-panel { @apply fixed inset-auto z-70 max-h-[min(28rem,calc(100%-0.75rem))] w-[min(26rem,calc(100vw-1rem))] origin-top-right grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-panel border border-line-2 bg-surface text-ink shadow-floating [position-area:bottom_span-left] open:grid motion-reduce:animate-none; }
+  .viewer-tab-overflow-header { @apply flex items-center border-b border-line; }
+
+  .viewer-tab-menu-item {
+    @apply relative flex min-w-0 select-none items-center rounded-sm duration-[160ms] ease-out motion-reduce:transition-none;
+  }
+  .viewer-tab-menu-item[data-active="true"] { @apply bg-surface-2 text-ink; }
+  .viewer-tab-menu-item[data-active="false"] { @apply bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink; }
+  .viewer-tab-menu-item[data-drag-state="shifting"] { @apply transition-transform will-change-transform motion-reduce:transition-none; }
+  .viewer-tab-menu-item[data-drag-state="dragging"] { @apply opacity-0; }
+  .viewer-tab-menu-trigger {
+    @apply flex min-h-10 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-2 py-1 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
+  }
+  .viewer-tab-menu-trigger[data-reorderable="true"] { @apply touch-none cursor-default; }
+  .viewer-tab-menu-trigger[data-reorderable="false"] { @apply cursor-default; }
+}

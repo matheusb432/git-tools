@@ -197,6 +197,7 @@ mod tests {
             range_generation: ViewerRangeGeneration::new(2),
             selection_generation: ViewerSelectionGeneration::new(1),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },

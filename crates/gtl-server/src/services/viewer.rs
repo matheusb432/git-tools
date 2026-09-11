@@ -5,6 +5,7 @@ mod files;
 mod history;
 mod live_watch;
 mod projects;
+mod row_session;
 mod rows;
 mod search;
 mod settings;
@@ -112,6 +113,18 @@ impl ViewerService for ViewerGrpcService {
             }
         });
         Ok(Response::new(Box::pin(ReceiverStream::new(receiver))))
+    }
+
+    type StreamViewerRowSessionStream =
+        ReceiverStream<Result<v1::StreamViewerRowSessionResponse, Status>>;
+
+    async fn stream_viewer_row_session(
+        &self,
+        request: Request<tonic::Streaming<v1::StreamViewerRowSessionRequest>>,
+    ) -> Result<Response<Self::StreamViewerRowSessionStream>, Status> {
+        Ok(Response::new(
+            row_session::start(self.state.clone(), request.into_inner()).await?,
+        ))
     }
 
     type StreamViewerRowsStream = rows::RowStream;

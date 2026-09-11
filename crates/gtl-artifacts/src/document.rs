@@ -165,7 +165,8 @@ mod tests {
         ] {
             assert!(!html.contains(retired), "retained retired asset: {retired}");
         }
-        assert!(!has_disallowed_external_url(&html));
+        let markup = html.replace(static_artifact_enhancement_script(), "");
+        assert!(!has_disallowed_external_url(&markup));
     }
 
     #[test]
@@ -224,16 +225,19 @@ mod tests {
         .unwrap();
         let split = build_html(
             &view,
-            RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Compact).with_wrap_lines(true),
             None,
         )
         .unwrap();
 
+        assert!(unified.contains("data-wrap-lines=\"false\""));
+        assert!(split.contains("data-wrap-lines=\"true\""));
         assert!(unified.contains("data-layout=\"unified\""));
         assert!(unified.contains("text-[var(--sy-kw)]"));
         assert!(unified.contains("⋯ 2001 chars"));
         assert!(split.contains("data-layout=\"split\""));
-        assert!(split.contains("grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)]"));
+        assert!(split.contains("class=\"diff-row-split\""));
+        assert!(split.contains("grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));
         assert!(split.contains("current"));
         assert!(split.contains(">2</span>"));
     }

@@ -21,3 +21,9 @@ mod projects;
 
 #[path = "viewer/settings_recovery.rs"]
 mod settings_recovery;
+
+#[path = "viewer/line_wrapping.rs"]
+mod line_wrapping;
+
+#[path = "viewer/desktop_shell.rs"]
+mod desktop_shell;

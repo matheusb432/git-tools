@@ -15,7 +15,9 @@ fn capability_allowlist_grants_no_fs_or_shell() {
             "core:default",
             "core:window:allow-show",
             "core:window:allow-hide",
-            "core:window:allow-set-focus"
+            "core:window:allow-set-focus",
+            "core:window:allow-start-dragging",
+            "core:window:allow-internal-toggle-maximize"
         ]),
         "permissions must remain exactly the reviewed core/window set"
     );

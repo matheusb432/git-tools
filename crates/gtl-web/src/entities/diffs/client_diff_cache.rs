@@ -7,8 +7,9 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerRowContentId};
 use lru::LruCache;
 
 use super::client_diff::{
-    ClientDiffFileError, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWindow,
-    ClientDiffWorkspace, ClientDiffWorkspaceStoreExt, LoadedRowWindow, window_too_large,
+    ClientDiffFetch, ClientDiffFileError, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
+    ClientDiffWindow, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt, LoadedRowWindow,
+    window_too_large,
 };
 
 const RETAINED_VIEWS_MAX: usize = 8;
@@ -62,25 +63,62 @@ pub(super) struct ClientDiffCacheKey {
     pub(super) content_id: ViewerRowContentId,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) struct ClientDiffCache {
     workspaces: Store<HashMap<ClientDiffCacheKey, ClientDiffWorkspace>>,
     recency: Signal<VecDeque<ClientDiffCacheKey>>,
     rows: Signal<RetainedRows>,
+    pub(super) requests: Signal<VecDeque<ClientDiffFetch>>,
 }
 
 pub(crate) fn use_client_diff_cache_provider() {
     let workspaces = use_store(HashMap::new);
     let recency = use_signal(VecDeque::new);
     let rows = use_signal(RetainedRows::default);
+    let mut requests = use_signal(VecDeque::<ClientDiffFetch>::new);
+    use_drop(move || {
+        let pending = std::mem::take(&mut *requests.write());
+        drop(pending);
+    });
     use_context_provider(|| ClientDiffCache {
         workspaces,
         recency,
         rows,
+        requests,
     });
 }
 
+pub(super) fn retain_windows(
+    cache: ClientDiffCache,
+    key: &ClientDiffCacheKey,
+    window: ClientDiffWindow,
+    windows: Vec<LoadedRowWindow>,
+    protected: &[ClientDiffWindow],
+) -> Result<bool, ClientDiffFileError> {
+    let mut protected = protected.to_vec();
+    for (offset, rows) in windows.into_iter().enumerate() {
+        let loaded = ClientDiffWindow {
+            file: window.file,
+            batch: window.batch + offset,
+        };
+        if !cache.retain_window(key, loaded, rows, &protected)? {
+            return Ok(false);
+        }
+        protected.push(loaded);
+    }
+    Ok(true)
+}
+
 impl ClientDiffCache {
+    pub(super) fn workspace(
+        self,
+        key: &ClientDiffCacheKey,
+    ) -> Store<ClientDiffWorkspace, impl Writable<Target = ClientDiffWorkspace> + Clone + use<>>
+    {
+        // Keep the provider-owned lens; boxing it would bind it to the calling component.
+        self.workspaces.get_unchecked(key.clone())
+    }
+
     pub(super) fn select(
         mut self,
         server_instance_id: Option<String>,
@@ -133,6 +171,11 @@ impl ClientDiffCache {
     }
 
     fn forget_windows(mut self, key: &ClientDiffCacheKey) {
+        let pending = std::mem::take(&mut *self.requests.write());
+        let (cancelled, retained): (VecDeque<_>, VecDeque<_>) =
+            pending.into_iter().partition(|fetch| &fetch.content == key);
+        self.requests.set(retained);
+        drop(cancelled);
         let expired = self
             .rows
             .peek()
@@ -267,12 +310,12 @@ impl ClientDiffCache {
         window: ClientDiffWindow,
         loaded: LoadedRowWindow,
     ) -> Result<(), ClientDiffFileError> {
-        let workspace: Store<ClientDiffWorkspace> =
-            self.workspaces.get_unchecked(key.clone()).into();
+        let workspace = self.workspace(key);
         let file = workspace
             .files()
             .get(window.file)
             .ok_or(ClientDiffFileError::InvalidResponse)?;
+        let mut digits = file.clone().line_number_digits();
         match loaded.rows {
             gtl_wire::viewer::ViewerRows::Unified(rows) => {
                 let mut batch = file
@@ -291,24 +334,25 @@ impl ClientDiffCache {
                 batch.set(rows);
             }
         }
-        if *file.line_number_digits().peek() != loaded.line_number_digits {
-            file.line_number_digits().set(loaded.line_number_digits);
+        if *digits.peek() != loaded.line_number_digits {
+            digits.set(loaded.line_number_digits);
         }
         Ok(())
     }
 
     fn clear_window(self, key: &WindowKey) {
-        let workspace: Store<ClientDiffWorkspace> =
-            self.workspaces.get_unchecked(key.content.clone()).into();
+        let workspace = self.workspace(&key.content);
         let Some(file) = workspace.files().get(key.window.file) else {
             return;
         };
-        file.state()
+        file.clone()
+            .state()
             .set(super::client_diff::ClientDiffFileState::Loading);
-        if let Some(mut batch) = file.rows().unified().get(key.window.batch) {
+        let rows = file.rows();
+        if let Some(mut batch) = rows.clone().unified().get(key.window.batch) {
             batch.set(Vec::new());
         }
-        if let Some(mut batch) = file.rows().split().get(key.window.batch) {
+        if let Some(mut batch) = rows.split().get(key.window.batch) {
             batch.set(Vec::new());
         }
     }

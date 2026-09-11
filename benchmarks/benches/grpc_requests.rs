@@ -106,6 +106,7 @@ fn grpc_requests(criterion: &mut Criterion) {
     });
     benchmark_get_viewer_shell(criterion, &runtime, &viewer_client);
     benchmark_stream_viewer_rows(criterion, &runtime, &viewer_client, identity);
+    benchmark_native_row_windows(criterion, &runtime, server.auth(), identity);
 
     runtime.block_on(async {
         require(server.stop().await, "stopping the benchmark gRPC server");
@@ -260,6 +261,56 @@ fn benchmark_stream_viewer_rows(
             )
         });
     });
+}
+
+fn benchmark_native_row_windows(
+    criterion: &mut Criterion,
+    runtime: &tokio::runtime::Runtime,
+    auth: &LocalAuth,
+    identity: v1::ViewerViewIdentity,
+) {
+    let client = runtime.block_on(async {
+        require(
+            gtl_client::ViewerClient::connect(auth).await,
+            "connect native row client",
+        )
+    });
+    let identity = require(
+        gtl_wire::proto::viewer::decode_viewer_view_identity(identity),
+        "decode native row identity",
+    );
+    let requests: Vec<_> = (0..2_000)
+        .step_by(64)
+        .map(|start| gtl_wire::viewer::StreamViewerRows {
+            identity,
+            file: Some(gtl_wire::viewer::ViewerDiffFileId::for_index(0)),
+            row_range: Some(require(
+                gtl_wire::viewer::ViewerRowRange::try_new(start, (2_000 - start).min(64)),
+                "native row range",
+            )),
+        })
+        .collect();
+    runtime.block_on(consume_native_row_windows(client.clone(), &requests));
+    criterion.bench_function("grpc-requests/native-row-windows/2k-rust", |bencher| {
+        bencher
+            .to_async(runtime)
+            .iter(|| consume_native_row_windows(client.clone(), &requests));
+    });
+}
+
+async fn consume_native_row_windows(
+    mut client: gtl_client::ViewerClient,
+    requests: &[gtl_wire::viewer::StreamViewerRows],
+) {
+    for request in requests {
+        let mut stream = require(
+            client.stream_rows(request.clone()).await,
+            "start native row demand",
+        );
+        while let Some(frame) = require(stream.message_bytes().await, "receive native row frame") {
+            black_box(frame);
+        }
+    }
 }
 
 async fn consume_viewer_rows(

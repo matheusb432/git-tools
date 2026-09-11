@@ -24,7 +24,7 @@ pub(crate) fn AlertDialog(
     rsx! {
         dialog {
             id,
-            class: "m-auto w-[min(30rem,calc(100vw-2rem))] rounded-panel border border-del-line bg-surface p-0 text-ink shadow-none backdrop:bg-bg/80",
+            class: "alert-dialog-surface m-auto p-0",
             role: "alertdialog",
             aria_modal: "true",
             aria_labelledby: title_id.clone(),
@@ -35,7 +35,7 @@ pub(crate) fn AlertDialog(
                     oncancel.call(());
                 }
             },
-            div { class: "flex items-start gap-3 border-b border-line px-5 py-4",
+            div { class: "alert-dialog-header gap-3 px-5 py-4",
                 span { class: "mt-0.5 shrink-0 text-del", aria_hidden: "true",
                     TriangleAlert { size: 18 }
                 }
@@ -48,7 +48,7 @@ pub(crate) fn AlertDialog(
                     }
                 }
             }
-            div { class: "flex justify-end gap-2 px-5 py-4",
+            div { class: "alert-dialog-actions gap-2 px-5 py-4",
                 Button {
                     variant: ButtonVariant::Ghost,
                     state: if cancel_disabled { ButtonState::Disabled } else { ButtonState::Enabled },

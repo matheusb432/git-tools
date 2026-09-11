@@ -2,12 +2,15 @@ use dioxus::prelude::*;
 
 use crate::{
     entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow},
-    shared::ui::{Button, ButtonSize, ButtonVariant},
+    shared::ui::{
+        Button, ButtonSize, ButtonVariant,
+        scroll_area::{
+            ScrollAreaVariant,
+            browser::use_scrollbars,
+            scrollbar::{ScrollbarPlacement, ScrollbarRails},
+        },
+    },
 };
-
-const LONG_LINE_TEXT_CLASSES: &str = "min-w-0 flex-1 whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]";
-const LONG_LINE_COLLAPSED_CLASSES: &str = "overflow-hidden text-ellipsis";
-const LONG_LINE_EXPANDED_CLASSES: &str = "overflow-x-auto text-clip";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChangedTextTone {
@@ -137,16 +140,15 @@ pub(super) fn LongLine(
         }
     });
     let artifact_long_line = artifact_enhancement.then_some("");
-    let artifact_expanded = artifact_enhancement.then(|| is_expanded.to_string());
+    let artifact_expanded = is_expanded.to_string();
     rsx! {
         span {
-            class: "flex items-baseline gap-2",
+            class: "diff-long-line",
             "data-gtl-long-line": artifact_long_line,
             "data-gtl-expanded": artifact_expanded,
             LongLineText {
                 source,
                 marker,
-                expanded: is_expanded,
                 artifact_enhancement,
                 copy_text,
             }
@@ -194,19 +196,12 @@ fn retained_line(
 fn LongLineText(
     source: CodeLineSource,
     marker: Option<char>,
-    expanded: bool,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
+    let scrollbars = use_scrollbars();
     let marker = marker.map(|value| value.to_string());
     let artifact_long_line_text = artifact_enhancement.then_some("");
-    let artifact_expanded_classes = artifact_enhancement.then_some(LONG_LINE_EXPANDED_CLASSES);
-    let artifact_collapsed_classes = artifact_enhancement.then_some(LONG_LINE_COLLAPSED_CLASSES);
-    let overflow_classes = if expanded {
-        LONG_LINE_EXPANDED_CLASSES
-    } else {
-        LONG_LINE_COLLAPSED_CLASSES
-    };
     source.with(|code| {
         let Some(code) = code else {
             return rsx! {};
@@ -214,11 +209,14 @@ fn LongLineText(
         let text = code.text.as_str();
         rsx! {
             span {
-                class: "{LONG_LINE_TEXT_CLASSES}",
-                class: "{overflow_classes}",
+                class: "diff-long-line-text",
+                onresize: move |_| scrollbars.measure(),
+                onscroll: move |_| scrollbars.refresh(),
                 "data-gtl-long-line-text": artifact_long_line_text,
-                "data-gtl-expanded-classes": artifact_expanded_classes,
-                "data-gtl-collapsed-classes": artifact_collapsed_classes,
+                ScrollbarRails {
+                    controller: scrollbars,
+                    placement: ScrollbarPlacement::Viewport(ScrollAreaVariant::Rail),
+                }
                 {marker}
                 if copy_text {
                     span { "data-gtl-copy-text": "", "{text}" }
@@ -300,8 +298,8 @@ pub(super) fn SemanticText(
 const fn changed_text_classes(changed_text_tone: ChangedTextTone) -> &'static str {
     match changed_text_tone {
         ChangedTextTone::None => "",
-        ChangedTextTone::Removed => "rounded-xs bg-[color-mix(in_srgb,var(--del)_34%,transparent)]",
-        ChangedTextTone::Added => "rounded-xs bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
+        ChangedTextTone::Removed => "diff-text-change-removed",
+        ChangedTextTone::Added => "diff-text-change-added",
     }
 }
 

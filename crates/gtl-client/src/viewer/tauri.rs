@@ -146,21 +146,40 @@ impl ViewerClient {
         &mut self,
         request: StreamViewerRows,
     ) -> Result<ViewerRowStream, ViewerClientError> {
-        let stream_id = invoke_with_request(ROWS_START_COMMAND, request).await?;
-        Ok(ViewerRowStream {
+        start_stream(ROWS_START_COMMAND, request, |stream_id| ViewerRowStream {
             stream: IpcPullStream::new(stream_id, ROWS_NEXT_BATCH_COMMAND, ROWS_CANCEL_COMMAND),
         })
+        .await
     }
 
     pub async fn watch(
         &mut self,
         request: gtl_wire::viewer::WatchViewer,
     ) -> Result<ViewerVersionStream, ViewerClientError> {
-        let stream_id = invoke_with_request(WATCH_START_COMMAND, request).await?;
-        Ok(ViewerVersionStream {
-            stream: IpcPullStream::new(stream_id, WATCH_NEXT_BATCH_COMMAND, WATCH_CANCEL_COMMAND),
+        start_stream(WATCH_START_COMMAND, request, |stream_id| {
+            ViewerVersionStream {
+                stream: IpcPullStream::new(
+                    stream_id,
+                    WATCH_NEXT_BATCH_COMMAND,
+                    WATCH_CANCEL_COMMAND,
+                ),
+            }
         })
+        .await
     }
+}
+
+async fn start_stream<Request: Serialize + 'static, Stream: 'static>(
+    command: &'static str,
+    request: Request,
+    own: fn(u32) -> Stream,
+) -> Result<Stream, ViewerClientError> {
+    let (sender, receiver) = futures_channel::oneshot::channel();
+    wasm_bindgen_futures::spawn_local(super::stream_start::complete(
+        async move { invoke_with_request(command, request).await.map(own) },
+        sender,
+    ));
+    receiver.await.map_err(|_| ViewerClientError::Unavailable)?
 }
 
 pub struct ViewerRowStream {
@@ -263,14 +282,16 @@ async fn load_connection() -> Result<ViewerConnection, ViewerClientError> {
     Ok(connection)
 }
 
-async fn invoke_without_arguments<Response>(command: &str) -> Result<Response, ViewerClientError>
+pub(crate) async fn invoke_without_arguments<Response>(
+    command: &str,
+) -> Result<Response, ViewerClientError>
 where
     Response: DeserializeOwned,
 {
     invoke(command, JsValue::UNDEFINED).await
 }
 
-async fn invoke_with_request<Request, Response>(
+pub(crate) async fn invoke_with_request<Request, Response>(
     command: &str,
     request: Request,
 ) -> Result<Response, ViewerClientError>

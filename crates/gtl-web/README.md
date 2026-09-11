@@ -16,6 +16,9 @@ Release builds contain only local application assets and connect only to the loc
 xtask owns stylesheet generation, the Dioxus Web bundle, Tauri embedding, drift checks, and the
 development server. Use the repository's `just --list` output for current entry points.
 
-`src/app/assets/styles/tailwind.css` and `tokens.css` are the shared stylesheet sources. Rust owns
+`src/app/assets/styles/` owns shared theme and component rules. The `tailwind.css` entry point
+includes the whole application; `artifact.css` includes the shared diff and control rules needed
+by raw HTML artifacts. Both generate tracked stylesheets in `assets/`. Rust owns
 desktop browser behavior and all presentation. `src/artifact.js` is the one handwritten frontend
-asset: a bounded progressive enhancer for already-rendered raw artifact markup.
+asset: a bounded progressive enhancer for already-rendered raw artifact markup. Artifact builds
+minify it into Cargo's output directory before embedding it in the saved HTML.

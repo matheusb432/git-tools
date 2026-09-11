@@ -107,7 +107,7 @@ pub(super) fn DiffFileCard(
             "data-gtl-absolute-path": artifact_absolute_path,
             "data-gtl-comment-leader": comment_leader,
             "data-gtl-initial-open": artifact_initial_open,
-            class: "group/file border-b border-line-2 bg-bg print:break-inside-avoid print:[&[hidden]]:block!",
+            class: "diff-file-card group/file print:[&[hidden]]:block!",
             class: if is_flashing() { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
             DiffFileHeader {
@@ -149,7 +149,7 @@ fn DiffFileHeader(
     let file_summary = summary.read();
     rsx! {
         summary {
-            class: "relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-open/file:border-b [&::-webkit-details-marker]:hidden mobile:min-h-11 mobile:gap-1.5 mobile:py-1.5 mobile:pr-2 mobile:pl-4 print:static print:bg-[#f2f2f2]",
+            class: "diff-file-summary",
             onclick: move |event| {
                 event.prevent_default();
                 onopenchange.call(!*open.peek());
@@ -199,7 +199,7 @@ pub(super) fn copy_comment_leader(path: &RepositoryRelativePath) -> &'static str
 fn DiffFileCaret() -> Element {
     rsx! {
         span {
-            class: "flex size-5 flex-none items-center justify-center text-base leading-none text-ink-3 transition-transform group-open/file:rotate-90 motion-reduce:transition-none",
+            class: "diff-file-caret size-5 text-base leading-none group-open/file:rotate-90 motion-reduce:transition-none",
             aria_hidden: "true",
             "›"
         }
@@ -215,7 +215,7 @@ fn DiffFilePath(path: String, status: ViewerFileStatus) -> Element {
             (Some(directory), file_name)
         });
     rsx! {
-        span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+        span { class: "diff-file-path min-w-0",
             if let Some(directory) = directory {
                 span { class: "text-ink-3", "{directory}/" }
             }
@@ -227,7 +227,7 @@ fn DiffFilePath(path: String, status: ViewerFileStatus) -> Element {
 #[component]
 fn DiffLineStats(added: DiffLineCount, removed: DiffLineCount) -> Element {
     rsx! {
-        span { class: "flex flex-none items-center gap-1.5 text-xs font-medium tabular-nums",
+        span { class: "diff-file-line-stats gap-1.5 text-xs font-medium tabular-nums",
             DiffLineChangeText { kind: DiffLineChangeKind::Added, count: added.value() }
             DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: removed.value() }
         }
@@ -311,6 +311,7 @@ mod tests {
                 range_generation: gtl_models::viewer::ViewerRangeGeneration::default(),
                 selection_generation: gtl_models::viewer::ViewerSelectionGeneration::default(),
                 render_options: ViewerRenderOptions {
+                    wrap_lines: false,
                     layout: ViewerDiffLayout::Unified,
                     density: ViewerDiffDensity::Compact,
                 },
@@ -386,8 +387,8 @@ mod tests {
         assert!(artifact.contains(r#"data-gtl-absolute-path="/repo/scripts/run.SH""#));
         assert!(artifact.contains("data-gtl-comment-leader=\"#\""));
         assert!(artifact.contains(r#"data-gtl-initial-open="false""#));
-        assert!(artifact.contains("group/file border-b border-line-2 bg-bg"));
-        assert!(artifact.contains("relative sticky top-0 z-10"));
+        assert!(artifact.contains("diff-file-card group/file"));
+        assert!(artifact.contains("diff-file-summary"));
         assert!(artifact.contains(r#"aria-label="Modified file">M</span></summary>"#));
         assert!(!artifact.contains("mb-5 rounded-panel"));
         assert_artifact_copy_menu(&artifact);
@@ -413,8 +414,14 @@ mod tests {
         assert!(artifact.contains(r#"id="artifact-view-7-file-0-copy-menu""#));
         assert!(artifact.contains(r#"popovertarget="artifact-view-7-file-0-copy-menu""#));
         assert!(artifact.contains(r#"popover="auto""#));
-        assert!(artifact.contains("[position-area:bottom_span-left]"));
-        assert!(artifact.contains("[position-try-fallbacks:flip-block]"));
+        assert!(artifact.contains("popover-surface"));
+        let stylesheet = include_str!("../../../app/assets/styles/overlays.css");
+        let (_, styles) = stylesheet
+            .split_once(".popover-surface[data-placement=\"trigger-end\"] {")
+            .unwrap();
+        let styles = styles.split('}').next().unwrap();
+        assert!(styles.contains("[position-area:bottom_span-left]"));
+        assert!(styles.contains("[position-try-fallbacks:flip-block]"));
         assert!(artifact.contains(r#"data-gtl-copy="path""#));
         assert!(artifact.contains(r#"data-gtl-copy="absolute""#));
         assert!(!artifact.contains(r#"data-gtl-copy="code""#));

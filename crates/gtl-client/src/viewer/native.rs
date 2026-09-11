@@ -1,3 +1,5 @@
+mod row_sessions;
+
 use gtl_local_auth::LocalAuth;
 use gtl_wire::{
     proto,
@@ -62,6 +64,7 @@ pub struct ViewerClient {
     client: ViewerServiceClient<AuthenticatedChannel>,
     server_instance_id: String,
     protocol_version: u32,
+    row_sessions: std::sync::Arc<tokio::sync::Mutex<row_sessions::RowSessions>>,
 }
 
 impl ViewerClient {
@@ -129,6 +132,7 @@ impl ViewerClient {
             client,
             server_instance_id: bootstrap.instance_id().to_string(),
             protocol_version: bootstrap.protocol_version(),
+            row_sessions: std::sync::Arc::default(),
         })
     }
 
@@ -277,13 +281,21 @@ impl ViewerClient {
         &mut self,
         request: StreamViewerRows,
     ) -> Result<ViewerRowStream, ViewerClientError> {
-        let stream = self
-            .client
-            .stream_viewer_rows(proto::viewer::encode_stream_viewer_rows_request(request))
+        if request.row_range.is_none() {
+            let stream = self
+                .client
+                .stream_viewer_rows(proto::viewer::encode_stream_viewer_rows_request(request))
+                .await
+                .map_err(|status| decode_status(&status))?
+                .into_inner();
+            return Ok(ViewerRowStream {
+                stream: RowResponseStream::Complete(Box::new(stream)),
+            });
+        }
+        self.row_sessions
+            .lock()
             .await
-            .map(tonic::Response::into_inner)
-            .map_err(|status| decode_status(&status))?;
-        Ok(ViewerRowStream { stream })
+            .request(self.client.clone(), request)
     }
 
     pub async fn watch(
@@ -302,16 +314,29 @@ impl ViewerClient {
     }
 }
 
+enum RowResponseStream {
+    Window(tokio::sync::mpsc::Receiver<Result<v1::StreamViewerRowsResponse, ViewerClientError>>),
+    Complete(Box<tonic::Streaming<v1::StreamViewerRowsResponse>>),
+}
+
 pub struct ViewerRowStream {
-    stream: tonic::Streaming<v1::StreamViewerRowsResponse>,
+    stream: RowResponseStream,
 }
 
 impl ViewerRowStream {
+    async fn next(&mut self) -> Result<Option<v1::StreamViewerRowsResponse>, ViewerClientError> {
+        match &mut self.stream {
+            RowResponseStream::Window(stream) => stream.recv().await.transpose(),
+            RowResponseStream::Complete(stream) => stream
+                .message()
+                .await
+                .map_err(|status| decode_status(&status)),
+        }
+    }
+
     pub async fn message_bytes(&mut self) -> Result<Option<Vec<u8>>, ViewerClientError> {
-        self.stream
-            .message()
-            .await
-            .map_err(|status| decode_status(&status))?
+        self.next()
+            .await?
             .as_ref()
             .map(proto::row_ipc::encode_frame)
             .transpose()
@@ -319,10 +344,8 @@ impl ViewerRowStream {
     }
 
     pub async fn message(&mut self) -> Result<Option<ViewerRowStreamItem>, ViewerClientError> {
-        self.stream
-            .message()
-            .await
-            .map_err(|status| decode_status(&status))?
+        self.next()
+            .await?
             .map(proto::viewer::decode_stream_viewer_rows_response)
             .transpose()
             .map_err(Into::into)

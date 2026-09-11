@@ -1,14 +1,12 @@
 use dioxus::prelude::*;
 
 use super::{
-    HEADER_CODE_CLASSES, HeaderTone,
+    HeaderTone,
     content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
 use crate::entities::diffs::{
     ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerSplitRow,
 };
-
-const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitSide {
@@ -172,16 +170,16 @@ fn SplitDiffRowView(
 
 #[component]
 fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
-    let (shell_tone_classes, code_tone_classes) = match tone {
-        HeaderTone::Meta => ("opacity-60", ""),
-        HeaderTone::Hunk => ("bg-sunk", "font-semibold"),
+    let tone = match tone {
+        HeaderTone::Meta => "meta",
+        HeaderTone::Hunk => "hunk",
     };
     rsx! {
         div {
-            class: "grid grid-cols-[minmax(0,1fr)] items-stretch whitespace-normal",
-            class: "{shell_tone_classes}",
+            class: "diff-row-split-header",
+            "data-diff-tone": tone,
             "data-gtl-diff-row": "",
-            code { class: "{HEADER_CODE_CLASSES}", class: "{code_tone_classes}", "{text}" }
+            code { class: "diff-row-header-code diff-row-code", "{text}" }
         }
     }
 }
@@ -189,11 +187,7 @@ fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
 #[component]
 fn SplitRowShell(children: Element) -> Element {
     rsx! {
-        div {
-            class: "grid grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)] items-stretch whitespace-normal tablet:grid-cols-[44px_minmax(0,1fr)] mobile:grid-cols-[30px_minmax(0,1fr)]",
-            "data-gtl-diff-row": "",
-            {children}
-        }
+        div { class: "diff-row-split", "data-gtl-diff-row": "", {children} }
     }
 }
 
@@ -259,16 +253,12 @@ fn SplitCell(
 #[component]
 fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
     let line_number = number.map(|value| value.to_string());
-    let side_classes = match side {
-        SplitSide::Old => "",
-        SplitSide::New => "border-l border-line tablet:border-t tablet:border-l-0",
+    let side = match side {
+        SplitSide::Old => "old",
+        SplitSide::New => "new",
     };
     rsx! {
-        span {
-            class: "select-none whitespace-nowrap px-2 text-right text-xs text-ink-3 [font-variant-numeric:tabular-nums] mobile:px-1",
-            class: "{side_classes}",
-            {line_number}
-        }
+        span { class: "diff-row-split-gutter", "data-diff-side": side, {line_number} }
     }
 }
 
@@ -291,19 +281,19 @@ fn SplitCodeCell(
         SplitCellPresentation::Removed => ChangedTextTone::Removed,
         SplitCellPresentation::Added => ChangedTextTone::Added,
     };
-    let presentation_classes = match presentation {
-        SplitCellPresentation::OldContext => "bg-transparent",
-        SplitCellPresentation::NewContext => "bg-transparent tablet:border-t tablet:border-line",
-        SplitCellPresentation::Removed => "bg-del-bg",
-        SplitCellPresentation::Added => "bg-add-bg tablet:border-t tablet:border-line",
+    let presentation = match presentation {
+        SplitCellPresentation::OldContext => "old-context",
+        SplitCellPresentation::NewContext => "new-context",
+        SplitCellPresentation::Removed => "removed",
+        SplitCellPresentation::Added => "added",
     };
     let copy_line = copy_line_number.map(|_| "");
     let new_line_number = copy_line_number.map(|number| number.to_string());
 
     rsx! {
         code {
-            class: "{SPLIT_CODE_CELL_CLASSES}",
-            class: "{presentation_classes}",
+            class: "diff-row-split-code diff-row-code",
+            "data-diff-cell": presentation,
             "data-gtl-copy-line": copy_line,
             "data-gtl-new-line": new_line_number,
             CodeCellContent {
@@ -319,13 +309,16 @@ fn SplitCodeCell(
 
 #[component]
 fn SplitPad(side: SplitSide) -> Element {
-    let side_classes = match side {
-        SplitSide::Old => "bg-sunk",
-        SplitSide::New => "bg-sunk tablet:border-t tablet:border-line",
+    let cell = match side {
+        SplitSide::Old => "pad-old",
+        SplitSide::New => "pad-new",
     };
     rsx! {
         SplitGutter { side, number: None }
-        code { class: "{SPLIT_CODE_CELL_CLASSES}", class: "{side_classes}" }
+        code {
+            class: "diff-row-split-code diff-row-code",
+            "data-diff-cell": cell,
+        }
     }
 }
 
@@ -376,7 +369,7 @@ mod tests {
         assert!(html.contains(">9999</span>"));
         assert!(html.contains(">10000</span>"));
         assert_eq!(html.matches("4 chars").count(), 3);
-        assert!(html.contains("bg-sunk tablet:border-t tablet:border-line"));
+        assert!(html.contains(r#"data-diff-cell="pad-new""#));
         assert!(absent_gutter.ends_with("></span>"));
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
         assert!(html.contains(r#"data-gtl-copy-text="">abce</span>"#));

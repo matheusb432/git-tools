@@ -1,29 +1,28 @@
+pub(crate) mod browser;
+mod geometry;
+pub(crate) mod scrollbar;
+
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-// WebKit paints native scrollbars over the top layer, so hide background bars while overlays are
-// open.
-#[cfg(any(feature = "artifact", feature = "desktop"))]
-pub(crate) const OVERLAY_SCROLLBAR_CLASSES: &str = "[&:has(:popover-open,:modal)_:is(.overflow-auto,.overflow-y-auto,.overflow-x-auto):not(:popover-open,:modal,:popover-open_*,:modal_*)]:[scrollbar-width:none]";
-
-const SCROLL_AREA_STANDARD_CLASSES: &str = "[scrollbar-color:var(--color-acc-line)_transparent] [&::-webkit-scrollbar]:size-3 [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-4 [&::-webkit-scrollbar-thumb]:border-solid [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-acc-line [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-acc [&::-webkit-scrollbar-thumb:active]:bg-acc-2";
-#[cfg(feature = "interactive-ui")]
-const SCROLL_AREA_RAIL_CLASSES: &str = "[scrollbar-color:var(--color-acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-corner]:bg-transparent [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-acc [&::-webkit-scrollbar-thumb:hover]:bg-acc-2";
+const SCROLL_AREA_STANDARD_CLASSES: &str = "scroll-area";
+const SCROLL_AREA_RAIL_CLASSES: &str = "scroll-area-rail";
+const SCROLL_AREA_VERTICAL_CLASSES: &str = "scroll-area-vertical";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ScrollAreaVariant {
     #[default]
     Standard,
-    #[cfg(feature = "interactive-ui")]
     Rail,
+    Vertical,
 }
 
 impl ScrollAreaVariant {
     const fn classes(self) -> &'static str {
         match self {
             Self::Standard => SCROLL_AREA_STANDARD_CLASSES,
-            #[cfg(feature = "interactive-ui")]
             Self::Rail => SCROLL_AREA_RAIL_CLASSES,
+            Self::Vertical => SCROLL_AREA_VERTICAL_CLASSES,
         }
     }
 }
@@ -35,8 +34,11 @@ pub(crate) fn ScrollArea(
     onmounted: Option<EventHandler<MountedEvent>>,
     onresize: Option<EventHandler<ResizeEvent>>,
     onscroll: Option<EventHandler<ScrollEvent>>,
+    onfocusin: Option<EventHandler<FocusEvent>>,
+    onfocusout: Option<EventHandler<FocusEvent>>,
     children: Element,
 ) -> Element {
+    let scrollbars = browser::use_scrollbars();
     let base = attributes!(div {
         class: variant.classes(),
     });
@@ -50,17 +52,37 @@ pub(crate) fn ScrollArea(
                 }
             },
             onresize: move |event| {
+                scrollbars.measure();
                 if let Some(onresize) = onresize {
                     onresize.call(event);
                 }
             },
             onscroll: move |event| {
+                scrollbars.refresh();
                 if let Some(onscroll) = onscroll {
                     onscroll.call(event);
                 }
             },
+            onfocusin: move |event| {
+                if let Some(handler) = onfocusin {
+                    handler.call(event);
+                }
+            },
+            onfocusout: move |event| {
+                if let Some(handler) = onfocusout {
+                    handler.call(event);
+                }
+            },
             ..attributes,
-            {children}
+            scrollbar::ScrollbarRails {
+                controller: scrollbars,
+                placement: scrollbar::ScrollbarPlacement::Viewport(variant),
+            }
+            div {
+                class: "scroll-area-content",
+                onresize: move |_| scrollbars.measure(),
+                {children}
+            }
         }
     }
 }

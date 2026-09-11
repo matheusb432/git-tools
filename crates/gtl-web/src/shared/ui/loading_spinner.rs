@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-const LOADING_SPINNER_CLASSES: &str = "inline-flex size-3.5 flex-none items-center justify-center";
+const LOADING_SPINNER_CLASSES: &str = "control-loading-spinner size-3.5";
 
 #[component]
 pub(crate) fn LoadingSpinner(
@@ -16,7 +16,7 @@ pub(crate) fn LoadingSpinner(
     rsx! {
         span {..attributes,
             svg {
-                class: "size-full animate-spin motion-reduce:animate-none",
+                class: "control-loading-spinner-icon size-full",
                 view_box: "0 0 24 24",
                 fill: "none",
                 "focusable": "false",

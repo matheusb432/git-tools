@@ -3,7 +3,7 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
 use super::LoadingSpinner;
 
-const BUTTON_CLASSES: &str = "cursor-pointer items-center whitespace-nowrap rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_CLASSES: &str = "control-button";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonType {
@@ -35,9 +35,9 @@ pub(crate) enum ButtonLayout {
 impl ButtonLayout {
     const fn classes(self) -> &'static str {
         match self {
-            Self::Inline => "inline-flex shrink-0 justify-center",
+            Self::Inline => "control-button-layout-inline",
             Self::Content => "",
-            Self::FullWidthStart => "flex w-full justify-start",
+            Self::FullWidthStart => "control-button-layout-full-width-start w-full",
             Self::Block => "block",
         }
     }
@@ -48,42 +48,26 @@ pub(crate) enum ButtonVariant {
     #[default]
     Primary,
     Secondary,
-    #[cfg(feature = "artifact")]
-    Pressed,
     #[cfg(feature = "interactive-ui")]
     Destructive,
     Failure,
     Outline,
     Ghost,
+    Toggle,
     Bare,
 }
 
 impl ButtonVariant {
     pub(crate) const fn classes(self) -> &'static str {
         match self {
-            Self::Primary => {
-                "border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
-            }
-            Self::Secondary => {
-                "border border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg"
-            }
-            #[cfg(feature = "artifact")]
-            Self::Pressed => {
-                "border border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
-            }
+            Self::Primary => "control-button-variant-primary",
+            Self::Secondary => "control-button-variant-secondary",
             #[cfg(feature = "interactive-ui")]
-            Self::Destructive => {
-                "border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
-            }
-            Self::Failure => {
-                "border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg"
-            }
-            Self::Outline => {
-                "border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink"
-            }
-            Self::Ghost => {
-                "border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink"
-            }
+            Self::Destructive => "control-button-variant-destructive",
+            Self::Failure => "control-button-variant-failure",
+            Self::Outline => "control-button-variant-outline",
+            Self::Ghost => "control-button-variant-ghost",
+            Self::Toggle => "control-button-variant-ghost control-button-variant-toggle",
             Self::Bare => "",
         }
     }

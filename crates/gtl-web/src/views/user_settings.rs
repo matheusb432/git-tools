@@ -31,10 +31,10 @@ pub(crate) fn UserSettingsView() -> Element {
 
     rsx! {
         document::Title { "Settings - git-tools" }
-        main { class: "h-full overflow-hidden bg-bg",
-            ScrollArea { class: "h-full overflow-auto px-4 py-5 sm:px-6",
-                div { class: "mx-auto grid max-w-5xl gap-5",
-                    header { class: "border-b border-line pb-4",
+        main { class: "settings-page-shell h-full",
+            ScrollArea { class: "overflow-auto h-full px-4 py-5 sm:px-6",
+                div { class: "settings-page-container mx-auto gap-5",
+                    header { class: "settings-page-header pb-4",
                         div { class: "flex items-center gap-2 text-acc",
                             span { aria_hidden: "true",
                                 Settings { size: 16 }
@@ -45,11 +45,11 @@ pub(crate) fn UserSettingsView() -> Element {
                         }
                         h1 {
                             id: gtl_web_contracts::user_settings::SETTINGS_HEADING_ID,
-                            class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
+                            class: "settings-page-title mt-1 text-lg font-semibold tracking-tight",
                             tabindex: "-1",
                             "User settings"
                         }
-                        p { class: "mt-1 max-w-2xl leading-5 text-ink-2",
+                        p { class: "settings-page-description mt-1 leading-5",
                             "Choose viewer defaults, then submit to save them."
                         }
                     }
@@ -129,9 +129,7 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
             render_options: settings.render_options,
         }
 
-        section {
-            class: "overflow-hidden rounded-panel border border-line bg-surface",
-            aria_label: "Resolved viewer settings",
+        section { class: "settings-card", aria_label: "Resolved viewer settings",
             SettingsTableHeader {
                 icon: rsx! {
                     FileCog {}
@@ -139,7 +137,7 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
                 subtitle: "Current sources and effective values.",
                 "Resolved configuration"
             }
-            dl { class: "divide-y divide-line",
+            dl { class: "settings-rows",
                 SettingsRow { term: "Configuration file", "{configuration_path}" }
                 SettingsRow { term: "Effective theme", "{viewer_theme_label(settings.effective_theme)}" }
                 SettingsRow { term: "Push confirmation", "{push_confirmation_text}" }
@@ -149,9 +147,7 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
             }
         }
 
-        section {
-            class: "overflow-hidden rounded-panel border border-line bg-surface",
-            aria_label: "Project diff exclusions",
+        section { class: "settings-card", aria_label: "Project diff exclusions",
             SettingsTableHeader { subtitle: "Repository-specific extension filters.", "Project exclusions" }
             if projects.is_empty() {
                 p { class: "px-4 py-5 text-ink-3", "No project-specific exclusions." }
@@ -213,7 +209,7 @@ fn SettingsTableHeader(
     children: Element,
 ) -> Element {
     rsx! {
-        header { class: "border-b border-line bg-surface-2 px-4 py-3",
+        header { class: "settings-card-header px-4 py-3",
             div { class: "flex items-center",
                 if let Some(icon) = icon {
                     span { class: "mr-2 text-acc", aria_hidden: "true", {icon} }
@@ -230,9 +226,9 @@ fn SettingsTableHeader(
 #[component]
 fn SettingsRow(term: String, children: Element) -> Element {
     rsx! {
-        div { class: "grid gap-2 px-4 py-3 sm:grid-cols-[14rem_minmax(0,1fr)]",
+        div { class: "settings-row gap-2 px-4 py-3",
             dt { class: "font-semibold text-ink-2", "{term}" }
-            dd { class: "m-0 min-w-0 break-words text-ink", {children} }
+            dd { class: "settings-row-value m-0 min-w-0", {children} }
         }
     }
 }

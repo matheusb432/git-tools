@@ -12,6 +12,7 @@ service ViewerService {
   rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
   rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
+  rpc StreamViewerRowSession(stream StreamViewerRowSessionRequest) returns (stream StreamViewerRowSessionResponse);
   rpc StreamViewerRows(StreamViewerRowsRequest) returns (stream StreamViewerRowsResponse);
   rpc SearchViewerFiles(SearchViewerFilesRequest) returns (SearchViewerFilesResponse);
   rpc FindViewerDiff(FindViewerDiffRequest) returns (FindViewerDiffResponse);
@@ -81,6 +82,7 @@ enum ViewerDiffDensity {
 }
 
 message ViewerRenderOptions {
+  bool wrap_lines = 3;
   ViewerDiffLayout layout = 1;
   ViewerDiffDensity density = 2;
 }
@@ -222,7 +224,13 @@ message ViewerActiveState {
   }
 }
 
+message ViewerSidebarVisibility {
+  bool files = 1;
+  bool commits = 2;
+}
+
 message ViewerPreferences {
+  ViewerSidebarVisibility sidebars = 4;
   ViewerTheme theme = 1;
   ViewerRenderOptions render_options = 2;
   ViewerKeybindings keybindings = 3;
@@ -237,6 +245,8 @@ enum ViewerKeybindingPlatform {
 }
 
 message ViewerKeybindings {
+  string toggle_files_sidebar = 4;
+  string toggle_commits_sidebar = 5;
   ViewerKeybindingPlatform platform = 1;
   string search_files = 2;
   string search_text_in_all_files = 3;
@@ -373,6 +383,35 @@ message StreamViewerRowsRequest {
   ViewerViewIdentity identity = 1;
   optional string file_id = 2;
   ViewerRowRange row_range = 3;
+}
+
+message StreamViewerRowSessionRequest {
+  uint64 request_id = 1;
+  StreamViewerRowsRequest rows = 2;
+}
+
+message StreamViewerRowSessionResponse {
+  uint64 request_id = 1;
+  oneof event {
+    StreamViewerRowsResponse rows = 2;
+    Empty completed = 3;
+    ViewerRowSessionFailure failed = 4;
+  }
+}
+
+message ViewerRowSessionFailure {
+  ViewerRowSessionFailureCode code = 1;
+}
+
+enum ViewerRowSessionFailureCode {
+  VIEWER_ROW_SESSION_FAILURE_CODE_UNSPECIFIED = 0;
+  VIEWER_ROW_SESSION_FAILURE_CODE_INVALID_REQUEST = 1;
+  VIEWER_ROW_SESSION_FAILURE_CODE_NOT_FOUND = 2;
+  VIEWER_ROW_SESSION_FAILURE_CODE_CONFLICT = 3;
+  VIEWER_ROW_SESSION_FAILURE_CODE_RESOURCE_EXHAUSTED = 4;
+  VIEWER_ROW_SESSION_FAILURE_CODE_UNAVAILABLE = 5;
+  VIEWER_ROW_SESSION_FAILURE_CODE_INVALID_SETTINGS = 6;
+  VIEWER_ROW_SESSION_FAILURE_CODE_INTERNAL = 7;
 }
 
 message SearchViewerFilesRequest {
@@ -608,6 +647,7 @@ enum ProjectsViewMode {
 message ProjectsViewFieldUpdate { oneof operation { ProjectsViewMode update = 1; ClearSetting clear = 2; } }
 
 message GetViewerSettingsResponse {
+  ViewerSidebarVisibility sidebars = 9;
   ProjectsViewMode projects_view = 7;
   optional string configuration_path = 1;
   optional ViewerTheme configured_theme = 2;
@@ -634,6 +674,9 @@ message ProjectSettingsValue { repeated ViewerProjectSettingsUpdate projects = 1
 message ProjectSettingsFieldUpdate { oneof operation { ProjectSettingsValue update = 1; ClearSetting clear = 2; } }
 
 message EditSettingsRequest {
+  BoolFieldUpdate files_sidebar_visible = 9;
+  BoolFieldUpdate commits_sidebar_visible = 10;
+  BoolFieldUpdate wrap_lines = 8;
   ProjectsViewFieldUpdate projects_view = 7;
   ThemeFieldUpdate theme = 1;
   LayoutFieldUpdate layout = 2;

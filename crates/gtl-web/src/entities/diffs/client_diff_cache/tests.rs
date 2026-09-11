@@ -286,6 +286,7 @@ fn cache() -> ClientDiffCache {
         workspaces: Store::new(HashMap::new()),
         recency: Signal::new(VecDeque::new()),
         rows: Signal::new(super::RetainedRows::default()),
+        requests: Signal::new(VecDeque::new()),
     }
 }
 
@@ -330,6 +331,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             range_generation: ViewerRangeGeneration::new(1),
             selection_generation: ViewerSelectionGeneration::default(),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },

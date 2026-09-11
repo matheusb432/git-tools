@@ -1,0 +1,81 @@
+@layer components {
+  .diff-workspace-sidebar {
+    @apply hidden workspace:block;
+    transition: opacity 150ms ease-out, visibility 0s linear;
+  }
+  .diff-workspace-sidebar[aria-hidden="true"] {
+    @apply invisible opacity-0;
+    transition-delay: 0s, 150ms;
+  }
+  .diff-workspace-sidebar-content { @apply h-full min-h-0 overflow-hidden; width: var(--sidebar-size); }
+  @media (prefers-reduced-motion: reduce) {
+    .diff-workspace-sidebar { transition: none; }
+  }
+
+  .diff-workspace-grid[data-files-sidebar-visible="false"] { --files-sidebar-width: 0px; }
+  .diff-workspace-grid[data-commits-sidebar-visible="false"] { --commits-sidebar-width: 0px; }
+
+  .diff-workspace-main { @apply grid grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg; }
+  .diff-workspace-loading { @apply grid grid-rows-[2.75rem_3rem_minmax(0,1fr)]; }
+  .diff-workspace-loading-columns { @apply grid grid-cols-1 bg-line; }
+  .diff-workspace-shell { @apply flex flex-col overflow-hidden; }
+  .diff-workspace-shell-content { @apply flex-1 overflow-hidden; }
+  .diff-workspace-mobile-grid { @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden; }
+  .diff-workspace-desktop-grid { @apply relative grid grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden; }
+  .diff-workspace-grid {
+    --files-sidebar-size: 220px;
+    --commits-sidebar-size: 210px;
+    @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[var(--files-sidebar-width,var(--files-sidebar-size))_minmax(0,1fr)_var(--commits-sidebar-width,var(--commits-sidebar-size))] workspace:grid-rows-[auto_minmax(0,1fr)] expanded:[--files-sidebar-size:262px] expanded:[--commits-sidebar-size:252px] wide-screen:[--files-sidebar-size:320px] wide-screen:[--commits-sidebar-size:304px] transition-[grid-template-columns] duration-150 ease-out motion-reduce:transition-none;
+  }
+  .diff-workspace-mobile-navigation { @apply col-span-3 row-start-2 grid grid-cols-2 border-b border-line bg-surface; }
+  .diff-workspace-mobile-content { @apply col-span-3 row-start-3 overflow-hidden; }
+  .diff-workspace-titlebar { @apply col-span-3 row-start-1 flex items-center border-b border-line bg-surface; }
+  .diff-workspace-panel { @apply overflow-hidden bg-surface; }
+  .diff-workspace-files-panel { --sidebar-size: var(--files-sidebar-size); @apply col-start-1 row-start-2 border-r border-line; }
+  .diff-workspace-commits-panel { --sidebar-size: var(--commits-sidebar-size); @apply col-start-3 row-start-2 border-l border-line; }
+  .diff-document-scroll { @apply overflow-auto bg-bg text-ink; }
+  .diff-file-card { @apply border-b border-line-2 bg-bg; }
+  .diff-file-summary { @apply relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
+  .diff-file-card[open] > .diff-file-summary { @apply border-b; }
+  .diff-file-summary::-webkit-details-marker { display: none; }
+  @media (max-width: 760px) {
+    .diff-file-summary { @apply min-h-11 gap-1.5 py-1.5 pr-2 pl-4; }
+  }
+  @media print {
+    .diff-file-card { break-inside: avoid; }
+    .diff-file-summary { position: static; background: #f2f2f2; }
+  }
+  .diff-file-caret { @apply flex flex-none items-center justify-center text-ink-3 transition-transform; }
+  .diff-file-path { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
+  .diff-file-line-stats { @apply flex flex-none items-center; }
+  .diff-files-scroll-panel, .diff-commits-scroll-panel { @apply overflow-auto bg-surface; }
+  .diff-search-layout { @apply grid grid-cols-[minmax(0,1fr)_auto]; }
+  .diff-path-filter-option { @apply flex cursor-pointer items-center rounded-sm text-ink-2 hover:bg-surface-2 aria-selected:bg-acc-soft aria-selected:text-ink; }
+  .diff-commit-card { @apply relative border-0 border-b border-line text-left; }
+  .diff-files-directory-summary { @apply flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc; }
+  .diff-files-directory-summary::-webkit-details-marker { display: none; }
+  .diff-files-directory-name { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
+  .diff-files-directory-caret { @apply flex-none transition-transform; }
+  .diff-files-file-button { @apply text-left bg-transparent hover:bg-surface-2 active:bg-surface-2; }
+  .diff-files-file-name { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
+  .diff-file-actions { @apply flex flex-none items-center gap-1; }
+  .diff-file-copy-menu { @apply flex flex-none; }
+  .diff-file-copy-feedback { @apply min-w-12 flex-none text-right text-[0.6875rem] font-semibold text-ink-3; }
+  .diff-file-copy-feedback[data-state="success"] { @apply text-add; }
+  .diff-file-copy-feedback[data-state="failure"] { @apply text-del; }
+  .diff-commits-header { @apply border-b border-line; }
+  .diff-commits-header-content { @apply flex items-start justify-between; }
+  .diff-commits-heading { @apply flex whitespace-nowrap text-ink; }
+  .diff-commit-details-header { @apply flex items-center justify-between; }
+  .diff-commit-details-body { @apply whitespace-pre-wrap break-words text-ink-2; }
+  .diff-commit-details-metadata { @apply divide-y divide-line border-t border-line; }
+  .diff-commits-loading { @apply text-center text-ink-3; }
+  .diff-commits-error { @apply mx-3 mt-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del; }
+  .diff-commits-selection-error { @apply m-3 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del; }
+  @media (max-width: 1280px) {
+    .diff-commits-error, .diff-commits-selection-error { @apply mx-2.5; }
+  }
+  @media (max-width: 760px) {
+    .diff-file-actions { display: none; }
+  }
+}

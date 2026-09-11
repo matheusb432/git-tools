@@ -18,7 +18,9 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
         let page = &spec.session.page;
         let files = RawArtifactFiles::new(page);
         assert_initial_artifact(page, &files).await?;
+        assert_sidebar_toggles(page).await?;
         assert_path_filter_popup(page).await?;
+        assert_sticky_horizontal_scrollbar(page, &files).await?;
         assert_large_line_interaction(page, &files).await?;
         assert_collapsed_file_navigation(page, &files).await?;
         assert_mobile_file_navigation(page, &files).await?;
@@ -30,6 +32,101 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
     }
     .await;
     spec.finish(outcome).await
+}
+
+async fn assert_sticky_horizontal_scrollbar(
+    page: &Page,
+    files: &RawArtifactFiles,
+) -> anyhow::Result<()> {
+    page.set_viewport_size(Viewport {
+        width: 390,
+        height: 400,
+    })
+    .await?;
+    support::get_button(page, "Changed files")
+        .click(None)
+        .await?;
+    page.locator("dialog[open] [data-gtl-action='navigate-file'][title='src/alpha.rs']")
+        .click(None)
+        .await?;
+    let rail = files
+        .alpha
+        .locator("[aria-label='Scroll diff horizontally']");
+    expect(rail.clone()).to_be_visible().await?;
+    let viewport = page
+        .locator("[data-gtl-diff-document]")
+        .bounding_box()
+        .await?
+        .context("diff viewport is hidden")?;
+    let file = files
+        .alpha
+        .bounding_box()
+        .await?
+        .context("alpha file is hidden")?;
+    let bar = rail
+        .bounding_box()
+        .await?
+        .context("horizontal scrollbar is hidden")?;
+    ensure!(
+        file.y + file.height > viewport.y + viewport.height + 30.0
+            && (bar.y + bar.height - viewport.y - viewport.height).abs() < 2.0,
+        "horizontal scrollbar is unavailable before the file end: {file:?}, {viewport:?}, {bar:?}"
+    );
+    let source = files.alpha.locator("[data-gtl-copy-text]").first();
+    let before = source
+        .bounding_box()
+        .await?
+        .context("source line is hidden")?;
+    page.mouse()
+        .move_to(bar.x + 20.0, bar.y + bar.height / 2.0, None)
+        .await?;
+    page.mouse().down(None).await?;
+    page.mouse()
+        .move_to(bar.x + 100.0, bar.y + bar.height / 2.0, None)
+        .await?;
+    page.mouse().up(None).await?;
+    crate::harness::browser::operation("horizontal source scrolling", async {
+        loop {
+            let after = source
+                .bounding_box()
+                .await?
+                .context("source line is hidden after dragging")?;
+            ensure!(
+                (after.y - before.y).abs() < 1.0,
+                "dragging the scrollbar moved source vertically: {before:?}, {after:?}"
+            );
+            if after.x < before.x - 1.0 {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+        }
+    })
+    .await?;
+    page.set_viewport_size(Viewport {
+        width: 1_200,
+        height: 900,
+    })
+    .await?;
+    Ok(())
+}
+
+async fn assert_sidebar_toggles(page: &Page) -> anyhow::Result<()> {
+    let files = page.locator("aside[aria-label='Changed files']");
+    let commits = page.locator("aside[aria-label='Commits']");
+    support::get_button(page, "Toggle Files sidebar")
+        .click(None)
+        .await?;
+    expect(files.clone()).to_be_hidden().await?;
+    expect(commits.clone()).to_be_visible().await?;
+    page.keyboard().press("Control+Alt+b", None).await?;
+    expect(commits.clone()).to_be_hidden().await?;
+    page.keyboard().press("Control+b", None).await?;
+    expect(files).to_be_visible().await?;
+    support::get_button(page, "Toggle Commits sidebar")
+        .click(None)
+        .await?;
+    expect(commits).to_be_visible().await?;
+    Ok(())
 }
 
 async fn assert_path_filter_popup(page: &Page) -> anyhow::Result<()> {
@@ -309,6 +406,15 @@ async fn assert_mobile_file_navigation(
     files: &RawArtifactFiles,
 ) -> anyhow::Result<()> {
     support::set_mobile_viewport(page).await?;
+    let files_dialog = page.locator("dialog[id$='-files-dialog']");
+    let commits_dialog = page.locator("dialog[id$='-commits-dialog']");
+    page.keyboard().press("Control+b", None).await?;
+    expect(files_dialog.clone()).to_be_visible().await?;
+    page.keyboard().press("Control+Alt+b", None).await?;
+    expect(files_dialog).to_be_hidden().await?;
+    expect(commits_dialog.clone()).to_be_visible().await?;
+    page.keyboard().press("Control+Alt+b", None).await?;
+    expect(commits_dialog).to_be_hidden().await?;
     support::click(
         &support::get_button(page, "Changed files"),
         "open raw mobile changed files",

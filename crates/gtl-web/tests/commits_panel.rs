@@ -36,8 +36,12 @@ fn single_commit_panel_is_read_only_but_keeps_copy_action() -> TestResult {
     assert!(html.contains("data-gtl-hover-popover-delay-ms=\"350\""));
     assert!(html.contains("aria-label=\"Commit details for 0123456789\""));
     assert!(html.contains("popover=\"auto\""));
-    assert!(html.contains("animate-commit-popover-enter"));
-    assert!(html.contains("overflow-x-hidden"));
+    assert!(html.contains("hover-popover-content"));
+    let stylesheet = include_str!("../src/app/assets/styles/overlays.css");
+    let (_, styles) = stylesheet.split_once(".hover-popover-content {").unwrap();
+    let styles = styles.split('}').next().unwrap();
+    assert!(styles.contains("animate-commit-popover-enter"));
+    assert!(styles.contains("overflow-x-hidden"));
     assert!(html.contains("2026-08-19T10:00:00Z"));
     assert!(html.contains("data-testid=\"commits-panel\""));
     Ok(())

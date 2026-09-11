@@ -2,18 +2,21 @@ use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabRequest};
+use lucide_dioxus::LayoutGrid;
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
     application_router::Route,
+    window_chrome::WindowDragExcluded,
 };
 use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
         ui::{
-            Button, ButtonSize, ButtonVariant, ScrollArea, ScrollAreaVariant, ViewerTabItem,
-            ViewerTabOverflowMenu, ViewerTabRailMeasurementItem, use_toast, viewer_tab_element_id,
+            NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
+            ViewerTabRailMeasurementItem, ViewerTabSelectionIndicator, use_toast,
+            viewer_tab_element_id,
         },
     },
     views::viewer_menu::ViewerMenu,
@@ -156,11 +159,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
         Vec::new()
     };
     let projects_active = matches!(route, Route::Projects {});
-    let tab_rail_classes = if tab_rail_collapsed {
-        "pointer-events-none invisible min-w-0 flex-1 overflow-hidden"
-    } else {
-        "min-w-0 flex-1 overflow-x-auto"
-    };
     let overflow_close_tabs = displayed_tab_ids.clone();
     let overflow_drop_tabs = displayed_tab_ids.clone();
     let reorderable = pending_order.is_none();
@@ -177,26 +175,28 @@ pub(crate) fn ApplicationNavigation() -> Element {
     });
 
     rsx! {
-        nav {
+        NavigationBar {
+            bordered: false,
             aria_label: "Viewer navigation",
-            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface pr-2",
-            Button {
-                variant: if projects_active { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
-                size: ButtonSize::Medium,
-                class: "m-1",
-                aria_label: "Projects",
-                onclick: move |_| {
-                    navigator.push(Route::Projects {});
-                },
-                lucide_dioxus::LayoutGrid { size: 16 }
-                span { class: "hidden sm:inline", "Projects" }
-            }
-            div {
-                class: "relative flex min-w-0 flex-1 items-end",
-                style: "margin-left:-1px;",
+            leading: rsx! {
+                Link {
+                    to: Route::Projects {},
+                    class: "viewer-tab-pinned",
+                    draggable: "false",
+                    aria_label: "Projects",
+                    aria_current: projects_active.then_some("page"),
+                    title: "Projects",
+                    span { class: "viewer-navigation-icon size-3.5", aria_hidden: "true",
+                        LayoutGrid { size: 15 }
+                    }
+                    span { class: "hidden sm:inline", "Projects" }
+                    ViewerTabSelectionIndicator { active: projects_active }
+                }
+            },
+            rail: rsx! {
                 ScrollArea {
                     variant: ScrollAreaVariant::Rail,
-                    class: tab_rail_classes,
+                    class: "viewer-tab-rail",
                     role: "tablist",
                     aria_label: "Open diffs",
                     aria_hidden: tab_rail_collapsed.to_string(),
@@ -212,7 +212,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             tab_rail_overflow.content_resized.call(event);
                         },
                         if tabs.is_empty() {
-                            p { class: "mb-2 self-center px-2 text-ink-3", "No open diffs" }
+                            p { class: "viewer-navigation-empty h-9 px-3", "No open diffs" }
                         }
                         if tab_rail_collapsed {
                             for tab in displayed_tabs.iter().copied() {
@@ -293,63 +293,68 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     }
                 }
                 if tab_rail_collapsed && let Some(active_tab) = overflow_active_tab {
-                    div { class: "absolute inset-0 z-20 flex min-w-0 items-end",
-                        ViewerTabOverflowMenu {
-                            id: VIEWER_TAB_OVERFLOW_MENU_ID,
-                            tabs: overflow_tabs,
-                            active_tab,
-                            diff_rows_loading_tab_id,
-                            reorderable,
-                            onactivate: move |tab_id| {
-                                activate_viewer_tab
-                                    .call(ViewerTabActivation {
-                                        tab_id,
-                                        focus: false,
-                                    });
-                            },
-                            onclose: move |tab_id| {
-                                let focus_overflow_trigger = close_focus_target(&overflow_close_tabs, tab_id)
-                                    .is_some();
-                                browser::hide_popover(VIEWER_TAB_OVERFLOW_MENU_ID);
-                                spawn(async move {
-                                    match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
-                                        Ok(shell) => {
-                                            viewer.replace_shell(shell);
-                                            let focus_id = if focus_overflow_trigger {
-                                                format!("{VIEWER_TAB_OVERFLOW_MENU_ID}-trigger")
-                                            } else {
-                                                "workspace-heading".to_owned()
-                                            };
-                                            browser::focus_element(focus_id);
+                    WindowDragExcluded {
+                        div { class: "viewer-navigation-overflow h-9 min-w-0",
+                            ViewerTabOverflowMenu {
+                                id: VIEWER_TAB_OVERFLOW_MENU_ID,
+                                tabs: overflow_tabs,
+                                active_tab,
+                                diff_rows_loading_tab_id,
+                                reorderable,
+                                onactivate: move |tab_id| {
+                                    activate_viewer_tab
+                                        .call(ViewerTabActivation {
+                                            tab_id,
+                                            focus: false,
+                                        });
+                                },
+                                onclose: move |tab_id| {
+                                    let focus_overflow_trigger = close_focus_target(&overflow_close_tabs, tab_id)
+                                        .is_some();
+                                    browser::hide_popover(VIEWER_TAB_OVERFLOW_MENU_ID);
+                                    spawn(async move {
+                                        match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
+                                            Ok(shell) => {
+                                                viewer.replace_shell(shell);
+                                                let focus_id = if focus_overflow_trigger {
+                                                    format!("{VIEWER_TAB_OVERFLOW_MENU_ID}-trigger")
+                                                } else {
+                                                    "workspace-heading".to_owned()
+                                                };
+                                                browser::focus_element(focus_id);
+                                            }
+                                            Err(error) => toast.error(error.message()),
                                         }
-                                        Err(error) => toast.error(error.message()),
-                                    }
-                                });
-                            },
-                            onmove: move |request| {
-                                let Some(order) = moved_tab_ids(&overflow_drop_tabs, request) else {
-                                    return;
-                                };
-                                pending_tab_order.set(Some(order));
-                                move_tab.call(request);
-                            },
+                                    });
+                                },
+                                onmove: move |request| {
+                                    let Some(order) = moved_tab_ids(&overflow_drop_tabs, request) else {
+                                        return;
+                                    };
+                                    pending_tab_order.set(Some(order));
+                                    move_tab.call(request);
+                                },
+                            }
                         }
                     }
                 }
-            }
-
-            ViewerMenu {
-                id: VIEWER_MENU_ID,
-                history_count: tabs.len(),
-                trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value().to_owned(),
-                history_test_id: test_ids::VIEWER_HISTORY_OPEN.value().to_owned(),
-                onhistory: move |()| {
-                    navigator.push(Route::History {});
-                },
-                onsettings: move |()| {
-                    navigator.push(Route::Settings {});
-                },
-            }
+            },
+            trailing: rsx! {
+                WindowDragExcluded {
+                    ViewerMenu {
+                        id: VIEWER_MENU_ID,
+                        history_count: tabs.len(),
+                        trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value().to_owned(),
+                        history_test_id: test_ids::VIEWER_HISTORY_OPEN.value().to_owned(),
+                        onhistory: move |()| {
+                            navigator.push(Route::History {});
+                        },
+                        onsettings: move |()| {
+                            navigator.push(Route::Settings {});
+                        },
+                    }
+                }
+            },
         }
     }
 }

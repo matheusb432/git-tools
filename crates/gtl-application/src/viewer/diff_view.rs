@@ -112,6 +112,7 @@ pub struct ViewerDiffFileSource<'view> {
 #[must_use]
 pub const fn project_render_options(options: RenderOptions) -> ViewerRenderOptions {
     ViewerRenderOptions {
+        wrap_lines: options.wrap_lines(),
         layout: match options.layout() {
             DiffLayout::Unified => gtl_wire::viewer::ViewerDiffLayout::Unified,
             DiffLayout::Split => gtl_wire::viewer::ViewerDiffLayout::Split,
@@ -317,6 +318,7 @@ mod tests {
             range_generation: ViewerRangeGeneration::new(8),
             selection_generation: ViewerSelectionGeneration::new(9),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density,
             },
@@ -489,6 +491,7 @@ mod tests {
             snapshot.content_id(identity(ViewerDiffDensity::Full).render_options)
         );
         let split = ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Compact,
         };
@@ -516,6 +519,7 @@ mod tests {
         assert_eq!(
             project_render_options(RenderOptions::new(DiffLayout::Split, DiffDensity::Full)),
             ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Split,
                 density: ViewerDiffDensity::Full,
             }

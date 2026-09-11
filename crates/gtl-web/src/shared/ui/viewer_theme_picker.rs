@@ -13,13 +13,13 @@ pub(crate) fn ViewerThemePicker(
     onthemechange: EventHandler<ViewerTheme>,
 ) -> Element {
     rsx! {
-        label { class: "flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
+        label { class: "control-viewer-theme-picker h-8 gap-2 px-2.5",
             span { class: "text-acc", aria_hidden: "true",
                 CircleDot { size: 9, fill: "currentColor" }
             }
             span { class: "sr-only", "Theme" }
             select {
-                class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
+                class: "control-viewer-theme-select",
                 value: theme.as_str(),
                 disabled,
                 aria_label: "Theme",

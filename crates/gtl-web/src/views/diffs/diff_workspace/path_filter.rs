@@ -226,7 +226,7 @@ fn PathFilterOption(
     rsx! {
         div {
             id,
-            class: "flex min-h-8 cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm text-ink-2 hover:bg-surface-2 aria-selected:bg-acc-soft aria-selected:text-ink mobile:min-h-11",
+            class: "diff-path-filter-option min-h-8 gap-2 px-2 py-1 text-sm mobile:min-h-11",
             role: "option",
             aria_label: path.clone(),
             aria_selected: active.to_string(),

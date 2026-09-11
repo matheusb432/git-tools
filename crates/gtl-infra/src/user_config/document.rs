@@ -23,8 +23,14 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub(super) enum UserSettingsDocumentKey {
+    #[strum(to_string = "wrap_lines")]
+    WrapLines,
     #[strum(to_string = "projects_view")]
     ProjectsView,
+    #[strum(to_string = "files_sidebar_visible")]
+    FilesSidebarVisible,
+    #[strum(to_string = "commits_sidebar_visible")]
+    CommitsSidebarVisible,
     #[strum(to_string = "theme")]
     Theme,
     #[strum(to_string = "layout")]
@@ -37,6 +43,10 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsSearchFiles,
     #[strum(to_string = "keybindings.search_text_in_all_files")]
     KeybindingsSearchTextInAllFiles,
+    #[strum(to_string = "keybindings.toggle_files_sidebar")]
+    KeybindingsToggleFilesSidebar,
+    #[strum(to_string = "keybindings.toggle_commits_sidebar")]
+    KeybindingsToggleCommitsSidebar,
     #[strum(to_string = "diff.exclude")]
     DefaultDiffExclusions,
     #[strum(to_string = "tags")]
@@ -64,12 +74,18 @@ pub(super) enum UserSettingsDocumentKey {
 impl UserSettingsDocumentKey {
     const fn root(self) -> &'static str {
         match self {
+            Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::FilesSidebarVisible => "files_sidebar_visible",
+            Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
-            Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
+            Self::KeybindingsSearchFiles
+            | Self::KeybindingsSearchTextInAllFiles
+            | Self::KeybindingsToggleFilesSidebar
+            | Self::KeybindingsToggleCommitsSidebar => "keybindings",
             Self::DefaultDiffExclusions => "diff",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
@@ -86,13 +102,18 @@ impl UserSettingsDocumentKey {
 
     const fn leaf(self) -> &'static str {
         match self {
+            Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::FilesSidebarVisible => "files_sidebar_visible",
+            Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "confirm",
             Self::KeybindingsSearchFiles => "search_files",
             Self::KeybindingsSearchTextInAllFiles => "search_text_in_all_files",
+            Self::KeybindingsToggleFilesSidebar => "toggle_files_sidebar",
+            Self::KeybindingsToggleCommitsSidebar => "toggle_commits_sidebar",
             Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "exclude",
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
@@ -105,12 +126,18 @@ impl UserSettingsDocumentKey {
 
     const fn container(self) -> &'static str {
         match self {
+            Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::FilesSidebarVisible => "files_sidebar_visible",
+            Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
             Self::PushConfirmation => "push",
-            Self::KeybindingsSearchFiles | Self::KeybindingsSearchTextInAllFiles => "keybindings",
+            Self::KeybindingsSearchFiles
+            | Self::KeybindingsSearchTextInAllFiles
+            | Self::KeybindingsToggleFilesSidebar
+            | Self::KeybindingsToggleCommitsSidebar => "keybindings",
             Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "diff",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
@@ -263,6 +290,10 @@ type RawSettingValue = toml::Value;
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawUserSettingsDocument {
+    files_sidebar_visible: Option<RawSettingValue>,
+    commits_sidebar_visible: Option<RawSettingValue>,
+    #[serde(default)]
+    wrap_lines: Option<RawSettingValue>,
     #[serde(default)]
     projects_view: ProjectsViewMode,
     #[serde(default)]
@@ -302,6 +333,8 @@ struct RawPushSettingsDocument {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawKeybindingsDocument {
+    toggle_files_sidebar: Option<RawSettingValue>,
+    toggle_commits_sidebar: Option<RawSettingValue>,
     #[serde(default)]
     search_files: Option<RawSettingValue>,
     #[serde(default)]
@@ -420,6 +453,20 @@ fn parse_settings(
         .map(|value| parse_render_option(UserSettingsDocumentKey::Density, &value))
         .transpose()?
         .unwrap_or(DiffDensity::Compact);
+    let wrap_lines =
+        optional_bool(UserSettingsDocumentKey::WrapLines, document.wrap_lines)?.unwrap_or(false);
+    let sidebars = gtl_models::viewer::ViewerSidebarVisibility {
+        files: optional_bool(
+            UserSettingsDocumentKey::FilesSidebarVisible,
+            document.files_sidebar_visible,
+        )?
+        .unwrap_or(true),
+        commits: optional_bool(
+            UserSettingsDocumentKey::CommitsSidebarVisible,
+            document.commits_sidebar_visible,
+        )?
+        .unwrap_or(true),
+    };
     let keybindings = parse_keybindings(document.keybindings.unwrap_or_default())?;
     let push_confirmation_required = optional_bool(
         UserSettingsDocumentKey::PushConfirmation,
@@ -439,12 +486,13 @@ fn parse_settings(
     Ok((
         UserSettings::new(
             theme,
-            RenderOptions::new(layout, density),
+            RenderOptions::new(layout, density).with_wrap_lines(wrap_lines),
             keybindings,
             push_confirmation_required,
             DiffExclusions::new(projects.diff_exclusions, diff_exclusions_default),
             projects.push_all_exclusions,
         )
+        .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
             tag_patterns_default,
             projects.tag_patterns,
@@ -469,7 +517,19 @@ fn parse_keybindings(
     )?
     .unwrap_or(defaults[ViewerKeybindingAction::SearchTextInAllFiles]);
 
+    let toggle_files_sidebar = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsToggleFilesSidebar,
+        document.toggle_files_sidebar,
+    )?
+    .unwrap_or(defaults[ViewerKeybindingAction::ToggleFilesSidebar]);
+    let toggle_commits_sidebar = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsToggleCommitsSidebar,
+        document.toggle_commits_sidebar,
+    )?
+    .unwrap_or(defaults[ViewerKeybindingAction::ToggleCommitsSidebar]);
     ViewerKeybindings::try_from_fn(platform, |action| match action {
+        ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
+        ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
     })
@@ -492,6 +552,12 @@ fn parse_keybindings(
 
 const fn keybinding_document_key(action: ViewerKeybindingAction) -> UserSettingsDocumentKey {
     match action {
+        ViewerKeybindingAction::ToggleFilesSidebar => {
+            UserSettingsDocumentKey::KeybindingsToggleFilesSidebar
+        }
+        ViewerKeybindingAction::ToggleCommitsSidebar => {
+            UserSettingsDocumentKey::KeybindingsToggleCommitsSidebar
+        }
         ViewerKeybindingAction::SearchFiles => UserSettingsDocumentKey::KeybindingsSearchFiles,
         ViewerKeybindingAction::SearchTextInAllFiles => {
             UserSettingsDocumentKey::KeybindingsSearchTextInAllFiles
@@ -637,6 +703,36 @@ fn project_settings(
 }
 
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
+    for (key, update) in [
+        (
+            UserSettingsDocumentKey::FilesSidebarVisible,
+            patch.files_sidebar_visible,
+        ),
+        (
+            UserSettingsDocumentKey::CommitsSidebarVisible,
+            patch.commits_sidebar_visible,
+        ),
+    ] {
+        match update {
+            UserSettingsFieldUpdate::Update(value) => {
+                set_value(&mut document[key.root()], Value::from(value));
+            }
+            UserSettingsFieldUpdate::Clear => {
+                document.remove(key.root());
+            }
+            UserSettingsFieldUpdate::Unchanged => {}
+        }
+    }
+    match patch.wrap_lines {
+        UserSettingsFieldUpdate::Update(value) => set_value(
+            &mut document[UserSettingsDocumentKey::WrapLines.root()],
+            Value::from(value),
+        ),
+        UserSettingsFieldUpdate::Clear => {
+            document.remove(UserSettingsDocumentKey::WrapLines.root());
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
     apply_root_string(
         document,
         UserSettingsDocumentKey::ProjectsView,

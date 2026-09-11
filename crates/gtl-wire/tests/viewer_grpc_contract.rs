@@ -97,8 +97,10 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
         }],
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Graphite,
             render_options: gtl_wire::viewer::ViewerRenderOptions {
+                wrap_lines: true,
                 layout: ViewerDiffLayout::Split,
                 density: ViewerDiffDensity::Full,
             },
@@ -107,6 +109,10 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
                 |action| match action {
                     ViewerKeybindingAction::SearchFiles => "alt+p".parse().unwrap(),
                     ViewerKeybindingAction::SearchTextInAllFiles => "ctrl+shift+f".parse().unwrap(),
+                    ViewerKeybindingAction::ToggleFilesSidebar
+                    | ViewerKeybindingAction::ToggleCommitsSidebar => {
+                        ViewerKeybindings::default()[action]
+                    }
                 },
             )
             .unwrap(),
@@ -149,6 +155,7 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
         tabs: Vec::new(),
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: viewer_identity().unwrap().render_options,
             keybindings: ViewerKeybindings::default(),
@@ -213,12 +220,19 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                     state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
                 }),
                 preferences: Some(v1::ViewerPreferences {
+                    sidebars: Some(v1::ViewerSidebarVisibility {
+                        files: true,
+                        commits: true,
+                    }),
                     theme: v1::ViewerTheme::Dark as i32,
                     render_options: Some(v1::ViewerRenderOptions {
+                        wrap_lines: false,
                         layout: v1::ViewerDiffLayout::Unified as i32,
                         density: v1::ViewerDiffDensity::Compact as i32,
                     }),
                     keybindings: Some(v1::ViewerKeybindings {
+                        toggle_files_sidebar: "ctrl+b".to_owned(),
+                        toggle_commits_sidebar: "ctrl+alt+b".to_owned(),
                         platform: v1::ViewerKeybindingPlatform::Linux as i32,
                         search_files: search_files.to_owned(),
                         search_text_in_all_files: search_text_in_all_files.to_owned(),
@@ -242,6 +256,7 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
         range_generation: ViewerRangeGeneration::new(3),
         selection_generation: ViewerSelectionGeneration::new(2),
         render_options: gtl_wire::viewer::ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Unified,
             density: ViewerDiffDensity::Compact,
         },
@@ -362,6 +377,7 @@ fn viewer_identity() -> Result<viewer::ViewerViewIdentity, Box<dyn std::error::E
         range_generation: ViewerRangeGeneration::new(3),
         selection_generation: ViewerSelectionGeneration::new(2),
         render_options: viewer::ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Unified,
             density: ViewerDiffDensity::Compact,
         },
@@ -464,11 +480,16 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 #[test]
 fn settings_codec_round_trips_exclusions_and_effective_values() {
     let settings = ViewerUserSettings {
+        sidebars: gtl_models::viewer::ViewerSidebarVisibility {
+            files: false,
+            commits: true,
+        },
         projects_view: gtl_models::settings::ProjectsViewMode::Table,
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
         configured_theme: Some(ViewerTheme::Hearth),
         effective_theme: ViewerTheme::Hearth,
         render_options: gtl_wire::viewer::ViewerRenderOptions {
+            wrap_lines: false,
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Full,
         },
@@ -492,6 +513,9 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
 #[test]
 fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
     let request = EditSettingsRequest {
+        files_sidebar_visible: FieldUpdate::Update(false),
+        commits_sidebar_visible: FieldUpdate::Clear,
+        wrap_lines: FieldUpdate::Update(true),
         projects_view: FieldUpdate::Update(gtl_models::settings::ProjectsViewMode::Table),
         theme: FieldUpdate::Clear,
         layout: FieldUpdate::Unchanged,
@@ -505,10 +529,23 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         }]),
     };
 
-    assert_eq!(
-        decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
-        request
-    );
+    for wrap_lines in [
+        FieldUpdate::Unchanged,
+        FieldUpdate::Clear,
+        FieldUpdate::Update(false),
+        FieldUpdate::Update(true),
+    ] {
+        let request = EditSettingsRequest {
+            files_sidebar_visible: wrap_lines.clone(),
+            commits_sidebar_visible: wrap_lines.clone(),
+            wrap_lines,
+            ..request.clone()
+        };
+        assert_eq!(
+            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            request
+        );
+    }
 }
 
 #[test]

@@ -3864,6 +3864,7 @@ dependencies = [
 name = "gtl-client"
 version = "0.1.0"
 dependencies = [
+ "futures-channel",
  "gtl-local-auth",
  "gtl-models",
  "gtl-wire",
@@ -3886,6 +3887,7 @@ name = "gtl-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "gtk",
  "gtl-client",
  "gtl-wire",
  "raw-window-handle",
@@ -4004,6 +4006,7 @@ dependencies = [
  "directories",
  "gtl-application",
  "gtl-artifacts",
+ "gtl-client",
  "gtl-infra",
  "gtl-local-auth",
  "gtl-models",
@@ -4036,12 +4039,14 @@ dependencies = [
  "dioxus-sdk-time",
  "dioxus-ssr",
  "dx-story",
+ "futures-channel",
  "gtl-client",
  "gtl-models",
  "gtl-web-contracts",
  "gtl-wire",
  "lru",
  "lucide-dioxus",
+ "minifier",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
@@ -5118,6 +5123,12 @@ dependencies = [
  "mime",
  "unicase",
 ]
+
+[[package]]
+name = "minifier"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245c950e30794ed20f72ff60c85ae1cddb0ba54fda4623017a678943f98f636c"
 
 [[package]]
 name = "miniz_oxide"

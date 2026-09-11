@@ -16,17 +16,19 @@ mod field_error;
 mod field_label;
 #[cfg(feature = "artifact")]
 mod floating_notice;
-mod icon_popover;
+pub(crate) mod icon_popover;
 mod loading_spinner;
 mod menu_action;
+#[cfg(feature = "interactive-ui")]
+mod navigation_bar;
 #[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) mod no_data;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 mod page_notice;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
-mod popover;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
-mod scroll_area;
+mod panel_dialog;
+pub(crate) mod popover;
+pub(crate) mod scroll_area;
 mod search_panel;
 #[cfg(feature = "interactive-ui")]
 mod select;
@@ -57,19 +59,21 @@ pub(crate) use field_error::FieldError;
 pub(crate) use field_label::FieldLabel;
 #[cfg(feature = "artifact")]
 pub(crate) use floating_notice::FloatingNotice;
+pub(crate) use icon_popover::IconPopover;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use icon_popover::IconPopoverIconMotion;
-pub(crate) use icon_popover::{IconPopover, IconPopoverPlacement};
 pub(crate) use loading_spinner::LoadingSpinner;
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
+#[cfg(feature = "interactive-ui")]
+pub(crate) use navigation_bar::NavigationBar;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) use page_notice::PageNotice;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
-pub(crate) use popover::Popover;
+pub(crate) use panel_dialog::PanelDialog;
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub(crate) use scroll_area::ScrollArea;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) use scroll_area::ScrollAreaVariant;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
-pub(crate) use scroll_area::{OVERLAY_SCROLLBAR_CLASSES, ScrollArea};
 pub(crate) use search_panel::{SearchPanel, SearchPanelPlacement};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use select::{Select, SelectOption};
@@ -88,6 +92,8 @@ pub(crate) use viewer_tab::ViewerTabItem;
 pub(crate) use viewer_tab::ViewerTabOverflowMenu;
 #[cfg(feature = "desktop")]
 pub(crate) use viewer_tab::ViewerTabRailMeasurementItem;
+#[cfg(feature = "desktop")]
+pub(crate) use viewer_tab::ViewerTabSelectionIndicator;
 #[cfg(feature = "desktop")]
 pub(crate) use viewer_tab::viewer_tab_element_id;
 #[cfg(feature = "component-preview")]

@@ -1,6 +1,14 @@
 mod response;
 
-use dioxus::prelude::*;
+use dioxus::{
+    core::{Task, spawn_forever},
+    prelude::*,
+};
+use futures_channel::oneshot;
+
+const FETCH_ROWS: usize = super::CLIENT_LINE_BATCH_SIZE;
+const FETCH_WINDOWS: usize = FETCH_ROWS / super::CLIENT_LINE_BATCH_SIZE;
+const FETCH_RETRIES_MAX: usize = 4;
 use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerViewIdentity};
 
 use super::{
@@ -8,7 +16,7 @@ use super::{
     ClientDiffWorkspaceStoreExt,
 };
 use crate::{
-    entities::diffs::client_diff_cache::{ClientDiffCache, ClientDiffCacheKey},
+    entities::diffs::client_diff_cache::{ClientDiffCache, ClientDiffCacheKey, retain_windows},
     shared::retry_delay::RetryDelay,
 };
 
@@ -16,6 +24,23 @@ use crate::{
 pub(crate) struct ClientDiffWindow {
     pub(crate) file: usize,
     pub(crate) batch: usize,
+}
+
+pub(in crate::entities::diffs) struct ClientDiffFetch {
+    identity: ViewerViewIdentity,
+    window: ClientDiffWindow,
+    task: Option<Task>,
+    reply: Option<oneshot::Sender<bool>>,
+    pub(in crate::entities::diffs) content: ClientDiffCacheKey,
+    network_active: bool,
+}
+
+impl Drop for ClientDiffFetch {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.cancel();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -36,6 +61,8 @@ pub(crate) struct ClientDiffWorkspaceController {
     demand: Signal<RowDemand>,
     stream: Resource<()>,
     key: Memo<ClientDiffCacheKey>,
+    cache: ClientDiffCache,
+    identity: Memo<ViewerViewIdentity>,
 }
 
 impl ClientDiffWorkspaceController {
@@ -48,7 +75,12 @@ impl ClientDiffWorkspaceController {
     }
 
     pub(crate) fn row_stream_active(self) -> bool {
-        self.stream.state().cloned() == UseResourceState::Pending
+        let identity = (self.identity)();
+        self.cache
+            .requests
+            .read()
+            .iter()
+            .any(|fetch| fetch.identity == identity && fetch.network_active)
     }
 
     pub(crate) fn request_windows(
@@ -105,6 +137,8 @@ pub(crate) fn use_client_diff_workspace(
         demand,
         stream,
         key,
+        cache,
+        identity,
     }
 }
 
@@ -146,66 +180,135 @@ async fn load_workspace(
         if cache.contains_window(&key, window) {
             continue;
         }
-        if !load_window(
-            cache,
-            &key,
-            workspace,
-            identity,
-            window,
-            &demand.windows[..priority],
-        )
-        .await
-        {
+        if !load_window(cache, &key, identity, window, &demand.windows[..priority]).await {
             return;
         }
     }
 }
 
 async fn load_window(
-    cache: ClientDiffCache,
+    mut cache: ClientDiffCache,
     key: &ClientDiffCacheKey,
-    workspace: Store<ClientDiffWorkspace>,
     identity: ViewerViewIdentity,
     window: ClientDiffWindow,
     protected: &[ClientDiffWindow],
 ) -> bool {
+    let window = ClientDiffWindow {
+        batch: window.batch / FETCH_WINDOWS * FETCH_WINDOWS,
+        ..window
+    };
+    let (reply, response) = oneshot::channel();
+    let previous = {
+        let mut requests = cache.requests.write();
+        requests
+            .iter()
+            .position(|fetch| fetch.identity.tab_id == identity.tab_id)
+            .and_then(|index| requests.remove(index))
+    };
+    if let Some(mut previous) = previous {
+        if previous.identity == identity && previous.window == window {
+            previous.reply = Some(reply);
+            cache.requests.write().push_back(previous);
+            return response.await.unwrap_or(false);
+        }
+        drop(previous);
+    }
+    if cache.requests.peek().len() == gtl_wire::viewer::VIEWER_ROW_SESSIONS_MAX {
+        let evicted = cache.requests.write().pop_front();
+        drop(evicted);
+    }
+    let key = key.clone();
+    let protected = protected.to_vec();
+    let content = key.clone();
+    let task = spawn_forever(async move {
+        let success = fetch_windows(cache, &key, identity, window, &protected).await;
+        let entry = {
+            let mut requests = cache.requests.write();
+            requests
+                .iter()
+                .position(|fetch| fetch.identity == identity && fetch.window == window)
+                .and_then(|index| requests.remove(index))
+        };
+        let Some(mut entry) = entry else {
+            return;
+        };
+        entry.task = None;
+        if let Some(reply) = entry.reply.take() {
+            let _ = reply.send(success);
+        }
+    });
+    cache.requests.write().push_back(ClientDiffFetch {
+        identity,
+        window,
+        task: Some(task),
+        reply: Some(reply),
+        content,
+        network_active: false,
+    });
+    response.await.unwrap_or(false)
+}
+
+async fn fetch_windows(
+    mut cache: ClientDiffCache,
+    key: &ClientDiffCacheKey,
+    identity: ViewerViewIdentity,
+    window: ClientDiffWindow,
+    protected: &[ClientDiffWindow],
+) -> bool {
+    let workspace = cache.workspace(key);
     let Some(file) = workspace.files().get(window.file) else {
         return false;
     };
+    let summary = file.clone().summary();
+    let mut state = file.state();
     let mut retry = RetryDelay::default();
-    loop {
-        if workspace.peek().identity != identity {
+    for attempt in 0..=FETCH_RETRIES_MAX {
+        if *state.peek() != ClientDiffFileState::Loading {
+            state.set(ClientDiffFileState::Loading);
+        }
+        let Some(request) = response::WindowRequest::new(identity, window, &summary.peek()) else {
             return false;
-        }
-        if *file.state().peek() != ClientDiffFileState::Loading {
-            file.state().set(ClientDiffFileState::Loading);
-        }
-        let request = response::WindowRequest::new(identity, window, &file.summary().peek());
-        let result = match request {
-            Some(request) => response::read(request).await,
-            None => return false,
         };
-        if workspace.peek().identity != identity {
-            return false;
+        if let Some(fetch) = cache
+            .requests
+            .write()
+            .iter_mut()
+            .find(|fetch| fetch.identity == identity)
+        {
+            fetch.network_active = true;
         }
-        let result = result.and_then(|rows| cache.retain_window(key, window, rows, protected));
-        let reconnect = match result {
-            Ok(true) => {
-                file.state().set(ClientDiffFileState::Complete);
-                return true;
+        let result = response::read(request).await;
+        if let Some(fetch) = cache
+            .requests
+            .write()
+            .iter_mut()
+            .find(|fetch| fetch.identity == identity)
+        {
+            fetch.network_active = false;
+        }
+        let result =
+            result.and_then(|windows| retain_windows(cache, key, window, windows, protected));
+        let error = match result {
+            Ok(retained) => {
+                state.set(ClientDiffFileState::Complete);
+                return retained;
             }
-            Ok(false) => return false,
-            Err(error) => {
-                let reconnect = error.retries_automatically();
-                file.state().set(ClientDiffFileState::Error(error));
-                reconnect
-            }
+            Err(error) => error,
         };
-        if !reconnect {
+        let awaiting = cache.requests.peek().iter().any(|fetch| {
+            fetch.identity == identity
+                && fetch
+                    .reply
+                    .as_ref()
+                    .is_some_and(|reply| !reply.is_canceled())
+        });
+        if !error.retries_automatically() || attempt == FETCH_RETRIES_MAX || !awaiting {
+            state.set(ClientDiffFileState::Error(error));
             return false;
         }
         dioxus_sdk_time::sleep(retry.take_and_advance()).await;
     }
+    false
 }
 
 pub(in crate::entities::diffs) struct LoadedRowWindow {

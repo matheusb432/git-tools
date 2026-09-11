@@ -9,17 +9,14 @@ use gtl_wire::viewer::{ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerThem
 
 use crate::{
     app::{
-        application_navigation::ApplicationNavigation,
         application_router::{Route, use_viewer_routes},
+        window_header::WindowHeader,
     },
     entities::diffs::viewer_server,
     shared::{
         browser,
         retry_delay::RetryDelay,
-        ui::{
-            Button, ButtonSize, ButtonVariant, OVERLAY_SCROLLBAR_CLASSES, ToastHandle, ToastHost,
-            use_toast,
-        },
+        ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
         viewer_client::{ViewerClientError, discard_viewer_connection},
     },
 };
@@ -609,13 +606,13 @@ fn ApplicationLayoutContent() -> Element {
 
     rsx! {
         div {
-            class: "flex h-screen min-h-128 flex-col overflow-hidden bg-bg text-ink antialiased {OVERLAY_SCROLLBAR_CLASSES}",
+            class: "viewer-shell h-screen min-h-128 antialiased",
             "data-theme": theme.as_str(),
+            WindowHeader {}
             div {
-                class: if connection.is_connected() { "flex min-h-0 flex-1 flex-col" } else { "flex min-h-0 flex-1 flex-col opacity-70 saturate-50" },
+                class: "viewer-connection-content",
                 "inert": (!connection.is_connected()).then_some(""),
                 aria_busy: (!connection.is_connected()).to_string(),
-                ApplicationNavigation {}
                 div { class: "min-h-0 flex-1 overflow-hidden",
                     if matches!(&*state, ViewerShellLoad::Error(ViewerClientError::InvalidSettings)) {
                         crate::views::settings_recovery::SettingsRecovery { onretry: move |()| context.refresh(false) }
@@ -644,7 +641,7 @@ fn ViewerConnectionNotice(connection: ViewerConnection, onretry: EventHandler<()
 
     rsx! {
         div {
-            class: "fixed inset-x-4 bottom-6 z-80 mx-auto flex w-fit max-w-3xl items-center gap-3 rounded-panel border border-del-line bg-surface px-4 py-2 text-del shadow-floating",
+            class: "viewer-connection-notice mx-auto w-fit gap-3 px-4 py-2",
             role: if can_retry { "alert" } else { "status" },
             p {
                 if can_retry {
@@ -771,8 +768,10 @@ mod tests {
                 tab_id: viewer_tab_id(tab_id)?,
             },
             preferences: ViewerPreferences {
+                sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: super::ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {
+                    wrap_lines: false,
                     layout: gtl_wire::viewer::ViewerDiffLayout::Unified,
                     density: gtl_wire::viewer::ViewerDiffDensity::Compact,
                 },

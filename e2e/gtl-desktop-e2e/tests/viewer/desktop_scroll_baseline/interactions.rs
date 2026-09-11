@@ -80,6 +80,13 @@ struct Samples {
 }
 
 async fn sample(driver: &WebDriver, kind: &str, first: &str, second: &str) -> Result<Samples> {
+    let samples: usize =
+        runner_environment::required_environment("GTL_DESKTOP_SCROLL_INTERACTION_SAMPLES")?
+            .parse()?;
+    ensure!(
+        [5, 20].contains(&samples),
+        "invalid interaction sample count"
+    );
     let values: Samples = driver
         .execute_async(
             SCRIPT,
@@ -87,13 +94,14 @@ async fn sample(driver: &WebDriver, kind: &str, first: &str, second: &str) -> Re
                 serde_json::json!(kind),
                 serde_json::json!(first),
                 serde_json::json!(second),
+                serde_json::json!(samples),
             ],
         )
         .await
         .with_context(|| format!("measure {kind} interactions"))?
         .convert()?;
     ensure!(
-        values.milliseconds.len() == 20
+        values.milliseconds.len() == samples
             && values
                 .milliseconds
                 .iter()
@@ -105,7 +113,7 @@ async fn sample(driver: &WebDriver, kind: &str, first: &str, second: &str) -> Re
 }
 
 const SCRIPT: &str = r#"
-const [kind, first, second, done] = arguments;
+const [kind, first, second, samples, done] = arguments;
 const results = [];
 const uncached = [];
 let rowRequests = [];
@@ -142,7 +150,7 @@ const wait = async predicate => {
     Object.defineProperty(navigator, 'clipboard', {
         configurable: true, value: { writeText: async () => { window.__gtlCopyComplete = true; } },
     });
-    for (let iteration = 0; iteration < 20; iteration++) {
+    for (let iteration = 0; iteration < samples; iteration++) {
         await wait(ready);
         let action, complete;
         if (kind === 'tab') {

@@ -37,7 +37,7 @@ use crate::shared::browser;
 #[cfg(feature = "artifact")]
 use crate::shared::ui::FloatingNotice;
 #[cfg(any(feature = "artifact", feature = "component-preview"))]
-use crate::shared::ui::Popover;
+use crate::shared::ui::PanelDialog;
 #[cfg(any(
     feature = "artifact",
     feature = "component-preview",
@@ -53,6 +53,7 @@ mod desktop;
 mod file_search;
 mod files_panel;
 mod path_filter;
+mod sidebars;
 mod titlebar;
 
 #[cfg(feature = "desktop")]
@@ -183,9 +184,9 @@ fn WorkspaceMobileNavigation(
     oncommits: EventHandler<MouseEvent>,
 ) -> Element {
     let navigation_classes = if preview_visible {
-        "col-span-3 row-start-2 grid grid-cols-2 border-b border-line bg-surface"
+        "diff-workspace-mobile-navigation"
     } else {
-        "col-span-3 row-start-2 grid grid-cols-2 border-b border-line bg-surface workspace:hidden"
+        "diff-workspace-mobile-navigation workspace:hidden"
     };
     let artifact_action = artifact.then_some("open-dialog");
 
@@ -193,7 +194,7 @@ fn WorkspaceMobileNavigation(
         nav { class: navigation_classes, aria_label: "Viewer panels",
             Button {
                 id: files_trigger_id,
-                class: "flex min-h-11 min-w-0 justify-center gap-2 rounded-none border-0 border-r border-line px-3 focus-visible:-outline-offset-2",
+                class: "flex min-h-11 min-w-0 justify-center gap-2 rounded-none border-0 border-r px-3 focus-visible:-outline-offset-2",
                 layout: ButtonLayout::Content,
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Ghost,
@@ -337,7 +338,7 @@ pub(crate) fn PreviewDiffWorkspace(
             section {
                 id: "workspace-heading",
                 tabindex: "-1",
-                class: "relative grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden",
+                class: "diff-workspace-mobile-grid h-full min-h-0",
                 onkeydown: move |event: KeyboardEvent| {
                     if keyboard_event_matches(
                         &event,
@@ -370,11 +371,11 @@ pub(crate) fn PreviewDiffWorkspace(
                     onfiles: move |_| mobile_panel.set(Some(PreviewMobilePanel::Files)),
                     oncommits: move |_| mobile_panel.set(Some(PreviewMobilePanel::Commits)),
                 }
-                div { class: "col-span-3 row-start-3 min-h-0 overflow-hidden",
+                div { class: "diff-workspace-mobile-content min-h-0",
                     StaticDiffDocument { workspace: workspace.clone(), overlay: search_overlay }
                 }
             }
-            Popover {
+            PanelDialog {
                 id: "preview-mobile-files-panel",
                 trigger_id: "preview-mobile-files-trigger",
                 open: mobile_panel() == Some(PreviewMobilePanel::Files),
@@ -382,7 +383,7 @@ pub(crate) fn PreviewDiffWorkspace(
                 onclose: move |()| mobile_panel.set(None),
                 FilesPanel { onnavigate }
             }
-            Popover {
+            PanelDialog {
                 id: "preview-mobile-commits-panel",
                 trigger_id: "preview-mobile-commits-trigger",
                 open: mobile_panel() == Some(PreviewMobilePanel::Commits),
@@ -398,7 +399,7 @@ pub(crate) fn PreviewDiffWorkspace(
             section {
                 id: "workspace-heading",
                 tabindex: "-1",
-                class: "relative grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+                class: "diff-workspace-desktop-grid h-full min-h-0",
                 onkeydown: move |event: KeyboardEvent| {
                     if keyboard_event_matches(
                         &event,
@@ -419,13 +420,13 @@ pub(crate) fn PreviewDiffWorkspace(
                 path_filter::PathFilter { onnavigate }
                 PreviewViewTitlebar { onfindall: open_all_files_search }
                 aside {
-                    class: "col-start-1 row-start-2 min-h-0 overflow-hidden border-r border-line bg-surface",
+                    class: "diff-workspace-panel min-h-0 diff-workspace-files-panel",
                     aria_label: "Changed files",
                     FilesPanel { onnavigate }
                 }
                 StaticDiffDocument { workspace, overlay: search_overlay }
                 aside {
-                    class: "col-start-3 row-start-2 min-h-0 overflow-hidden border-l border-line bg-surface",
+                    class: "diff-workspace-panel min-h-0 diff-workspace-commits-panel",
                     aria_label: "Commits",
                     WorkspaceCommitsPanel {
                         details_popover_id_prefix: "preview-desktop-commits-panel",
@@ -533,7 +534,7 @@ pub(crate) fn ArtifactDiffWorkspace(
             "data-gtl-copy-context-feedback": "",
         }
 
-        Popover {
+        PanelDialog {
             id: files_dialog,
             trigger_id: files_trigger,
             open: false,
@@ -545,7 +546,7 @@ pub(crate) fn ArtifactDiffWorkspace(
                 artifact_view_id: Some(markup.view_id()),
             }
         }
-        Popover {
+        PanelDialog {
             id: commits_dialog.clone(),
             trigger_id: commits_trigger,
             open: false,
@@ -559,6 +560,10 @@ pub(crate) fn ArtifactDiffWorkspace(
 
 #[component]
 fn DiffWorkspaceDocument(
+    #[props(default)] sidebars: gtl_models::viewer::ViewerSidebarVisibility,
+    #[props(default)] sidebar_pending: bool,
+    #[props(default)] keybindings: gtl_models::viewer::ViewerKeybindings,
+    ontoggle_sidebar: Option<EventHandler<sidebars::Sidebar>>,
     diff_document: Element,
     onnavigate: EventHandler<String>,
     mobile_navigation: Option<Element>,
@@ -583,30 +588,38 @@ fn DiffWorkspaceDocument(
     );
     rsx! {
         div {
-            class: "relative grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] workspace:grid-rows-[auto_minmax(0,1fr)] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
+            class: "diff-workspace-grid h-full min-h-0",
             "data-gtl-workspace": artifact_workspace,
+            "data-files-sidebar-visible": sidebars.files.to_string(),
+            "data-commits-sidebar-visible": sidebars.commits.to_string(),
             "data-gtl-view": artifact_view_id.clone(),
             "data-gtl-files-folded": artifact_files_folded,
             path_filter::PathFilter { onnavigate, artifact_view_id: artifact_view_id.clone() }
-            ViewTitlebar { live_actions, artifact_view_id: artifact_view_id.clone() }
+            ViewTitlebar {
+                live_actions,
+                artifact_view_id: artifact_view_id.clone(),
+                sidebars,
+                sidebar_pending,
+                keybindings,
+                ontoggle_sidebar,
+                onclear_commit,
+            }
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}
             }
-            aside {
-                class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface workspace:block",
-                aria_label: "Changed files",
+            sidebars::SidebarPanel { sidebar: sidebars::Sidebar::Files, visible: sidebars.files,
                 FilesPanel {
                     test_id: Some(test_ids::CHANGED_FILES_PANEL.value().to_owned()),
                     onnavigate,
                     artifact_view_id: artifact_view_id.clone(),
                 }
             }
-            div { class: "col-span-3 row-start-3 min-h-0 overflow-hidden workspace:col-start-2 workspace:col-span-1 workspace:row-start-2",
+            div { class: "diff-workspace-mobile-content min-h-0 workspace:col-start-2 workspace:col-span-1 workspace:row-start-2",
                 {diff_document}
             }
-            aside {
-                class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface workspace:block",
-                aria_label: "Commits",
+            sidebars::SidebarPanel {
+                sidebar: sidebars::Sidebar::Commits,
+                visible: sidebars.commits,
                 WorkspaceCommitsPanel {
                     details_popover_id_prefix,
                     artifact: artifact_view_id.is_some(),
@@ -668,6 +681,7 @@ mod artifact_tests {
             range_generation: ViewerRangeGeneration::new(3),
             selection_generation: ViewerSelectionGeneration::new(5),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },

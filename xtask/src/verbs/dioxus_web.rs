@@ -48,7 +48,10 @@ const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-web/src",
     "crates/gtl-web-contracts/src",
 ];
-const GENERATED_SOURCE_OUTPUTS: &[&str] = &["crates/gtl-web/assets/tailwind.css"];
+const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
+    "crates/gtl-web/assets/tailwind.css",
+    "crates/gtl-web/assets/artifact.css",
+];
 const FILE_COUNT_MAX: usize = 10_000;
 const FILE_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const SOURCE_BYTES_MAX: u64 = 256 * 1024 * 1024;
@@ -70,6 +73,17 @@ const TAILWIND_ARGUMENTS: &[&str] = &[
     "crates/gtl-web/src/app/assets/styles/tailwind.css",
     "--output",
     "crates/gtl-web/assets/tailwind.css",
+    "--minify",
+];
+const ARTIFACT_TAILWIND_ARGUMENTS: &[&str] = &[
+    "run",
+    "--frozen",
+    "--allow-all",
+    "@tailwindcss/cli",
+    "--input",
+    "crates/gtl-web/src/app/assets/styles/artifact.css",
+    "--output",
+    "crates/gtl-web/assets/artifact.css",
     "--minify",
 ];
 const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
@@ -362,14 +376,15 @@ pub(crate) fn build_styles() -> Result<()> {
 }
 
 pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
-    process::run_step(
-        &Step::new(
-            "dioxus-tailwind",
-            "deno",
-            TAILWIND_ARGUMENTS.iter().copied(),
-        )
-        .with_current_directory(root),
-    )
+    for (label, arguments) in [
+        ("dioxus-tailwind", TAILWIND_ARGUMENTS),
+        ("artifact-tailwind", ARTIFACT_TAILWIND_ARGUMENTS),
+    ] {
+        process::run_step(
+            &Step::new(label, "deno", arguments.iter().copied()).with_current_directory(root),
+        )?;
+    }
+    Ok(())
 }
 
 pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {

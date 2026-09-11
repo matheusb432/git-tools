@@ -43,6 +43,35 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .await
         .context("select the live view v2 commit")?;
     wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
+    session
+        .driver()
+        .find(By::Css("button[aria-label='Toggle Commits sidebar']"))
+        .await?
+        .click()
+        .await?;
+    let full_comparison = session
+        .driver()
+        .query(By::Css("button[aria-label='Show full comparison']"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    full_comparison.click().await?;
+    session
+        .driver()
+        .query(By::Css("button[aria-label='Toggle Commits sidebar']"))
+        .and_enabled()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?
+        .click()
+        .await?;
+
+    wait_for_commit_card_selection(session.driver(), "live view v2", false)
+        .await?
+        .click()
+        .await?;
+    wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
     fixture.commit_extra()?;
     wait_for_commit_card_selection(session.driver(), "live view extra", false).await?;
     let commit_card =

@@ -4,7 +4,7 @@ use lucide_dioxus::ChevronDown;
 
 use super::FieldError;
 
-const SELECT_CLASSES: &str = "peer block min-h-10 w-full cursor-pointer appearance-none rounded-sm border border-line-2 bg-surface-2 px-3 py-2 pr-10 text-ink outline-none hover:border-ink-3 focus-visible:border-acc focus-visible:ring-2 focus-visible:ring-acc-soft disabled:cursor-not-allowed disabled:opacity-50";
+const SELECT_CLASSES: &str = "control-select min-h-10 w-full px-3 py-2 pr-10 peer";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SelectOption {
@@ -71,12 +71,10 @@ pub(crate) fn Select(
                     }
                 }
                 span {
-                    class: if has_error { "pointer-events-none absolute inset-0 rounded-sm border border-del opacity-100 duration-150 motion-safe:transition-opacity motion-reduce:transition-none peer-focus-visible:ring-2 peer-focus-visible:ring-del-bg" } else { "pointer-events-none absolute inset-0 rounded-sm border border-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none peer-focus-visible:ring-2 peer-focus-visible:ring-del-bg" },
+                    class: "control-select-error-overlay",
                     aria_hidden: "true",
                 }
-                span {
-                    class: "pointer-events-none absolute top-1/2 right-3 grid -translate-y-1/2 place-items-center text-ink-3 peer-focus:text-acc peer-disabled:opacity-50",
-                    aria_hidden: "true",
+                span { class: "control-select-chevron", aria_hidden: "true",
                     ChevronDown { size: 17 }
                 }
             }
@@ -107,7 +105,7 @@ mod tests {
         assert!(html.contains("aria-describedby=\"layout-error\""));
         assert!(html.contains("id=\"layout-error\""));
         assert!(html.contains("role=\"alert\""));
-        assert!(html.contains("h-4"));
+        assert!(html.contains("control-field-error"));
     }
 
     #[test]

@@ -4,6 +4,7 @@
 pub mod proto;
 
 pub mod viewer;
+pub mod window;
 
 #[allow(
     clippy::default_trait_access,

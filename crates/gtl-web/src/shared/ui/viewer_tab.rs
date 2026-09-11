@@ -9,9 +9,6 @@ use super::{Button, ButtonSize, ButtonVariant, LoadingSpinner};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use super::{CountBadge, ScrollArea};
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
-const VIEWER_TAB_OVERFLOW_PANEL_CLASSES: &str = "fixed inset-auto z-70 m-0 mt-1 mb-2 max-h-[min(28rem,calc(100%-0.75rem))] w-[min(26rem,calc(100vw-1rem))] origin-top-right grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-floating [position-area:bottom_span-left] open:grid open:animate-popover-enter motion-reduce:animate-none";
-
 mod pointer_drag;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -52,25 +49,16 @@ pub(crate) fn ViewerTabItem(
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(onmove);
-    let surface_classes = if active {
-        "bg-surface-2 text-ink"
-    } else {
-        "bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink"
-    };
-    let activation_classes = if reorderable {
-        "touch-none cursor-default"
-    } else {
-        "cursor-default"
-    };
-
     rsx! {
         div {
-            class: "group/viewer-tab relative flex h-9 min-w-24 max-w-72 shrink-0 select-none items-center {surface_classes} duration-[160ms] ease-out data-[drag-state=shifting]:transition-transform motion-reduce:transition-none data-[drag-state=dragging]:opacity-0 data-[drag-state=shifting]:will-change-transform",
+            class: "viewer-tab group/viewer-tab",
+            "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "horizontal",
             button {
                 id: viewer_tab_element_id(tab_id),
-                class: "flex h-full min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent pr-1 pl-2 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc {activation_classes}",
+                class: "viewer-tab-trigger",
+                "data-reorderable": reorderable.to_string(),
                 r#type: "button",
                 draggable: "false",
                 role: "tab",
@@ -122,12 +110,20 @@ pub(crate) fn ViewerTabItem(
                 test_id: gtl_web_contracts::test_ids::VIEWER_TAB_CLOSE.value().to_owned(),
                 onclick: onclose,
             }
-            span {
-                class: if active { "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-acc opacity-100 transition-opacity ease-out motion-reduce:transition-none" } else { "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-acc opacity-0" },
-                style: active.then_some("transition-duration:75ms;"),
-                "data-viewer-tab-selection-indicator": "true",
-                aria_hidden: "true",
-            }
+            ViewerTabSelectionIndicator { active }
+        }
+    }
+}
+
+#[component]
+pub(crate) fn ViewerTabSelectionIndicator(active: bool) -> Element {
+    rsx! {
+        span {
+            class: "viewer-tab-selection-indicator",
+            "data-active": active.to_string(),
+            style: active.then_some("transition-duration:75ms;"),
+            "data-viewer-tab-selection-indicator": "true",
+            aria_hidden: "true",
         }
     }
 }
@@ -182,17 +178,17 @@ fn ViewerTabCloseButton(
         Button {
             size: ButtonSize::IconCompact,
             variant: ButtonVariant::Bare,
-            class: "group/viewer-tab-close relative mr-1 flex-none text-white",
+            class: "viewer-tab-close mr-1 group/viewer-tab-close",
             aria_label: "Close {label}",
             "data-testid": test_id,
             onclick,
             span {
-                class: "pointer-events-none absolute inset-0 m-auto size-5 rounded-full opacity-0 transition-opacity ease-out group-hover/viewer-tab-close:opacity-100 group-focus-visible/viewer-tab-close:opacity-100 motion-reduce:transition-none",
+                class: "viewer-tab-close-surface m-auto size-5",
                 style: "background-color:#c1121f;transition-duration:100ms;",
                 aria_hidden: "true",
             }
             span {
-                class: "pointer-events-none absolute inset-0 z-2 grid place-items-center text-white",
+                class: "viewer-tab-close-icon",
                 style: "transform:translateX(-0.5px);",
                 aria_hidden: "true",
                 X { size: 14, stroke_width: 4 }
@@ -211,9 +207,7 @@ fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
         ViewerTabKind::LiveBranchChanges => ", Live, Branch changes",
     };
     rsx! {
-        span {
-            class: "inline-flex size-3.5 flex-none items-center justify-center text-add",
-            aria_hidden: "true",
+        span { class: "viewer-tab-kind-indicator size-3.5", aria_hidden: "true",
             match kind {
                 ViewerTabKind::Snapshot => rsx! {},
                 ViewerTabKind::Live => rsx! {
@@ -260,15 +254,15 @@ pub(crate) fn ViewerTabOverflowMenu(
     );
 
     rsx! {
-        div { class: "group/viewer-tab-overflow flex min-w-0 flex-1 items-end",
+        div { class: "viewer-tab-overflow min-w-0 group/viewer-tab-overflow",
             button {
                 id: trigger_id,
-                class: "relative flex h-9 w-full min-w-0 max-w-[30rem] cursor-default select-none items-center gap-1.5 border-0 bg-surface-2 px-2.5 text-left text-ink hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-has-[:popover-open]/viewer-tab-overflow:bg-line",
+                class: "viewer-tab-overflow-trigger h-9 w-full min-w-0 gap-1.5 px-2.5",
                 r#type: "button",
                 popovertarget: id.clone(),
                 popovertargetaction: "toggle",
                 aria_label: trigger_label.clone(),
-                aria_haspopup: "dialog",
+                aria_busy: active_tab_state.is_loading().to_string(),
                 aria_controls: id.clone(),
                 title: trigger_label,
                 "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_TRIGGER.value(),
@@ -277,25 +271,22 @@ pub(crate) fn ViewerTabOverflowMenu(
                 TabStateMarker { state: active_tab_state }
                 CountBadge { count: tabs.len(), aria_hidden: "true" }
                 span {
-                    class: "flex-none text-ink-3 transition-transform ease-out group-has-[:popover-open]/viewer-tab-overflow:rotate-180 motion-reduce:transition-none",
+                    class: "viewer-tab-overflow-chevron",
                     style: "transition-duration:100ms;",
                     aria_hidden: "true",
                     ChevronDown { size: 15 }
                 }
-                span {
-                    class: "pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-acc opacity-100",
-                    aria_hidden: "true",
-                }
+                ViewerTabSelectionIndicator { active: true }
             }
             div {
                 id,
-                class: VIEWER_TAB_OVERFLOW_PANEL_CLASSES,
+                class: "viewer-tab-overflow-panel m-0 mt-1 mb-2 p-0",
                 style: "height: fit-content;",
                 popover: "auto",
-                role: "dialog",
+                role: "group",
                 aria_labelledby: title_id.clone(),
                 "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_MENU.value(),
-                header { class: "flex items-center gap-3 border-b border-line px-3 py-2.5",
+                header { class: "viewer-tab-overflow-header gap-3 px-3 py-2.5",
                     div { class: "min-w-0 flex-1",
                         h2 {
                             id: title_id,
@@ -356,24 +347,15 @@ fn ViewerTabOverflowMenuItem(
     let tab_id = tab.id;
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(Some(onmove));
-    let surface_classes = if active {
-        "bg-surface-2 text-ink"
-    } else {
-        "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink"
-    };
-    let activation_classes = if reorderable {
-        "touch-none cursor-default"
-    } else {
-        "cursor-default"
-    };
-
     rsx! {
         li {
-            class: "group/viewer-tab-menu relative flex min-w-0 select-none items-center rounded-sm {surface_classes} duration-[160ms] ease-out data-[drag-state=shifting]:transition-transform motion-reduce:transition-none data-[drag-state=dragging]:opacity-0 data-[drag-state=shifting]:will-change-transform",
+            class: "viewer-tab-menu-item group/viewer-tab-menu",
+            "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "vertical",
             button {
-                class: "flex min-h-10 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-2 py-1 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc {activation_classes}",
+                class: "viewer-tab-menu-trigger",
+                "data-reorderable": reorderable.to_string(),
                 r#type: "button",
                 draggable: "false",
                 popovertarget: popover_id,
@@ -525,9 +507,7 @@ mod tests {
         ViewerTabItem, ViewerTabItemProps, ViewerTabRailMeasurementItem, tab_presentation_state,
     };
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
-    use super::{
-        VIEWER_TAB_OVERFLOW_PANEL_CLASSES, ViewerTabOverflowMenu, ViewerTabOverflowMenuProps,
-    };
+    use super::{ViewerTabOverflowMenu, ViewerTabOverflowMenuProps};
     use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
@@ -601,15 +581,15 @@ mod tests {
         tab.rebuild_in_place();
         let html = dioxus_ssr::render(&tab);
 
-        assert!(html.starts_with("<div class=\"group/viewer-tab"));
-        assert!(html.contains("bg-surface-2 text-ink"));
-        assert!(html.contains("bg-acc opacity-100 transition-opacity ease-out"));
+        assert!(html.starts_with("<div class=\"viewer-tab group/viewer-tab\""));
+        assert!(html.contains("data-active=\"true\""));
+        assert!(html.contains("class=\"viewer-tab-selection-indicator\" data-active=\"true\""));
         assert!(html.contains("style=\"transition-duration:75ms;\""));
         assert!(!html.contains("duration-150"));
         assert!(!html.contains("active:bg-"));
-        assert!(html.contains("group-hover/viewer-tab-close:opacity-100"));
+        assert!(html.contains("viewer-tab-close mr-1 group/viewer-tab-close"));
         assert!(html.contains("background-color:#c1121f;transition-duration:100ms"));
-        assert!(html.contains("text-white"));
+        assert!(html.contains("viewer-tab-close-icon"));
         assert!(html.contains("transform:translateX(-0.5px)"));
         assert!(html.contains("stroke-width=\"4\""));
         assert!(html.contains("aria-label=\"Close Working tree\""));
@@ -642,9 +622,8 @@ mod tests {
         tab.rebuild_in_place();
         let html = dioxus_ssr::render(&tab);
 
-        assert!(html.contains("bg-sunk text-ink-2"));
-        assert!(html.contains("hover:bg-surface-2 hover:text-ink"));
-        assert!(!html.contains("bg-transparent text-ink-2"));
+        assert!(html.contains("data-active=\"false\""));
+        assert!(html.contains("class=\"viewer-tab group/viewer-tab\""));
         assert!(html.contains("aria-busy=\"false\""));
         assert!(html.contains(", Live"));
         assert!(!html.contains("animate-spin"));
@@ -688,17 +667,16 @@ mod tests {
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
     #[test]
     fn overflow_panel_stays_below_its_trigger_with_bounded_height() {
-        assert!(VIEWER_TAB_OVERFLOW_PANEL_CLASSES.contains("[position-area:bottom_span-left]"));
-        assert!(
-            VIEWER_TAB_OVERFLOW_PANEL_CLASSES.contains("max-h-[min(28rem,calc(100%-0.75rem))]")
-        );
-        assert!(!VIEWER_TAB_OVERFLOW_PANEL_CLASSES.contains("position-try-fallbacks"));
-        assert!(VIEWER_TAB_OVERFLOW_PANEL_CLASSES.contains("open:grid"));
-        assert!(
-            !VIEWER_TAB_OVERFLOW_PANEL_CLASSES
-                .split_whitespace()
-                .any(|class| class == "grid")
-        );
+        let stylesheet = include_str!("../../app/assets/styles/viewer-tabs.css");
+        let (_, styles) = stylesheet
+            .split_once(".viewer-tab-overflow-panel {")
+            .unwrap();
+        let styles = styles.split('}').next().unwrap();
+        assert!(styles.contains("[position-area:bottom_span-left]"));
+        assert!(styles.contains("max-h-[min(28rem,calc(100%-0.75rem))]"));
+        assert!(!styles.contains("position-try-fallbacks"));
+        assert!(styles.contains("open:grid"));
+        assert!(!styles.split_whitespace().any(|class| class == "grid"));
     }
 
     #[cfg(any(feature = "component-preview", feature = "desktop"))]

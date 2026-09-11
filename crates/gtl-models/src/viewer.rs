@@ -20,3 +20,18 @@ pub use pagination::{
     InvalidHistoryPage,
 };
 pub use tabs::{ViewerTab, ViewerTabKind, ViewerTabPlacement, ViewerTabState};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ViewerSidebarVisibility {
+    pub files: bool,
+    pub commits: bool,
+}
+
+impl Default for ViewerSidebarVisibility {
+    fn default() -> Self {
+        Self {
+            files: true,
+            commits: true,
+        }
+    }
+}

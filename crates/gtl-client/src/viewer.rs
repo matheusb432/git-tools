@@ -1,7 +1,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
+#[cfg(any(test, all(target_arch = "wasm32", feature = "viewer-ipc")))]
+mod stream_start;
 #[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
-mod tauri;
+pub(crate) mod tauri;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::{ViewerClient, ViewerRowStream, ViewerVersionStream};
@@ -22,7 +24,7 @@ pub enum ViewerClientError {
     NotFound,
     #[error("The viewer changed while this action was running. Try again.")]
     Conflict,
-    #[error("The viewer has too many active streams. Close another viewer and try again.")]
+    #[error("The viewer is temporarily busy loading rows. Try again shortly.")]
     ResourceExhausted,
     #[error("The desktop viewer is temporarily unavailable.")]
     Unavailable,
@@ -48,7 +50,7 @@ impl ViewerClientError {
             Self::NotFound => "This viewer item is no longer available.",
             Self::Conflict => "The viewer changed while this action was running. Try again.",
             Self::ResourceExhausted => {
-                "The viewer has too many active streams. Close another viewer and try again."
+                "The viewer is temporarily busy loading rows. Try again shortly."
             }
             Self::Unavailable => "The desktop viewer is temporarily unavailable.",
             Self::ProjectsUnavailable => {

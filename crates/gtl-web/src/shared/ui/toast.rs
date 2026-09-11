@@ -169,22 +169,18 @@ fn ToastViewport(queue: ToastQueue, ondismiss: EventHandler<ToastId>) -> Element
     let Some(toast) = queue.entries.front().cloned() else {
         return rsx! {
             div {
-                class: "pointer-events-none fixed inset-x-3 bottom-12 z-60 mx-auto w-auto max-w-xl",
+                class: "toast-viewport mx-auto w-auto",
                 aria_label: "Notifications",
                 "data-testid": test_ids::TOAST_VIEWPORT.value(),
             }
         };
     };
     let shows_ledger = queue.entries.len() > 1;
-    let card_classes = if shows_ledger {
-        "pointer-events-auto relative mt-2 w-full overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating animate-toast-enter motion-reduce:animate-none"
-    } else {
-        "pointer-events-auto relative w-full overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating animate-toast-enter motion-reduce:animate-none"
-    };
+    let card_classes = "toast-card";
 
     rsx! {
         div {
-            class: "pointer-events-none fixed inset-x-3 bottom-12 z-60 mx-auto w-auto max-w-xl",
+            class: "toast-viewport mx-auto w-auto",
             aria_label: "Notifications",
             "data-testid": test_ids::TOAST_VIEWPORT.value(),
             if shows_ledger {
@@ -214,17 +210,18 @@ fn ToastViewport(queue: ToastQueue, ondismiss: EventHandler<ToastId>) -> Element
             div {
                 key: "{toast.id.0}",
                 class: card_classes,
+                "data-ledger": shows_ledger.to_string(),
                 role: toast.kind.role(),
                 aria_live: toast.kind.aria_live(),
                 aria_atomic: "true",
                 "data-testid": test_ids::TOAST.value(),
                 div {
-                    class: "absolute inset-y-0 left-0 w-1 {toast.kind.accent_classes()}",
+                    class: "toast-accent w-1 {toast.kind.accent_classes()}",
                     aria_hidden: "true",
                 }
-                div { class: "flex min-h-20 items-center gap-3 py-3 pr-2 pl-5",
+                div { class: "toast-content min-h-20 gap-3 py-3 pr-2 pl-5",
                     span {
-                        class: "flex size-12 shrink-0 items-center justify-center rounded-panel border {toast.kind.icon_classes()}",
+                        class: "toast-icon size-12 {toast.kind.icon_classes()}",
                         aria_hidden: "true",
                         ToastIcon { kind: toast.kind }
                     }
@@ -232,7 +229,7 @@ fn ToastViewport(queue: ToastQueue, ondismiss: EventHandler<ToastId>) -> Element
                         "{toast.message}"
                     }
                     Button {
-                        class: "size-11 shrink-0 text-ink-2",
+                        class: "size-11 shrink-0",
                         size: ButtonSize::Content,
                         variant: ButtonVariant::Ghost,
                         aria_label: "Dismiss notification",
@@ -245,7 +242,7 @@ fn ToastViewport(queue: ToastQueue, ondismiss: EventHandler<ToastId>) -> Element
                     }
                 }
                 div {
-                    class: "absolute inset-x-0 bottom-0 h-0.5 origin-left animate-toast-expiry {toast.kind.accent_classes()} motion-reduce:animate-none",
+                    class: "toast-expiry h-0.5 {toast.kind.accent_classes()}",
                     aria_hidden: "true",
                 }
             }
@@ -396,10 +393,11 @@ mod tests {
                 main { "Route content" }
             }
         });
+        let viewport = format!(r#"data-testid="{}""#, test_ids::TOAST_VIEWPORT.value());
         assert!(html.contains("Route content"));
-        assert!(html.contains(test_ids::TOAST_VIEWPORT.value()));
-        assert!(html.find("Route content") < html.find(test_ids::TOAST_VIEWPORT.value()));
-        assert_eq!(html.matches(test_ids::TOAST_VIEWPORT.value()).count(), 1);
+        assert!(html.contains(&viewport));
+        assert!(html.find("Route content") < html.find(&viewport));
+        assert_eq!(html.matches(&viewport).count(), 1);
     }
 
     #[allow(dead_code)]

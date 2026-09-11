@@ -1,0 +1,57 @@
+@layer components {
+  .control-data-table { @apply overflow-x-auto rounded-panel border border-line bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc; }
+  .control-data-table-table { @apply min-w-[44rem] border-collapse text-left; }
+  .control-data-table-head { @apply border-b border-line-2 bg-sunk whitespace-nowrap text-ink-3; }
+  .control-table-column { @apply align-middle whitespace-nowrap; }
+  .control-data-table-row { @apply border-b border-line text-ink-2 last:border-b-0 even:bg-sunk/30 hover:bg-surface-2 focus-within:bg-surface-2; }
+  .control-field-error { @apply mt-1 h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none; }
+  .control-field-error[data-visible="true"] { @apply opacity-100; }
+  .control-field-label { @apply flex flex-1 flex-col text-ink; }
+  .control-navigation-bar { @apply z-70 box-content flex shrink-0 items-end border-b border-line bg-surface; }
+  .control-navigation-bar[data-bordered="false"] { @apply border-b-0; }
+  .control-navigation-bar-leading { @apply flex shrink-0 items-stretch; }
+  .control-navigation-bar-rail { @apply relative flex flex-1 items-end; }
+  .control-navigation-bar-trailing { @apply flex shrink-0 items-center; }
+  .control-select { @apply block cursor-pointer appearance-none rounded-sm border border-line-2 bg-surface-2 text-ink outline-none hover:border-ink-3 focus-visible:border-acc focus-visible:ring-2 focus-visible:ring-acc-soft disabled:cursor-not-allowed disabled:opacity-50; }
+  .control-select-error-overlay { @apply pointer-events-none absolute inset-0 rounded-sm border border-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none peer-focus-visible:ring-2 peer-focus-visible:ring-del-bg; }
+  .peer[aria-invalid="true"] + .control-select-error-overlay { @apply opacity-100; }
+  .control-select-chevron { @apply pointer-events-none absolute top-1/2 right-3 grid -translate-y-1/2 place-items-center text-ink-3 peer-focus:text-acc peer-disabled:opacity-50; }
+  .control-skeleton { @apply animate-pulse rounded-sm bg-line-2 motion-reduce:animate-none; }
+  .control-page-notice { @apply grid place-content-center text-center; }
+  .control-viewer-theme-picker { @apply flex flex-none items-center rounded-sm border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50; }
+  .control-viewer-theme-select { @apply cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed; }
+  .alert-dialog-surface { @apply w-[min(30rem,calc(100vw-2rem))] rounded-panel border border-del-line bg-surface text-ink shadow-none backdrop:bg-bg/80; }
+  .alert-dialog-header { @apply flex items-start border-b border-line; }
+  .alert-dialog-actions { @apply flex justify-end; }
+  .toast-viewport { @apply pointer-events-none fixed inset-x-3 bottom-12 z-60 max-w-xl; }
+  .toast-card { @apply pointer-events-auto relative w-full overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating animate-toast-enter motion-reduce:animate-none; }
+  .toast-card[data-ledger="true"] { @apply mt-2; }
+  .toast-content { @apply flex items-center; }
+  .toast-icon { @apply flex shrink-0 items-center justify-center rounded-panel border; }
+  .toast-expiry { @apply absolute inset-x-0 bottom-0 origin-left animate-toast-expiry motion-reduce:animate-none; }
+  .toast-accent { @apply absolute inset-y-0 left-0; }
+  .viewer-tab-floating { @apply pointer-events-none fixed inset-auto flex select-none items-center rounded-sm border-0 bg-surface-2 text-ink shadow-floating outline outline-1 outline-acc-line; }
+  .icon-popover-quarter-turn { @apply transition-transform duration-150 ease-out group-has-[:popover-open]/icon-popover:rotate-90 motion-reduce:transition-none; }
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-expiry {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}

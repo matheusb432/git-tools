@@ -59,6 +59,9 @@ pub(crate) struct DesktopScrollBenchmarkArguments {
     /// Compare the current result, then replace the local baseline after a successful run.
     #[arg(long)]
     pub(crate) update: bool,
+    /// Use five interaction samples per launch and separate quick reports.
+    #[arg(long)]
+    pub(crate) quick: bool,
 }
 
 pub(crate) fn refresh_fixture() -> Result<()> {
@@ -83,10 +86,20 @@ pub(crate) fn run_fixture_worker() -> Result<()> {
 pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Result<()> {
     require_linux_systemd("desktop scroll benchmark")?;
     let root = repository_root();
-    let baseline_path = root.join(BENCHMARK_BASELINE_RELATIVE_PATH);
-    let current_path = root.join(BENCHMARK_CURRENT_RELATIVE_PATH);
+    let baseline_path = root.join(if arguments.quick {
+        ".artifacts/benchmarks/desktop-scroll/quick-baseline.json"
+    } else {
+        BENCHMARK_BASELINE_RELATIVE_PATH
+    });
+    let current_path = root.join(if arguments.quick {
+        ".artifacts/benchmarks/desktop-scroll/quick-current.json"
+    } else {
+        BENCHMARK_CURRENT_RELATIVE_PATH
+    });
     let baseline = load_baseline(&baseline_path, arguments.update)?;
-    ensure_clean_repository(&root)?;
+    if !arguments.quick {
+        ensure_clean_repository(&root)?;
+    }
     let executable =
         std::env::current_exe().context("resolve xtask desktop benchmark worker executable")?;
     let source_commit = git_output(&root, &["rev-parse", "HEAD"])?;
@@ -94,7 +107,15 @@ pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Resu
         source_commit.len() == 40 && source_commit.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "Git returned an invalid source commit: {source_commit}"
     );
-    let invocation = if arguments.update {
+    let source_commit =
+        if arguments.quick && !git_output(&root, &["status", "--porcelain=v1"])?.is_empty() {
+            format!("{source_commit}-dirty")
+        } else {
+            source_commit
+        };
+    let invocation = if arguments.quick {
+        "just bench-scroll --quick"
+    } else if arguments.update {
         "just bench-scroll --update"
     } else {
         "just bench-scroll"
@@ -104,6 +125,7 @@ pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Resu
         &BenchmarkWorkerInputs {
             output: &current_path,
             launches: BENCHMARK_LAUNCHES,
+            interaction_samples: if arguments.quick { 5 } else { 20 },
             source_commit: &source_commit,
             invocation,
         },
@@ -133,6 +155,7 @@ pub(crate) fn run_benchmark_worker() -> Result<()> {
 struct BenchmarkWorkerInputs<'a> {
     output: &'a Path,
     launches: usize,
+    interaction_samples: usize,
     source_commit: &'a str,
     invocation: &'a str,
 }
@@ -160,6 +183,10 @@ fn bounded_benchmark_worker_step(executable: &Path, inputs: &BenchmarkWorkerInpu
         inputs.output.to_string_lossy(),
     )
     .with_environment("GTL_DESKTOP_SCROLL_LAUNCHES", inputs.launches.to_string())
+    .with_environment(
+        "GTL_DESKTOP_SCROLL_INTERACTION_SAMPLES",
+        inputs.interaction_samples.to_string(),
+    )
     .with_environment("GTL_DESKTOP_SCROLL_SOURCE_COMMIT", inputs.source_commit)
     .with_environment("GTL_DESKTOP_SCROLL_INVOCATION", inputs.invocation)
     .with_environment(
@@ -483,6 +510,7 @@ mod tests {
             &BenchmarkWorkerInputs {
                 output: Path::new("/repo/.artifacts/scroll.json"),
                 launches: 3,
+                interaction_samples: 20,
                 source_commit: "0123456789012345678901234567890123456789",
                 invocation: "just bench-scroll",
             },

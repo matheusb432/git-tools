@@ -16,11 +16,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 16;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 19;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
 pub const VIEWER_ROW_BATCH_MAX_ROWS: usize = 64;
+pub const VIEWER_ROW_RANGE_MAX_ROWS: usize = 512;
+pub const VIEWER_ROW_SESSIONS_MAX: usize = 10;
 pub const VIEWER_ROW_BATCH_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_ROW_MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024;
 pub const VIEWER_SEARCH_QUERY_MAX_BYTES: usize = 256;
@@ -93,6 +95,7 @@ impl ViewerDiffDensity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerRenderOptions {
+    pub wrap_lines: bool,
     pub layout: ViewerDiffLayout,
     pub density: ViewerDiffDensity,
 }
@@ -465,6 +468,7 @@ pub enum ViewerActiveState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerPreferences {
+    pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
     pub keybindings: ViewerKeybindings,
@@ -555,6 +559,7 @@ pub struct ViewerDiffExclusions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
+    pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub projects_view: gtl_models::settings::ProjectsViewMode,
     pub configuration_path: Option<String>,
     pub configured_theme: Option<ViewerTheme>,
@@ -581,6 +586,9 @@ pub struct ViewerProjectSettingsUpdate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EditSettingsRequest {
+    pub files_sidebar_visible: FieldUpdate<bool>,
+    pub commits_sidebar_visible: FieldUpdate<bool>,
+    pub wrap_lines: FieldUpdate<bool>,
     pub projects_view: FieldUpdate<gtl_models::settings::ProjectsViewMode>,
     pub theme: FieldUpdate<ViewerTheme>,
     pub layout: FieldUpdate<ViewerDiffLayout>,
@@ -789,7 +797,7 @@ impl std::error::Error for ViewerRowRangeError {}
 impl ViewerRowRange {
     pub fn try_new(start: u32, count: u32) -> Result<Self, ViewerRowRangeError> {
         if count == 0
-            || u64::from(count) > VIEWER_ROW_BATCH_MAX_ROWS as u64
+            || u64::from(count) > VIEWER_ROW_RANGE_MAX_ROWS as u64
             || start.checked_add(count).is_none()
         {
             return Err(ViewerRowRangeError);

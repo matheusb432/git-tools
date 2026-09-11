@@ -13,6 +13,7 @@ const BUNDLES: &[(&str, &str)] = &[
         "crates/gtl-web/assets/component-preview.css",
         "just web preview-styles",
     ),
+    ("crates/gtl-web/assets/artifact.css", "just web styles"),
 ];
 
 /// Fail if any generated path has checkout changes after a rebuild. `is_clean(path)` reports

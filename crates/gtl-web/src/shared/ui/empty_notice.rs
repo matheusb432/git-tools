@@ -1,8 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-const EMPTY_NOTICE_CLASSES: &str =
-    "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic";
+const EMPTY_NOTICE_CLASSES: &str = "control-empty-notice p-4";
 
 #[component]
 pub(crate) fn EmptyNotice(

@@ -31,7 +31,8 @@ pub(crate) fn FieldError(message: Option<String>, id: Option<String>) -> Element
     rsx! {
         p {
             id,
-            class: if has_error { "mt-1 h-4 px-3 text-xs font-medium text-del opacity-100 duration-150 motion-safe:transition-opacity motion-reduce:transition-none" } else { "mt-1 h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none" },
+            class: "control-field-error",
+            "data-visible": has_error.then_some("true"),
             span { aria_hidden: "true", "{message_displayed}" }
             span { class: "sr-only", role: "alert", aria_atomic: "true",
                 {message.unwrap_or_default()}

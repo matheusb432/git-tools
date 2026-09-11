@@ -38,6 +38,7 @@ pub(crate) fn ViewerSettingsForm(
     let mut theme = use_signal(|| initial.theme);
     let mut layout = use_signal(|| initial.render_options.layout);
     let mut density = use_signal(|| initial.render_options.density);
+    let mut wrap_lines = use_signal(|| initial.render_options.wrap_lines);
 
     rsx! {
         form {
@@ -50,22 +51,23 @@ pub(crate) fn ViewerSettingsForm(
                     .call(ViewerSettingsSelection {
                         theme: theme(),
                         render_options: ViewerRenderOptions {
+                            wrap_lines: wrap_lines(),
                             layout: layout(),
                             density: density(),
                         },
                     });
             },
             section {
-                class: "overflow-hidden rounded-panel border border-line bg-surface",
+                class: "settings-card",
                 aria_label: "Editable viewer settings",
-                header { class: "border-b border-line bg-surface-2 px-4 py-3",
+                header { class: "settings-card-header px-4 py-3",
                     h2 { class: "font-semibold text-ink", "Diff display" }
                     p { class: "mt-0.5 text-xs leading-5 text-ink-3",
                         "These defaults apply to viewer sessions and raw artifacts."
                     }
                 }
-                div { class: "grid gap-4 p-4 sm:grid-cols-3",
-                    div { class: "flex min-w-0 flex-col gap-1.5",
+                div { class: "settings-form-grid gap-4 p-4",
+                    div { class: "settings-form-field min-w-0 gap-1.5",
                         FieldLabel {
                             for_id: "settings-theme",
                             label: "Theme",
@@ -94,7 +96,7 @@ pub(crate) fn ViewerSettingsForm(
                             },
                         }
                     }
-                    div { class: "flex min-w-0 flex-col gap-1.5",
+                    div { class: "settings-form-field min-w-0 gap-1.5",
                         FieldLabel {
                             for_id: "settings-layout",
                             label: "Layout",
@@ -117,7 +119,30 @@ pub(crate) fn ViewerSettingsForm(
                             },
                         }
                     }
-                    div { class: "flex min-w-0 flex-col gap-1.5",
+                    div { class: "settings-form-field min-w-0 gap-1.5",
+                        FieldLabel {
+                            for_id: "settings-wrap-lines",
+                            label: "Wrap lines",
+                            hint: "Fit source lines to the available width or scroll horizontally.",
+                        }
+                        Select {
+                            id: "settings-wrap-lines",
+                            name: "wrap_lines",
+                            "data-testid": gtl_web_contracts::test_ids::VIEWER_SETTINGS_WRAP_LINES.value(),
+                            aria_label: "Wrap lines",
+                            value: if wrap_lines() { "true" } else { "false" },
+                            options: vec![SelectOption::new("false", "Off"), SelectOption::new("true", "On")],
+                            error: None,
+                            disabled: pending,
+                            onchange: move |event: FormEvent| {
+                                if let Ok(selected) = event.value().parse::<bool>() {
+                                    wrap_lines.set(selected);
+                                    onmodified.call(());
+                                }
+                            },
+                        }
+                    }
+                    div { class: "settings-form-field min-w-0 gap-1.5",
                         FieldLabel {
                             for_id: "settings-density",
                             label: "View",
@@ -141,7 +166,7 @@ pub(crate) fn ViewerSettingsForm(
                         }
                     }
                 }
-                footer { class: "flex min-h-16 items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3",
+                footer { class: "settings-form-footer min-h-16 gap-3 px-4 py-3",
                     p {
                         class: "text-xs text-add",
                         role: "status",
@@ -170,6 +195,10 @@ pub(super) fn viewer_settings_patch(
     selected: ViewerSettingsSelection,
 ) -> EditSettingsRequest {
     EditSettingsRequest {
+        wrap_lines: changed_field(
+            &current.render_options.wrap_lines,
+            selected.render_options.wrap_lines,
+        ),
         theme: changed_optional_field(current.theme.as_ref(), selected.theme),
         layout: changed_field(
             &current.render_options.layout,
@@ -255,7 +284,14 @@ mod tests {
         layout: ViewerDiffLayout,
         density: ViewerDiffDensity,
     ) -> ViewerSettingsSelection {
-        ViewerSettingsSelection::new(theme, ViewerRenderOptions { layout, density })
+        ViewerSettingsSelection::new(
+            theme,
+            ViewerRenderOptions {
+                wrap_lines: false,
+                layout,
+                density,
+            },
+        )
     }
 
     #[test]

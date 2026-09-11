@@ -1,6 +1,7 @@
 //! Authenticated local gRPC client for `gtl-server`.
 
 mod viewer;
+pub mod window;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;

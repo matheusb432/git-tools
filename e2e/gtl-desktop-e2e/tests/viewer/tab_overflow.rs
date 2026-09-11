@@ -7,7 +7,7 @@ use thirtyfour::{By, Key, WebDriver, WebElement};
 
 use crate::support::{self, fixture::TabOverflowFixture, wait};
 
-const DESKTOP_WIDTH: u32 = 1200;
+const DESKTOP_WIDTH: u32 = 1400;
 const NARROW_WIDTH: u32 = 480;
 const WINDOW_HEIGHT: u32 = 800;
 
@@ -28,14 +28,6 @@ struct TabCloseVisual {
 struct TabSelectionMotion {
     active_transition_duration: String,
     inactive_transition_duration: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OverflowMenuMotion {
-    animation_duration: String,
-    animation_name: String,
-    keyframes: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -95,6 +87,9 @@ async fn verify_rail_responsiveness(
     driver: &WebDriver,
     fixture: &TabOverflowFixture,
 ) -> Result<()> {
+    driver
+        .set_window_rect(20, 20, DESKTOP_WIDTH, WINDOW_HEIGHT)
+        .await?;
     fixture.forward_initial()?;
     let (initial_last_repository, initial_last_marker) = fixture
         .initial_last_identity()
@@ -700,13 +695,9 @@ async fn verify_overflow_menu(driver: &WebDriver, fixture: &TabOverflowFixture) 
         .context("open the tab overflow menu")?;
     let menu = support::selectors::by_test_id(driver, test_ids::VIEWER_TAB_OVERFLOW_MENU).await?;
     assert_menu_geometry(driver, &trigger, &menu).await?;
-    let motion = read_overflow_menu_motion(driver, &menu).await?;
     ensure!(
-        motion.animation_name == "popover-enter"
-            && motion.animation_duration == "0.1s"
-            && motion.keyframes.contains("translate")
-            && !motion.keyframes.contains("scale"),
-        "the overflow menu does not use the optimized translation-only motion: {motion:?}"
+        menu.css_value("animation-name").await? == "none",
+        "the overflow menu delays its content with an entrance animation"
     );
     assert_menu_contents(&menu, fixture.len()).await?;
     support::evidence::capture(driver, "viewer-tab-overflow-menu", true).await?;
@@ -723,48 +714,6 @@ async fn verify_overflow_menu(driver: &WebDriver, fixture: &TabOverflowFixture) 
         .await
         .context("activate the moved overflowed tab")?;
     wait_for_collapsed_active_diff(driver, first_repository, first_marker).await
-}
-
-async fn read_overflow_menu_motion(
-    driver: &WebDriver,
-    menu: &WebElement,
-) -> Result<OverflowMenuMotion> {
-    driver
-        .execute(
-            r#"
-                const menu = arguments[0];
-                const style = getComputedStyle(menu);
-                const findKeyframes = (rules, name) => {
-                    for (const rule of rules) {
-                        if (rule.type === CSSRule.KEYFRAMES_RULE && rule.name === name) {
-                            return rule.cssText;
-                        }
-                        if (rule.cssRules) {
-                            const nested = findKeyframes(rule.cssRules, name);
-                            if (nested) return nested;
-                        }
-                    }
-                    return "";
-                };
-                let keyframes = "";
-                for (const sheet of document.styleSheets) {
-                    try {
-                        keyframes = findKeyframes(sheet.cssRules, style.animationName);
-                    } catch (_) {}
-                    if (keyframes) break;
-                }
-                return {
-                    animationDuration: style.animationDuration,
-                    animationName: style.animationName,
-                    keyframes,
-                };
-            "#,
-            vec![menu.to_json().context("encode viewer tab overflow menu")?],
-        )
-        .await
-        .context("inspect viewer tab overflow menu motion")?
-        .convert()
-        .context("decode viewer tab overflow menu motion")
 }
 
 async fn assert_menu_geometry(

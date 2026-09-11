@@ -315,8 +315,10 @@ mod tests {
                 ViewerActiveState::Pending { tab_id }
             }),
             preferences: ViewerPreferences {
+                sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {
+                    wrap_lines: false,
                     layout: gtl_wire::viewer::ViewerDiffLayout::Split,
                     density: gtl_wire::viewer::ViewerDiffDensity::Full,
                 },

@@ -137,6 +137,7 @@ fn response(sequence: u64, event: Event) -> v1::StreamViewerRowsResponse {
             range_generation: 8,
             selection_generation: 9,
             render_options: Some(v1::ViewerRenderOptions {
+                wrap_lines: false,
                 layout: v1::ViewerDiffLayout::Unified.into(),
                 density: v1::ViewerDiffDensity::Compact.into(),
             }),

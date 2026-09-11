@@ -6,16 +6,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 pub enum ViewerKeybindingAction {
     SearchFiles,
     SearchTextInAllFiles,
+    ToggleFilesSidebar,
+    ToggleCommitsSidebar,
 }
 
 impl ViewerKeybindingAction {
-    const ALL: [Self; 2] = [Self::SearchFiles, Self::SearchTextInAllFiles];
+    const ALL: [Self; 4] = [
+        Self::SearchFiles,
+        Self::SearchTextInAllFiles,
+        Self::ToggleFilesSidebar,
+        Self::ToggleCommitsSidebar,
+    ];
     const COUNT: usize = Self::ALL.len();
 
     const fn index(self) -> usize {
         match self {
             Self::SearchFiles => 0,
             Self::SearchTextInAllFiles => 1,
+            Self::ToggleFilesSidebar => 2,
+            Self::ToggleCommitsSidebar => 3,
         }
     }
 
@@ -23,6 +32,13 @@ impl ViewerKeybindingAction {
         match self {
             Self::SearchFiles => ViewerKeybinding::primary_character('p'),
             Self::SearchTextInAllFiles => ViewerKeybinding::primary_character('f'),
+            Self::ToggleFilesSidebar => ViewerKeybinding::primary_character('b'),
+            Self::ToggleCommitsSidebar => ViewerKeybinding {
+                key: ViewerKey::Character('b'),
+                modifiers: ViewerModifiers(
+                    ViewerModifier::Primary as u8 | ViewerModifier::Alt as u8,
+                ),
+            },
         }
     }
 }
@@ -32,6 +48,8 @@ impl fmt::Display for ViewerKeybindingAction {
         formatter.write_str(match self {
             Self::SearchFiles => "search_files",
             Self::SearchTextInAllFiles => "search_text_in_all_files",
+            Self::ToggleFilesSidebar => "toggle_files_sidebar",
+            Self::ToggleCommitsSidebar => "toggle_commits_sidebar",
         })
     }
 }
@@ -515,6 +533,8 @@ struct SerializedViewerKeybindings {
     platform: ViewerKeybindingPlatform,
     search_files: ViewerKeybinding,
     search_text_in_all_files: ViewerKeybinding,
+    toggle_files_sidebar: ViewerKeybinding,
+    toggle_commits_sidebar: ViewerKeybinding,
 }
 
 impl Serialize for ViewerKeybindings {
@@ -526,6 +546,8 @@ impl Serialize for ViewerKeybindings {
             platform: self.platform,
             search_files: self[ViewerKeybindingAction::SearchFiles],
             search_text_in_all_files: self[ViewerKeybindingAction::SearchTextInAllFiles],
+            toggle_files_sidebar: self[ViewerKeybindingAction::ToggleFilesSidebar],
+            toggle_commits_sidebar: self[ViewerKeybindingAction::ToggleCommitsSidebar],
         }
         .serialize(serializer)
     }
@@ -540,6 +562,8 @@ impl<'de> Deserialize<'de> for ViewerKeybindings {
         Self::try_from_fn(value.platform, |action| match action {
             ViewerKeybindingAction::SearchFiles => value.search_files,
             ViewerKeybindingAction::SearchTextInAllFiles => value.search_text_in_all_files,
+            ViewerKeybindingAction::ToggleFilesSidebar => value.toggle_files_sidebar,
+            ViewerKeybindingAction::ToggleCommitsSidebar => value.toggle_commits_sidebar,
         })
         .map_err(D::Error::custom)
     }
@@ -567,7 +591,38 @@ mod tests {
         ViewerKeybindings::try_from_fn(platform, |action| match action {
             ViewerKeybindingAction::SearchFiles => search_files,
             ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+            ViewerKeybindingAction::ToggleFilesSidebar
+            | ViewerKeybindingAction::ToggleCommitsSidebar => {
+                ViewerKeybindings::for_platform(platform)[action]
+            }
         })
+    }
+
+    #[test]
+    fn sidebar_defaults_match_vs_code_and_reject_conflicting_overrides() {
+        for platform in [
+            ViewerKeybindingPlatform::Linux,
+            ViewerKeybindingPlatform::Windows,
+        ] {
+            let bindings = ViewerKeybindings::for_platform(platform);
+            assert_display_keys(
+                bindings,
+                ViewerKeybindingAction::ToggleFilesSidebar,
+                ["Ctrl", "B"],
+            );
+            assert_display_keys(
+                bindings,
+                ViewerKeybindingAction::ToggleCommitsSidebar,
+                ["Ctrl", "Alt", "B"],
+            );
+            let conflict = ViewerKeybindings::try_from_fn(platform, |action| match action {
+                ViewerKeybindingAction::ToggleCommitsSidebar => {
+                    bindings[ViewerKeybindingAction::ToggleFilesSidebar]
+                }
+                _ => bindings[action],
+            });
+            assert!(conflict.is_err());
+        }
     }
 
     fn assert_display_keys<const N: usize>(
@@ -731,6 +786,8 @@ mod tests {
             "platform": "mac_os",
             "search_files": "ctrl+p",
             "search_text_in_all_files": "meta+p",
+            "toggle_files_sidebar": "ctrl+b",
+            "toggle_commits_sidebar": "ctrl+alt+b",
         });
 
         assert!(serde_json::from_value::<ViewerKeybindings>(value).is_err());

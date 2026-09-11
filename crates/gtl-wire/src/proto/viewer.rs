@@ -143,6 +143,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
         tabs: shell.tabs.into_iter().map(encode_viewer_tab).collect(),
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
+            sidebars: Some(encode_sidebar_visibility(shell.preferences.sidebars)),
             theme: encode_viewer_theme(shell.preferences.theme) as i32,
             render_options: Some(encode_viewer_render_options(
                 shell.preferences.render_options,
@@ -542,6 +543,7 @@ pub fn decode_get_viewer_settings_response(
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     let exclusions = required(response.diff_exclusions)?;
     Ok(ViewerUserSettings {
+        sidebars: decode_sidebar_visibility(required(response.sidebars)?),
         projects_view: decode_projects_view(response.projects_view)?,
         configuration_path: response.configuration_path,
         configured_theme: response
@@ -575,6 +577,7 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
         projects_view: encode_projects_view(settings.projects_view) as i32,
         configuration_path: settings.configuration_path,
         configured_theme: settings
@@ -606,7 +609,7 @@ pub fn encode_get_viewer_settings_response(
 #[must_use]
 pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSettingsRequest {
     use v1::{
-        bool_field_update, density_field_update, extensions_field_update, layout_field_update,
+        density_field_update, extensions_field_update, layout_field_update,
         project_settings_field_update, theme_field_update,
     };
     let theme = match request.theme {
@@ -642,15 +645,8 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
             )),
         }),
     };
-    let push_confirmation_required = match request.push_confirmation_required {
-        FieldUpdate::Unchanged => None,
-        FieldUpdate::Clear => Some(v1::BoolFieldUpdate {
-            operation: Some(bool_field_update::Operation::Clear(v1::ClearSetting {})),
-        }),
-        FieldUpdate::Update(value) => Some(v1::BoolFieldUpdate {
-            operation: Some(bool_field_update::Operation::Update(value)),
-        }),
-    };
+    let wrap_lines = encode_bool_field_update(&request.wrap_lines);
+    let push_confirmation_required = encode_bool_field_update(&request.push_confirmation_required);
     let default_diff_exclusions = match request.default_diff_exclusions {
         FieldUpdate::Unchanged => None,
         FieldUpdate::Clear => Some(v1::ExtensionsFieldUpdate {
@@ -689,6 +685,9 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
         }),
     };
     v1::EditSettingsRequest {
+        files_sidebar_visible: encode_bool_field_update(&request.files_sidebar_visible),
+        commits_sidebar_visible: encode_bool_field_update(&request.commits_sidebar_visible),
+        wrap_lines,
         projects_view: encode_projects_view_update(&request.projects_view),
         theme,
         layout,
@@ -699,6 +698,17 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
     }
 }
 
+fn encode_bool_field_update(update: &FieldUpdate<bool>) -> Option<v1::BoolFieldUpdate> {
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => v1::bool_field_update::Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(value) => v1::bool_field_update::Operation::Update(*value),
+    };
+    Some(v1::BoolFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
 pub fn decode_edit_settings_request(
     request: v1::EditSettingsRequest,
 ) -> Result<EditSettingsRequest, ViewerCodecError> {
@@ -707,6 +717,8 @@ pub fn decode_edit_settings_request(
         project_settings_field_update, theme_field_update,
     };
     Ok(EditSettingsRequest {
+        files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)?,
+        commits_sidebar_visible: decode_bool_field_update(request.commits_sidebar_visible)?,
         projects_view: match request.projects_view {
             None => FieldUpdate::Unchanged,
             Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
@@ -741,6 +753,13 @@ pub fn decode_edit_settings_request(
                 density_field_update::Operation::Update(value) => {
                     FieldUpdate::Update(decode_viewer_diff_density(value)?)
                 }
+            },
+        },
+        wrap_lines: match request.wrap_lines {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                bool_field_update::Operation::Update(value) => FieldUpdate::Update(value),
             },
         },
         push_confirmation_required: match request.push_confirmation_required {
@@ -991,6 +1010,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
             .collect::<Result<Vec<_>, _>>()?,
         active: decode_viewer_active_state(required(shell.active)?)?,
         preferences: ViewerPreferences {
+            sidebars: decode_sidebar_visibility(required(preferences.sidebars)?),
             theme: decode_viewer_theme(preferences.theme)?,
             render_options: decode_viewer_render_options(required(preferences.render_options)?)?,
             keybindings: decode_viewer_keybindings(&required(preferences.keybindings)?)?,
@@ -1001,6 +1021,9 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
 
 fn encode_viewer_keybindings(keybindings: ViewerKeybindings) -> v1::ViewerKeybindings {
     v1::ViewerKeybindings {
+        toggle_files_sidebar: keybindings[ViewerKeybindingAction::ToggleFilesSidebar].to_string(),
+        toggle_commits_sidebar: keybindings[ViewerKeybindingAction::ToggleCommitsSidebar]
+            .to_string(),
         platform: match keybindings.platform() {
             ViewerKeybindingPlatform::Linux => v1::ViewerKeybindingPlatform::Linux,
             ViewerKeybindingPlatform::Windows => v1::ViewerKeybindingPlatform::Windows,
@@ -1033,7 +1056,17 @@ fn decode_viewer_keybindings(
         .search_text_in_all_files
         .parse::<ViewerKeybinding>()
         .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let toggle_files_sidebar = keybindings
+        .toggle_files_sidebar
+        .parse::<ViewerKeybinding>()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let toggle_commits_sidebar = keybindings
+        .toggle_commits_sidebar
+        .parse::<ViewerKeybinding>()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
     ViewerKeybindings::try_from_fn(platform, |action| match action {
+        ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
+        ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
     })
@@ -1289,6 +1322,7 @@ pub fn decode_viewer_render_options(
     options: v1::ViewerRenderOptions,
 ) -> Result<ViewerRenderOptions, ViewerCodecError> {
     Ok(ViewerRenderOptions {
+        wrap_lines: options.wrap_lines,
         layout: decode_viewer_diff_layout(options.layout)?,
         density: decode_viewer_diff_density(options.density)?,
     })
@@ -1313,6 +1347,7 @@ pub fn decode_viewer_diff_density(density: i32) -> Result<ViewerDiffDensity, Vie
 #[must_use]
 pub fn encode_viewer_render_options(options: ViewerRenderOptions) -> v1::ViewerRenderOptions {
     v1::ViewerRenderOptions {
+        wrap_lines: options.wrap_lines,
         layout: encode_viewer_diff_layout(options.layout) as i32,
         density: encode_viewer_diff_density(options.density) as i32,
     }
@@ -1781,4 +1816,34 @@ pub fn decode_reset_settings_response(
     crate::viewer::ResetSettingsOk {
         backup_path: response.backup_path,
     }
+}
+
+fn encode_sidebar_visibility(
+    sidebars: gtl_models::viewer::ViewerSidebarVisibility,
+) -> v1::ViewerSidebarVisibility {
+    v1::ViewerSidebarVisibility {
+        files: sidebars.files,
+        commits: sidebars.commits,
+    }
+}
+
+fn decode_sidebar_visibility(
+    sidebars: v1::ViewerSidebarVisibility,
+) -> gtl_models::viewer::ViewerSidebarVisibility {
+    gtl_models::viewer::ViewerSidebarVisibility {
+        files: sidebars.files,
+        commits: sidebars.commits,
+    }
+}
+
+fn decode_bool_field_update(
+    update: Option<v1::BoolFieldUpdate>,
+) -> Result<FieldUpdate<bool>, ViewerCodecError> {
+    Ok(match update {
+        None => FieldUpdate::Unchanged,
+        Some(update) => match required(update.operation)? {
+            v1::bool_field_update::Operation::Update(value) => FieldUpdate::Update(value),
+            v1::bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        },
+    })
 }

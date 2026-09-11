@@ -6,7 +6,7 @@ use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 
 use crate::shared::ui::{
-    Button, ButtonSize, ButtonVariant, ScrollArea, ScrollAreaVariant, ViewerTabItem,
+    Button, ButtonSize, ButtonVariant, NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem,
     ViewerTabOverflowMenu,
 };
 
@@ -71,12 +71,8 @@ enum PreviewWidth {
 impl PreviewWidth {
     const fn frame_classes(self) -> &'static str {
         match self {
-            Self::Desktop => {
-                "mx-auto w-full max-w-4xl overflow-hidden rounded-panel border border-line bg-bg shadow-floating"
-            }
-            Self::Narrow => {
-                "mx-auto w-[23rem] max-w-full overflow-hidden rounded-panel border border-line bg-bg shadow-floating"
-            }
+            Self::Desktop => "story-viewer-frame mx-auto w-full",
+            Self::Narrow => "story-viewer-frame-narrow mx-auto max-w-full",
         }
     }
 
@@ -119,41 +115,42 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
 
     rsx! {
         section { class: width.frame_classes(), aria_label: width.frame_label(),
-            nav {
-                class: "flex min-w-0 items-end border-b border-line bg-surface",
+            NavigationBar {
                 aria_label: "Viewer navigation preview",
-                if let Some(active_tab) = active_tab {
-                    ViewerTabOverflowMenu {
-                        id: width.menu_id(),
-                        tabs: state.tabs.clone(),
-                        active_tab,
-                        diff_rows_loading_tab_id: state.tabs.iter().find(|tab| tab.state == ViewerTabState::Pending).map(|tab| tab.id),
-                        onactivate: move |tab_id| {
-                            preview_state.set(preview_state().activate(tab_id));
-                        },
-                        onclose: move |tab_id| {
-                            preview_state.set(preview_state().close(tab_id));
-                        },
-                        onmove: move |request| {
-                            preview_state.set(preview_state().move_tab(request));
-                        },
+                rail: rsx! {
+                    if let Some(active_tab) = active_tab {
+                        ViewerTabOverflowMenu {
+                            id: width.menu_id(),
+                            tabs: state.tabs.clone(),
+                            active_tab,
+                            diff_rows_loading_tab_id: state.tabs.iter().find(|tab| tab.state == ViewerTabState::Pending).map(|tab| tab.id),
+                            onactivate: move |tab_id| {
+                                preview_state.set(preview_state().activate(tab_id));
+                            },
+                            onclose: move |tab_id| {
+                                preview_state.set(preview_state().close(tab_id));
+                            },
+                            onmove: move |request| {
+                                preview_state.set(preview_state().move_tab(request));
+                            },
+                        }
+                    } else {
+                        p { class: "flex h-9 min-w-0 flex-1 items-center px-3 text-ink-3", "No open diffs" }
+                        Button {
+                            size: ButtonSize::Small,
+                            variant: ButtonVariant::Ghost,
+                            class: "self-center",
+                            onclick: move |_| {
+                                preview_state.set(PreviewTabState::new(tabs_reset.clone()));
+                            },
+                            "Reset"
+                        }
                     }
-                } else {
-                    p { class: "mb-2 min-w-0 flex-1 px-2 text-ink-3", "No open diffs" }
-                    Button {
-                        size: ButtonSize::Small,
-                        variant: ButtonVariant::Ghost,
-                        class: "mb-1",
-                        onclick: move |_| {
-                            preview_state.set(PreviewTabState::new(tabs_reset.clone()));
-                        },
-                        "Reset"
-                    }
-                }
+                },
             }
             div {
                 id: "viewer-active-view",
-                class: "grid min-h-40 place-items-center px-6 py-10 text-center",
+                class: "story-active-view min-h-40 px-6 py-10",
                 div {
                     p { class: "text-xs text-ink-3", "Viewing" }
                     p { class: "mt-1 font-semibold text-ink", "{active_label}" }
@@ -174,46 +171,47 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
 
     rsx! {
         section {
-            class: "mx-auto w-full max-w-4xl overflow-hidden rounded-panel border border-line bg-bg shadow-floating",
+            class: "story-viewer-frame mx-auto w-full",
             aria_label: "Interactive viewer tab rail",
-            nav {
-                class: "flex min-w-0 items-end border-b border-line bg-surface",
+            NavigationBar {
                 aria_label: "Viewer navigation preview",
-                ScrollArea {
-                    variant: ScrollAreaVariant::Rail,
-                    class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
-                    role: "tablist",
-                    aria_label: "Open diffs",
-                    for tab in &state.tabs {
-                        {
-                            let tab_id = tab.id;
-                            let active = state.active_tab_id == Some(tab_id);
-                            rsx! {
-                                ViewerTabItem {
-                                    key: "{tab.id}",
-                                    tab: tab.clone(),
-                                    active,
-                                    rows_loading: tab.state == ViewerTabState::Pending,
-                                    reorderable: true,
-                                    onactivate: move |()| {
-                                        preview_state.set(preview_state().activate(tab_id));
-                                    },
-                                    onkeydown: move |_| {},
-                                    onclose: move |_| {
-                                        preview_state.set(preview_state().close(tab_id));
-                                    },
-                                    onmove: move |request| {
-                                        preview_state.set(preview_state().move_tab(request));
-                                    },
+                rail: rsx! {
+                    ScrollArea {
+                        variant: ScrollAreaVariant::Rail,
+                        class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
+                        role: "tablist",
+                        aria_label: "Open diffs",
+                        for tab in &state.tabs {
+                            {
+                                let tab_id = tab.id;
+                                let active = state.active_tab_id == Some(tab_id);
+                                rsx! {
+                                    ViewerTabItem {
+                                        key: "{tab.id}",
+                                        tab: tab.clone(),
+                                        active,
+                                        rows_loading: tab.state == ViewerTabState::Pending,
+                                        reorderable: true,
+                                        onactivate: move |()| {
+                                            preview_state.set(preview_state().activate(tab_id));
+                                        },
+                                        onkeydown: move |_| {},
+                                        onclose: move |_| {
+                                            preview_state.set(preview_state().close(tab_id));
+                                        },
+                                        onmove: move |request| {
+                                            preview_state.set(preview_state().move_tab(request));
+                                        },
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                },
             }
             div {
                 id: "viewer-active-view",
-                class: "grid min-h-40 place-items-center px-6 py-10 text-center",
+                class: "story-active-view min-h-40 px-6 py-10",
                 div {
                     p { class: "text-xs text-ink-3", "Viewing" }
                     p { class: "mt-1 font-semibold text-ink", "{active_label}" }

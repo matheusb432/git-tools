@@ -42,6 +42,7 @@ pub fn execute(
             settings.viewer_render_options(),
             settings.theme().unwrap_or(Theme::Dark),
             settings.viewer_keybindings(),
+            settings.sidebar_visibility(),
             feedback,
         )
     })??;

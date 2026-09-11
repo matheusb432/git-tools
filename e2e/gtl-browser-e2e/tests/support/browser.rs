@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context as _, Result, bail};
 use playwright_rs::{
     LaunchOptions, Playwright,
+    api::IgnoreDefaultArgs,
     protocol::{Browser, BrowserContext, CDPSession, GotoOptions, Page, Route},
 };
 use serde_json::Value;
@@ -302,13 +303,19 @@ async fn open_session(install_artifact_audit: bool) -> Result<Session> {
     let browser = match operation("launch Chromium", async {
         playwright
             .chromium()
-            .launch_with_options(LaunchOptions::new().args(vec![
-                "--disable-background-networking".to_owned(),
-                "--disable-component-update".to_owned(),
-                "--disable-default-apps".to_owned(),
-                "--disable-sync".to_owned(),
-                "--metrics-recording-only".to_owned(),
-            ]))
+            .launch_with_options(
+                LaunchOptions::new()
+                    .ignore_default_args(IgnoreDefaultArgs::Array(vec![
+                        "--hide-scrollbars".to_owned(),
+                    ]))
+                    .args(vec![
+                        "--disable-background-networking".to_owned(),
+                        "--disable-component-update".to_owned(),
+                        "--disable-default-apps".to_owned(),
+                        "--disable-sync".to_owned(),
+                        "--metrics-recording-only".to_owned(),
+                    ]),
+            )
             .await
             .context("launch Chromium")
     })

@@ -54,7 +54,14 @@ struct TabPresentation {
     default_expanded: Option<bool>,
     files: HashMap<String, bool>,
     expanded_lines: HashSet<ExpandedLine>,
-    geometry: Option<(ViewerRowContentId, f64, DiffGeometry)>,
+    geometry: Option<RetainedGeometry>,
+}
+
+struct RetainedGeometry {
+    content: ViewerRowContentId,
+    wrap_lines: bool,
+    width: f64,
+    geometry: DiffGeometry,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -141,21 +148,28 @@ impl DiffPresentation {
         mut self,
         tab: ViewerTabId,
         content: ViewerRowContentId,
+        wrap_lines: bool,
     ) -> Option<(f64, DiffGeometry)> {
-        let (retained_content, width, geometry) =
-            self.tabs.write().get_mut(&tab)?.geometry.take()?;
-        (retained_content == content).then_some((width, geometry))
+        let retained = self.tabs.write().get_mut(&tab)?.geometry.take()?;
+        (retained.content == content && retained.wrap_lines == wrap_lines)
+            .then_some((retained.width, retained.geometry))
     }
 
     pub(super) fn keep_geometry(
         mut self,
         tab: ViewerTabId,
         content: ViewerRowContentId,
+        wrap_lines: bool,
         width: f64,
         geometry: DiffGeometry,
     ) {
         if let Some(tab) = self.tabs.write().get_mut(&tab) {
-            tab.geometry = Some((content, width, geometry));
+            tab.geometry = Some(RetainedGeometry {
+                content,
+                wrap_lines,
+                width,
+                geometry,
+            });
         }
     }
 

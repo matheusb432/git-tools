@@ -2,6 +2,9 @@
 
 mod viewer_ipc;
 mod window_activation;
+mod window_controls;
+#[cfg(target_os = "linux")]
+mod window_frame;
 
 use std::sync::{
     Arc,
@@ -142,7 +145,7 @@ const fn xlib_window_id(handle: raw_window_handle::XlibWindowHandle) -> u64 {
 }
 
 #[cfg(any(not(target_pointer_width = "64"), target_os = "windows"))]
-const fn xlib_window_id(handle: raw_window_handle::XlibWindowHandle) -> u64 {
+fn xlib_window_id(handle: raw_window_handle::XlibWindowHandle) -> u64 {
     u64::from(handle.window)
 }
 
@@ -160,13 +163,28 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 }
 
 fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    {
+        use raw_window_handle::{HasDisplayHandle as _, RawDisplayHandle};
+        if matches!(app.display_handle()?.as_raw(), RawDisplayHandle::Wayland(_)) {
+            // GTK 3 uses the GLib program name for the Wayland window's application id.
+            gtk::glib::set_prgname(Some(&app.config().identifier));
+        }
+    }
     let focus_diff = std::env::args_os().any(|argument| argument == "--focus-diff");
-    WebviewWindowBuilder::new(app, "main", main_window_url(focus_diff))
+    let window = WebviewWindowBuilder::new(app, "main", main_window_url(focus_diff))
         .title(MAIN_WINDOW_TITLE)
+        .decorations(!cfg!(target_os = "windows"))
+        .resizable(true)
+        .shadow(true)
+        .visible(false)
         .inner_size(MAIN_WINDOW_SIZE.0, MAIN_WINDOW_SIZE.1)
         .min_inner_size(MAIN_WINDOW_MIN_SIZE.0, MAIN_WINDOW_MIN_SIZE.1)
         .on_navigation(viewer_navigation_allowed)
         .build()?;
+    #[cfg(target_os = "linux")]
+    window_frame::configure(&window)?;
+    window.show()?;
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -199,6 +217,8 @@ pub fn run() -> anyhow::Result<()> {
         .manage(MainWindowLifecycle::default())
         .manage(ViewerIpcState::default())
         .invoke_handler(tauri::generate_handler![
+            window_controls::desktop_window_state,
+            window_controls::desktop_window_action,
             viewer_connect,
             viewer_get_shell,
             viewer_list_projects,

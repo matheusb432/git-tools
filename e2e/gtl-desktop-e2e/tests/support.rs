@@ -100,7 +100,10 @@ async fn probe_active_diff(
     marker: &str,
 ) -> Result<Option<()>> {
     let active_tabs = driver
-        .find_all(By::Css("[role='tab'][aria-selected='true']"))
+        .find_all(By::Css(format!(
+            "[role='tab'][aria-selected='true'], {}",
+            gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_TRIGGER.selector()
+        )))
         .await?;
     let Some(active_tab) = active_tabs.into_iter().next() else {
         return Ok(None);

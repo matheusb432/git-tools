@@ -17,14 +17,12 @@ pub(crate) fn SearchPanel(
     children: Element,
 ) -> Element {
     let position = match placement {
-        SearchPanelPlacement::DocumentEnd => {
-            "top-3 right-5 z-20 tablet:right-3 mobile:top-1 mobile:right-1"
-        }
-        SearchPanelPlacement::WorkspaceCenter => "top-2 left-1/2 z-60 -translate-x-1/2",
+        SearchPanelPlacement::DocumentEnd => "control-search-panel-document-end",
+        SearchPanelPlacement::WorkspaceCenter => "control-search-panel-workspace-center",
     };
     rsx! {
         section {
-            class: "absolute {position} w-[min(34rem,calc(100%-1.5rem))] overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating",
+            class: "control-search-panel {position}",
             role: "search",
             aria_label: label,
             onkeydown,

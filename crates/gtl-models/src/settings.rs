@@ -56,6 +56,7 @@ pub struct UserSettings {
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
     viewer_keybindings: ViewerKeybindings,
+    sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
     push_confirmation_required: bool,
     diff_exclusions: DiffExclusions,
     push_all_exclusions: PushAllExclusions,
@@ -79,11 +80,28 @@ impl UserSettings {
             theme,
             viewer_render_options,
             viewer_keybindings,
+            sidebar_visibility: crate::viewer::ViewerSidebarVisibility::default(),
             push_confirmation_required,
             diff_exclusions,
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_sidebar_visibility(
+        self,
+        sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
+    ) -> Self {
+        Self {
+            sidebar_visibility,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn sidebar_visibility(&self) -> crate::viewer::ViewerSidebarVisibility {
+        self.sidebar_visibility
     }
 
     #[must_use]

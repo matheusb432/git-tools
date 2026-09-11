@@ -86,13 +86,15 @@ pub(super) fn start(
             .map(ViewerDiffFileId::for_index)
             .collect(),
     };
-    let row_stream = state
-        .viewer_row_streams
-        .start_stream()
-        .map_err(|_| Status::internal("viewer work state is unavailable"))?;
+    let row_stream = ViewerWorkCancellation::default();
     let (sender, receiver) = mpsc::channel(ROW_STREAM_BUFFER);
     let cancel_on_drop = super::cancellation::CancelOnDrop(row_stream.clone());
+    let settings_cancellation = state
+        .viewer_row_streams
+        .current_stream()
+        .map_err(|_| Status::internal("viewer work state is unavailable"))?;
     let writer = StreamWriter {
+        settings_cancellation,
         state,
         identity,
         proto_identity,
@@ -101,7 +103,16 @@ pub(super) fn start(
         row_stream,
         sender,
     };
-    tokio::task::spawn_blocking(move || produce_rows(writer, snapshot.view(), files, range));
+    let permit = writer
+        .state
+        .viewer_row_workers
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Status::resource_exhausted("viewer row workers are busy"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        produce_rows(writer, snapshot.view(), files, range);
+    });
     Ok(RowStream {
         receiver: ReceiverStream::new(receiver),
         _cancel_on_drop: cancel_on_drop,
@@ -220,15 +231,19 @@ struct StreamWriter {
     sequence: u64,
     next_row: u32,
     row_stream: ViewerWorkCancellation,
+    settings_cancellation: ViewerWorkCancellation,
     sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
 }
 
 impl StreamWriter {
     fn is_current(&self) -> bool {
-        if self.row_stream.is_cancelled() || self.sender.is_closed() {
+        if self.row_stream.is_cancelled()
+            || self.settings_cancellation.is_cancelled()
+            || self.sender.is_closed()
+        {
             return false;
         }
-        let current = shell::identity_is_current(
+        let current = shell::tab_identity_is_current(
             &self.state.viewer,
             self.identity,
             to_render_options(self.identity.render_options),
@@ -489,6 +504,7 @@ fn to_render_options(
             gtl_wire::viewer::ViewerDiffDensity::Full => gtl_models::viewer::DiffDensity::Full,
         },
     )
+    .with_wrap_lines(options.wrap_lines)
 }
 
 #[cfg(test)]

@@ -77,8 +77,9 @@ bench-scroll-fixture-update:
 # Compare production desktop scrolling against the local baseline. Use --update to replace it.
 [arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
 [group('performance')]
-bench-scroll update="":
-    cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ update }}
+[arg("quick", long="quick", value="--quick", help="Use five interaction samples per launch")]
+bench-scroll update="" quick="":
+    cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ update }} {{ quick }}
 
 # Compare release server highlighting against the local baseline. Use --update to replace it.
 [arg("update", long="update", value="--update", help="Compare and replace the local baseline")]

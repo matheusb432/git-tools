@@ -1,7 +1,9 @@
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
 use serde::Deserialize;
-use thirtyfour::{By, Key, WebDriver, components::SelectElement, prelude::ElementQueryable as _};
+use thirtyfour::{
+    By, Key, WebDriver, WebElement, components::SelectElement, prelude::ElementQueryable as _,
+};
 
 use crate::support::{self, fixture::OneShotFixture, wait};
 
@@ -31,6 +33,7 @@ search_text_in_all_files = "alt+f"
         .await?;
     assert_cli_reopen_navigates_from_settings_and_history(session.driver(), &fixture).await?;
     assert_menu_covers_active_scrollbar(session.driver()).await?;
+    assert_menu_keyboard_navigation(session.driver()).await?;
     assert_server_owned_searches(session.driver()).await?;
     let copied =
         support::copy_selected_diff_line(session.driver(), "work.txt", "alpha-one-shot-marker")
@@ -212,6 +215,79 @@ async fn assert_settings_update_preserves_route(driver: &WebDriver) -> Result<()
     Ok(())
 }
 
+async fn assert_menu_keyboard_navigation(driver: &WebDriver) -> Result<()> {
+    let trigger = support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER).await?;
+    trigger.send_keys(Key::Up).await?;
+    for (key, label) in [
+        (Key::Home, "History"),
+        (Key::Down, "User settings"),
+        (Key::Down, "History"),
+        (Key::End, "User settings"),
+    ] {
+        driver.active_element().await?.send_keys(key).await?;
+        ensure!(
+            driver
+                .active_element()
+                .await?
+                .attr("aria-label")
+                .await?
+                .as_deref()
+                == Some(label),
+            "menu keyboard navigation did not focus {label}"
+        );
+    }
+    driver.active_element().await?.send_keys("h").await?;
+    ensure!(
+        driver
+            .active_element()
+            .await?
+            .attr("aria-label")
+            .await?
+            .as_deref()
+            == Some("History"),
+        "menu letter navigation did not focus History"
+    );
+    driver
+        .active_element()
+        .await?
+        .send_keys(Key::Escape)
+        .await?;
+    ensure!(
+        driver.active_element().await? == trigger,
+        "Escape did not restore menu trigger focus"
+    );
+    trigger.send_keys(Key::Enter).await?;
+    ensure!(
+        driver
+            .active_element()
+            .await?
+            .attr("aria-label")
+            .await?
+            .as_deref()
+            == Some("History"),
+        "Enter did not focus the first menu action"
+    );
+    driver.active_element().await?.send_keys(Key::Tab).await?;
+    ensure!(
+        driver
+            .find_all(By::Css("[role='menu']:popover-open"))
+            .await?
+            .is_empty(),
+        "Tab did not dismiss the menu"
+    );
+    ensure!(
+        driver
+            .active_element()
+            .await?
+            .attr("role")
+            .await?
+            .as_deref()
+            != Some("menuitem"),
+        "Tab kept focus inside the menu"
+    );
+    Ok(())
+}
+
 async fn assert_menu_covers_active_scrollbar(driver: &WebDriver) -> Result<()> {
     let trigger = support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER).await?;
     let document = driver.find(By::Css("[data-gtl-diff-document]")).await?;
@@ -234,8 +310,15 @@ async fn assert_menu_covers_active_scrollbar(driver: &WebDriver) -> Result<()> {
             .move_to_element_center(&trigger)
             .perform()
             .await?;
-        // Let the native scrollbar fade before recording the unobstructed menu.
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        let scrollbar = document
+            .find(By::Css(
+                ":scope > .scrollbars [data-scroll-axis='vertical']",
+            ))
+            .await?;
+        ensure!(
+            scrollbar.is_displayed().await?,
+            "opening the menu hid the background scrollbar"
+        );
         let unobstructed = menu.screenshot_as_png().await?;
         driver
             .action_chain()
@@ -292,7 +375,7 @@ async fn assert_commit_details_hover_popover(driver: &WebDriver) -> Result<()> {
         || async { Ok(popover.is_displayed().await?.then_some(())) },
     )
     .await?;
-    let animation_style = read_commit_popover_animation_style(driver).await?;
+    let animation_style = read_commit_popover_animation_style(driver, &popover).await?;
     ensure!(
         animation_style.animation_name == "commit-popover-enter"
             && animation_style.animation_duration == "0.1s"
@@ -352,16 +435,16 @@ async fn assert_commit_details_hover_popover(driver: &WebDriver) -> Result<()> {
 
 async fn read_commit_popover_animation_style(
     driver: &WebDriver,
+    popover: &WebElement,
 ) -> Result<CommitPopoverAnimationStyle> {
+    let surface = popover
+        .find(By::Css(test_ids::HOVER_POPOVER_CONTENT.selector()))
+        .await
+        .context("find the desktop commit popover content")?;
     Ok(driver
         .execute(
             r#"
-                const surface = document.querySelector(
-                    "[popover][role='tooltip'] > .animate-commit-popover-enter",
-                );
-                if (surface === null) {
-                    return null;
-                }
+                const surface = arguments[0];
 
                 const findKeyframes = (rules, name) => {
                     for (const rule of rules) {
@@ -404,7 +487,7 @@ async fn read_commit_popover_animation_style(
                         ),
                 };
             "#,
-            Vec::new(),
+            vec![surface.to_json().context("encode commit popover content")?],
         )
         .await?
         .convert()?)

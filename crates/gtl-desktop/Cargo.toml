@@ -26,6 +26,7 @@ tauri-plugin-single-instance.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+gtk.workspace = true
 x11-dl.workspace = true
 
 [features]

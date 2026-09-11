@@ -243,6 +243,7 @@ mod tests {
             range_generation: ViewerRangeGeneration::new(11),
             selection_generation: ViewerSelectionGeneration::new(selection_generation),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },

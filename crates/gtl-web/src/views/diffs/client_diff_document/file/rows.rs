@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
+use super::super::scroll_area::DiffRowsScrollArea;
 #[cfg(feature = "desktop")]
 use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 use crate::{
@@ -20,34 +21,6 @@ pub(super) fn DiffFileBody(
     retry_allowed: bool,
     artifact_file_id: Option<String>,
 ) -> Element {
-    rsx! {
-        div { class: "overflow-hidden",
-            DiffFileRows {
-                file,
-                layout,
-                density,
-                file_index,
-                onretry,
-                retry_allowed,
-                artifact_file_id,
-            }
-        }
-    }
-}
-
-#[component]
-fn DiffFileRows(
-    file: ReadStore<ClientDiffFile>,
-    layout: ViewerDiffLayout,
-    density: ViewerDiffDensity,
-    file_index: usize,
-    onretry: EventHandler<()>,
-    retry_allowed: bool,
-    artifact_file_id: Option<String>,
-) -> Element {
-    let density_label = density.as_str();
-    let layout_label = layout.as_str();
-    let style = unified_line_number_width_style(layout, file.line_number_digits().cloned());
     let artifact_enhancement = artifact_file_id.is_some();
     let row_container_id = diff_rows_id(file_index, artifact_file_id.as_deref());
     let rows = file.rows();
@@ -55,13 +28,14 @@ fn DiffFileRows(
     let split_batches = rows.split();
 
     rsx! {
-        div {
+        DiffRowsScrollArea {
             id: row_container_id,
-            class: "overflow-x-hidden text-sm leading-5",
-            style,
-            aria_label: "{layout_label} {density_label} diff rows",
-            "data-layout": layout_label,
-            "data-density": density_label,
+            layout,
+            density,
+            line_number_digits: file.line_number_digits().cloned(),
+            footer: rsx! {
+                DiffFileLoadState { state: file.state(), retry_allowed, onretry }
+            },
             if layout == ViewerDiffLayout::Unified {
                 for batch_index in 0..unified_batches.len() {
                     UnifiedDiffRowBatch {
@@ -81,7 +55,6 @@ fn DiffFileRows(
                     }
                 }
             }
-            DiffFileLoadState { state: file.state(), retry_allowed, onretry }
         }
     }
 }
@@ -91,14 +64,6 @@ fn diff_rows_id(file_index: usize, artifact_file_id: Option<&str>) -> String {
         || format!("viewer-diff-{file_index}"),
         |file_id| format!("{file_id}-rows"),
     )
-}
-
-fn unified_line_number_width_style(
-    layout: ViewerDiffLayout,
-    line_number_digit_width: u32,
-) -> Option<String> {
-    (layout == ViewerDiffLayout::Unified)
-        .then(|| format!("--unified-line-number-width:calc({line_number_digit_width}ch + 8px)"))
 }
 
 #[component]
@@ -148,18 +113,6 @@ fn DiffFileLoadError(message: String, retryable: bool, onretry: EventHandler<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn digit_width_sizes_only_the_unified_line_number_gutter() {
-        assert_eq!(
-            unified_line_number_width_style(ViewerDiffLayout::Unified, 5),
-            Some("--unified-line-number-width:calc(5ch + 8px)".to_owned())
-        );
-        assert_eq!(
-            unified_line_number_width_style(ViewerDiffLayout::Split, 5),
-            None
-        );
-    }
 
     #[test]
     fn artifact_row_container_uses_the_qualified_file_identity() {

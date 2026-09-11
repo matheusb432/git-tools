@@ -36,13 +36,18 @@ struct TabOverflowEntry {
 
 impl OneShotFixture {
     pub fn create(data_root: &Path) -> Result<Self> {
+        Self::create_named(data_root, ONE_SHOT_REPOSITORY)
+    }
+
+    pub fn create_named(data_root: &Path, name: &str) -> Result<Self> {
         let cli = required_environment_path("GTL_E2E_CLI_BINARY")?;
         let fixture_root = required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
         let repository = create_changed_repository(
             &fixture_root.join("dom-repositories"),
-            ONE_SHOT_REPOSITORY,
+            name,
             &format!(
-                "alpha-one-shot-marker\n{}",
+                "alpha-one-shot-marker\nwrapping-source {}\n{}",
+                "readable source text ".repeat(15),
                 "scrollbar fixture\n".repeat(120)
             ),
             "one-shot change",

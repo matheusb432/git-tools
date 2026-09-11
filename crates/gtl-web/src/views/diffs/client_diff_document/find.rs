@@ -320,6 +320,7 @@ mod tests {
             range_generation: ViewerRangeGeneration::new(2),
             selection_generation: ViewerSelectionGeneration::new(3),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout,
                 density: ViewerDiffDensity::Compact,
             },

@@ -1,5 +1,6 @@
 mod live_views;
 mod projects;
+mod row_sessions;
 
 use std::{error::Error, time::Duration};
 
@@ -392,6 +393,9 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
 
     viewer
         .edit_settings(EditSettingsRequest {
+            wrap_lines: Some(BoolFieldUpdate {
+                operation: Some(bool_field_update::Operation::Update(true)),
+            }),
             projects_view: Some(gtl_wire::v1::ProjectsViewFieldUpdate {
                 operation: Some(gtl_wire::v1::projects_view_field_update::Operation::Update(
                     gtl_wire::v1::ProjectsViewMode::Table as i32,
@@ -417,6 +421,12 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
     assert_eq!(
         settings.projects_view,
         gtl_wire::v1::ProjectsViewMode::Table as i32
+    );
+    assert!(
+        settings
+            .render_options
+            .ok_or("missing render options")?
+            .wrap_lines
     );
     assert!(!settings.push_confirmation_required);
     assert!(

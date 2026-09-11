@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, ensure};
 use thirtyfour::{
-    By, WebDriver, WebElement, prelude::ElementQueryable as _, stringmatch::StringMatch,
+    By, WebDriver, WebElement,
+    prelude::{ElementQueryable as _, ElementWaitable as _},
+    stringmatch::StringMatch,
 };
 
 use crate::support;
@@ -46,25 +48,23 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
     )
     .await?;
     let alpha = card(session.driver(), "Alpha").await?;
+    let alpha_text = alpha.text().await?;
     ensure!(
-        alpha.text().await?.contains("[!?]"),
-        "project card omitted CLI working-tree symbols"
+        alpha_text.contains("[!?]"),
+        "project card omitted CLI working-tree symbols: {alpha_text:?}"
+    );
+    let beta_text = card(session.driver(), "Beta").await?.text().await?;
+    ensure!(
+        beta_text.contains("[✓]"),
+        "clean project omitted CLI symbol: {beta_text:?}"
     );
     ensure!(
-        card(session.driver(), "Beta")
-            .await?
-            .text()
-            .await?
-            .contains("[✓]"),
-        "clean project omitted CLI symbol"
+        alpha_text.contains("Unpushed commits"),
+        "commit count must name its unit: {alpha_text:?}"
     );
     ensure!(
-        alpha.text().await?.contains("Unpushed commits"),
-        "commit count must name its unit"
-    );
-    ensure!(
-        !alpha.text().await?.contains("Modified") && !alpha.text().await?.contains("Untracked"),
-        "project card retained path count labels"
+        !alpha_text.contains("Modified") && !alpha_text.contains("Untracked"),
+        "project card retained path count labels: {alpha_text:?}"
     );
     ensure!(
         session
@@ -116,7 +116,11 @@ async fn exercise_local_comparison(
     fixture.use_local_comparison()?;
     home(session.driver()).await?;
     let alpha = card(session.driver(), "Alpha").await?;
-    alpha.find(By::Css("summary")).await?.click().await?;
+    alpha
+        .find(By::Css("button[aria-label^='Comparison branch']"))
+        .await?
+        .click()
+        .await?;
     let input = alpha.find(By::Css("input")).await?;
     input.clear().await?;
     input.send_keys("review-base").await?;
@@ -125,19 +129,15 @@ async fn exercise_local_comparison(
         .await?
         .click()
         .await?;
-    support::wait::until(
-        "stored local comparison branch",
-        support::wait::ASSERTION_TIMEOUT,
-        || async {
-            let alpha = card(session.driver(), "Alpha").await?;
-            Ok(alpha
-                .text()
-                .await?
-                .contains("Comparison: review-base")
-                .then_some(()))
-        },
-    )
-    .await?;
+    card(session.driver(), "Alpha")
+        .await?
+        .query(By::Css(
+            "button[aria-label='Comparison branch: review-base']",
+        ))
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await
+        .context("stored local comparison branch")?;
     support::evidence::capture(session.driver(), "project-comparison-settings", true).await?;
     session.driver().set_window_rect(0, 0, 390, 800).await?;
     support::evidence::capture(session.driver(), "project-comparison-settings-narrow", true)
@@ -326,7 +326,7 @@ async fn restore_comparisons(session: &mut support::session::TestSession) -> Res
 
 async fn home(driver: &WebDriver) -> Result<()> {
     driver
-        .query(By::Css("button[aria-label='Projects']"))
+        .query(By::Css("a[aria-label='Projects']"))
         .and_displayed()
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()
@@ -366,8 +366,9 @@ async fn card(driver: &WebDriver, name: &str) -> Result<WebElement> {
 async fn action(driver: &WebDriver, project: &str, label: &str) -> Result<WebElement> {
     card(driver, project)
         .await?
-        .query(By::Css("a, button"))
-        .with_text(StringMatch::new(label))
+        .query(By::Css(format!(
+            "a[aria-label='{label}'], button[aria-label='{label}']"
+        )))
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()
         .await
@@ -601,6 +602,7 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
         "row text must not drag a link"
     );
     support::evidence::capture(session.driver(), "projects-table-desktop", true).await?;
+    assert_comparison_editor(session.driver(), "project-comparison-table").await?;
     let count = alpha
         .find(By::Css("[data-testid='project-table-unpushed']"))
         .await?;
@@ -678,6 +680,7 @@ async fn assert_live_tab_presentation(driver: &WebDriver) -> Result<()> {
 async fn restore_table_presentation(session: &mut support::session::TestSession) -> Result<()> {
     session.driver().set_window_rect(0, 0, 390, 800).await?;
     support::evidence::capture(session.driver(), "projects-table-narrow", true).await?;
+    assert_comparison_editor(session.driver(), "project-comparison-table-narrow").await?;
     session.restart().await?;
     session.driver().set_window_rect(0, 0, 1600, 900).await?;
     table_row(session.driver(), "Alpha").await?;
@@ -694,5 +697,46 @@ async fn restore_table_presentation(session: &mut support::session::TestSession)
     );
     select_view(session.driver(), "Grid view").await?;
     card(session.driver(), "Alpha").await?;
+    Ok(())
+}
+
+async fn assert_comparison_editor(driver: &WebDriver, evidence_name: &str) -> Result<()> {
+    let trigger = table_row(driver, "Alpha")
+        .await?
+        .find(By::Css("button[aria-label^='Comparison branch']"))
+        .await?;
+    let panel_id = trigger
+        .attr("aria-controls")
+        .await?
+        .context("comparison panel ID")?;
+    trigger.send_keys(thirtyfour::Key::Enter).await?;
+    let panel = driver.find(By::Id(panel_id)).await?;
+    panel.wait_until().displayed().await?;
+    let fits = driver
+        .execute(
+            r"
+        const panel = arguments[0];
+        const input = panel.querySelector('input');
+        const label = input.closest('label').querySelector('span');
+        const text = document.createRange();
+        text.selectNodeContents(label);
+        return panel.scrollWidth <= panel.clientWidth + 1 &&
+            Math.abs(text.getBoundingClientRect().left - input.getBoundingClientRect().left) < 1;
+    ",
+            vec![panel.to_json()?],
+        )
+        .await?
+        .convert::<bool>()?;
+    ensure!(
+        fits,
+        "comparison label, input, or helper text overflowed or lost left alignment"
+    );
+    support::evidence::capture(driver, evidence_name, true).await?;
+    panel
+        .find(By::Css("input"))
+        .await?
+        .send_keys(thirtyfour::Key::Escape)
+        .await?;
+    panel.wait_until().not_displayed().await?;
     Ok(())
 }

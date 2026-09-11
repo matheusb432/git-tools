@@ -5,11 +5,12 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows, Viewe
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{Button, ButtonSize, ButtonVariant, OVERLAY_SCROLLBAR_CLASSES},
+    shared::ui::{Button, ButtonSize, ButtonVariant, ScrollArea, scroll_area::ScrollAreaVariant},
     views::diffs::ArtifactDiffWorkspace,
 };
 
-const STATIC_ARTIFACT_ENHANCEMENT_SCRIPT: &str = include_str!("artifact.js");
+const STATIC_ARTIFACT_ENHANCEMENT_SCRIPT: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/artifact.min.js"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StaticArtifactView {
@@ -112,7 +113,7 @@ pub const fn static_artifact_enhancement_script() -> &'static str {
 fn StaticArtifactDocument(views: Vec<StaticArtifactView>) -> Element {
     if views.is_empty() {
         return rsx! {
-            main { class: "grid h-screen place-content-center bg-bg px-5 text-center text-ink",
+            main { class: "artifact-empty h-screen px-5",
                 h1 { class: "font-semibold", "No diffs in this artifact" }
             }
         };
@@ -121,35 +122,36 @@ fn StaticArtifactDocument(views: Vec<StaticArtifactView>) -> Element {
     let has_tabs = views.len() > 1;
     rsx! {
         main {
-            class: "flex h-screen min-h-0 flex-col overflow-hidden bg-bg text-ink {OVERLAY_SCROLLBAR_CLASSES}",
+            class: "viewer-shell h-screen min-h-0",
             "data-gtl-artifact-ready": "true",
             if has_tabs {
-                nav {
-                    class: "flex flex-none items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5",
+                ScrollArea {
+                    variant: ScrollAreaVariant::Rail,
+                    class: "flex-none border-b border-line bg-surface-2",
                     role: "tablist",
                     aria_label: "Subrepo diffs",
-                    for (index, artifact) in views.iter().enumerate() {
-                        {
-                            let tab_id = artifact.view.identity.tab_id;
-                            let button_id = format!("artifact-tab-{tab_id}");
-                            let panel_id = format!("artifact-panel-{tab_id}");
-                            rsx! {
-                                Button {
-                                    key: "{artifact.view.identity.tab_id}",
-                                    id: button_id,
-                                    class: "max-w-[280px] overflow-hidden text-ellipsis",
-                                    size: ButtonSize::Small,
-                                    variant: if index == 0 { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                                    role: "tab",
-                                    aria_selected: (index == 0).to_string(),
-                                    aria_controls: panel_id,
-                                    tabindex: if index == 0 { "0" } else { "-1" },
-                                    "data-gtl-artifact-tab": index,
-                                    "data-gtl-action": "select-view",
-                                    "data-gtl-view": tab_id.to_string(),
-                                    "data-gtl-selected-classes": ButtonVariant::Pressed.classes(),
-                                    "data-gtl-unselected-classes": ButtonVariant::Outline.classes(),
-                                    "{artifact.view.repository_name}"
+                    div { class: "artifact-tabs gap-1.5 px-3 py-2.5",
+                        for (index, artifact) in views.iter().enumerate() {
+                            {
+                                let tab_id = artifact.view.identity.tab_id;
+                                let button_id = format!("artifact-tab-{tab_id}");
+                                let panel_id = format!("artifact-panel-{tab_id}");
+                                rsx! {
+                                    Button {
+                                        key: "{artifact.view.identity.tab_id}",
+                                        id: button_id,
+                                        class: "artifact-tab",
+                                        size: ButtonSize::Small,
+                                        variant: ButtonVariant::Bare,
+                                        role: "tab",
+                                        aria_selected: (index == 0).to_string(),
+                                        aria_controls: panel_id,
+                                        tabindex: if index == 0 { "0" } else { "-1" },
+                                        "data-gtl-artifact-tab": index,
+                                        "data-gtl-action": "select-view",
+                                        "data-gtl-view": tab_id.to_string(),
+                                        "{artifact.view.repository_name}"
+                                    }
                                 }
                             }
                         }
@@ -206,7 +208,7 @@ mod tests {
     fn enhancement_script_only_mutates_existing_document_state() {
         let script = static_artifact_enhancement_script();
 
-        assert_eq!(script.matches("addEventListener").count(), 11);
+        assert_eq!(script.matches("addEventListener").count(), 17);
         assert!(script.contains("root.addEventListener(\"copy\""));
         assert!(script.contains("root.addEventListener(\"mouseover\""));
         assert!(script.contains("data-gtl-hover-popover-target"));
@@ -356,6 +358,7 @@ mod tests {
                 range_generation: ViewerRangeGeneration::new(1),
                 selection_generation: ViewerSelectionGeneration::default(),
                 render_options: ViewerRenderOptions {
+                    wrap_lines: false,
                     layout: ViewerDiffLayout::Unified,
                     density: ViewerDiffDensity::Compact,
                 },

@@ -1,0 +1,56 @@
+@layer components {
+  .projects-shell { @apply flex flex-col overflow-hidden; }
+  .projects-header { @apply flex shrink-0 items-center border-b border-line; }
+  .projects-title { @apply text-ink focus:outline-none; }
+  .projects-header-actions { @apply flex shrink-0 items-center; }
+  .projects-content { @apply flex-1 overflow-auto; }
+  .projects-grid { @apply grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))]; }
+  .projects-error { @apply flex items-center rounded-sm border border-warn-line bg-warn-bg text-warn; }
+
+  .project-card { @apply grid content-start rounded-panel border border-line bg-surface hover:border-line-2; }
+  .project-card-header { @apply flex items-center; }
+  .project-card-title { @apply truncate text-ink; }
+  .project-card-meta { @apply flex items-center text-ink-2; }
+  .project-card-actions { @apply grid overflow-hidden rounded-sm border border-line-2 bg-sunk; }
+
+  .project-signal-row { @apply flex items-center border-t border-line text-left text-ink-2 select-text first:border-t-0 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-ink-2; }
+  .project-signal-value { @apply w-[4ch] shrink-0; }
+  .project-review-dot { @apply inline-block shrink-0 rounded-full; }
+
+  .project-table-link { @apply flex items-center select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
+  .project-view-toggle { @apply flex items-center rounded-sm border border-line-2 bg-sunk; }
+
+  .settings-page-shell { @apply overflow-hidden bg-bg; }
+  .settings-page-container { @apply grid max-w-5xl; }
+  .settings-page-header { @apply border-b border-line; }
+  .settings-page-title { @apply text-ink focus:outline-none; }
+  .settings-page-description { @apply max-w-2xl text-ink-2; }
+  .settings-card { @apply overflow-hidden rounded-panel border border-line bg-surface; }
+  .settings-card-header { @apply border-b border-line bg-surface-2; }
+  .settings-rows { @apply divide-y divide-line; }
+  .settings-row { @apply grid sm:grid-cols-[14rem_minmax(0,1fr)]; }
+  .settings-row-value { @apply break-words text-ink; }
+  .settings-form-grid { @apply grid sm:grid-cols-2 xl:grid-cols-4; }
+  .settings-form-field { @apply flex flex-col; }
+  .settings-form-footer { @apply flex items-center justify-between border-t border-line bg-surface-2; }
+
+  .settings-recovery-path { @apply max-w-3xl break-all text-ink; }
+  .settings-recovery-diagnostic { @apply max-w-3xl whitespace-pre-wrap break-words text-left text-ink-2; }
+
+  .history-shell { @apply grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden; }
+  .history-header { @apply flex flex-col border-b border-line bg-surface sm:flex-row sm:items-end sm:justify-between; }
+  .history-header-title { @apply text-ink focus:outline-none; }
+  .history-content { @apply grid grid-rows-[minmax(0,1fr)_auto] bg-bg; }
+  .history-error { @apply rounded-sm border border-del-line bg-del-bg text-del; }
+  .history-loading-row { @apply grid rounded-sm border border-line bg-surface sm:grid-cols-[minmax(0,1.5fr)_minmax(8rem,1fr)_auto]; }
+  .history-row { @apply grid rounded-sm border border-line bg-surface hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center; }
+  .history-row-title-line { @apply flex items-center; }
+  .history-row-title { @apply truncate text-ink; }
+  .history-kind-badge { @apply shrink-0 rounded-sm border border-acc-line bg-acc-soft text-acc uppercase; }
+  .history-row-range { @apply truncate text-ink-2; }
+  .history-row-time { @apply block truncate text-ink-3; }
+  .history-row-actions { @apply flex items-center justify-end; }
+  .history-footer { @apply flex items-center justify-between border-t border-line bg-surface; }
+  .history-footer-count { @apply hidden text-ink-3 sm:block; }
+  .history-page-number { @apply text-center text-ink; }
+}

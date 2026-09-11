@@ -8,16 +8,153 @@
   const copyContextFeedbackTimers = new WeakMap();
   const flashTimers = new WeakMap();
   const hoverPopoverTimers = new WeakMap();
+  const scrollAreas = new WeakMap();
+  let scrollbarDrag = null;
 
-  function classWords(value) {
-    return (value ?? "").split(/\s+/).filter(Boolean);
+  function scrollMetrics(area, axis) {
+    const viewport = area.viewport;
+    return axis === "horizontal"
+      ? [viewport.clientWidth, viewport.scrollWidth, viewport.scrollLeft]
+      : [viewport.clientHeight, viewport.scrollHeight, viewport.scrollTop];
   }
 
-  function swapClasses(element, inactive, active) {
-    const inactiveClasses = classWords(inactive);
-    const activeClasses = classWords(active);
-    element.classList.remove(...inactiveClasses, ...activeClasses);
-    element.classList.add(...activeClasses);
+  function thumbGeometry(viewport, content, position) {
+    const maximum = Math.max(content - viewport, 0);
+    const size = content > 0 ? Math.min(viewport, Math.max(24, viewport * viewport / content)) : viewport;
+    const travel = viewport - size;
+    return { size, offset: maximum > 0 ? Math.max(0, Math.min(maximum, position)) / maximum * travel : 0, maximum, travel };
+  }
+
+  function scrollStyle(element, name, value) {
+    if (element.style.getPropertyValue(name) !== value) element.style.setProperty(name, value);
+  }
+
+  function scrollAttribute(element, name, value) {
+    if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+  }
+
+  function refreshScrollbars(area) {
+    const { viewport, layer, rails } = area;
+    if (viewport.clientWidth === 0 || viewport.clientHeight === 0) return;
+    scrollStyle(layer, "--scroll-width", `${viewport.clientWidth}px`);
+    scrollStyle(layer, "--scroll-height", `${viewport.clientHeight}px`);
+    for (const rail of rails) {
+      const axis = rail.dataset.scrollAxis;
+      const [size, content, position] = scrollMetrics(area, axis);
+      const geometry = thumbGeometry(size, content, position);
+      if (axis === "horizontal") scrollAttribute(viewport, "data-scroll-overflow-x", String(content > size));
+      scrollAttribute(rail, "aria-hidden", String(content <= size));
+      scrollAttribute(rail, "tabindex", content > size ? "0" : "-1");
+      scrollAttribute(rail, "aria-valuemax", String(geometry.maximum));
+      scrollAttribute(rail, "aria-valuenow", String(position));
+      const thumb = rail.firstElementChild;
+      scrollStyle(thumb, axis === "horizontal" ? "width" : "height", `${geometry.size}px`);
+      scrollStyle(thumb, "transform", `translate${axis === "horizontal" ? "X" : "Y"}(${geometry.offset}px)`);
+    }
+  }
+
+  function measureScrollbars(area) {
+    const style = getComputedStyle(area.viewport);
+    scrollStyle(area.layer, "--scroll-left", style.paddingLeft);
+    scrollStyle(area.layer, "--scroll-top", style.paddingTop);
+    refreshScrollbars(area);
+  }
+
+  function scrollToPosition(area, axis, position) {
+    if (axis === "horizontal") area.viewport.scrollLeft = position;
+    else area.viewport.scrollTop = position;
+    refreshScrollbars(area);
+  }
+
+  const scrollResize = new ResizeObserver((entries) => {
+    const areas = new Set(entries.map((entry) => scrollAreas.get(entry.target)));
+    for (const area of areas) measureScrollbars(area);
+  });
+
+  for (const [index, layer] of [...root.querySelectorAll("[data-scrollbars]")].entries()) {
+    const viewport = layer.dataset.scrollTarget ? document.getElementById(layer.dataset.scrollTarget) : layer.parentElement;
+    const rails = [...layer.querySelectorAll("[data-scroll-axis]")];
+    const area = { viewport, layer, rails };
+    if (!viewport.id) viewport.id = `artifact-scroll-${index}`;
+    viewport.dataset.scrollEnhanced = "true";
+    for (const rail of rails) {
+      rail.setAttribute("aria-controls", viewport.id);
+      scrollAreas.set(rail, area);
+    }
+    scrollAreas.set(viewport, area);
+    scrollResize.observe(viewport);
+    const content = viewport.querySelector(":scope > .scroll-area-content, :scope > [data-gtl-horizontal-size]");
+    if (content) { scrollAreas.set(content, area); scrollResize.observe(content); }
+    measureScrollbars(area);
+  }
+
+  root.addEventListener("scroll", (event) => {
+    const area = scrollAreas.get(event.target);
+    if (area) refreshScrollbars(area);
+  }, true);
+
+  root.addEventListener("pointerdown", (event) => {
+    const rail = event.target.closest("[data-scroll-axis]");
+    const area = scrollAreas.get(rail);
+    if (!area || event.button !== 0 || scrollbarDrag) return;
+    event.preventDefault();
+    rail.focus();
+    const axis = rail.dataset.scrollAxis;
+    const pointer = axis === "horizontal" ? event.clientX : event.clientY;
+    const [size, content, position] = scrollMetrics(area, axis);
+    const geometry = thumbGeometry(size, content, position);
+    if (!rail.firstElementChild.contains(event.target)) {
+      const rect = rail.getBoundingClientRect();
+      const start = axis === "horizontal" ? rect.x : rect.y;
+      scrollToPosition(area, axis, position + (pointer - start < geometry.offset ? -size : size));
+      return;
+    }
+    area.layer.setPointerCapture(event.pointerId);
+    rail.dataset.dragging = "true";
+    scrollbarDrag = { area, rail, axis, pointer, position, geometry, id: event.pointerId };
+  });
+
+  root.addEventListener("pointermove", (event) => {
+    if (!scrollbarDrag || scrollbarDrag.id !== event.pointerId) return;
+    event.preventDefault();
+    const { area, axis, pointer, position, geometry } = scrollbarDrag;
+    const current = axis === "horizontal" ? event.clientX : event.clientY;
+    scrollToPosition(area, axis, position + (geometry.travel > 0 ? (current - pointer) / geometry.travel * geometry.maximum : 0));
+  });
+
+  function finishScrollbarDrag() {
+    if (!scrollbarDrag) return;
+    const { area, rail, id } = scrollbarDrag;
+    scrollbarDrag = null;
+    delete rail.dataset.dragging;
+    if (area.layer.hasPointerCapture(id)) area.layer.releasePointerCapture(id);
+  }
+
+  root.addEventListener("pointerup", finishScrollbarDrag);
+  root.addEventListener("pointercancel", finishScrollbarDrag);
+  root.addEventListener("lostpointercapture", finishScrollbarDrag);
+
+  function scrollbarKeydown(event) {
+    const rail = event.target.closest("[data-scroll-axis]");
+    const area = scrollAreas.get(rail);
+    if (!area) return false;
+    const axis = rail.dataset.scrollAxis;
+    const [size, content, position] = scrollMetrics(area, axis);
+    let next;
+    switch (event.key) {
+      case "ArrowLeft": if (axis === "horizontal") next = position - 40; break;
+      case "ArrowRight": if (axis === "horizontal") next = position + 40; break;
+      case "ArrowUp": if (axis === "vertical") next = position - 40; break;
+      case "ArrowDown": if (axis === "vertical") next = position + 40; break;
+      case "PageUp": next = position - size; break;
+      case "PageDown": next = position + size; break;
+      case "Home": next = 0; break;
+      case "End": next = content - size; break;
+    }
+    if (next === undefined) return false;
+    event.preventDefault();
+    scrollToPosition(area, axis, next);
+    return true;
   }
 
   function artifactPanel(element) {
@@ -98,15 +235,6 @@
   function setTabSelected(tab, selected) {
     tab.setAttribute("aria-selected", String(selected));
     tab.tabIndex = selected ? 0 : -1;
-    swapClasses(
-      tab,
-      selected
-        ? tab.dataset.gtlUnselectedClasses
-        : tab.dataset.gtlSelectedClasses,
-      selected
-        ? tab.dataset.gtlSelectedClasses
-        : tab.dataset.gtlUnselectedClasses,
-    );
   }
 
   function selectView(selectedTab) {
@@ -132,6 +260,35 @@
       setTabSelected(tab, tab === selectedTab);
     }
     selectedTab.focus();
+  }
+
+  function toggleSidebar(panel, sidebar) {
+    const workspace = panelWorkspace(panel);
+    if (workspace === null) return;
+    const hiddenPanel = workspace.querySelector(
+      `.diff-workspace-${sidebar}-panel`,
+    );
+    const restoreFocus = hiddenPanel?.contains(document.activeElement);
+    const attribute = `data-${sidebar}-sidebar-visible`;
+    const visible = workspace.getAttribute(attribute) !== "true";
+    for (const target of root.querySelectorAll("[data-gtl-workspace]")) {
+      target.setAttribute(attribute, String(visible));
+      const sidebarPanel = target.querySelector(`[data-sidebar-panel='${sidebar}']`);
+      if (sidebarPanel !== null) {
+        sidebarPanel.setAttribute("aria-hidden", String(!visible));
+        sidebarPanel.toggleAttribute("inert", !visible);
+      }
+    }
+    for (
+      const control of root.querySelectorAll(
+        `[data-sidebar-toggle='${sidebar}']`,
+      )
+    ) {
+      control.setAttribute("aria-pressed", String(visible));
+    }
+    if (!visible && restoreFocus) {
+      panel.querySelector(`[data-sidebar-toggle='${sidebar}']`)?.focus();
+    }
   }
 
   function setFilesFolded(panel, folded) {
@@ -253,15 +410,7 @@
     const control = container.querySelector(
       "[data-gtl-action='toggle-long-line']",
     );
-    const text = container.querySelector("[data-gtl-long-line-text]");
     if (control !== null) control.setAttribute("aria-expanded", "false");
-    if (text !== null) {
-      swapClasses(
-        text,
-        text.dataset.gtlExpandedClasses,
-        text.dataset.gtlCollapsedClasses,
-      );
-    }
   }
 
   function resetPanel(panel) {
@@ -485,18 +634,6 @@
     const expanded = container.dataset.gtlExpanded !== "true";
     container.dataset.gtlExpanded = String(expanded);
     action.setAttribute("aria-expanded", String(expanded));
-    const text = container.querySelector("[data-gtl-long-line-text]");
-    if (text !== null) {
-      swapClasses(
-        text,
-        expanded
-          ? text.dataset.gtlCollapsedClasses
-          : text.dataset.gtlExpandedClasses,
-        expanded
-          ? text.dataset.gtlExpandedClasses
-          : text.dataset.gtlCollapsedClasses,
-      );
-    }
   }
 
   root.addEventListener("mouseover", (event) => {
@@ -547,6 +684,18 @@
         event.preventDefault();
         selectView(action);
         break;
+      case "toggle-files-sidebar":
+      case "toggle-commits-sidebar": {
+        event.preventDefault();
+        const panel = artifactPanel(action);
+        if (panel !== null) {
+          toggleSidebar(
+            panel,
+            name === "toggle-files-sidebar" ? "files" : "commits",
+          );
+        }
+        break;
+      }
       case "toggle-files": {
         event.preventDefault();
         const panel = artifactPanel(action);
@@ -619,10 +768,42 @@
   });
 
   document.addEventListener("keydown", (event) => {
+    if (scrollbarKeydown(event)) return;
     if (!(event.target instanceof Element) || event.isComposing) return;
     const panel = artifactPanel(event.target) ??
       root.querySelector("[data-gtl-view-panel]:not([hidden])");
     if (panel === null) return;
+    if (
+      event.key.toLowerCase() === "b" && event.ctrlKey && !event.shiftKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault();
+      if (event.repeat) return;
+      const sidebar = event.altKey ? "commits" : "files";
+      if (window.matchMedia("(min-width: 1025px)").matches) {
+        toggleSidebar(panel, sidebar);
+      } else {
+        const trigger = panel.querySelector(
+          `[data-gtl-action='open-dialog'][id$='-${sidebar}-trigger']`,
+        );
+        if (trigger !== null) {
+          const dialog = document.getElementById(
+            trigger.getAttribute("aria-controls"),
+          );
+          if (dialog instanceof HTMLDialogElement && dialog.open) {
+            closeDialog(dialog, true);
+          } else {
+            for (
+              const open of panel.querySelectorAll(
+                "dialog[data-gtl-dialog][open]",
+              )
+            ) closeDialog(open, false);
+            openDialog(trigger);
+          }
+        }
+      }
+      return;
+    }
     const filter = event.target.closest("[data-gtl-path-filter]");
     if (
       filter !== null &&

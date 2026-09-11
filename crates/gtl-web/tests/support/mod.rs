@@ -33,6 +33,7 @@ pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<Viewe
             range_generation: ViewerRangeGeneration::default(),
             selection_generation: ViewerSelectionGeneration::default(),
             render_options: ViewerRenderOptions {
+                wrap_lines: false,
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },

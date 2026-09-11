@@ -753,13 +753,22 @@ impl ViewerSession {
 
     #[must_use]
     pub fn active_content_identity(&self) -> Option<ActiveContentIdentity> {
-        let identity = self.active_displayed_content_identity()?;
-        let tab = self.tab(identity.tab_id())?;
-        if matches!(tab.selection, CommitSelection::Pending { .. }) {
+        self.content_identity(self.active?)
+    }
+
+    #[must_use]
+    pub fn content_identity(&self, tab_id: ViewerTabId) -> Option<ActiveContentIdentity> {
+        let tab = self.tab(tab_id)?;
+        if !matches!(tab.tab.state(), ViewerTabState::Ready)
+            || matches!(tab.selection, CommitSelection::Pending { .. })
+        {
             return None;
         }
-
-        Some(identity)
+        Some(ActiveContentIdentity {
+            tab_id,
+            range_generation: tab.generation,
+            selection_generation: tab.selection_generation,
+        })
     }
 
     #[must_use]
@@ -1147,6 +1156,7 @@ mod tests {
             .open(other_recipe, batch_id(2), ViewerTabKind::Snapshot)
             .unwrap();
         assert_ne!(id, other);
+        assert_eq!(session.content_identity(id), identity);
         assert!(session.activate(id));
         assert_eq!(session.active_content_identity(), identity);
         assert!(matches!(session.commit_selection_snapshot(id),
@@ -1331,6 +1341,7 @@ mod tests {
             ),
             super::super::Theme::Dark,
             gtl_models::viewer::ViewerKeybindings::default(),
+            gtl_models::viewer::ViewerSidebarVisibility::default(),
             None,
         )
         .unwrap()
