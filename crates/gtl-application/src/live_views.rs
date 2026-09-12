@@ -1,6 +1,5 @@
 //! The live-views feature: persisted repo views the app renders on demand.
 
-pub mod delete_live_viewer_tab;
 pub mod list_live_views;
 mod persistence;
 pub mod probe_source;

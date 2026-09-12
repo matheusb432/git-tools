@@ -281,7 +281,7 @@ impl ViewerContext {
         self.shell_requests.write().order = order;
         self.cancel_shell_request();
         if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
-            notification.enqueue(self.toast);
+            self.toast.warn(notification);
         }
         self.publish_shell(shell);
         ViewerShellReplacement::Accepted
@@ -442,7 +442,7 @@ async fn refresh_shell(
             };
             context.shell_requests.write().order = order;
             if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
-                notification.enqueue(context.toast);
+                context.toast.warn(notification);
             }
             context.publish_shell(shell);
         }
@@ -662,27 +662,9 @@ fn ViewerConnectionNotice(connection: ViewerConnection, onretry: EventHandler<()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ViewerFeedbackToast {
-    Ok(String),
-    Warn(String),
-}
-
-impl ViewerFeedbackToast {
-    fn enqueue(self, toast: ToastHandle) {
-        match self {
-            Self::Ok(message) => toast.ok(message),
-            Self::Warn(message) => toast.warn(message),
-        }
-    }
-}
-
-fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<ViewerFeedbackToast> {
+fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<String> {
     match feedback? {
         ViewerFeedback::TabClosed => None,
-        ViewerFeedback::LiveViewDeleted => {
-            Some(ViewerFeedbackToast::Ok("Live view deleted.".to_owned()))
-        }
         ViewerFeedback::SnapshotRecipesSkipped { labels } => {
             let message = if labels.is_empty() {
                 "Skipped snapshot diffs with no commits or changed files.".to_owned()
@@ -694,7 +676,7 @@ fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<ViewerFeed
                     labels.join(", ")
                 )
             };
-            Some(ViewerFeedbackToast::Warn(message))
+            Some(message)
         }
     }
 }
@@ -716,9 +698,9 @@ mod tests {
     };
 
     use super::{
-        ViewerDiffRowsLoading, ViewerFeedbackToast, ViewerRenderCommand,
-        ViewerRenderCommandCompletion, ViewerRenderCommandScheduler, ViewerRenderCommandSubmission,
-        ViewerRenderCommandTicket, ViewerShellOrder, viewer_feedback_toast,
+        ViewerDiffRowsLoading, ViewerRenderCommand, ViewerRenderCommandCompletion,
+        ViewerRenderCommandScheduler, ViewerRenderCommandSubmission, ViewerRenderCommandTicket,
+        ViewerShellOrder, viewer_feedback_toast,
     };
     use crate::test_support::{TestResult, viewer_tab_id};
 
@@ -1027,9 +1009,7 @@ mod tests {
 
         assert_eq!(
             viewer_feedback_toast(Some(&feedback)),
-            Some(ViewerFeedbackToast::Warn(
-                "Skipped 2 diffs with no commits or changed files: api, web.".to_owned()
-            ))
+            Some("Skipped 2 diffs with no commits or changed files: api, web.".to_owned())
         );
     }
 }

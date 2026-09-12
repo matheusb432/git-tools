@@ -124,7 +124,11 @@ mod tests {
     use crate::{
         recipes::{RecipeOp, RecipeTarget},
         utils,
-        viewer::{pinned_tabs, session::CachedView},
+        viewer::{
+            close_viewer_tabs::{self, CloseViewerTabs},
+            pinned_tabs,
+            session::CachedView,
+        },
     };
 
     #[test]
@@ -179,8 +183,12 @@ mod tests {
                 assert_eq!(tab.recipe, recipe);
             })
             .unwrap();
-        work::close_other_tabs(&state, tab_id).unwrap();
-        work::close_tab(&state, tab_id).unwrap();
+        for request in [
+            CloseViewerTabs::Others(tab_id),
+            CloseViewerTabs::One(tab_id),
+        ] {
+            close_viewer_tabs::execute(request, &mut connection, &state).unwrap();
+        }
         assert_eq!(state.inspect(|session| session.tabs().len()).unwrap(), 1);
         connection
             .execute_batch("DROP TABLE pinned_viewer_tabs")

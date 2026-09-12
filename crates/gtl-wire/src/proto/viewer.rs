@@ -85,8 +85,6 @@ viewer_tab_codecs! {
     decode_close_viewer_tab_response <= CloseViewerTabResponse;
     encode_refresh_viewer_tab_request => RefreshViewerTabRequest;
     decode_refresh_viewer_tab_response <= RefreshViewerTabResponse;
-    encode_delete_live_viewer_tab_request => DeleteLiveViewerTabRequest;
-    decode_delete_live_viewer_tab_response <= DeleteLiveViewerTabResponse;
     encode_clear_viewer_commit_selection_request => ClearViewerCommitSelectionRequest;
     decode_clear_viewer_commit_selection_response <= ClearViewerCommitSelectionResponse;
 }
@@ -321,7 +319,6 @@ fn encode_viewer_commit_selection(selection: ViewerCommitSelection) -> v1::Viewe
 fn encode_viewer_feedback(feedback: ViewerFeedback) -> v1::ViewerFeedback {
     let (kind, labels) = match feedback {
         ViewerFeedback::TabClosed => (v1::ViewerFeedbackKind::TabClosed, Vec::new()),
-        ViewerFeedback::LiveViewDeleted => (v1::ViewerFeedbackKind::LiveViewDeleted, Vec::new()),
         ViewerFeedback::SnapshotRecipesSkipped { labels } => {
             (v1::ViewerFeedbackKind::SnapshotRecipesSkipped, labels)
         }
@@ -580,6 +577,10 @@ pub fn decode_get_viewer_settings_response(
     Ok(ViewerUserSettings {
         sidebars: decode_sidebar_visibility(required(response.sidebars)?),
         projects_view: decode_projects_view(response.projects_view)?,
+        projects_page_size: gtl_models::settings::ProjectsPageSize::try_new(
+            response.projects_page_size,
+        )
+        .map_err(|_| ViewerCodecError::InvalidMessage)?,
         configuration_path: response.configuration_path,
         configured_theme: response
             .configured_theme
@@ -614,6 +615,7 @@ pub fn encode_get_viewer_settings_response(
     v1::GetViewerSettingsResponse {
         sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
         projects_view: encode_projects_view(settings.projects_view) as i32,
+        projects_page_size: settings.projects_page_size.into_inner(),
         configuration_path: settings.configuration_path,
         configured_theme: settings
             .configured_theme
@@ -724,6 +726,7 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
         commits_sidebar_visible: encode_bool_field_update(&request.commits_sidebar_visible),
         wrap_lines,
         projects_view: encode_projects_view_update(&request.projects_view),
+        projects_page_size: encode_projects_page_size_update(&request.projects_page_size),
         theme,
         layout,
         density,
@@ -754,6 +757,18 @@ pub fn decode_edit_settings_request(
     Ok(EditSettingsRequest {
         files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)?,
         commits_sidebar_visible: decode_bool_field_update(request.commits_sidebar_visible)?,
+        projects_page_size: match request.projects_page_size {
+            None => FieldUpdate::Unchanged,
+            Some(value) => match required(value.operation)? {
+                v1::projects_page_size_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                v1::projects_page_size_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(
+                        gtl_models::settings::ProjectsPageSize::try_new(value)
+                            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                    )
+                }
+            },
+        },
         projects_view: match request.projects_view {
             None => FieldUpdate::Unchanged,
             Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
@@ -1323,7 +1338,6 @@ fn decode_viewer_feedback(
 ) -> Result<ViewerFeedback, ViewerCodecError> {
     match v1::ViewerFeedbackKind::try_from(feedback.kind) {
         Ok(v1::ViewerFeedbackKind::TabClosed) => Ok(ViewerFeedback::TabClosed),
-        Ok(v1::ViewerFeedbackKind::LiveViewDeleted) => Ok(ViewerFeedback::LiveViewDeleted),
         Ok(v1::ViewerFeedbackKind::SnapshotRecipesSkipped) => {
             Ok(ViewerFeedback::SnapshotRecipesSkipped {
                 labels: feedback.labels,
@@ -1911,4 +1925,21 @@ pub fn encode_close_other_viewer_tabs_request(
     v1::CloseOtherViewerTabsRequest {
         tab_id: u64::from(request.tab_id),
     }
+}
+
+fn encode_projects_page_size_update(
+    update: &FieldUpdate<gtl_models::settings::ProjectsPageSize>,
+) -> Option<v1::ProjectsPageSizeFieldUpdate> {
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => {
+            v1::projects_page_size_field_update::Operation::Clear(v1::ClearSetting {})
+        }
+        FieldUpdate::Update(value) => {
+            v1::projects_page_size_field_update::Operation::Update(value.into_inner())
+        }
+    };
+    Some(v1::ProjectsPageSizeFieldUpdate {
+        operation: Some(operation),
+    })
 }

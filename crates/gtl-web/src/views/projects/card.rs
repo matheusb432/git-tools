@@ -63,12 +63,13 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             div { class: "flex items-center gap-2 border-t border-line pt-3",
-                ProjectComparisonAction {
-                    path: project.path.clone(),
-                    mode: ViewerProjectDiffMode::Snapshot,
-                    shape: ProjectActionShape::Labeled,
-                    disabled: disabled || !ahead.is_available(),
-                    unavailable_reason: (!ahead.is_available()).then(|| ahead.description().into_owned()),
+                if ahead.has_changes() {
+                    ProjectComparisonAction {
+                        path: project.path.clone(),
+                        mode: ViewerProjectDiffMode::Snapshot,
+                        shape: ProjectActionShape::Labeled,
+                        disabled,
+                    }
                 }
                 ProjectComparisonAction {
                     path: project.path.clone(),

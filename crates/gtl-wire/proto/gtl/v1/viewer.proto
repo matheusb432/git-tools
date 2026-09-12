@@ -24,7 +24,6 @@ service ViewerService {
   rpc MoveViewerTab(MoveViewerTabRequest) returns (MoveViewerTabResponse);
   rpc CloseViewerTab(CloseViewerTabRequest) returns (CloseViewerTabResponse);
   rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
-  rpc DeleteLiveViewerTab(DeleteLiveViewerTabRequest) returns (DeleteLiveViewerTabResponse);
   rpc SelectViewerCommit(SelectViewerCommitRequest) returns (SelectViewerCommitResponse);
   rpc ClearViewerCommitSelection(ClearViewerCommitSelectionRequest) returns (ClearViewerCommitSelectionResponse);
   rpc SetViewerPreference(SetViewerPreferenceRequest) returns (SetViewerPreferenceResponse);
@@ -260,7 +259,8 @@ message ViewerKeybindings {
 enum ViewerFeedbackKind {
   VIEWER_FEEDBACK_KIND_UNSPECIFIED = 0;
   VIEWER_FEEDBACK_KIND_TAB_CLOSED = 1;
-  VIEWER_FEEDBACK_KIND_LIVE_VIEW_DELETED = 2;
+  reserved 2;
+  reserved "VIEWER_FEEDBACK_KIND_LIVE_VIEW_DELETED";
   VIEWER_FEEDBACK_KIND_SNAPSHOT_RECIPES_SKIPPED = 3;
 }
 
@@ -319,14 +319,6 @@ message RefreshViewerTabRequest {
 }
 
 message RefreshViewerTabResponse {
-  ViewerShell shell = 1;
-}
-
-message DeleteLiveViewerTabRequest {
-  uint64 tab_id = 1;
-}
-
-message DeleteLiveViewerTabResponse {
   ViewerShell shell = 1;
 }
 
@@ -663,6 +655,7 @@ message ProjectsViewFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  uint32 projects_page_size = 10;
   ViewerSidebarVisibility sidebars = 9;
   ProjectsViewMode projects_view = 7;
   optional string configuration_path = 1;
@@ -724,6 +717,7 @@ message ProjectSettingsFieldUpdate {
 }
 
 message EditSettingsRequest {
+  ProjectsPageSizeFieldUpdate projects_page_size = 11;
   BoolFieldUpdate files_sidebar_visible = 9;
   BoolFieldUpdate commits_sidebar_visible = 10;
   BoolFieldUpdate wrap_lines = 8;
@@ -737,6 +731,13 @@ message EditSettingsRequest {
 }
 
 message EditSettingsResponse {}
+
+message ProjectsPageSizeFieldUpdate {
+  oneof operation {
+    uint32 update = 1;
+    ClearSetting clear = 2;
+  }
+}
 
 message OpenViewerDiffFileRequest {
   ViewerViewIdentity identity = 1;

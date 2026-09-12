@@ -6,7 +6,7 @@ use gtl_application::settings::{
 use gtl_models::{
     diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
-    settings::{ProjectsViewMode, PushAllExclusions, UserSettings},
+    settings::{ProjectsPageSize, ProjectsViewMode, PushAllExclusions, UserSettings},
     tags::{
         TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
         TagTemplate, TagTemplateError,
@@ -27,6 +27,8 @@ pub(super) enum UserSettingsDocumentKey {
     WrapLines,
     #[strum(to_string = "projects_view")]
     ProjectsView,
+    #[strum(to_string = "projects_page_size")]
+    ProjectsPageSize,
     #[strum(to_string = "files_sidebar_visible")]
     FilesSidebarVisible,
     #[strum(to_string = "commits_sidebar_visible")]
@@ -77,6 +79,7 @@ impl UserSettingsDocumentKey {
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
@@ -105,6 +108,7 @@ impl UserSettingsDocumentKey {
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
@@ -129,6 +133,7 @@ impl UserSettingsDocumentKey {
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
@@ -244,6 +249,7 @@ pub(super) struct UserSettingsDocument {
     editable: DocumentMut,
     settings: UserSettings,
     projects_view: ProjectsViewMode,
+    projects_page_size: ProjectsPageSize,
 }
 
 impl UserSettingsDocument {
@@ -252,12 +258,13 @@ impl UserSettingsDocument {
         let editable = raw
             .parse::<DocumentMut>()
             .map_err(UserSettingsDocumentError::TomlSyntax)?;
-        let (settings, projects_view) = parse_settings(&raw)?;
+        let (settings, projects_view, projects_page_size) = parse_settings(&raw)?;
         Ok(Self {
             raw,
             editable,
             settings,
             projects_view,
+            projects_page_size,
         })
     }
 
@@ -265,8 +272,8 @@ impl UserSettingsDocument {
         self.settings
     }
 
-    pub(super) fn into_viewer_settings(self) -> (UserSettings, ProjectsViewMode) {
-        (self.settings, self.projects_view)
+    pub(super) fn into_viewer_settings(self) -> (UserSettings, ProjectsViewMode, ProjectsPageSize) {
+        (self.settings, self.projects_view, self.projects_page_size)
     }
 
     pub(super) fn apply(mut self, patch: UserSettingsPatch) -> UserSettingsDocumentEdit {
@@ -296,6 +303,7 @@ struct RawUserSettingsDocument {
     wrap_lines: Option<RawSettingValue>,
     #[serde(default)]
     projects_view: ProjectsViewMode,
+    projects_page_size: Option<RawSettingValue>,
     #[serde(default)]
     theme: Option<RawSettingValue>,
     #[serde(default)]
@@ -439,7 +447,7 @@ fn tag_pattern_name(
 
 fn parse_settings(
     raw: &str,
-) -> Result<(UserSettings, ProjectsViewMode), UserSettingsDocumentError> {
+) -> Result<(UserSettings, ProjectsViewMode, ProjectsPageSize), UserSettingsDocumentError> {
     let document = toml::from_str::<RawUserSettingsDocument>(raw)
         .map_err(UserSettingsDocumentError::TomlSchema)?;
     let theme = optional_string(UserSettingsDocumentKey::Theme, document.theme)?
@@ -498,6 +506,12 @@ fn parse_settings(
             projects.tag_patterns,
         )),
         document.projects_view,
+        document
+            .projects_page_size
+            .and_then(|value| value.as_integer())
+            .and_then(|value| u32::try_from(value).ok())
+            .and_then(|value| ProjectsPageSize::try_new(value).ok())
+            .unwrap_or_default(),
     ))
 }
 
@@ -730,6 +744,16 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         ),
         UserSettingsFieldUpdate::Clear => {
             document.remove(UserSettingsDocumentKey::WrapLines.root());
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
+    match patch.projects_page_size {
+        UserSettingsFieldUpdate::Update(value) => set_value(
+            &mut document[UserSettingsDocumentKey::ProjectsPageSize.root()],
+            Value::from(i64::from(value.into_inner())),
+        ),
+        UserSettingsFieldUpdate::Clear => {
+            document.remove(UserSettingsDocumentKey::ProjectsPageSize.root());
         }
         UserSettingsFieldUpdate::Unchanged => {}
     }

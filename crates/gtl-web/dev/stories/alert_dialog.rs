@@ -38,16 +38,16 @@ fn interactive() -> Element {
                 id: "preview-alert-trigger",
                 variant: ButtonVariant::Destructive,
                 onclick: move |_| open.set(true),
-                "Delete live view"
+                "Delete item"
             }
             output { class: "text-sm text-ink-2", aria_live: "polite", "{outcome}" }
             AlertDialog {
                 id: "preview-alert-dialog",
                 trigger_id: "preview-alert-trigger",
                 open: open(),
-                title: "Delete live view",
-                description: "This removes the saved live view. Render history remains available.",
-                confirm_label: "Delete live view",
+                title: "Delete item",
+                description: "This action cannot be undone.",
+                confirm_label: "Delete item",
                 oncancel: move |()| {
                     open.set(false);
                     outcome.set("Canceled");
@@ -78,8 +78,8 @@ fn pending() -> Element {
                 id: "preview-pending-alert-dialog",
                 trigger_id: "preview-pending-alert-trigger",
                 open: open(),
-                title: "Delete live view",
-                description: "The viewer is waiting for confirmation from the local service.",
+                title: "Delete item",
+                description: "The item is being deleted.",
                 confirm_label: "Deleting",
                 confirm_state: ButtonState::Loading,
                 cancel_disabled: true,

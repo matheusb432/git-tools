@@ -95,12 +95,6 @@ viewer_request!(move_tab, MoveViewerTab, ViewerShell, move_tab);
 viewer_request!(close_tab, ViewerTabRequest, ViewerShell, close_tab);
 viewer_request!(refresh_tab, ViewerTabRequest, ViewerShell, refresh_tab);
 viewer_request!(
-    delete_live_tab,
-    ViewerTabRequest,
-    ViewerShell,
-    delete_live_tab
-);
-viewer_request!(
     select_commit,
     SelectViewerCommit,
     ViewerShell,

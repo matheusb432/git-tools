@@ -1,9 +1,9 @@
 use gtl_application::{
     diffs::open_diff_file_in_configured_editor::OpenDiffFileInConfiguredEditorError,
-    live_views::delete_live_viewer_tab::DeleteLiveViewerTabError,
     viewer::{
-        self, find_viewer_diff::FindViewerDiffError, get_viewer_shell::GetViewerShellError,
-        move_viewer_tab::MoveViewerTabError, open_viewer_diff_file::OpenViewerDiffFileError,
+        self, close_viewer_tabs::CloseViewerTabsError, find_viewer_diff::FindViewerDiffError,
+        get_viewer_shell::GetViewerShellError, move_viewer_tab::MoveViewerTabError,
+        open_viewer_diff_file::OpenViewerDiffFileError,
         read_viewer_diff_text::ReadViewerDiffTextError, source::ViewerSourceError,
     },
 };
@@ -84,15 +84,13 @@ pub(super) fn move_viewer_tab_error(error: MoveViewerTabError) -> Status {
     }
 }
 
-pub(super) fn delete_live_viewer_tab_error(error: DeleteLiveViewerTabError) -> Status {
+pub(super) fn close_viewer_tabs_error(error: CloseViewerTabsError) -> Status {
     match error {
-        DeleteLiveViewerTabError::UnknownTab => {
-            Status::not_found("live viewer tab is not available")
+        CloseViewerTabsError::UnknownTab => Status::not_found("viewer tab is not available"),
+        CloseViewerTabsError::ReserveWork(error) => {
+            map_reserve_recipe(error, "refresh viewer after closing tabs")
         }
-        DeleteLiveViewerTabError::ReserveWork(error) => {
-            map_reserve_recipe(error, "refresh viewer after deleting live tab")
-        }
-        error => unexpected_viewer(error, "delete live viewer tab"),
+        error => unexpected_viewer(error, "close viewer tabs"),
     }
 }
 

@@ -31,6 +31,14 @@ pub(super) enum ProjectSignal {
 }
 
 impl ProjectSignal {
+    pub(super) fn has_changes(&self) -> bool {
+        match self {
+            Self::Ahead { count, .. } => count.into_inner() > 0,
+            Self::Local { tracked, untracked } => !tracked.is_zero() || !untracked.is_zero(),
+            Self::Unavailable(_) => false,
+        }
+    }
+
     pub(super) const fn is_available(&self) -> bool {
         !matches!(self, Self::Unavailable(_))
     }

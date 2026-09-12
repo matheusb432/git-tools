@@ -24,6 +24,13 @@ pub enum ProjectsViewMode {
     Table,
 }
 
+#[nutype::nutype(
+    validate(predicate = |value| matches!(value, 10 | 15 | 30)),
+    default = 15,
+    derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, Serialize, Deserialize)
+)]
+pub struct ProjectsPageSize(u32);
+
 /// Exact, case-sensitive Git Tools project names omitted from `push --all` before Git inspection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushAllExclusions(BTreeSet<ProjectName>);
@@ -162,6 +169,28 @@ mod tests {
         paths::{ProjectName, RepositoryRelativePath},
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybindings},
     };
+
+    #[test]
+    fn projects_page_size_rejects_invalid_construction_and_deserialization() {
+        assert_eq!(super::ProjectsPageSize::default().into_inner(), 15);
+        for value in [10, 15, 30] {
+            let size = super::ProjectsPageSize::try_new(value).unwrap();
+            let json = serde_json::to_value(size).unwrap();
+            assert_eq!(json, serde_json::json!(value));
+            assert_eq!(
+                serde_json::from_value::<super::ProjectsPageSize>(json).unwrap(),
+                size
+            );
+        }
+        for value in [0, 1, 9, 11, 14, 16, 29, 31, u32::MAX] {
+            assert!(super::ProjectsPageSize::try_new(value).is_err());
+            assert!(
+                serde_json::from_value::<super::ProjectsPageSize>(serde_json::json!(value))
+                    .is_err()
+            );
+        }
+        assert!(serde_json::from_str::<super::ProjectsPageSize>("\"15\"").is_err());
+    }
 
     fn project(value: &str) -> ProjectName {
         ProjectName::try_new(value.to_owned()).unwrap()

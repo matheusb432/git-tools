@@ -6,6 +6,14 @@ use super::FieldError;
 
 const SELECT_CLASSES: &str = "control-select min-h-10 w-full px-3 py-2 pr-10 peer";
 
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) enum SelectVariant {
+    #[default]
+    Field,
+    #[cfg(feature = "desktop")]
+    Toolbar,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SelectOption {
     value: String,
@@ -30,6 +38,7 @@ pub(crate) fn Select(
     value: String,
     options: Vec<SelectOption>,
     error: Option<String>,
+    #[props(default)] variant: SelectVariant,
     #[props(default)] disabled: bool,
     #[props(extends = GlobalAttributes)]
     #[props(extends = select)]
@@ -78,7 +87,9 @@ pub(crate) fn Select(
                     ChevronDown { size: 17 }
                 }
             }
-            FieldError { id: error_id, message: error }
+            if variant == SelectVariant::Field || has_error {
+                FieldError { id: error_id, message: error }
+            }
         }
     }
 }

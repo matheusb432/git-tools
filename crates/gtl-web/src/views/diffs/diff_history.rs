@@ -5,7 +5,7 @@ use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
     ViewerHistoryEntry, ViewerHistoryFilter, ViewerHistoryPage,
 };
-use lucide_dioxus::{Check, ChevronLeft, ChevronRight, Copy, ExternalLink};
+use lucide_dioxus::{Check, Copy, ExternalLink};
 
 use crate::{
     app::application_layout::ViewerContext,
@@ -13,8 +13,11 @@ use crate::{
     shared::{
         browser,
         ui::{
-            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, ScrollArea, Select,
-            SelectOption, Skeleton,
+            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, Select, SelectOption,
+            Skeleton,
+            data_table::{DataTable, DataTableRow, TableColumn, TableHeading},
+            pagination::{PageNavigation, PagePosition, Pagination},
+            select::SelectVariant,
         },
         viewer_client::ViewerClientError,
     },
@@ -118,46 +121,51 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
         ViewerHistoryFilter::Project { name } => format!("project:{name}"),
     };
     rsx! {
-        div { class: "history-shell h-[min(32rem,calc(100vh-10rem))] min-h-0",
+        div { class: "history-shell h-full min-h-0",
             div { class: "flex items-center gap-3 pb-4",
-                label { r#for: "snapshot-project-filter", "Project" }
-                Select {
-                    id: "snapshot-project-filter",
-                    aria_label: "Snapshot project",
-                    value: selected,
-                    options,
-                    onchange: move |event: FormEvent| {
-                        let value = event.value();
-                        let next = match value.as_str() {
-                            "all" => ViewerHistoryFilter::All,
-                            "unassociated" => ViewerHistoryFilter::Unassociated,
-                            value => {
-                                let Some(name) = value
-                                    .strip_prefix("project:")
-                                    .and_then(|name| {
-                                        gtl_models::paths::ProjectName::try_new(name.to_owned()).ok()
-                                    }) else {
-                                    return;
-                                };
-                                ViewerHistoryFilter::Project {
-                                    name,
+                label { class: "shrink-0", r#for: "snapshot-project-filter", "Project" }
+                div { class: "min-w-0 flex-1 sm:max-w-sm",
+                    Select {
+                        id: "snapshot-project-filter",
+                        variant: SelectVariant::Toolbar,
+                        aria_label: "Snapshot project",
+                        value: selected,
+                        options,
+                        onchange: move |event: FormEvent| {
+                            let value = event.value();
+                            let next = match value.as_str() {
+                                "all" => ViewerHistoryFilter::All,
+                                "unassociated" => ViewerHistoryFilter::Unassociated,
+                                value => {
+                                    let Some(name) = value
+                                        .strip_prefix("project:")
+                                        .and_then(|name| {
+                                            gtl_models::paths::ProjectName::try_new(name.to_owned()).ok()
+                                        }) else {
+                                        return;
+                                    };
+                                    ViewerHistoryFilter::Project {
+                                        name,
+                                    }
                                 }
-                            }
-                        };
-                        cursor.set(ViewerHistoryCursor::Newest);
-                        filter.set(next);
-                    },
+                            };
+                            cursor.set(ViewerHistoryCursor::Newest);
+                            filter.set(next);
+                        },
+                    }
                 }
             }
             section {
                 class: "history-content min-h-0",
                 aria_label: "Recent diff renders",
-                ScrollArea { class: "overflow-auto min-h-0",
-                    if let Some(error) = action_error {
-                        div {
-                            class: "history-error mb-3 px-3 py-2",
-                            role: "alert",
-                            "{error.message()}"
+                div { class: "grid min-h-0 grid-rows-[auto_minmax(0,1fr)]",
+                    div {
+                        if let Some(error) = action_error {
+                            div {
+                                class: "history-error mb-3 px-3 py-2",
+                                role: "alert",
+                                "{error.message()}"
+                            }
                         }
                     }
                     match (pending, &*load) {
@@ -189,7 +197,17 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
                             }
                         },
                         (false, Some(Ok(page))) => rsx! {
-                            div { class: "grid gap-2",
+                            DataTable {
+                                caption: "Recent diff renders",
+                                header: rsx! {
+                                    TableHeading { "ID" }
+                                    TableHeading { "Diff" }
+                                    TableHeading { "Project" }
+                                    TableHeading { "Kind" }
+                                    TableHeading { "Range" }
+                                    TableHeading { "Rendered" }
+                                    TableHeading { class: "text-right", "Actions" }
+                                },
                                 for entry in &page.entries {
                                     HistoryRow {
                                         key: "{entry.id}",
@@ -205,9 +223,10 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
                         },
                     }
                 }
-                if !pending && let Some(Ok(page)) = &*load && !page.entries.is_empty() {
+                if let Some(Ok(page)) = &*load && !page.entries.is_empty() {
                     HistoryFooter {
                         page: page.clone(),
+                        pending,
                         onnavigate: move |next| cursor.set(next),
                     }
                 }
@@ -245,48 +264,67 @@ fn HistoryRow(
     oncopy: EventHandler<RenderHistoryId>,
 ) -> Element {
     rsx! {
-        article { class: "snapshot-history-row min-w-0 gap-3 py-3",
-            div { class: "min-w-0",
-                div { class: "history-row-title-line min-w-0 gap-2",
-                    h2 { class: "history-row-title font-semibold", "{entry.title}" }
-                    span { class: "history-kind-badge px-1.5 py-0.5 font-mono text-xs font-semibold tracking-widest",
-                        "{recipe_kind_label(entry.kind)}"
-                    }
+        DataTableRow {
+            TableColumn { class: "font-mono text-xs text-ink-3", "#{entry.id}" }
+            TableColumn {
+                span {
+                    class: "block max-w-64 truncate font-semibold text-ink",
+                    title: entry.title.clone(),
+                    "{entry.title}"
                 }
-                p { class: "history-row-range mt-1 font-mono", "{entry.range_label}" }
             }
-            div { class: "min-w-0 text-ink-2",
-                p { class: "truncate", "{entry.repository_name}" }
+            TableColumn {
+                span {
+                    class: "block max-w-40 truncate",
+                    title: "{entry.repository_name}",
+                    "{entry.repository_name}"
+                }
+            }
+            TableColumn {
+                span { class: "history-kind-badge px-1.5 py-0.5 font-mono text-xs",
+                    "{recipe_kind_label(entry.kind)}"
+                }
+            }
+            TableColumn {
+                span {
+                    class: "block max-w-48 truncate font-mono text-xs",
+                    title: entry.range_label.clone(),
+                    "{entry.range_label}"
+                }
+            }
+            TableColumn {
                 time {
-                    class: "history-row-time mt-1 font-mono tabular-nums",
+                    class: "whitespace-nowrap font-mono text-xs text-ink-3 tabular-nums",
                     datetime: entry.rendered_at.to_string(),
-                    "{entry.rendered_at}"
+                    "{entry.rendered_at.display_minute()}"
                 }
             }
-            div { class: "history-row-actions gap-1",
-                Button {
-                    size: ButtonSize::Small,
-                    variant: ButtonVariant::Outline,
-                    state: if opening { ButtonState::Loading } else if open_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
-                    aria_label: "Open {entry.title}",
-                    "data-testid": test_ids::HISTORY_ENTRY_OPEN.value(),
-                    onclick: move |_| onopen.call(entry.id),
-                    span { aria_hidden: "true",
-                        ExternalLink { size: 14 }
+            TableColumn {
+                div { class: "flex items-center justify-end gap-1",
+                    Button {
+                        size: ButtonSize::Small,
+                        variant: ButtonVariant::Outline,
+                        state: if opening { ButtonState::Loading } else if open_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
+                        aria_label: "Open {entry.title}",
+                        "data-testid": test_ids::HISTORY_ENTRY_OPEN.value(),
+                        onclick: move |_| onopen.call(entry.id),
+                        span { aria_hidden: "true",
+                            ExternalLink { size: 14 }
+                        }
+                        "Open"
                     }
-                    "Open"
-                }
-                Button {
-                    size: ButtonSize::IconSmall,
-                    variant: ButtonVariant::Ghost,
-                    aria_label: "Copy {entry.title} JSON",
-                    title: if copied { "Copied" } else { "Copy render JSON" },
-                    onclick: move |_| oncopy.call(entry.id),
-                    span { aria_hidden: "true",
-                        if copied {
-                            Check { size: 14 }
-                        } else {
-                            Copy { size: 14 }
+                    Button {
+                        size: ButtonSize::IconSmall,
+                        variant: ButtonVariant::Ghost,
+                        aria_label: "Copy {entry.title} JSON",
+                        title: if copied { "Copied" } else { "Copy render JSON" },
+                        onclick: move |_| oncopy.call(entry.id),
+                        span { aria_hidden: "true",
+                            if copied {
+                                Check { size: 14 }
+                            } else {
+                                Copy { size: 14 }
+                            }
                         }
                     }
                 }
@@ -298,6 +336,7 @@ fn HistoryRow(
 #[component]
 fn HistoryFooter(
     page: ViewerHistoryPage,
+    pending: bool,
     onnavigate: EventHandler<ViewerHistoryCursor>,
 ) -> Element {
     let Some(position) = page.position.page() else {
@@ -308,48 +347,23 @@ fn HistoryFooter(
     let page_count = u32::from(position.count());
     let previous = navigation.previous;
     let next = navigation.next;
-    let item_count_label = format!("{} renders", page.total_count);
-
     rsx! {
-        footer { class: "history-footer min-h-14 gap-3 px-3 sm:px-4",
-            p { class: "history-footer-count font-mono text-xs tabular-nums", "{item_count_label}" }
-            nav {
-                class: "ml-auto flex items-center gap-1",
-                aria_label: "History pages",
-                Button {
-                    size: ButtonSize::IconMedium,
-                    variant: ButtonVariant::Ghost,
-                    state: if previous.is_some() { ButtonState::Enabled } else { ButtonState::Disabled },
-                    aria_label: "Previous history page",
-                    onclick: move |_| {
-                        if let Some(cursor) = previous {
-                            onnavigate.call(cursor);
-                        }
-                    },
-                    span { aria_hidden: "true",
-                        ChevronLeft { size: 15 }
-                    }
+        Pagination {
+            position: PagePosition::new(page_number as usize, page_count as usize),
+            label: "History",
+            disabled: pending,
+            onselect: move |navigation| {
+                let next = match navigation {
+                    PageNavigation::First => Some(ViewerHistoryCursor::Newest),
+                    PageNavigation::Previous => previous,
+                    PageNavigation::Next => next,
+                    PageNavigation::Last => Some(ViewerHistoryCursor::Oldest),
+                };
+                if let Some(next) = next {
+                    onnavigate.call(next);
                 }
-                output {
-                    class: "history-page-number min-w-20 px-2 font-mono text-xs tabular-nums",
-                    aria_label: "History page {page_number} of {page_count}",
-                    "{page_number:02} / {page_count:02}"
-                }
-                Button {
-                    size: ButtonSize::IconMedium,
-                    variant: ButtonVariant::Ghost,
-                    state: if next.is_some() { ButtonState::Enabled } else { ButtonState::Disabled },
-                    aria_label: "Next history page",
-                    onclick: move |_| {
-                        if let Some(cursor) = next {
-                            onnavigate.call(cursor);
-                        }
-                    },
-                    span { aria_hidden: "true",
-                        ChevronRight { size: 15 }
-                    }
-                }
-            }
+            },
+            span { class: "whitespace-nowrap", "{page.total_count} renders" }
         }
     }
 }

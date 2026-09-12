@@ -3,12 +3,21 @@ use lucide_dioxus::X;
 
 use super::{Button, ButtonSize, ButtonVariant, ScrollArea, dialog::use_dialog};
 
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) enum PanelDialogVariant {
+    #[default]
+    Panel,
+    #[cfg(feature = "desktop")]
+    Table,
+}
+
 #[component]
 pub(crate) fn PanelDialog(
     id: String,
     trigger_id: String,
     open: bool,
     title: String,
+    #[props(default)] variant: PanelDialogVariant,
     onclose: EventHandler<()>,
     artifact_view_id: Option<String>,
     children: Element,
@@ -18,11 +27,16 @@ pub(crate) fn PanelDialog(
     let artifact_dialog = artifact_view_id.as_ref().map(|_| "");
     let artifact_close_action = artifact_view_id.as_ref().map(|_| "close-dialog");
     let artifact_trigger_id = artifact_view_id.as_ref().map(|_| trigger_id.clone());
+    let class = match variant {
+        PanelDialogVariant::Panel => "dialog-surface m-auto p-0",
+        #[cfg(feature = "desktop")]
+        PanelDialogVariant::Table => "dialog-surface m-auto w-[min(72rem,calc(100vw-2rem))] p-0",
+    };
 
     rsx! {
         dialog {
             id,
-            class: "dialog-surface m-auto p-0",
+            class,
             aria_modal: "true",
             aria_labelledby: title_id.clone(),
             "data-gtl-dialog": artifact_dialog,
@@ -49,10 +63,22 @@ pub(crate) fn PanelDialog(
                         }
                     }
                 }
-                ScrollArea { class: "min-h-0 overflow-auto p-4",
-                    if open || artifact_view_id.is_some() {
-                        {children}
-                    }
+                match variant {
+                    PanelDialogVariant::Panel => rsx! {
+                        ScrollArea { class: "min-h-0 overflow-auto p-4",
+                            if open || artifact_view_id.is_some() {
+                                {children}
+                            }
+                        }
+                    },
+                    #[cfg(feature = "desktop")]
+                    PanelDialogVariant::Table => rsx! {
+                        div { class: "min-h-0 overflow-hidden p-4",
+                            if open {
+                                {children}
+                            }
+                        }
+                    },
                 }
             }
         }

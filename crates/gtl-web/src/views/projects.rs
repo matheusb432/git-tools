@@ -9,14 +9,13 @@ mod table;
 mod view_mode;
 
 use dioxus::prelude::*;
-use gtl_models::settings::ProjectsViewMode;
+use gtl_models::settings::{ProjectsPageSize, ProjectsViewMode};
 use gtl_wire::viewer::ViewerHistoryFilter;
 use lucide_dioxus::{History, RefreshCw};
 
 use self::{
     card::ProjectCard,
     loading::use_projects,
-    presentation::ProjectsSummary,
     table::ProjectTable,
     view_mode::{ProjectsViewToggle, use_projects_presentation},
 };
@@ -26,7 +25,9 @@ use crate::{
         browser,
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, PanelDialog, ScrollArea,
-            Skeleton,
+            Select, SelectOption, Skeleton,
+            pagination::{PagePosition, Pagination},
+            select::SelectVariant,
         },
     },
 };
@@ -35,6 +36,7 @@ const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
 pub(crate) fn ProjectsView() -> Element {
+    let mut page_number = use_signal(|| 1);
     let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
     let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
     use_context_provider(|| OpenSnapshots(open_snapshots));
@@ -53,6 +55,14 @@ pub(crate) fn ProjectsView() -> Element {
     let load = projects.load.read();
     let mode = (presentation.mode)();
     let disabled = !viewer.actions_enabled();
+    let page_size = (presentation.page_size)();
+    let total = load.projects.as_ref().map_or(0, Vec::len);
+    let position = PagePosition::new(
+        page_number(),
+        total.div_ceil(page_size.into_inner() as usize),
+    );
+    let page_start = (position.number() - 1) * page_size.into_inner() as usize;
+
     rsx! {
         document::Title { "Projects - git-tools" }
         main {
@@ -65,7 +75,6 @@ pub(crate) fn ProjectsView() -> Element {
                     class: "projects-title text-xl font-semibold tracking-tight",
                     "Projects"
                 }
-                ProjectsSummary { load: projects.load }
                 div { class: "projects-header-actions ml-auto gap-3",
                     SnapshotHistoryButton {}
                     ProjectsViewToggle { presentation }
@@ -86,6 +95,7 @@ pub(crate) fn ProjectsView() -> Element {
                     id: "project-snapshots-dialog",
                     trigger_id: trigger,
                     title: "Snapshots",
+                    variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
                     open: true,
                     onclose: move |()| snapshots.set(None),
                     crate::views::SnapshotHistory { initial_filter: filter }
@@ -94,6 +104,7 @@ pub(crate) fn ProjectsView() -> Element {
             ScrollArea {
                 class: "projects-content min-h-0 p-4 sm:p-6",
                 "data-testid": "projects-content",
+                id: "projects-content",
                 div { class: "mx-auto max-w-7xl",
                     if let Some(error) = load.error.or((presentation.error)()) {
                         div {
@@ -137,15 +148,59 @@ pub(crate) fn ProjectsView() -> Element {
                             }
                         },
                         Some(items) if mode == ProjectsViewMode::Table => rsx! {
-                            ProjectTable { projects: items.clone(), disabled }
+                            ProjectTable {
+                                projects: items
+                                    .iter()
+                                    .skip(page_start)
+                                    .take(page_size.into_inner() as usize)
+                                    .cloned()
+                                    .collect(),
+                                disabled,
+                            }
                         },
                         Some(items) => rsx! {
                             div { class: PROJECT_GRID_CLASSES, aria_label: "Managed projects",
-                                for project in items {
+                                for project in items.iter().skip(page_start).take(page_size.into_inner() as usize) {
                                     ProjectCard { key: "{project.path}", project: project.clone(), disabled }
                                 }
                             }
                         },
+                    }
+                }
+            }
+            if total > 0 {
+                Pagination {
+                    position,
+                    label: "Projects",
+                    onselect: move |navigation| {
+                        page_number.set(position.select(navigation));
+                        browser::scroll_element_to_start("projects-content");
+                    },
+                    div { class: "flex items-center gap-2",
+                        label { class: "shrink-0", r#for: "projects-page-size", "Per page" }
+                        div { class: "w-20",
+                            Select {
+                                id: "projects-page-size",
+                                aria_label: "Projects per page",
+                                variant: SelectVariant::Toolbar,
+                                value: page_size.to_string(),
+                                options: [10, 15, 30]
+                                    .map(|size| SelectOption::new(size.to_string(), size.to_string()))
+                                    .to_vec(),
+                                disabled: (presentation.pending)(),
+                                onchange: move |event: FormEvent| {
+                                    if let Some(size) = event
+                                        .value()
+                                        .parse::<u32>()
+                                        .ok()
+                                        .and_then(|size| ProjectsPageSize::try_new(size).ok())
+                                    {
+                                        page_number.set(1);
+                                        (presentation.select_page_size)(size);
+                                    }
+                                },
+                            }
+                        }
                     }
                 }
             }

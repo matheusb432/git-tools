@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn single_toast_is_accessible_without_a_ledger() {
         let mut queue = ToastQueue::default();
-        queue.enqueue(ToastKind::Ok, "Live view deleted.");
+        queue.enqueue(ToastKind::Ok, "Changes saved.");
 
         let html = render(queue);
 
@@ -354,7 +354,7 @@ mod tests {
         assert!(html.contains(r#"role="status""#));
         assert!(html.contains(r#"aria-live="polite""#));
         assert!(html.contains(r#"aria-atomic="true""#));
-        assert!(html.contains("Live view deleted."));
+        assert!(html.contains("Changes saved."));
         assert!(html.contains(&format!(
             r#"data-testid="{}""#,
             test_ids::TOAST_DISMISS.value()

@@ -51,6 +51,7 @@ pub fn settings_patch(
         ),
         wrap_lines: application_field_update(request.wrap_lines, |value| value),
         projects_view: application_field_update(request.projects_view, |value| value),
+        projects_page_size: application_field_update(request.projects_page_size, |value| value),
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Light => Theme::Light,
             ViewerTheme::Dark => Theme::Dark,
@@ -106,6 +107,7 @@ pub fn preference_setting(preference: SetViewerPreference) -> SettingKeyValue {
 pub fn project_settings(
     settings: &UserSettings,
     projects_view: gtl_models::settings::ProjectsViewMode,
+    projects_page_size: gtl_models::settings::ProjectsPageSize,
     configuration_path: Option<String>,
 ) -> ViewerUserSettings {
     let configured_theme = settings.theme().map(super::project_theme);
@@ -113,6 +115,7 @@ pub fn project_settings(
     ViewerUserSettings {
         sidebars: settings.sidebar_visibility(),
         projects_view,
+        projects_page_size,
         configuration_path,
         configured_theme,
         effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),

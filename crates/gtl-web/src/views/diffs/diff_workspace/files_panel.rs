@@ -89,6 +89,7 @@ pub(super) fn FilesPanel(
     artifact_view_id: Option<String>,
 ) -> Element {
     let workspace = super::use_workspace_context();
+    let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Files);
     let model = workspace.files.read();
     let artifact_enhancement = artifact_view_id.is_some();
 
@@ -96,6 +97,9 @@ pub(super) fn FilesPanel(
         ScrollArea {
             class: "diff-files-scroll-panel h-full min-h-0 p-3 compact:p-2.5",
             "data-testid": test_id,
+            onmounted: scroll.mount,
+            onresize: move |_| scroll.restore.call(()),
+            onscroll: scroll.save,
             FilesPanelHeading { file_count: model.file_count, artifact_view_id }
             FilesPanelSummary { totals: model.totals }
             if model.file_count == 0 {

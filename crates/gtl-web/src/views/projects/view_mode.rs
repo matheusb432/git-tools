@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_models::settings::ProjectsViewMode;
+use gtl_models::settings::{ProjectsPageSize, ProjectsViewMode};
 use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
 use lucide_dioxus::{LayoutGrid, List};
 
@@ -15,9 +15,11 @@ use crate::{
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct ProjectsPresentation {
     pub(super) mode: Memo<ProjectsViewMode>,
+    pub(super) page_size: Memo<ProjectsPageSize>,
     pub(super) pending: Memo<bool>,
     pub(super) error: Memo<Option<ViewerClientError>>,
     pub(super) select: Callback<ProjectsViewMode>,
+    pub(super) select_page_size: Callback<ProjectsPageSize>,
     pub(super) retry: Callback<()>,
 }
 
@@ -37,8 +39,20 @@ pub(super) fn use_projects_presentation() -> ProjectsPresentation {
             .and_then(|result| result.as_ref().ok())
             .map_or(ProjectsViewMode::Grid, |settings| settings.projects_view)
     });
-    let pending =
-        use_memo(move || saving() || settings.read().is_none() || !viewer.actions_enabled());
+    let page_size = use_memo(move || {
+        settings
+            .read()
+            .as_ref()
+            .and_then(|result| result.as_ref().ok())
+            .map_or_else(ProjectsPageSize::default, |settings| {
+                settings.projects_page_size
+            })
+    });
+    let pending = use_memo(move || {
+        saving()
+            || settings.state().cloned() == UseResourceState::Pending
+            || !viewer.actions_enabled()
+    });
     let error = use_memo(move || {
         save_error().or_else(|| {
             settings
@@ -48,13 +62,9 @@ pub(super) fn use_projects_presentation() -> ProjectsPresentation {
                 .copied()
         })
     });
-    let mut save = use_action(move |mode: ProjectsViewMode| async move {
+    let mut save = use_action(move |request: EditSettingsRequest| async move {
         let instance_id = viewer.server_instance_id();
-        let result = viewer_server::edit_settings(EditSettingsRequest {
-            projects_view: FieldUpdate::Update(mode),
-            ..Default::default()
-        })
-        .await;
+        let result = viewer_server::edit_settings(request).await;
         saving.set(false);
         if viewer.server_instance_id() != instance_id {
             return Ok::<(), std::convert::Infallible>(());
@@ -65,27 +75,42 @@ pub(super) fn use_projects_presentation() -> ProjectsPresentation {
         }
         Ok(())
     });
-    let select = use_callback(move |mode: ProjectsViewMode| {
+    let update = use_callback(move |request: EditSettingsRequest| {
         if *pending.peek() {
             return;
         }
-        attempted.set(Some(mode));
+        attempted.set(Some(request.clone()));
         saving.set(true);
         save_error.set(None);
-        save.call(mode);
+        save.call(request);
+    });
+    let select = use_callback(move |mode: ProjectsViewMode| {
+        update(EditSettingsRequest {
+            projects_view: FieldUpdate::Update(mode),
+            ..Default::default()
+        });
+    });
+    let select_page_size = use_callback(move |size: ProjectsPageSize| {
+        update(EditSettingsRequest {
+            projects_page_size: FieldUpdate::Update(size),
+            ..Default::default()
+        });
     });
     let retry = use_callback(move |()| {
-        if let Some(mode) = *attempted.peek() {
-            select(mode);
+        let request = attempted.peek().clone();
+        if let Some(request) = request {
+            update(request);
         } else {
             settings.restart();
         }
     });
     ProjectsPresentation {
         mode,
+        page_size,
         pending,
         error,
         select,
+        select_page_size,
         retry,
     }
 }

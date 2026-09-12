@@ -25,5 +25,8 @@ mod settings_recovery;
 #[path = "viewer/line_wrapping.rs"]
 mod line_wrapping;
 
+#[path = "viewer/panel_scroll.rs"]
+mod panel_scroll;
+
 #[path = "viewer/desktop_shell.rs"]
 mod desktop_shell;

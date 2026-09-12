@@ -20,7 +20,6 @@ pub(super) fn ProjectComparisonAction(
     mode: ViewerProjectDiffMode,
     shape: ProjectActionShape,
     disabled: bool,
-    unavailable_reason: Option<String>,
 ) -> Element {
     let label = match mode {
         ViewerProjectDiffMode::Snapshot => "Create snapshot",
@@ -39,7 +38,6 @@ pub(super) fn ProjectComparisonAction(
             ButtonSize::Small
         },
     );
-    let title = unavailable_reason.unwrap_or_else(|| label.to_owned());
     let content = rsx! {
         if mode == ViewerProjectDiffMode::Snapshot {
             FileText { size: 15 }
@@ -56,7 +54,7 @@ pub(super) fn ProjectComparisonAction(
                 to: Route::project_diff(&path, mode),
                 draggable: "false",
                 class: classes,
-                title,
+                title: label,
                 aria_label: label,
                 {content}
             }
@@ -65,7 +63,7 @@ pub(super) fn ProjectComparisonAction(
                 r#type: "button",
                 disabled: true,
                 class: classes,
-                title,
+                title: label,
                 aria_label: label,
                 {content}
             }

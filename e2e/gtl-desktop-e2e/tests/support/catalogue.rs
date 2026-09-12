@@ -22,6 +22,30 @@ impl ProjectCatalogue {
         Ok(())
     }
 
+    pub fn seed_project_snapshots(&self, project_id: &str, count: i64) -> Result<()> {
+        let mut connection = self.database.connection_lock()?;
+        let transaction = connection.transaction()?;
+        let existing: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM recent_renders WHERE project_id = ?1",
+            [project_id],
+            |row| row.get(0),
+        )?;
+        for index in existing..count {
+            transaction.execute(
+                "INSERT INTO recent_renders (source_id, operation_id, target_id, argument, pinned_base, pinned_head, recipe_name, title, repo_name, range_label, rendered_at, project_id)
+                 SELECT source_id, operation_id, target_id, argument, pinned_base, ?3, ?2, ?2, repo_name, range_label, rendered_at, project_id
+                 FROM recent_renders WHERE project_id = ?1 AND pinned_base IS NOT NULL ORDER BY id LIMIT 1",
+                params![
+                    project_id,
+                    format!("Snapshot {index:02}"),
+                    format!("{index:040x}")
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn set_projects(&self, projects: &[(&str, &str, &Path)]) -> Result<()> {
         let fixture_home = std::env::var_os("HOME").context("isolated fixture home")?;
         let mut connection = self.database.connection_lock()?;

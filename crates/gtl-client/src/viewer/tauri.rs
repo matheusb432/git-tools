@@ -117,7 +117,6 @@ impl ViewerClient {
         move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";
         close_tab(ViewerTabRequest) -> ViewerShell => "viewer_close_tab";
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
-        delete_live_tab(ViewerTabRequest) -> ViewerShell => "viewer_delete_live_tab";
         select_commit(SelectViewerCommit) -> ViewerShell => "viewer_select_commit";
         set_tab_pinned(SetViewerTabPinned) -> () => "viewer_set_tab_pinned";
         close_other_tabs(ViewerTabRequest) -> () => "viewer_close_other_tabs";

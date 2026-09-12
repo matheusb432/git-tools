@@ -7,7 +7,7 @@ use super::ScrollArea;
 pub(crate) fn DataTable(caption: String, header: Element, children: Element) -> Element {
     rsx! {
         ScrollArea {
-            class: "control-data-table",
+            class: "control-data-table min-h-0",
             role: "region",
             aria_label: caption.clone(),
             tabindex: "0",

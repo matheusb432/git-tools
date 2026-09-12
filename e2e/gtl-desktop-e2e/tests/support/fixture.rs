@@ -63,6 +63,20 @@ impl OneShotFixture {
         command_checked_with_data_root(&self.cli, ["diff"], Some(&self.repository), &self.data_root)
             .context("forward one-shot diff")
     }
+
+    pub fn create_with_panel_history(data_root: &Path, name: &str) -> Result<Self> {
+        let fixture = Self::create_named(data_root, name)?;
+        for index in 0..48 {
+            let filename = format!("panel-{index:02}.txt");
+            fs::write(fixture.repository.join(&filename), "panel scroll fixture\n")?;
+            git(&fixture.repository, ["add", &filename])?;
+            git(
+                &fixture.repository,
+                ["commit", "-q", "-m", &format!("Add panel file {index:02}")],
+            )?;
+        }
+        Ok(fixture)
+    }
 }
 
 impl TabOverflowFixture {

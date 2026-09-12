@@ -15,7 +15,7 @@ use gtl_application::{
 };
 use gtl_models::{
     diffs::DiffExclusions,
-    settings::{ProjectsViewMode, PushAllExclusions, UserSettings},
+    settings::{ProjectsPageSize, ProjectsViewMode, PushAllExclusions, UserSettings},
     viewer::{RenderOptions, ViewerKeybindings},
 };
 
@@ -89,9 +89,15 @@ impl TomlSettingsStore {
 
     pub fn load_viewer_settings(
         &self,
-    ) -> Result<(UserSettings, ProjectsViewMode), UserSettingsLoadError> {
+    ) -> Result<(UserSettings, ProjectsViewMode, ProjectsPageSize), UserSettingsLoadError> {
         Ok(load_document(self.path.as_deref())?.map_or_else(
-            || (default_settings(), ProjectsViewMode::default()),
+            || {
+                (
+                    default_settings(),
+                    ProjectsViewMode::default(),
+                    ProjectsPageSize::default(),
+                )
+            },
             UserSettingsDocument::into_viewer_settings,
         ))
     }
@@ -488,6 +494,7 @@ excluded_from_push_all = true
             commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
             wrap_lines: UserSettingsFieldUpdate::Update(false),
             projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
+            projects_page_size: UserSettingsFieldUpdate::Update(ProjectsPageSize::default()),
             theme: UserSettingsFieldUpdate::Clear,
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
             density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
@@ -618,6 +625,71 @@ excluded_from_push_all = true
         );
         std::fs::write(&path, "wrap_lines = \"true\"\n").unwrap();
         assert!(store.load().is_err());
+    }
+
+    #[test]
+    fn projects_page_size_defaults_and_persists_without_changing_other_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), 15);
+        for raw in [
+            "0",
+            "-1",
+            "20",
+            "4294967296",
+            "15.5",
+            "true",
+            "[]",
+            "{}",
+            "\"invalid\"",
+            "\"15\"",
+        ] {
+            std::fs::write(
+                &path,
+                format!("# retained\ntheme = \"hearth\"\nprojects_page_size = {raw}\n"),
+            )
+            .unwrap();
+            assert_eq!(
+                store.load_viewer_settings().unwrap().2.into_inner(),
+                15,
+                "{raw}"
+            );
+            assert_eq!(
+                store.load().unwrap().theme(),
+                Some(gtl_models::viewer::Theme::Hearth)
+            );
+        }
+        for value in [10, 15, 30] {
+            store
+                .edit(UserSettingsPatch {
+                    projects_page_size: UserSettingsFieldUpdate::Update(
+                        ProjectsPageSize::try_new(value).unwrap(),
+                    ),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), value);
+            let saved = std::fs::read_to_string(&path).unwrap();
+            assert!(saved.contains(&format!("projects_page_size = {value}")));
+            assert!(saved.contains("# retained"));
+            assert_eq!(
+                store.load().unwrap().theme(),
+                Some(gtl_models::viewer::Theme::Hearth)
+            );
+        }
+        store
+            .edit(UserSettingsPatch {
+                projects_page_size: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), 15);
+        assert!(
+            !std::fs::read_to_string(path)
+                .unwrap()
+                .contains("projects_page_size")
+        );
     }
 
     #[test]

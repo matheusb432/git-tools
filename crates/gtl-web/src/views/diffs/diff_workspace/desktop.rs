@@ -7,7 +7,7 @@ use gtl_wire::viewer::{
     CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView,
     ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{Ellipsis, FileDiff, Trash2, TriangleAlert};
+use lucide_dioxus::{FileDiff, TriangleAlert};
 
 use super::{
     DiffWorkspaceDocument, MobilePanel, WorkspaceMobileNavigation,
@@ -22,17 +22,12 @@ use crate::{
     shared::{
         browser,
         ui::{
-            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover,
-            HoverPopoverPlacement, IconPopover, MENU_ACTION_HOST_CLASSES, MenuActionContent,
-            PageNotice, PanelDialog, Skeleton, popover::PopoverPlacement, use_hover_popover,
-            use_toast,
+            Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover, HoverPopoverPlacement,
+            PageNotice, PanelDialog, Skeleton, use_hover_popover, use_toast,
         },
     },
     views::diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
 };
-
-const LIVE_VIEW_ACTIONS_POPOVER_ID: &str = "live-view-actions";
-const DELETE_LIVE_VIEW_TRIGGER_ID: &str = "delete-live-view-trigger";
 
 #[component]
 pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
@@ -195,7 +190,6 @@ fn ReadyWorkspace(
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
-    let mut delete_open = use_signal(|| false);
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
     let sidebars = super::sidebars::use_sidebar_controls();
     let mut file_filter = use_signal(String::new);
@@ -279,7 +273,7 @@ fn ReadyWorkspace(
             .tabs
             .iter()
             .find(|tab| tab.id == tab_id)
-            .map(|tab| (tab.kind.is_live(), tab.pinned))
+            .map(|tab| tab.kind.is_live())
     });
     let commits_loading = commit_pages.is_loading();
     let commits_error = commit_pages.error().map(|error| error.message().to_owned());
@@ -302,16 +296,6 @@ fn ReadyWorkspace(
         }
         Ok::<(), std::convert::Infallible>(())
     });
-    let mut delete_view = use_action(move |tab_id: ViewerTabId| async move {
-        match viewer_server::delete_live_tab(ViewerTabRequest { tab_id }).await {
-            Ok(shell) => {
-                delete_open.set(false);
-                viewer.replace_shell(shell);
-            }
-            Err(error) => toast.error(error.message()),
-        }
-        Ok::<(), std::convert::Infallible>(())
-    });
     let active_tab = use_memo(move || view.read().identity.tab_id);
     let mut previous_tab = use_signal(move || *active_tab.peek());
     use_effect(move || {
@@ -321,20 +305,13 @@ fn ReadyWorkspace(
         }
         previous_tab.set(tab);
         commit_selection.cancel();
-        delete_view.cancel();
-        delete_open.set(false);
         mobile_panel.set(None);
         file_filter.set(String::new());
         path_filter_open.set(false);
         find_open.set(false);
         flashing_file.set(None);
         files_folded.set(presentation.all_folded(tab));
-        browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
     });
-    let onclear_commit = use_callback(move |()| {
-        commit_selection.call(CommitSelectionAction::UnselectCommit);
-    });
-
     let onselect_commit = use_callback(move |id: CommitId| {
         let current_selection = view.peek().commit_selection.clone();
         let action = make_commit_selection_action(&current_selection, tab_id, id);
@@ -356,7 +333,7 @@ fn ReadyWorkspace(
             }
         });
     };
-    let Some((is_live, pinned)) = ready_shell else {
+    let Some(is_live) = ready_shell else {
         return rsx! {};
     };
     let (file_count, commit_count) = workspace
@@ -379,21 +356,13 @@ fn ReadyWorkspace(
     let live_actions = Some(rsx! {
         ModifiedFilesButton { tab_id, visible: view.read().modified_files }
         if is_live {
-            LiveViewTitlebarActions {
-                tab_id,
-                pinned,
-                ondelete: move |_| {
-                    browser::hide_popover(LIVE_VIEW_ACTIONS_POPOVER_ID);
-                    delete_open.set(true);
-                },
-            }
+            LiveViewWarning { tab_id }
         }
     });
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
                 sidebars: (sidebars.visibility)(),
-                sidebar_pending: (sidebars.pending)(),
                 keybindings,
                 ontoggle_sidebar: sidebars.toggle,
                 diff_document: rsx! {
@@ -411,7 +380,6 @@ fn ReadyWorkspace(
                 mobile_navigation,
                 live_actions,
                 onselect_commit,
-                onclear_commit,
                 commits_loading,
                 commits_error: commits_error.clone(),
                 commits_has_more,
@@ -441,65 +409,6 @@ fn ReadyWorkspace(
                 load_error: commits_error,
                 has_more: commits_has_more,
                 onloadmore: onload_commits,
-            }
-        }
-        AlertDialog {
-            id: "delete-live-view-dialog",
-            trigger_id: DELETE_LIVE_VIEW_TRIGGER_ID,
-            open: delete_open(),
-            title: "Delete live view",
-            description: "This removes the saved live view and closes its tab. Render history remains available.",
-            confirm_label: "Delete live view",
-            confirm_state: if delete_view.pending() { ButtonState::Loading } else { ButtonState::Enabled },
-            cancel_disabled: delete_view.pending(),
-            oncancel: move |()| {
-                if !delete_view.pending() {
-                    delete_open.set(false);
-                }
-            },
-            onconfirm: move |()| {
-                if delete_view.pending() {
-                    return;
-                }
-                delete_view.call(tab_id);
-            },
-        }
-    }
-}
-
-#[component]
-fn LiveViewTitlebarActions(
-    tab_id: ViewerTabId,
-    pinned: bool,
-    ondelete: EventHandler<MouseEvent>,
-) -> Element {
-    rsx! {
-        div { class: "flex flex-none items-center gap-1",
-            LiveViewWarning { tab_id }
-            IconPopover {
-                id: LIVE_VIEW_ACTIONS_POPOVER_ID,
-                aria_label: "Live view actions",
-                placement: PopoverPlacement::TriggerEnd,
-                icon: rsx! {
-                    Ellipsis { size: 18 }
-                },
-                div { class: "grid gap-0.5 p-1.5",
-                    button {
-                        id: DELETE_LIVE_VIEW_TRIGGER_ID,
-                        disabled: pinned,
-                        title: pinned.then_some("Unpin this tab before deleting it"),
-                        class: MENU_ACTION_HOST_CLASSES,
-                        r#type: "button",
-                        onclick: ondelete,
-                        MenuActionContent {
-                            icon: rsx! {
-                                Trash2 { size: 16 }
-                            },
-                            label: "Delete live view",
-                            description: "Remove this saved live view",
-                        }
-                    }
-                }
             }
         }
     }
@@ -593,7 +502,7 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
         Button {
             size: ButtonSize::Small,
             variant: ButtonVariant::Outline,
-            state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            state: if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
             aria_label: "Modified files",
             aria_pressed: visible.to_string(),
             title: "Inspect current staged, unstaged, and untracked changes against HEAD",

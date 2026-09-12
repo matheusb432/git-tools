@@ -13,23 +13,23 @@ mod shell;
 
 use std::pin::Pin;
 
-use gtl_application::{
-    live_views::delete_live_viewer_tab,
-    viewer::{self, move_viewer_tab, pinned_tabs, set_modified_files, work},
+use gtl_application::viewer::{
+    self,
+    close_viewer_tabs::{self, CloseViewerTabs},
+    move_viewer_tab, pinned_tabs, set_modified_files, work,
 };
 use gtl_models::{diffs::CommitId, viewer::ViewerTabId};
 use gtl_wire::{
     proto,
     v1::{self, viewer_service_server::ViewerService},
-    viewer::ViewerFeedback,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 
 use self::{
     errors::{
-        delete_live_viewer_tab_error, map_reserve_commit, map_reserve_recipe,
-        move_viewer_tab_error, viewer_state_error,
+        close_viewer_tabs_error, map_reserve_commit, map_reserve_recipe, move_viewer_tab_error,
+        viewer_state_error,
     },
     settings::load_user_settings,
     shell::{parse_identity, project_shell},
@@ -199,9 +199,18 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::CloseOtherViewerTabsRequest>,
     ) -> Result<Response<v1::CloseOtherViewerTabsResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        if let Some(work) = work::close_other_tabs(&self.state.viewer, tab_id)
-            .map_err(|error| map_reserve_recipe(error, "close other viewer tabs"))?
-        {
+        let state = self.state.clone();
+        let closed = run_blocking(move || {
+            let mut connection = state.database.connection_lock()?;
+            Ok::<_, anyhow::Error>(close_viewer_tabs::execute(
+                CloseViewerTabs::Others(tab_id),
+                &mut connection,
+                &state.viewer,
+            ))
+        })
+        .await?
+        .map_err(|error| unexpected(error, "open viewer database"))?;
+        if let Some(work) = closed.map_err(close_viewer_tabs_error)? {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseOtherViewerTabsResponse {}))
@@ -212,9 +221,18 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::CloseViewerTabRequest>,
     ) -> Result<Response<v1::CloseViewerTabResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        if let Some(work) = work::close_tab(&self.state.viewer, tab_id)
-            .map_err(|error| map_reserve_recipe(error, "close viewer tab"))?
-        {
+        let state = self.state.clone();
+        let closed = run_blocking(move || {
+            let mut connection = state.database.connection_lock()?;
+            Ok::<_, anyhow::Error>(close_viewer_tabs::execute(
+                CloseViewerTabs::One(tab_id),
+                &mut connection,
+                &state.viewer,
+            ))
+        })
+        .await?
+        .map_err(|error| unexpected(error, "open viewer database"))?;
+        if let Some(work) = closed.map_err(close_viewer_tabs_error)? {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
@@ -232,33 +250,6 @@ impl ViewerService for ViewerGrpcService {
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::RefreshViewerTabResponse {
             shell: Some(project_shell(&self.state, None)?),
-        }))
-    }
-
-    async fn delete_live_viewer_tab(
-        &self,
-        request: Request<v1::DeleteLiveViewerTabRequest>,
-    ) -> Result<Response<v1::DeleteLiveViewerTabResponse>, Status> {
-        let tab_id = tab_id(request.into_inner().tab_id)?;
-        let state = self.state.clone();
-        let deletion = run_blocking(move || {
-            let connection = state.database.connection_lock()?;
-            Ok::<_, anyhow::Error>(delete_live_viewer_tab::execute(
-                tab_id,
-                &connection,
-                &state.viewer,
-            ))
-        })
-        .await?
-        .map_err(|error| unexpected(error, "open live-view database"))?;
-        if let Some(work) = deletion.map_err(delete_live_viewer_tab_error)? {
-            viewer_runtime::spawn_recipe(self.state.clone(), work);
-        }
-        Ok(Response::new(v1::DeleteLiveViewerTabResponse {
-            shell: Some(project_shell(
-                &self.state,
-                Some(ViewerFeedback::LiveViewDeleted),
-            )?),
         }))
     }
 

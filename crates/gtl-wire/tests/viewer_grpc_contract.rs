@@ -489,6 +489,7 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
             commits: true,
         },
         projects_view: gtl_models::settings::ProjectsViewMode::Table,
+        projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
         configured_theme: Some(ViewerTheme::Hearth),
         effective_theme: ViewerTheme::Hearth,
@@ -521,6 +522,9 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         commits_sidebar_visible: FieldUpdate::Clear,
         wrap_lines: FieldUpdate::Update(true),
         projects_view: FieldUpdate::Update(gtl_models::settings::ProjectsViewMode::Table),
+        projects_page_size: FieldUpdate::Update(
+            gtl_models::settings::ProjectsPageSize::try_new(30).unwrap(),
+        ),
         theme: FieldUpdate::Clear,
         layout: FieldUpdate::Unchanged,
         density: FieldUpdate::Update(ViewerDiffDensity::Compact),

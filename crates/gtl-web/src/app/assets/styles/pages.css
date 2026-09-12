@@ -38,22 +38,10 @@
   .settings-recovery-diagnostic { @apply max-w-3xl whitespace-pre-wrap break-words text-left text-ink-2; }
 
   .history-shell { @apply grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden; }
-  .history-header { @apply flex flex-col border-b border-line bg-surface sm:flex-row sm:items-end sm:justify-between; }
-  .history-header-title { @apply text-ink focus:outline-none; }
   .history-content { @apply grid grid-rows-[minmax(0,1fr)_auto] bg-bg; }
   .history-error { @apply rounded-sm border border-del-line bg-del-bg text-del; }
   .history-loading-row { @apply grid rounded-sm border border-line bg-surface sm:grid-cols-[minmax(0,1.5fr)_minmax(8rem,1fr)_auto]; }
-  .snapshot-history-row { @apply grid border-b border-line bg-surface sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center; }
-  .history-row { @apply grid rounded-sm border border-line bg-surface hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center; }
-  .history-row-title-line { @apply flex items-center; }
-  .history-row-title { @apply truncate text-ink; }
   .history-kind-badge { @apply shrink-0 rounded-sm border border-acc-line bg-acc-soft text-acc uppercase; }
-  .history-row-range { @apply truncate text-ink-2; }
-  .history-row-time { @apply block truncate text-ink-3; }
-  .history-row-actions { @apply flex items-center justify-end; }
-  .history-footer { @apply flex items-center justify-between border-t border-line bg-surface; }
-  .history-footer-count { @apply hidden text-ink-3 sm:block; }
-  .history-page-number { @apply text-center text-ink; }
 }
 
 @layer components {

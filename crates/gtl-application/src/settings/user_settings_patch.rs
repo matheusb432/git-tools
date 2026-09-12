@@ -87,6 +87,7 @@ pub struct UserSettingsPatch {
     pub commits_sidebar_visible: UserSettingsFieldUpdate<bool>,
     pub wrap_lines: UserSettingsFieldUpdate<bool>,
     pub projects_view: UserSettingsFieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub projects_page_size: UserSettingsFieldUpdate<gtl_models::settings::ProjectsPageSize>,
     /// Changes the configured viewer theme.
     pub theme: UserSettingsFieldUpdate<Theme>,
     /// Changes the configured diff layout.

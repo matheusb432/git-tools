@@ -1,4 +1,4 @@
-#[cfg(feature = "interactive-ui")]
+#[cfg(feature = "component-preview")]
 mod alert_dialog;
 mod badge;
 mod button;
@@ -25,13 +25,15 @@ mod navigation_bar;
 pub(crate) mod no_data;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 mod page_notice;
+#[cfg(feature = "desktop")]
+pub(crate) mod pagination;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
-mod panel_dialog;
+pub(crate) mod panel_dialog;
 pub(crate) mod popover;
 pub(crate) mod scroll_area;
 mod search_panel;
 #[cfg(feature = "interactive-ui")]
-mod select;
+pub(crate) mod select;
 #[cfg(feature = "interactive-ui")]
 mod skeleton;
 mod text_input;
@@ -42,7 +44,7 @@ mod viewer_tab;
 #[cfg(feature = "component-preview")]
 mod viewer_theme_picker;
 
-#[cfg(feature = "interactive-ui")]
+#[cfg(feature = "component-preview")]
 pub(crate) use alert_dialog::AlertDialog;
 pub(crate) use badge::{Badge, BadgeVariant};
 #[cfg(feature = "interactive-ui")]

@@ -11,8 +11,8 @@ use super::{
     ViewerState, ViewerStateError,
     prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     session::{
-        BeginCommitSelectionError, CachedView, CloseOutcome, CommitPatchTicket, ComputeTicket,
-        PublishOutcome, RENDER_PENDING_REASON, ViewerSession,
+        BeginCommitSelectionError, CachedView, CommitPatchTicket, ComputeTicket, PublishOutcome,
+        RENDER_PENDING_REASON, ViewerSession,
     },
 };
 use crate::{
@@ -205,21 +205,6 @@ pub fn activate_tab(
             return Err(ReserveRecipeError::UnknownTab);
         }
         reserve_active_if_needed(session)
-    })?
-}
-
-pub fn close_tab(
-    state: &ViewerState,
-    tab_id: ViewerTabId,
-) -> Result<Option<ReservedRecipeWork>, ReserveRecipeError> {
-    state.update(|session| {
-        let outcome = session
-            .close(tab_id)
-            .ok_or(ReserveRecipeError::UnknownTab)?;
-        match outcome {
-            CloseOutcome::ActiveChanged => reserve_active_if_needed(session),
-            CloseOutcome::ActiveUnchanged => Ok(None),
-        }
     })?
 }
 
@@ -449,26 +434,6 @@ pub fn clear_commit_selection(
     state.update(|session| session.clear_commit_selection(tab_id))
 }
 
-pub fn close_other_tabs(
-    state: &ViewerState,
-    tab_id: ViewerTabId,
-) -> Result<Option<ReservedRecipeWork>, ReserveRecipeError> {
-    state.update(|session| {
-        if session.tab(tab_id).is_none() {
-            return Err(ReserveRecipeError::UnknownTab);
-        }
-        let ids = session
-            .tabs()
-            .filter(|tab| tab.tab.id() != tab_id && !tab.pinned)
-            .map(|tab| tab.tab.id())
-            .collect::<Vec<_>>();
-        for id in ids {
-            session.close(id);
-        }
-        reserve_active_if_needed(session)
-    })?
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,28 +501,6 @@ mod tests {
 
         assert_eq!(refresh.ticket().tab_id, initial.ticket().tab_id);
         assert_ne!(refresh.ticket().generation, initial.ticket().generation);
-    }
-
-    #[test]
-    fn closing_the_active_tab_reserves_a_pending_predecessor() {
-        let state = ViewerState::new();
-        let first = reserve_pending(&state, "/repo/first", ViewerTabKind::Snapshot);
-        let second = reserve_pending(&state, "/repo/second", ViewerTabKind::Snapshot);
-
-        let refresh = close_tab(&state, second.ticket().tab_id).unwrap().unwrap();
-
-        assert_eq!(refresh.ticket().tab_id, first.ticket().tab_id);
-    }
-
-    #[test]
-    fn closing_an_inactive_tab_does_not_reserve_work() {
-        let state = ViewerState::new();
-        let first = reserve_pending(&state, "/repo/first", ViewerTabKind::Snapshot);
-        reserve_pending(&state, "/repo/second", ViewerTabKind::Snapshot);
-
-        let refresh = close_tab(&state, first.ticket().tab_id).unwrap();
-
-        assert!(refresh.is_none());
     }
 
     #[test]

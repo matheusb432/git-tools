@@ -1,4 +1,7 @@
 @layer components {
+  .control-pagination { @apply relative grid shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-t border-line bg-surface max-md:grid-cols-1 max-md:justify-items-center max-md:py-2; }
+  .control-pagination-progress { @apply absolute inset-x-4 top-0 h-px bg-line; }
+  .control-pagination-navigation { @apply col-start-2 flex items-center justify-center max-md:col-start-1; }
   .control-data-table { @apply overflow-x-auto rounded-panel border border-line bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc; }
   .control-data-table-table { @apply min-w-[44rem] border-collapse text-left; }
   .control-data-table-head { @apply border-b border-line-2 bg-sunk whitespace-nowrap text-ink-3; }

@@ -319,3 +319,10 @@ pub(crate) fn use_window_resize(handler: impl FnMut() + 'static) {
 
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
 pub(crate) fn use_window_resize(_handler: impl FnMut() + 'static) {}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn scroll_element_to_start(id: &str) {
+    if let Some(element) = document().and_then(|document| document.get_element_by_id(id)) {
+        element.set_scroll_top(0);
+    }
+}

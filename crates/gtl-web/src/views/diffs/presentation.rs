@@ -7,7 +7,10 @@ use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::ViewerRowContentId;
 
-use super::client_diff_document::viewport::geometry::DiffGeometry;
+use super::{
+    client_diff_document::viewport::geometry::DiffGeometry,
+    diff_workspace::panel_scroll::{Panel, PanelScrollPosition},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ScrollAnchor {
@@ -51,6 +54,8 @@ pub(super) fn use_diff_row(row: usize) {
 #[derive(Default)]
 struct TabPresentation {
     anchor: Option<ScrollAnchor>,
+    files_scroll: PanelScrollPosition,
+    commits_scroll: PanelScrollPosition,
     default_expanded: Option<bool>,
     files: HashMap<String, bool>,
     expanded_lines: HashSet<ExpandedLine>,
@@ -87,6 +92,34 @@ pub(crate) fn use_diff_presentation_provider() {
 }
 
 impl DiffPresentation {
+    pub(super) fn panel_scroll(self, tab: ViewerTabId, panel: Panel) -> PanelScrollPosition {
+        let tabs = self.tabs.peek();
+        let Some(tab) = tabs.get(&tab) else {
+            return PanelScrollPosition::default();
+        };
+        match panel {
+            Panel::Files => tab.files_scroll,
+            Panel::Commits => tab.commits_scroll,
+        }
+    }
+
+    pub(super) fn set_panel_scroll(
+        mut self,
+        tab: ViewerTabId,
+        panel: Panel,
+        position: PanelScrollPosition,
+    ) {
+        if self.panel_scroll(tab, panel) == position {
+            return;
+        }
+        let mut tabs = self.tabs.write();
+        let tab = tabs.entry(tab).or_default();
+        match panel {
+            Panel::Files => tab.files_scroll = position,
+            Panel::Commits => tab.commits_scroll = position,
+        }
+    }
+
     pub(super) fn all_folded(self, tab: ViewerTabId) -> Option<bool> {
         self.tabs
             .peek()

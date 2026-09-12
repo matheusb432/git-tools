@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
-use thirtyfour::{
-    By, WebDriver, WebElement, prelude::ElementQueryable as _, stringmatch::StringMatch,
-};
+use thirtyfour::{By, WebDriver, WebElement, prelude::ElementQueryable as _};
 
 use crate::support;
 
@@ -42,35 +40,6 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .click()
         .await
         .context("select the live view v2 commit")?;
-    wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
-    session
-        .driver()
-        .find(By::Css("button[aria-label='Toggle Commits sidebar']"))
-        .await?
-        .click()
-        .await?;
-    let full_comparison = session
-        .driver()
-        .query(By::Css("button[aria-label='Show full comparison']"))
-        .and_displayed()
-        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
-        .first()
-        .await?;
-    full_comparison.click().await?;
-    session
-        .driver()
-        .query(By::Css("button[aria-label='Toggle Commits sidebar']"))
-        .and_enabled()
-        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
-        .first()
-        .await?
-        .click()
-        .await?;
-
-    wait_for_commit_card_selection(session.driver(), "live view v2", false)
-        .await?
-        .click()
-        .await?;
     wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
     fixture.commit_extra()?;
     wait_for_commit_card_selection(session.driver(), "live view extra", false).await?;
@@ -116,7 +85,7 @@ async fn run_live_lifecycle(session: &mut support::session::TestSession) -> Resu
         .await
         .context("restore the refreshed live diff")?;
 
-    delete_live_view_and_assert_toast(session.driver()).await
+    close_live_view(session).await
 }
 
 async fn exercise_warning_recovery(
@@ -210,125 +179,52 @@ async fn exercise_warning_recovery(
     Ok(())
 }
 
-async fn delete_live_view_and_assert_toast(driver: &WebDriver) -> Result<()> {
-    enqueue_copy_toast(driver).await?;
-    confirm_live_view_deletion(driver).await?;
-    assert_live_deletion_queue(driver).await
-}
-
-async fn enqueue_copy_toast(driver: &WebDriver) -> Result<()> {
-    let copied = support::copy_selected_diff_line(driver, "work.txt", "alpha-v2").await?;
+async fn close_live_view(session: &mut support::session::TestSession) -> Result<()> {
+    let driver = session.driver();
     ensure!(
-        copied.contains("alpha-v2"),
-        "live-view source copy omitted its selected line"
+        driver
+            .find_all(By::Css(
+                "[aria-label='Live view actions'], #delete-live-view-dialog"
+            ))
+            .await?
+            .is_empty(),
+        "manual live deletion remains available"
     );
-    let copy_toast = support::selectors::by_test_id(driver, test_ids::TOAST)
-        .await
-        .context("show copied-line feedback before live deletion")?;
-    ensure!(
-        copy_toast.text().await?.starts_with("Copied with context"),
-        "copied-line toast has unexpected text"
-    );
-    Ok(())
-}
-
-async fn confirm_live_view_deletion(driver: &WebDriver) -> Result<()> {
-    driver
-        .find(By::Css("[popovertarget='live-view-actions']"))
-        .await
-        .context("find the live-view actions trigger")?
+    support::selectors::by_test_id(driver, test_ids::VIEWER_TAB_CLOSE)
+        .await?
         .click()
-        .await
-        .context("open the live-view actions")?;
+        .await?;
     driver
-        .find(By::Id("delete-live-view-trigger"))
-        .await
-        .context("find the live-view delete action")?
-        .click()
-        .await
-        .context("open the live-view delete confirmation")?;
-    let dialog = driver
-        .find(By::Id("delete-live-view-dialog"))
-        .await
-        .context("find the live-view delete confirmation")?;
-    dialog
-        .query(By::Css("button"))
-        .ignore_errors(true)
-        .with_text(StringMatch::new("Delete live view"))
-        .and_enabled()
+        .query(By::Id("projects-heading"))
         .and_displayed()
         .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()
-        .await
-        .context("find the live-view delete confirmation action")?
-        .click()
-        .await
-        .context("confirm the live-view deletion")?;
-    Ok(())
-}
-
-async fn assert_live_deletion_queue(driver: &WebDriver) -> Result<()> {
-    support::selectors::by_test_id(driver, test_ids::TOAST_LEDGER)
-        .await
-        .context("show the event ledger while live deletion waits")?;
-    support::evidence::capture(driver, "viewer-toast-queued", true)
-        .await
-        .context("capture queued toast evidence")?;
-
-    support::selectors::by_test_id(driver, test_ids::TOAST_DISMISS)
-        .await?
-        .click()
-        .await
-        .context("dismiss copied-line feedback")?;
-    support::wait::until(
-        "live-view deletion toast reaches the front of the queue",
-        support::wait::ASSERTION_TIMEOUT,
-        || async {
-            let toasts = driver.find_all(By::Css(test_ids::TOAST.selector())).await?;
-            let Some(toast) = toasts.into_iter().next() else {
-                return Ok(None);
-            };
-            Ok((toast.text().await? == "Live view deleted.").then_some(()))
-        },
-    )
-    .await?;
-    let toast = support::selectors::by_test_id(driver, test_ids::TOAST).await?;
-    ensure!(
-        toast.text().await? == "Live view deleted.",
-        "live-view deletion toast has unexpected text"
-    );
-    ensure!(
-        toast.attr("role").await?.as_deref() == Some("status"),
-        "live-view deletion toast is not an accessible status"
-    );
+        .await?;
     ensure!(
         driver
-            .find_all(By::Css(test_ids::TOAST_LEDGER.selector()))
+            .find_all(By::Css(test_ids::TOAST.selector()))
             .await?
             .is_empty(),
-        "event ledger remained visible with no waiting toast"
+        "closing a live tab enqueued a toast"
     );
-    support::evidence::capture(driver, "viewer-toast-single", true)
-        .await
-        .context("capture single toast evidence")?;
-
-    support::selectors::by_test_id(driver, test_ids::TOAST_DISMISS)
-        .await?
-        .click()
-        .await
-        .context("dismiss the live-view deletion toast")?;
-    support::wait::until(
-        "dismissed live-view deletion toast",
-        support::wait::ASSERTION_TIMEOUT,
-        || async {
-            Ok(driver
-                .find_all(By::Css(test_ids::TOAST.selector()))
-                .await?
-                .is_empty()
-                .then_some(()))
-        },
-    )
-    .await
+    support::evidence::capture(driver, "live-view-closed", true).await?;
+    session.restart().await?;
+    session
+        .driver()
+        .query(By::Id("projects-heading"))
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    ensure!(
+        session
+            .driver()
+            .find_all(By::Css("[role='tab']"))
+            .await?
+            .is_empty(),
+        "closed live view was restored after restart"
+    );
+    Ok(())
 }
 
 async fn wait_for_commit_card_selection(

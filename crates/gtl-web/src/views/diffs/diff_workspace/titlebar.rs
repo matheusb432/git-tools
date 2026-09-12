@@ -3,12 +3,8 @@ use gtl_models::git::{GitHead, GitRevision};
 use gtl_wire::viewer::ViewerAppliedExclusions;
 use lucide_dioxus::ChevronsDownUp;
 #[cfg(feature = "component-preview")]
-use lucide_dioxus::{Ellipsis, Search, Trash2};
+use lucide_dioxus::Search;
 
-#[cfg(feature = "component-preview")]
-use crate::shared::ui::popover::PopoverPlacement;
-#[cfg(feature = "component-preview")]
-use crate::shared::ui::{IconPopover, MENU_ACTION_HOST_CLASSES, MenuActionContent};
 use crate::shared::{
     browser,
     ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant},
@@ -17,10 +13,8 @@ use crate::shared::{
 #[component]
 pub(super) fn ViewTitlebar(
     sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    sidebar_pending: bool,
     keybindings: gtl_models::viewer::ViewerKeybindings,
     ontoggle_sidebar: Option<EventHandler<super::sidebars::Sidebar>>,
-    onclear_commit: Option<EventHandler<()>>,
     live_actions: Option<Element>,
     artifact_view_id: Option<String>,
 ) -> Element {
@@ -51,57 +45,13 @@ pub(super) fn ViewTitlebar(
             div { class: "workspace:hidden",
                 super::path_filter::PathFilterTrigger { artifact_view_id: artifact_view_id.clone() }
             }
-            SelectedCommit { onclear: onclear_commit }
             super::sidebars::SidebarButtons {
                 visibility: sidebars,
                 keybindings,
-                pending: sidebar_pending,
                 ontoggle: ontoggle_sidebar,
                 artifact: artifact_view_id.is_some(),
             }
             CollapseFilesButton { artifact_view_id }
-        }
-    }
-}
-
-#[component]
-fn SelectedCommit(onclear: Option<EventHandler<()>>) -> Element {
-    use gtl_wire::viewer::ViewerCommitSelection;
-    let workspace = super::use_workspace_context();
-    let view = workspace.view.read();
-    let (id, status) = match &view.commit_selection {
-        ViewerCommitSelection::None => return rsx! {},
-        ViewerCommitSelection::Ready { id } => (id, "Selected commit"),
-        ViewerCommitSelection::Pending { id } => (id, "Loading commit"),
-        ViewerCommitSelection::Error { id, .. } => (id, "Commit could not be loaded"),
-    };
-    let short_id = id.to_string().chars().take(8).collect::<String>();
-    let label = match &view.commit_selection {
-        ViewerCommitSelection::Pending { .. } => format!("Loading {short_id}"),
-        ViewerCommitSelection::Error { .. } => format!("Failed {short_id}"),
-        ViewerCommitSelection::None | ViewerCommitSelection::Ready { .. } => short_id,
-    };
-    rsx! {
-        div {
-            class: "flex min-w-0 items-center gap-1",
-            "data-selected-commit": id.to_string(),
-            span {
-                class: "text-xs text-ink-2",
-                title: "{status}: {id}",
-                aria_label: "{status}: {id}",
-                "{label}"
-            }
-            if let Some(onclear) = onclear {
-                Button {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Small,
-                    aria_label: "Show full comparison",
-                    title: "Show full comparison",
-                    onclick: move |_| onclear.call(()),
-                    span { class: "mobile:hidden", "Show full comparison" }
-                    lucide_dioxus::X { size: 14 }
-                }
-            }
         }
     }
 }
@@ -142,7 +92,6 @@ pub(super) fn PreviewViewTitlebar(
             if mobile {
                 super::path_filter::PathFilterTrigger {}
             }
-            PreviewLiveViewActions { mobile }
             CollapseFilesButton { preview_mobile: mobile }
         }
     }
@@ -162,41 +111,6 @@ fn FindAllFilesButton(onfindall: EventHandler<()>) -> Element {
                 Search { size: 15 }
             }
             span { "All files" }
-        }
-    }
-}
-
-#[cfg(feature = "component-preview")]
-#[component]
-fn PreviewLiveViewActions(mobile: bool) -> Element {
-    let action_size = if mobile {
-        ButtonSize::IconTouch
-    } else {
-        ButtonSize::Small
-    };
-
-    rsx! {
-        div { class: "flex flex-none items-center gap-1",
-            IconPopover {
-                id: if mobile { "preview-mobile-live-actions" } else { "preview-desktop-live-actions" },
-                aria_label: "Live view actions",
-                placement: PopoverPlacement::TriggerEnd,
-                trigger_size: action_size,
-                icon: rsx! {
-                    Ellipsis { size: if mobile { 20 } else { 18 } }
-                },
-                div { class: "grid gap-0.5 p-1.5",
-                    button { class: MENU_ACTION_HOST_CLASSES, r#type: "button",
-                        MenuActionContent {
-                            icon: rsx! {
-                                Trash2 { size: 16 }
-                            },
-                            label: "Delete live view",
-                            description: "Remove this saved live view",
-                        }
-                    }
-                }
-            }
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Viewer application operations and shared model re-exports.
 
+pub mod close_viewer_tabs;
 mod complete_recipe_computation;
 mod compute_recipe;
 mod diff_view;

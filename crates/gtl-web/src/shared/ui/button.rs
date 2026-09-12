@@ -83,7 +83,7 @@ pub(crate) enum ButtonSize {
     #[cfg(feature = "interactive-ui")]
     IconCompact,
     IconSmall,
-    #[cfg(feature = "interactive-ui")]
+    #[cfg(feature = "component-preview")]
     IconMedium,
     IconTouch,
 }
@@ -98,7 +98,7 @@ impl ButtonSize {
             #[cfg(feature = "interactive-ui")]
             Self::IconCompact => "size-6 p-0",
             Self::IconSmall => "size-8 p-0",
-            #[cfg(feature = "interactive-ui")]
+            #[cfg(feature = "component-preview")]
             Self::IconMedium => "size-9 p-0",
             Self::IconTouch => "size-11 p-0",
         }

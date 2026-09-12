@@ -2,15 +2,12 @@ use std::borrow::Cow;
 
 use dioxus::prelude::*;
 use gtl_models::{
-    repository::status::{RepositoryStatus, StatusChanges, StatusClass, StatusHead},
+    repository::status::{RepositoryStatus, StatusChanges, StatusHead},
     timestamps::MachineTimestamp,
 };
 use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectBranchComparison};
 
-use super::{
-    loading::ProjectLoad,
-    status::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus},
-};
+use super::status::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus};
 
 impl ProjectIssue {
     pub(super) fn description(&self) -> &str {
@@ -152,28 +149,5 @@ pub(super) fn ProjectSignalGlyph(signal: ProjectSignal) -> Element {
             aria_label: signal.description().into_owned(),
             "{signal.glyph()}"
         }
-    }
-}
-
-#[component]
-pub(super) fn ProjectsSummary(load: ReadSignal<ProjectLoad>) -> Element {
-    let load = load.read();
-    let summary = load.projects.as_ref().map_or_else(
-        || "Loading projects".to_owned(),
-        |projects| {
-            let total = projects.len();
-            let to_review = projects
-                .iter()
-                .filter(|project| project.review_class() == StatusClass::Pending)
-                .count();
-            let noun = if total == 1 { "project" } else { "projects" };
-            match to_review {
-                0 => format!("{total} {noun}, nothing to review"),
-                to_review => format!("{total} {noun}, {to_review} to review"),
-            }
-        },
-    );
-    rsx! {
-        p { class: "min-w-0 truncate text-ink-2 max-sm:hidden", "{summary}" }
     }
 }

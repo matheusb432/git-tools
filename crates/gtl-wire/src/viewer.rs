@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 20;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 21;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -482,7 +482,6 @@ pub struct ViewerPreferences {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ViewerFeedback {
     TabClosed,
-    LiveViewDeleted,
     SnapshotRecipesSkipped { labels: Vec<String> },
 }
 
@@ -578,6 +577,7 @@ pub struct ViewerDiffExclusions {
 pub struct ViewerUserSettings {
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub projects_view: gtl_models::settings::ProjectsViewMode,
+    pub projects_page_size: gtl_models::settings::ProjectsPageSize,
     pub configuration_path: Option<String>,
     pub configured_theme: Option<ViewerTheme>,
     pub effective_theme: ViewerTheme,
@@ -607,6 +607,7 @@ pub struct EditSettingsRequest {
     pub commits_sidebar_visible: FieldUpdate<bool>,
     pub wrap_lines: FieldUpdate<bool>,
     pub projects_view: FieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub projects_page_size: FieldUpdate<gtl_models::settings::ProjectsPageSize>,
     pub theme: FieldUpdate<ViewerTheme>,
     pub layout: FieldUpdate<ViewerDiffLayout>,
     pub density: FieldUpdate<ViewerDiffDensity>,

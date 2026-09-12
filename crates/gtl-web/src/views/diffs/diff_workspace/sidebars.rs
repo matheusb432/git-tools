@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerSidebarVisibility};
 use lucide_dioxus::{PanelLeft, PanelRight};
 
-use crate::shared::ui::{Button, ButtonSize, ButtonState, ButtonVariant};
+use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Sidebar {
@@ -55,15 +55,9 @@ pub(super) fn SidebarPanel(sidebar: Sidebar, visible: bool, children: Element) -
 pub(super) fn SidebarButtons(
     visibility: ViewerSidebarVisibility,
     keybindings: ViewerKeybindings,
-    pending: bool,
     ontoggle: Option<EventHandler<Sidebar>>,
     artifact: bool,
 ) -> Element {
-    let state = if pending {
-        ButtonState::Disabled
-    } else {
-        ButtonState::Enabled
-    };
     rsx! {
         div {
             class: "hidden items-center gap-1 workspace:flex",
@@ -75,7 +69,6 @@ pub(super) fn SidebarButtons(
                     sidebar,
                     visible,
                     keybindings,
-                    state,
                     ontoggle,
                     artifact,
                 }
@@ -89,7 +82,6 @@ fn SidebarButton(
     sidebar: Sidebar,
     visible: bool,
     keybindings: ViewerKeybindings,
-    state: ButtonState,
     ontoggle: Option<EventHandler<Sidebar>>,
     artifact: bool,
 ) -> Element {
@@ -104,7 +96,6 @@ fn SidebarButton(
         Button {
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Toggle,
-            state,
             id: (!artifact).then(|| format!("{}-sidebar-toggle", sidebar.name())),
             aria_label: label,
             title,
@@ -132,7 +123,6 @@ fn SidebarButton(
 #[derive(Clone, Copy)]
 pub(super) struct SidebarControls {
     pub(super) visibility: Memo<ViewerSidebarVisibility>,
-    pub(super) pending: ReadSignal<bool>,
     pub(super) toggle: Callback<Sidebar>,
 }
 
@@ -196,9 +186,5 @@ pub(super) fn use_sidebar_controls() -> SidebarControls {
         pending.set(true);
         save.call(request);
     });
-    SidebarControls {
-        visibility,
-        pending: pending.into(),
-        toggle,
-    }
+    SidebarControls { visibility, toggle }
 }

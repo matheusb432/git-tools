@@ -53,6 +53,7 @@ pub(super) fn WorkspaceCommitsPanel(
     onloadmore: Option<EventHandler<()>>,
 ) -> Element {
     let workspace = super::use_workspace_context();
+    let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Commits);
     let view = workspace.view.read();
     let selected_id = match &view.commit_selection {
         ViewerCommitSelection::None => None,
@@ -71,7 +72,10 @@ pub(super) fn WorkspaceCommitsPanel(
         ScrollArea {
             class: "diff-commits-scroll-panel h-full min-h-0",
             "data-testid": test_id,
+            onmounted: scroll.mount,
+            onresize: move |_| scroll.restore.call(()),
             onscroll: move |event: ScrollEvent| {
+                scroll.save.call(event.clone());
                 if has_more
                     && scroll_is_near_bottom(&event.data())
                     && let Some(onloadmore) = onloadmore

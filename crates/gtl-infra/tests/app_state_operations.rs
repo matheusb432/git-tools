@@ -14,14 +14,17 @@ use gtl_application::{
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
-        delete_live_viewer_tab,
         list_live_views::{self, ListLiveViews},
         save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
     ports::{Clock, GitRepositoryState},
     recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
     utils::FakeGitClient,
-    viewer::{ViewerState, work},
+    viewer::{
+        ViewerState,
+        close_viewer_tabs::{self, CloseViewerTabs},
+        work,
+    },
 };
 use gtl_infra::app_state::SqliteAppState;
 use gtl_models::{
@@ -153,8 +156,8 @@ fn public_operations_use_the_migrated_schema() {
     .ticket()
     .tab_id;
     let refresh = {
-        let connection = state.connection_lock().unwrap();
-        delete_live_viewer_tab::execute(tab_id, &connection, &viewer).unwrap()
+        let mut connection = state.connection_lock().unwrap();
+        close_viewer_tabs::execute(CloseViewerTabs::One(tab_id), &mut connection, &viewer).unwrap()
     };
     assert!(refresh.is_none());
     assert!(list_live_views(&state).is_empty());
@@ -435,7 +438,7 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         projects[0].last_rendered_at.as_ref().unwrap().as_ref(),
         "2026-09-06T11:00:00Z"
     );
-    assert_live_restores_independently(&connection, &viewer, ids[1]);
+    assert_live_restores_independently(&mut connection, &viewer, ids[1]);
     Ok(())
 }
 
@@ -480,7 +483,7 @@ fn create_project_comparison_repository(root: &std::path::Path) {
 }
 
 fn assert_live_restores_independently(
-    connection: &rusqlite::Connection,
+    connection: &mut rusqlite::Connection,
     viewer: &ViewerState,
     live_tab: gtl_models::viewer::ViewerTabId,
 ) {
@@ -489,7 +492,7 @@ fn assert_live_restores_independently(
     let restored = ViewerState::new();
     work::reserve_restored_live_views(&restored, saved).unwrap();
     assert_eq!(restored.inspect(|session| session.tabs().len()).unwrap(), 1);
-    delete_live_viewer_tab::execute(live_tab, connection, viewer).unwrap();
+    close_viewer_tabs::execute(CloseViewerTabs::One(live_tab), connection, viewer).unwrap();
     assert!(
         list_live_views::execute(ListLiveViews, connection)
             .unwrap()

@@ -396,6 +396,11 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
             wrap_lines: Some(BoolFieldUpdate {
                 operation: Some(bool_field_update::Operation::Update(true)),
             }),
+            projects_page_size: Some(gtl_wire::v1::ProjectsPageSizeFieldUpdate {
+                operation: Some(
+                    gtl_wire::v1::projects_page_size_field_update::Operation::Update(30),
+                ),
+            }),
             projects_view: Some(gtl_wire::v1::ProjectsViewFieldUpdate {
                 operation: Some(gtl_wire::v1::projects_view_field_update::Operation::Update(
                     gtl_wire::v1::ProjectsViewMode::Table as i32,
@@ -422,6 +427,7 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
         settings.projects_view,
         gtl_wire::v1::ProjectsViewMode::Table as i32
     );
+    assert_eq!(settings.projects_page_size, 30);
     assert!(
         settings
             .render_options
@@ -435,6 +441,40 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
             .ok_or("settings response omitted exclusions")?
             .default_extensions
             .is_empty()
+    );
+
+    let error = viewer
+        .edit_settings(EditSettingsRequest {
+            projects_page_size: Some(gtl_wire::v1::ProjectsPageSizeFieldUpdate {
+                operation: Some(
+                    gtl_wire::v1::projects_page_size_field_update::Operation::Update(20),
+                ),
+            }),
+            ..Default::default()
+        })
+        .await
+        .err()
+        .ok_or("invalid page size was accepted")?;
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    viewer
+        .edit_settings(EditSettingsRequest {
+            projects_page_size: Some(gtl_wire::v1::ProjectsPageSizeFieldUpdate {
+                operation: Some(
+                    gtl_wire::v1::projects_page_size_field_update::Operation::Clear(
+                        gtl_wire::v1::ClearSetting {},
+                    ),
+                ),
+            }),
+            ..Default::default()
+        })
+        .await?;
+    assert_eq!(
+        viewer
+            .get_viewer_settings(GetViewerSettingsRequest {})
+            .await?
+            .into_inner()
+            .projects_page_size,
+        15
     );
 
     server.stop().await?;

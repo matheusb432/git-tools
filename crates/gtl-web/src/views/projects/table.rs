@@ -124,12 +124,13 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
             }
             TableColumn { class: "text-right",
                 div { class: "flex justify-end gap-1",
-                    ProjectComparisonAction {
-                        path: project.path.clone(),
-                        mode: ViewerProjectDiffMode::Snapshot,
-                        shape: ProjectActionShape::Icon,
-                        disabled: disabled || !ahead.is_available(),
-                        unavailable_reason: (!ahead.is_available()).then(|| ahead.description().into_owned()),
+                    if ahead.has_changes() {
+                        ProjectComparisonAction {
+                            path: project.path.clone(),
+                            mode: ViewerProjectDiffMode::Snapshot,
+                            shape: ProjectActionShape::Icon,
+                            disabled,
+                        }
                     }
                     ProjectComparisonAction {
                         path: project.path.clone(),

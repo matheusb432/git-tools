@@ -74,11 +74,16 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
             .is_empty(),
         "overview must not add search"
     );
-    let initial_unpushed = action(session.driver(), "Initial", "Create snapshot").await?;
-    ensure!(
-        !initial_unpushed.is_enabled().await?,
-        "initial repository must not offer unpushed commits"
-    );
+    for name in ["Beta", "Initial", "Missing"] {
+        ensure!(
+            card(session.driver(), name)
+                .await?
+                .find_all(By::Css("[aria-label='Create snapshot']"))
+                .await?
+                .is_empty(),
+            "project {name} offered an empty snapshot"
+        );
+    }
     ensure!(
         card(session.driver(), "Initial")
             .await?
@@ -291,6 +296,7 @@ async fn review_comparisons(
 }
 
 async fn review_snapshot_dialog(session: &support::session::TestSession) -> Result<()> {
+    session.catalogue.seed_project_snapshots("ALP", 65)?;
     session
         .driver()
         .find(By::Css("button[aria-label='Snapshots for Alpha']"))
@@ -313,9 +319,65 @@ async fn review_snapshot_dialog(session: &support::session::TestSession) -> Resu
             == Some("project:Alpha"),
         "project snapshots filter was not preselected"
     );
+    wait_for_snapshot_rows(session.driver(), 30).await?;
+    let aligned = session.driver().execute(r"
+        const dialog = document.querySelector('dialog[open]');
+        const label = dialog.querySelector('label');
+        const select = dialog.querySelector('select');
+        const a = label.getBoundingClientRect();
+        const b = select.getBoundingClientRect();
+        const footer = dialog.querySelector('footer').getBoundingClientRect();
+        return Math.abs(a.y + a.height / 2 - b.y - b.height / 2) < 1 && footer.bottom <= dialog.getBoundingClientRect().bottom;
+    ", vec![]).await?.convert::<bool>()?;
+    ensure!(
+        aligned,
+        "snapshot filter is uneven or pagination is outside the dialog"
+    );
     support::evidence::capture(session.driver(), "project-snapshots-dialog", true).await?;
+    dialog
+        .find(By::Css("[aria-label='Last page']"))
+        .await?
+        .click()
+        .await?;
+    wait_for_snapshot_rows(session.driver(), 5).await?;
+    dialog
+        .find(By::Css("[aria-label='Previous page']"))
+        .await?
+        .click()
+        .await?;
+    wait_for_snapshot_rows(session.driver(), 30).await?;
+    dialog
+        .find(By::Css("[aria-label='First page']"))
+        .await?
+        .click()
+        .await?;
+    dialog
+        .query(By::Css("output[aria-label='Page 1 of 3']"))
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    session.driver().set_window_rect(0, 0, 390, 800).await?;
+    support::evidence::capture(session.driver(), "project-snapshots-narrow", true).await?;
     dialog.send_keys(thirtyfour::Key::Escape).await?;
+    session.driver().set_window_rect(0, 0, 1600, 900).await?;
+
     Ok(())
+}
+
+async fn wait_for_snapshot_rows(driver: &WebDriver, expected: usize) -> Result<()> {
+    support::wait::until(
+        "snapshot table page",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok((driver
+                .find_all(By::Css("dialog[open] tbody tr"))
+                .await?
+                .len()
+                == expected)
+                .then_some(()))
+        },
+    )
+    .await
 }
 
 async fn restore_comparisons(session: &mut support::session::TestSession) -> Result<()> {
@@ -717,15 +779,16 @@ async fn exercise_table(session: &mut support::session::TestSession) -> Result<(
             .contains("projects_view = \"table\""),
         "list choice was not saved in user settings"
     );
-    ensure!(
-        !table_row(session.driver(), "Initial")
-            .await?
-            .find(By::Css("button[aria-label='Create snapshot']"))
-            .await?
-            .is_enabled()
-            .await?,
-        "unborn repository comparison must be disabled"
-    );
+    for name in ["Beta", "Initial", "Missing"] {
+        ensure!(
+            table_row(session.driver(), name)
+                .await?
+                .find_all(By::Css("[aria-label='Create snapshot']"))
+                .await?
+                .is_empty(),
+            "table project {name} offered an empty snapshot"
+        );
+    }
     let link = alpha
         .find(By::Css("[data-testid='project-table-name']"))
         .await?;
@@ -873,5 +936,181 @@ async fn assert_comparison_editor(driver: &WebDriver, evidence_name: &str) -> Re
         .send_keys(thirtyfour::Key::Escape)
         .await?;
     panel.wait_until().not_displayed().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn projects_paginate_locally_and_restore_the_page_size() -> Result<()> {
+    support::run_test("viewer-project-pagination", |session| {
+        Box::pin(run_pagination(session))
+    })
+    .await
+}
+
+async fn run_pagination(session: &mut support::session::TestSession) -> Result<()> {
+    let fixture_home = std::env::var_os("HOME").context("fixture home")?;
+    let root = tempfile::Builder::new()
+        .prefix(".gtl-pages-")
+        .tempdir_in(fixture_home)?;
+    let projects = (0..31_u8)
+        .map(|index| {
+            (
+                format!(
+                    "P{}{}",
+                    char::from(b'A' + index / 26),
+                    char::from(b'A' + index % 26)
+                ),
+                format!("Project {index:02}"),
+                root.path().join(format!("project-{index:02}")),
+            )
+        })
+        .collect::<Vec<_>>();
+    let catalogue = projects
+        .iter()
+        .map(|(id, title, path)| (id.as_str(), title.as_str(), path.as_path()))
+        .collect::<Vec<_>>();
+    session.catalogue.set_projects(&catalogue)?;
+    session.write_user_config("projects_page_size = \"invalid\"\n")?;
+    session.restart().await?;
+    wait_for_project_count(session.driver(), 15).await?;
+    ensure!(
+        session
+            .driver()
+            .find(By::Id("projects-page-size"))
+            .await?
+            .value()
+            .await?
+            .as_deref()
+            == Some("15"),
+        "malformed page size did not default to 15"
+    );
+    ensure!(
+        session
+            .driver()
+            .find_all(By::Css("header.projects-header p"))
+            .await?
+            .is_empty(),
+        "Projects header retained its summary"
+    );
+    let requests = session.project_requests()?;
+    session
+        .driver()
+        .find(By::Css(
+            "nav[aria-label='Projects pages'] [aria-label='Last page']",
+        ))
+        .await?
+        .click()
+        .await?;
+    wait_for_project_count(session.driver(), 1).await?;
+    ensure!(
+        session.project_requests()? == requests,
+        "pagination fetched another project list"
+    );
+    session
+        .driver()
+        .find(By::Css(
+            "nav[aria-label='Projects pages'] [aria-label='First page']",
+        ))
+        .await?
+        .click()
+        .await?;
+    wait_for_project_count(session.driver(), 15).await?;
+    for (size, count) in [("10", 10), ("30", 30), ("15", 15)] {
+        set_page_size(session.driver(), size).await?;
+        wait_for_project_count(session.driver(), count).await?;
+        ensure!(
+            std::fs::read_to_string(session.data_root().join("config.toml"))?
+                .contains(&format!("projects_page_size = {size}")),
+            "page size was not persisted"
+        );
+    }
+    support::evidence::capture(session.driver(), "projects-pagination-grid", true).await?;
+    exercise_table_pages(session).await?;
+    session.catalogue.set_projects(&catalogue[..4])?;
+    session
+        .driver()
+        .find(By::Css("button[aria-label='Refresh projects']"))
+        .await?
+        .click()
+        .await?;
+    wait_for_project_count(session.driver(), 4).await?;
+    Ok(())
+}
+
+async fn exercise_table_pages(session: &mut support::session::TestSession) -> Result<()> {
+    select_view(session.driver(), "List view").await?;
+    set_page_size(session.driver(), "10").await?;
+    wait_for_project_count(session.driver(), 10).await?;
+    session
+        .driver()
+        .find(By::Css(
+            "nav[aria-label='Projects pages'] [aria-label='Next page']",
+        ))
+        .await?
+        .send_keys(thirtyfour::Key::Enter)
+        .await?;
+    session
+        .driver()
+        .query(By::Css("output[aria-label='Page 2 of 4']"))
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    wait_for_project_count(session.driver(), 10).await?;
+    support::evidence::capture(session.driver(), "projects-pagination-table", true).await?;
+    session.driver().set_window_rect(0, 0, 390, 800).await?;
+    let navigation = session
+        .driver()
+        .find(By::Css("nav[aria-label='Projects pages']"))
+        .await?
+        .rect()
+        .await?;
+    ensure!(
+        navigation.x >= 0.0 && navigation.x + navigation.width <= 390.0,
+        "pagination overflowed the narrow viewport"
+    );
+    support::evidence::capture(session.driver(), "projects-pagination-narrow", true).await?;
+    session.restart().await?;
+    wait_for_project_count(session.driver(), 10).await?;
+    ensure!(
+        session
+            .driver()
+            .find(By::Id("projects-page-size"))
+            .await?
+            .value()
+            .await?
+            .as_deref()
+            == Some("10"),
+        "saved page size was not restored"
+    );
+    Ok(())
+}
+
+async fn wait_for_project_count(driver: &WebDriver, expected: usize) -> Result<()> {
+    support::wait::until(
+        "bounded project page",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok((driver
+                .find_all(By::Css("[data-project-card], [data-project-row]"))
+                .await?
+                .len()
+                == expected)
+                .then_some(()))
+        },
+    )
+    .await
+}
+
+async fn set_page_size(driver: &WebDriver, value: &str) -> Result<()> {
+    let select = driver
+        .query(By::Id("projects-page-size"))
+        .and_enabled()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?;
+    thirtyfour::components::SelectElement::new(&select)
+        .await?
+        .select_by_value(value)
+        .await?;
     Ok(())
 }

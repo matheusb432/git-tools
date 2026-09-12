@@ -52,6 +52,7 @@ pub(crate) mod commits_panel;
 mod desktop;
 mod file_search;
 mod files_panel;
+pub(super) mod panel_scroll;
 mod path_filter;
 mod sidebars;
 mod titlebar;
@@ -555,7 +556,6 @@ pub(crate) fn ArtifactDiffWorkspace(
 #[component]
 fn DiffWorkspaceDocument(
     #[props(default)] sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    #[props(default)] sidebar_pending: bool,
     #[props(default)] keybindings: gtl_models::viewer::ViewerKeybindings,
     ontoggle_sidebar: Option<EventHandler<sidebars::Sidebar>>,
     diff_document: Element,
@@ -563,7 +563,6 @@ fn DiffWorkspaceDocument(
     mobile_navigation: Option<Element>,
     live_actions: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
-    onclear_commit: Option<EventHandler<()>>,
     #[props(default)] commits_loading: bool,
     commits_error: Option<String>,
     #[props(default)] commits_has_more: bool,
@@ -593,10 +592,8 @@ fn DiffWorkspaceDocument(
                 live_actions,
                 artifact_view_id: artifact_view_id.clone(),
                 sidebars,
-                sidebar_pending,
                 keybindings,
                 ontoggle_sidebar,
-                onclear_commit,
             }
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}

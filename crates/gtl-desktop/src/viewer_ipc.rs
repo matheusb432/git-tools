@@ -168,12 +168,6 @@ viewer_request_command!(
     refresh_tab
 );
 viewer_request_command!(
-    viewer_delete_live_tab,
-    ViewerTabRequest,
-    ViewerShell,
-    delete_live_tab
-);
-viewer_request_command!(
     viewer_select_commit,
     SelectViewerCommit,
     ViewerShell,
