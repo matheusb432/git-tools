@@ -5,13 +5,13 @@ pub fn status() -> anyhow::Result<()> {
     let status = client.status();
     #[cfg(unix)]
     println!(
-        "gtl-server serving via UDS at {} (instance {})",
+        "Server running at {} (instance {})",
         status.uds_path.display(),
         status.instance_id
     );
     #[cfg(windows)]
     println!(
-        "gtl-server serving via TCP at {} (instance {})",
+        "Server running at {} (instance {})",
         status.tcp_address, status.instance_id
     );
     Ok(())

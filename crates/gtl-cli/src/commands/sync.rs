@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use anyhow::Context as _;
 use gtl_models::{
     git::{BranchName, CommitCount, RemoteName, RemoteUrl},
@@ -14,7 +12,7 @@ pub struct PushTarget {
     pub top: RepositoryRoot,
     pub branch: BranchName,
     pub remote: RemoteName,
-    pub remote_url: Option<RemoteUrl>,
+    pub remote_urls: Vec<RemoteUrl>,
     pub pending: PendingChanges,
 }
 
@@ -38,10 +36,11 @@ pub(crate) fn push_target_from_grpc(
             .context("gtl-server returned an empty push branch")?,
         remote: RemoteName::try_new(target.remote)
             .context("gtl-server returned an empty push remote")?,
-        remote_url: target
-            .remote_url
+        remote_urls: target
+            .remote_urls
+            .into_iter()
             .map(RemoteUrl::try_new)
-            .transpose()
+            .collect::<Result<Vec<_>, _>>()
             .context("gtl-server returned an empty push remote URL")?,
         pending: pending_from_grpc(
             target
@@ -57,7 +56,7 @@ pub(crate) fn push_target_to_grpc(target: &PushTarget) -> v1::RepositoryPushTarg
         repository_root: target.top.to_string(),
         branch: target.branch.to_string(),
         remote: target.remote.to_string(),
-        remote_url: target.remote_url.as_ref().map(ToString::to_string),
+        remote_urls: target.remote_urls.iter().map(ToString::to_string).collect(),
         pending: Some(pending_to_grpc(target.pending)),
     }
 }
@@ -108,130 +107,123 @@ fn pending_to_grpc(pending: PendingChanges) -> v1::PendingChanges {
 }
 
 fn remote_label(target: &PushTarget) -> String {
-    target.remote_url.as_ref().map_or_else(
-        || target.remote.to_string(),
-        |url| format!("{} ({url})", target.remote),
+    if target.remote_urls.is_empty() {
+        target.remote.to_string()
+    } else {
+        format!(
+            "{} ({})",
+            target.remote,
+            target
+                .remote_urls
+                .iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+pub(crate) fn confirmation(target: &PushTarget) -> crate::confirm::Dialog {
+    use crate::confirm::{Detail, Dialog};
+
+    if target.pending.changed.is_zero() {
+        return push_confirmation(target);
+    }
+    let details = vec![
+        Detail::new("Project", &target.name),
+        Detail::new("Branch", &target.branch),
+        Detail::new("Files to commit", files_to_commit(target.pending)),
+        Detail::new(
+            "Commits to push",
+            target.pending.ahead.into_inner().saturating_add(1),
+        ),
+        Detail::new("Push", remote_label(target)),
+    ];
+    Dialog::new(
+        "Confirm commit and push",
+        details,
+        "Commit all changes and push?",
     )
 }
 
-#[must_use]
-pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String {
-    let remote = remote_label(target);
-    let dest = format!("{}/{}", target.remote, target.branch);
-    let PendingChanges {
-        changed,
-        staged,
-        unprepared,
-        ahead,
-    } = target.pending;
+pub(crate) fn push_confirmation(target: &PushTarget) -> crate::confirm::Dialog {
+    use crate::confirm::{Detail, Dialog};
 
-    let mut out = format!(
-        "{command}: review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\n{command} will:",
-        target.name,
-        target.top.display(),
-        target.branch,
-        remote,
-        message
-    );
-
-    if !changed.is_zero() {
-        if !unprepared.is_zero() {
-            let _ = write!(
-                out,
-                "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
-            );
-        }
-        let staged_note = if staged.is_zero() {
-            String::new()
-        } else {
-            format!(" ({staged} already staged)")
-        };
-        let _ = write!(
-            out,
-            "\n  • commit {changed} change(s){staged_note} as a single commit"
-        );
-        let pushed_count = ahead.into_inner().saturating_add(1);
-        let _ = write!(out, "\n  • push {pushed_count} commit(s) to {dest}");
-    } else if ahead != CommitCount::default() {
-        let _ = write!(
-            out,
-            "\n  • nothing to commit; push {ahead} unpushed commit(s) to {dest}"
-        );
-    } else {
-        out.push_str("\n  • nothing to commit or push, already up to date");
-    }
-
-    out
+    Dialog::new(
+        "Confirm push",
+        vec![
+            Detail::new("Project", &target.name),
+            Detail::new("Branch", &target.branch),
+            Detail::new("Commits to push", target.pending.ahead),
+            Detail::new("Push", remote_label(target)),
+        ],
+        "Push these commits?",
+    )
 }
 
-#[must_use]
-pub fn push_confirmation(target: &PushTarget) -> String {
-    let remote = remote_label(target);
-    let dest = format!("{}/{}", target.remote, target.branch);
-    let PendingChanges { changed, ahead, .. } = target.pending;
+pub(crate) fn commit_confirmation(target: &CommitTarget) -> crate::confirm::Dialog {
+    use crate::confirm::{Detail, Dialog};
 
-    let mut out = format!(
-        "push: review before pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n\npush will:",
-        target.name,
-        target.top.display(),
-        target.branch,
-        remote
-    );
-
-    if !changed.is_zero() {
-        let _ = write!(
-            out,
-            "\n  • refuse to push while {changed} uncommitted change(s) are present"
-        );
-        out.push_str("\n  • push only existing commits; it will not stage or create a commit");
-    } else if ahead != CommitCount::default() {
-        let _ = write!(out, "\n  • push {ahead} unpushed commit(s) to {dest}");
-    } else {
-        out.push_str("\n  • nothing to push, already up to date");
-    }
-
-    out
+    Dialog::new(
+        "Confirm commit",
+        vec![
+            Detail::new("Project", &target.name),
+            Detail::new("Branch", &target.branch),
+            Detail::new("Files to commit", files_to_commit(target.pending)),
+        ],
+        "Commit all changes?",
+    )
 }
 
-#[must_use]
-pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
-    let PendingChanges {
-        changed,
-        staged,
-        unprepared,
-        ahead: _,
-    } = target.pending;
+fn files_to_commit(pending: PendingChanges) -> String {
+    format!(
+        "{} (all changes, including unstaged and untracked)",
+        pending.changed
+    )
+}
 
-    let mut out = format!(
-        "commit: review before committing:\n  repo:    {} ({})\n  branch:  {}\n  message: {}\n\ncommit will:",
-        target.name,
-        target.top.display(),
-        target.branch,
-        message
-    );
-
-    if changed.is_zero() {
-        out.push_str("\n  • nothing to commit, working tree clean");
-    } else {
-        if !unprepared.is_zero() {
-            let _ = write!(
-                out,
-                "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
-            );
-        }
-        let staged_note = if staged.is_zero() {
-            String::new()
-        } else {
-            format!(" ({staged} already staged)")
-        };
-        let _ = write!(
-            out,
-            "\n  • commit {changed} change(s){staged_note} as a single commit"
-        );
-        out.push_str("\n  • leave the commit local; it will not push");
+pub(crate) fn print_failure_progress(progress: Option<&v1::RepositoryMutationProgress>) {
+    let Some(progress) = progress else {
+        return;
+    };
+    match failure_progress(progress) {
+        Ok(detail) if !detail.is_empty() => eprintln!("{detail}"),
+        Ok(_) => {}
+        Err(error) => eprintln!("operation progress: {error}"),
     }
+}
 
-    out
+fn failure_progress(progress: &v1::RepositoryMutationProgress) -> anyhow::Result<String> {
+    use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
+    use v1::repository_mutation_progress::State;
+
+    let created = |id: &str| -> anyhow::Result<String> {
+        let id = CommitId::try_from(id.to_string())?;
+        Ok(format!(
+            "  Created local commit: {}",
+            id.abbreviated(CommitIdAbbreviation::SevenCharacters)
+        ))
+    };
+    match progress
+        .state
+        .as_ref()
+        .context("server omitted mutation progress")?
+    {
+        State::Unchanged(_) => Ok(String::new()),
+        State::Staged(_) => Ok("  Changes remain staged".into()),
+        State::CreatedCommitId(id) => created(id),
+        State::PushAttempted(attempt) => {
+            let local = attempt
+                .created_commit_id
+                .as_deref()
+                .map(created)
+                .transpose()?;
+            Ok(local.map_or_else(
+                || "  Push outcome unconfirmed".into(),
+                |local| format!("{local}\n  Push outcome unconfirmed"),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -242,138 +234,26 @@ mod tests {
         repository_root,
     };
 
-    fn push_target() -> PushTarget {
-        PushTarget {
-            name: project_name("repo-a"),
-            top: repository_root("/home/me/work/repo-a"),
+    #[test]
+    fn commit_and_push_review_names_the_scope_and_destination() {
+        let target = PushTarget {
+            name: project_name("example-project"),
+            top: repository_root("/repos/example-project"),
             branch: branch_name("main"),
             remote: remote_name("origin"),
-            remote_url: Some(remote_url("git@github.com:me/repo-a.git")),
-            pending: PendingChanges {
-                changed: path_count(2),
-                staged: path_count(0),
-                unprepared: path_count(2),
-                ahead: commit_count(2),
-            },
-        }
-    }
-
-    fn commit_target() -> CommitTarget {
-        CommitTarget {
-            name: project_name("repo-a"),
-            top: repository_root("/home/me/work/repo-a"),
-            branch: branch_name("main"),
+            remote_urls: vec![remote_url("git@example.invalid:team/example-project.git")],
             pending: PendingChanges {
                 changed: path_count(3),
                 staged: path_count(1),
                 unprepared: path_count(2),
-                ahead: commit_count(0),
+                ahead: commit_count(2),
             },
-        }
-    }
-
-    #[test]
-    fn confirmation_names_repo_branch_remote_and_message() {
-        let text = confirmation("push", &push_target(), "save work");
-        assert!(text.contains("repo-a"), "names the repo");
-        assert!(text.contains("/home/me/work/repo-a"), "shows the path");
-        assert!(text.contains("main"), "names the branch");
-        assert!(text.contains("origin"), "names the remote");
-        assert!(
-            text.contains("git@github.com:me/repo-a.git"),
-            "shows the remote url"
-        );
-        assert!(text.contains("save work"), "shows the commit message");
-    }
-
-    #[test]
-    fn confirmation_omits_empty_remote_url_parens() {
-        let mut target = push_target();
-        target.remote_url = None;
-        let text = confirmation("push", &target, "save work");
-        assert!(text.contains("origin"));
-        let remote_line = text
-            .lines()
-            .find(|line| line.trim_start().starts_with("remote:"))
-            .unwrap();
-        assert!(
-            !remote_line.contains("()"),
-            "no empty parens when url is unknown"
-        );
-    }
-
-    #[test]
-    fn confirmation_spells_out_stage_commit_push_for_a_dirty_repo() {
-        let mut target = push_target();
-        target.pending = PendingChanges {
-            changed: path_count(3),
-            staged: path_count(1),
-            unprepared: path_count(2),
-            ahead: commit_count(1),
         };
-        let text = confirmation("push", &target, "save work");
-        assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
-        assert!(
-            text.contains("commit 3 change(s) (1 already staged) as a single commit"),
-            "{text}"
-        );
-        assert!(text.contains("push 2 commit(s) to origin/main"), "{text}");
-    }
-
-    #[test]
-    fn confirmation_clean_but_ahead_says_push_only() {
-        let mut target = push_target();
-        target.pending = PendingChanges {
-            ahead: commit_count(3),
-            ..PendingChanges::default()
-        };
-        let text = confirmation("push", &target, "ignored");
-        assert!(
-            text.contains("nothing to commit; push 3 unpushed commit(s) to origin/main"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn confirmation_clean_and_up_to_date_says_nothing_to_do() {
-        let mut target = push_target();
-        target.pending = PendingChanges::default();
-        let text = confirmation("push", &target, "ignored");
-        assert!(text.contains("already up to date"), "{text}");
-    }
-
-    #[test]
-    fn push_only_confirmation_omits_message_and_commit_language() {
-        let mut target = push_target();
-        target.pending = PendingChanges {
-            ahead: commit_count(3),
-            ..PendingChanges::default()
-        };
-
-        let text = push_confirmation(&target);
-
-        assert!(!text.contains("message:"), "{text}");
-        assert!(!text.contains("committing & pushing"), "{text}");
-        assert!(!text.contains("commit "), "{text}");
-        assert!(text.contains("review before pushing"), "{text}");
-        assert!(
-            text.contains("push 3 unpushed commit(s) to origin/main"),
-            "{text}"
-        );
-    }
-
-    #[test]
-    fn commit_confirmation_spells_out_local_only_commit() {
-        let text = commit_confirmation(&commit_target(), "save work");
-
-        assert!(text.contains("review before committing"), "{text}");
-        assert!(text.contains("save work"), "{text}");
-        assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
-        assert!(
-            text.contains("commit 3 change(s) (1 already staged) as a single commit"),
-            "{text}"
-        );
-        assert!(text.contains("leave the commit local"), "{text}");
-        assert!(!text.contains("push "), "{text}");
+        let text = confirmation(&target).render("Confirm commit and push", false);
+        assert!(text.contains("3 (all changes, including unstaged and untracked)"));
+        assert!(text.contains("Commits to push  3"));
+        assert!(text.contains("origin (git@example.invalid:team/example-project.git)"));
+        assert!(!text.contains("/repos"));
+        assert!(!text.contains("message"));
     }
 }

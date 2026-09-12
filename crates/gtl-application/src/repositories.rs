@@ -18,3 +18,11 @@ pub mod resolve_repository_root;
 pub(crate) mod working_tree;
 
 pub use commit_progress::CommitProgress;
+
+fn git_failure(operation: &str, detail: &str) -> String {
+    if detail.trim().is_empty() {
+        format!("{operation} failed")
+    } else {
+        format!("{operation} failed: {}", detail.trim())
+    }
+}

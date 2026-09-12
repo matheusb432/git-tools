@@ -54,6 +54,7 @@ message TagBumpPreview {
   string next_tag = 8;
   string message = 9;
   bool push = 10;
+  repeated string push_urls = 11;
 }
 
 message TagBumpRejection {
@@ -83,6 +84,7 @@ message TagBumpResult {
   string tag = 1;
   TagBumpStatus status = 2;
   string detail = 3;
+  TagOperationProgress progress = 4;
 }
 
 message ExecuteTagBumpResponse {

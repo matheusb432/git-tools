@@ -146,7 +146,7 @@ impl From<v1::RenderProjectRepositoryDiffsResponse> for RenderedDiffResult {
 fn print_notes(notes: &[v1::Note]) -> anyhow::Result<()> {
     for note in notes {
         match v1::NoteLevel::try_from(note.level) {
-            Ok(v1::NoteLevel::Info) => println!("{}", note.text),
+            Ok(v1::NoteLevel::Info) => {}
             Ok(v1::NoteLevel::Warning) => eprintln!("{}", note.text),
             Ok(v1::NoteLevel::Error) => anyhow::bail!(note.text.clone()),
             Ok(v1::NoteLevel::Unspecified) | Err(_) => {

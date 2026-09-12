@@ -1,15 +1,12 @@
-use anyhow::Context as _;
-use gtl_models::{
-    paths::RepositoryRoot,
-    tags::{TagSlot, TagTemplate},
-};
+use gtl_models::paths::RepositoryRoot;
 use gtl_wire::v1;
 
 use crate::{
     ExitCode,
     cli::TagBumpLevel,
     commands,
-    confirm::{Confirmation, DefaultAnswer, RealConfirm},
+    confirm::{Detail, Dialog},
+    output,
     server_client::ServerClient,
 };
 
@@ -40,37 +37,22 @@ pub fn run(args: BumpArgs) -> ExitCode {
         }
     };
 
-    let rendered_preview = match render_preview(&preview) {
-        Ok(rendered) => rendered,
+    let dialog = match confirmation(&preview) {
+        Ok(dialog) => dialog,
         Err(error) => {
             eprintln!("tag bump: {}", crate::error_text(&error));
             return ExitCode::Internal;
         }
     };
-    println!("{rendered_preview}");
     if dry {
+        println!(
+            "{}",
+            dialog.render("Tag bump preview", output::stdout_color())
+        );
         return ExitCode::Ok;
     }
-
-    let question = if preview.push {
-        format!("Create and push annotated tag {}?", preview.next_tag)
-    } else {
-        format!("Create annotated tag {}?", preview.next_tag)
-    };
-    match crate::confirm::request(&RealConfirm, yes, &question, DefaultAnswer::Yes) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("tag bump: non-interactive shell; pass --yes to create the displayed tag");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            println!("tag bump: aborted; no tag created");
-            return ExitCode::Ok;
-        }
-        Confirmation::Invalid(error) => {
-            eprintln!("tag bump: {error}; no tag created");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
+    if let Err(exit) = crate::confirm::request("tag bump", yes, &dialog) {
+        return exit;
     }
 
     let bumped = match client.execute_tag_bump(v1::ExecuteTagBumpRequest {
@@ -82,24 +64,23 @@ pub fn run(args: BumpArgs) -> ExitCode {
             return ExitCode::Internal;
         }
     };
-    if let Err(error) = print_notes(&bumped.notes) {
-        eprintln!("tag bump: {}", crate::error_text(&error));
-        return ExitCode::Internal;
-    }
     match bumped.outcome {
         Some(v1::execute_tag_bump_response::Outcome::Applied(result)) => {
-            match v1::TagBumpStatus::try_from(result.status) {
-                Ok(
-                    v1::TagBumpStatus::Created
-                    | v1::TagBumpStatus::NoOp
-                    | v1::TagBumpStatus::Pushed,
-                ) => ExitCode::Ok,
-                Ok(v1::TagBumpStatus::Failed) => ExitCode::Internal,
+            let status = match v1::TagBumpStatus::try_from(result.status) {
+                Ok(v1::TagBumpStatus::Created) => v1::TagActionStatus::Created,
+                Ok(v1::TagBumpStatus::NoOp) => v1::TagActionStatus::NoOp,
+                Ok(v1::TagBumpStatus::Pushed) => v1::TagActionStatus::Pushed,
+                Ok(v1::TagBumpStatus::Failed) => v1::TagActionStatus::Failed,
                 Ok(v1::TagBumpStatus::Unspecified) | Err(_) => {
-                    eprintln!("tag bump: gtl-server returned an invalid tag-bump status");
-                    ExitCode::Internal
+                    eprintln!("tag bump: server returned an invalid status");
+                    return ExitCode::Internal;
                 }
-            }
+            };
+            super::render_tag_action(&super::TagActionResult {
+                status: status as i32,
+                detail: result.detail,
+                progress: result.progress,
+            })
         }
         Some(v1::execute_tag_bump_response::Outcome::Rejected(rejection)) => {
             eprintln!("tag bump: {}", rejection.detail);
@@ -153,129 +134,54 @@ fn to_grpc_level(level: TagBumpLevel) -> v1::TagBumpLevel {
     v1::TagBumpLevel { kind: Some(kind) }
 }
 
-fn render_preview(preview: &v1::TagBumpPreview) -> anyhow::Result<String> {
-    let message = preview
-        .message
-        .lines()
-        .map(|line| format!("    {line}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let publish = if preview.push {
-        format!("origin (refs/tags/{} only)", preview.next_tag)
-    } else {
-        "no".to_string()
-    };
-
-    Ok(format!(
-        "Tag bump review:\n  repository: {} ({})\n  branch: {}\n  pattern: {} ({})\n  base tag: {}\n  bump: {}\n  create: annotated tag {}\n  target: {}\n  message:\n{}\n  push: {}",
-        repository_name(&preview.repository_root)?,
-        preview.repository_root,
-        head_name(preview.head.as_ref())?,
-        preview.pattern,
-        preview.template,
-        preview.base_tag.as_deref().unwrap_or("none"),
-        slot_label(preview)?,
-        preview.next_tag,
-        preview.target_commit_id,
-        message,
-        publish,
-    ))
-}
-
-fn repository_name(repo_path: &str) -> anyhow::Result<String> {
-    Ok(RepositoryRoot::try_new(repo_path.into())?
-        .project_name()
-        .to_string())
-}
-
-fn slot_label(preview: &v1::TagBumpPreview) -> anyhow::Result<String> {
-    let template = preview
-        .template
-        .parse::<TagTemplate>()
-        .context("gtl-server returned an invalid tag template")?;
-    let slot = TagSlot::try_new(preview.slot_from_right)
-        .context("gtl-server returned an invalid tag-bump slot")?;
-    Ok(match template.component_at(slot) {
-        Some(component) => format!("slot {slot} ({component})"),
-        None => format!("slot {slot}"),
-    })
-}
-
-fn head_name(head: Option<&v1::GitHead>) -> anyhow::Result<&str> {
-    match head
-        .and_then(|head| head.state.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("gtl-server returned no tag-bump head state"))?
-    {
-        v1::git_head::State::Branch(branch) => Ok(branch),
-        v1::git_head::State::Detached(_) => Ok("HEAD"),
-    }
-}
-
-fn print_notes(notes: &[v1::Note]) -> anyhow::Result<()> {
-    for note in notes {
-        match v1::NoteLevel::try_from(note.level) {
-            Ok(v1::NoteLevel::Info) => println!("{}", note.text),
-            Ok(v1::NoteLevel::Warning | v1::NoteLevel::Error) => {
-                eprintln!("{}", note.text);
-            }
-            Ok(v1::NoteLevel::Unspecified) | Err(_) => {
-                anyhow::bail!("gtl-server returned an invalid tag-bump note level")
-            }
+fn confirmation(preview: &v1::TagBumpPreview) -> anyhow::Result<Dialog> {
+    let project = RepositoryRoot::try_new(preview.repository_root.clone().into())?.project_name();
+    let push = if preview.push {
+        if preview.push_urls.is_empty() {
+            "origin (URL unavailable)".to_string()
+        } else {
+            format!("origin ({})", preview.push_urls.join(", "))
         }
-    }
-    Ok(())
+    } else {
+        "No".to_string()
+    };
+    let question = if preview.push {
+        format!("Create and push annotated tag {}?", preview.next_tag)
+    } else {
+        format!("Create annotated tag {}?", preview.next_tag)
+    };
+    Ok(Dialog::new(
+        "Confirm tag bump",
+        vec![
+            Detail::new("Project", project),
+            Detail::new("Base tag", preview.base_tag.as_deref().unwrap_or("None")),
+            Detail::new("New tag", &preview.next_tag),
+            Detail::new("Push", push),
+        ],
+        question,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::v1;
-
-    use super::render_preview;
+    use super::*;
 
     #[test]
-    fn preview_names_the_exact_tag_target_message_and_push_ref() {
+    fn tag_preview_shows_only_the_project_version_and_publication() {
         let preview = v1::TagBumpPreview {
-            repository_root: "/repo/git-tools".into(),
-            head: Some(v1::GitHead {
-                state: Some(v1::git_head::State::Branch("main".into())),
-            }),
-            target_commit_id: "0123456789abcdef0123456789abcdef01234567".into(),
-            pattern: "semver".into(),
-            template: "v{major}.{minor}.{patch}".into(),
-            slot_from_right: 0,
-            base_tag: Some("v0.30.0".into()),
-            next_tag: "v0.30.1".into(),
-            message: "release\nnotes".into(),
+            repository_root: "/repos/example-project".into(),
+            base_tag: Some("v1.2.3".into()),
+            next_tag: "v1.2.4".into(),
             push: true,
+            push_urls: vec!["git@example.invalid:team/example-project.git".into()],
+            message: "private multiline\nmessage".into(),
+            ..Default::default()
         };
-
         assert_eq!(
-            render_preview(&preview).unwrap(),
-            "Tag bump review:\n  repository: git-tools (/repo/git-tools)\n  branch: main\n  pattern: semver (v{major}.{minor}.{patch})\n  base tag: v0.30.0\n  bump: slot 0 (patch)\n  create: annotated tag v0.30.1\n  target: 0123456789abcdef0123456789abcdef01234567\n  message:\n    release\n    notes\n  push: origin (refs/tags/v0.30.1 only)"
+            confirmation(&preview)
+                .unwrap()
+                .render("Tag bump preview", false),
+            "Tag bump preview\n\n  Project   example-project\n  Base tag  v1.2.3\n  New tag   v1.2.4\n  Push      origin (git@example.invalid:team/example-project.git)"
         );
-    }
-
-    #[test]
-    fn preview_names_an_empty_lineage_and_an_anonymous_slot() {
-        let preview = v1::TagBumpPreview {
-            repository_root: "/repo/sample_project".into(),
-            head: Some(v1::GitHead {
-                state: Some(v1::git_head::State::Branch("main".into())),
-            }),
-            target_commit_id: "0123456789abcdef0123456789abcdef01234567".into(),
-            pattern: "alpha".into(),
-            template: "{major}.{minor}.{patch}-alpha.{n}.{n}".into(),
-            slot_from_right: 1,
-            base_tag: None,
-            next_tag: "0.0.0-alpha.1.0".into(),
-            message: "first alpha".into(),
-            push: false,
-        };
-
-        let rendered = render_preview(&preview).unwrap();
-        assert!(rendered.contains("  pattern: alpha ({major}.{minor}.{patch}-alpha.{n}.{n})\n"));
-        assert!(rendered.contains("  base tag: none\n"));
-        assert!(rendered.contains("  bump: slot 1\n"));
-        assert!(rendered.ends_with("  push: no"));
     }
 }

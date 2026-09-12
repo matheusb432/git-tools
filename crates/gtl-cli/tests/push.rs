@@ -137,7 +137,7 @@ fn push_modes_apply_exclusions_and_commit_nested_untracked_files() -> Result<()>
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()
         .code(2)
-        .stdout(contains("review before pushing"))
+        .stdout("")
         .stderr(contains("pass --yes"));
     assert_eq!(fixture.commits_unpushed_count()?, 1);
 
@@ -182,7 +182,7 @@ excluded_from_push_all = true
         .assert()
         .success()
         .stdout(contains("review before pushing").not())
-        .stdout(contains("push: pushed 1 commit(s)"))
+        .stdout(contains("Pushed 1 commit"))
         .stderr(contains("pass --yes").not());
     assert_eq!(fixture.commits_unpushed_count()?, 0);
 
@@ -192,7 +192,7 @@ excluded_from_push_all = true
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()
         .success()
-        .stdout(contains("push: staged, committed, and pushed"));
+        .stdout(contains("Staged, committed, and pushed"));
     assert_eq!(fixture.git(&["status", "--porcelain"])?, "");
     assert_eq!(
         fixture.git(&["log", "-1", "--format=%s"])?,
@@ -210,7 +210,7 @@ excluded_from_push_all = true
         .env("GIT_TOOLS_CONFIG", config)
         .assert()
         .success()
-        .stdout(contains("1 repos: 1 pushed"));
+        .stdout(contains("1 project: 1 pushed"));
     assert_eq!(recursive.commits_unpushed_count()?, 0);
     Ok(())
 }

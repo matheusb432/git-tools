@@ -1,117 +1,177 @@
-/// Answer selected when the user submits an empty confirmation reply.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DefaultAnswer {
-    Yes,
-    // Kept available for destructive commands that should require an explicit yes.
-    #[allow(dead_code)]
-    No,
+use std::{fmt, io::IsTerminal as _};
+
+use dialoguer::{
+    Confirm,
+    console::Term,
+    theme::{ColorfulTheme, Theme},
+};
+
+use crate::{ExitCode, output};
+
+pub(crate) struct Detail {
+    label: &'static str,
+    value: String,
 }
 
-impl DefaultAnswer {
-    const fn hint(self) -> &'static str {
-        match self {
-            Self::Yes => "[Y/n]",
-            Self::No => "[y/N]",
+impl Detail {
+    pub(crate) fn new(label: &'static str, value: impl fmt::Display) -> Self {
+        Self {
+            label,
+            value: output::single_line(&value.to_string()),
         }
     }
 }
 
-/// A recognized confirmation answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Answer {
-    Yes,
-    No,
+pub(crate) struct Dialog {
+    heading: &'static str,
+    details: Vec<Detail>,
+    question: String,
+    table: Option<String>,
 }
 
-/// Why a confirmation reply could not be interpreted as yes or no.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum AnswerError {
-    #[error("unrecognized answer {0:?} (expected y/yes or n/no)")]
-    Invalid(String),
-}
-
-/// Complete result of applying confirmation policy to an action.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum Confirmation {
-    Proceed,
-    Declined,
-    RefuseNonInteractive,
-    Invalid(AnswerError),
-}
-
-/// Terminal and input seam used by confirmation policy.
-pub(crate) trait Confirm {
-    fn interactive(&self) -> bool;
-
-    fn confirm(&self, question: &str, default: DefaultAnswer) -> Result<Answer, AnswerError>;
-}
-
-/// Real confirmation adapter backed by the process terminal and standard input.
-pub(crate) struct RealConfirm;
-
-impl Confirm for RealConfirm {
-    fn interactive(&self) -> bool {
-        stdin_is_terminal()
+impl Dialog {
+    pub(crate) fn new(
+        heading: &'static str,
+        details: Vec<Detail>,
+        question: impl Into<String>,
+    ) -> Self {
+        Self {
+            heading,
+            details,
+            question: output::single_line(&question.into()),
+            table: None,
+        }
     }
 
-    fn confirm(&self, question: &str, default: DefaultAnswer) -> Result<Answer, AnswerError> {
-        use std::io::Write;
+    pub(crate) fn with_table(mut self, table: String) -> Self {
+        self.table = Some(table);
+        self
+    }
 
-        print!("{question} {} ", default.hint());
-        let _ = std::io::stdout().flush();
+    pub(crate) fn render(&self, heading: &str, color: bool) -> String {
+        let width = self
+            .details
+            .iter()
+            .map(|detail| detail.label.len())
+            .max()
+            .unwrap_or_default();
+        let mut lines = vec![output::heading(heading, color), String::new()];
+        lines.extend(self.details.iter().map(|detail| {
+            format!(
+                "  {}  {}",
+                output::heading(&format!("{:<width$}", detail.label), color),
+                detail.value
+            )
+        }));
+        if let Some(table) = &self.table {
+            if !self.details.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push(table.clone());
+        }
+        lines.join("\n")
+    }
 
-        let mut input = String::new();
-        let read = std::io::stdin().read_line(&mut input).map(|_| input);
-        answer_from_input(read, default)
+    fn interact(&self) -> dialoguer::Result<Option<bool>> {
+        let terminal = Term::stderr();
+        terminal.write_line(&self.render(self.heading, output::stderr_color()))?;
+        terminal.write_line("")?;
+        let theme = ConfirmationTheme {
+            color: output::stderr_color(),
+            theme: ColorfulTheme::default(),
+        };
+        let answer = Confirm::with_theme(&theme)
+            .with_prompt(&self.question)
+            .default(true)
+            .interact_on_opt(&terminal);
+        if answer.is_err() {
+            terminal.show_cursor()?;
+        }
+        answer
     }
 }
 
-/// Reports whether standard input can safely host an interactive prompt.
 pub(crate) fn stdin_is_terminal() -> bool {
-    std::io::IsTerminal::is_terminal(&std::io::stdin())
+    std::io::stdin().is_terminal()
 }
 
-/// Applies bypass, terminal, and answer policy for one confirmation request.
-pub(crate) fn request(
-    confirm: &impl Confirm,
-    bypass: bool,
-    question: &str,
-    default: DefaultAnswer,
-) -> Confirmation {
+pub(crate) fn request(command: &str, bypass: bool, dialog: &Dialog) -> Result<(), ExitCode> {
     if bypass {
-        return Confirmation::Proceed;
+        return Ok(());
     }
-    if !confirm.interactive() {
-        return Confirmation::RefuseNonInteractive;
+    if !stdin_is_terminal() || !std::io::stderr().is_terminal() {
+        eprintln!("{command}: interactive confirmation requires a terminal; pass --yes to proceed");
+        return Err(ExitCode::Usage);
     }
-
-    match confirm.confirm(question, default) {
-        Ok(Answer::Yes) => Confirmation::Proceed,
-        Ok(Answer::No) => Confirmation::Declined,
-        Err(error) => Confirmation::Invalid(error),
-    }
-}
-
-fn interpret(input: &str, default: DefaultAnswer) -> Result<Answer, AnswerError> {
-    let trimmed = input.trim();
-    match trimmed.to_ascii_lowercase().as_str() {
-        "" => Ok(match default {
-            DefaultAnswer::Yes => Answer::Yes,
-            DefaultAnswer::No => Answer::No,
-        }),
-        "y" | "yes" => Ok(Answer::Yes),
-        "n" | "no" => Ok(Answer::No),
-        _ => Err(AnswerError::Invalid(trimmed.to_string())),
+    match dialog.interact() {
+        Ok(Some(true)) => Ok(()),
+        Ok(Some(false) | None) => Err(ExitCode::Ok),
+        Err(dialoguer::Error::IO(error)) if error.kind() == std::io::ErrorKind::Interrupted => {
+            eprintln!("{command}: cancelled");
+            Err(ExitCode::Ok)
+        }
+        Err(error) => {
+            eprintln!("{command}: confirmation failed: {error}");
+            Err(ExitCode::Internal)
+        }
     }
 }
 
-fn answer_from_input(
-    input: std::io::Result<String>,
-    default: DefaultAnswer,
-) -> Result<Answer, AnswerError> {
-    match input {
-        Ok(input) => interpret(&input, default),
-        Err(_) => Ok(Answer::No),
+struct ConfirmationTheme {
+    theme: ColorfulTheme,
+    color: bool,
+}
+
+impl ConfirmationTheme {
+    fn write(
+        &self,
+        formatter: &mut dyn fmt::Write,
+        render: impl FnOnce(&mut String) -> fmt::Result,
+    ) -> fmt::Result {
+        let mut text = String::new();
+        render(&mut text)?;
+        if self.color {
+            formatter.write_str(&text)
+        } else {
+            formatter.write_str(&dialoguer::console::strip_ansi_codes(&text))
+        }
+    }
+}
+
+impl Theme for ConfirmationTheme {
+    fn format_confirm_prompt(
+        &self,
+        formatter: &mut dyn fmt::Write,
+        prompt: &str,
+        default: Option<bool>,
+    ) -> fmt::Result {
+        self.write(formatter, |text| {
+            self.theme.format_confirm_prompt(text, prompt, default)
+        })
+    }
+
+    fn format_confirm_prompt_selection(
+        &self,
+        formatter: &mut dyn fmt::Write,
+        prompt: &str,
+        selection: Option<bool>,
+    ) -> fmt::Result {
+        self.write(formatter, |text| {
+            if selection == Some(true) {
+                self.theme
+                    .format_confirm_prompt_selection(text, prompt, selection)
+            } else {
+                use fmt::Write as _;
+                write!(
+                    text,
+                    "{} {} {} {}",
+                    self.theme.error_prefix,
+                    self.theme.prompt_style.apply_to(prompt),
+                    self.theme.success_suffix,
+                    self.theme.error_style.apply_to("cancelled")
+                )
+            }
+        })
     }
 }
 
@@ -119,117 +179,47 @@ fn answer_from_input(
 mod tests {
     use super::*;
 
-    #[derive(Clone)]
-    struct TestConfirm {
-        interactive: bool,
-        answer: Result<Answer, AnswerError>,
+    #[test]
+    fn details_align_and_flatten_untrusted_text() {
+        let dialog = Dialog::new(
+            "Confirm action",
+            vec![
+                Detail::new("Project", "example\nproject"),
+                Detail::new("New tag", "v1.2.3"),
+            ],
+            "Proceed?",
+        );
+        assert_eq!(
+            dialog.render("Preview", false),
+            "Preview\n\n  Project  example project\n  New tag  v1.2.3"
+        );
     }
 
-    impl Confirm for TestConfirm {
-        fn interactive(&self) -> bool {
-            self.interactive
+    #[test]
+    fn bypass_does_not_need_a_terminal() {
+        assert_eq!(
+            request(
+                "action",
+                true,
+                &Dialog::new("Confirm action", Vec::new(), "Proceed?")
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn decline_and_escape_render_the_same_plain_cancellation() {
+        let theme = ConfirmationTheme {
+            theme: ColorfulTheme::default(),
+            color: false,
+        };
+        for answer in [Some(false), None] {
+            let mut rendered = String::new();
+            theme
+                .format_confirm_prompt_selection(&mut rendered, "Proceed?", answer)
+                .unwrap();
+            assert!(rendered.contains("cancelled"));
+            assert!(!rendered.contains('\u{1b}'));
         }
-
-        fn confirm(&self, _question: &str, _default: DefaultAnswer) -> Result<Answer, AnswerError> {
-            self.answer.clone()
-        }
-    }
-
-    #[test]
-    fn empty_answer_uses_the_configured_default() {
-        assert_eq!(interpret("", DefaultAnswer::Yes), Ok(Answer::Yes));
-        assert_eq!(interpret(" \n", DefaultAnswer::No), Ok(Answer::No));
-    }
-
-    #[test]
-    fn explicit_answers_override_either_default() {
-        for input in ["y", "Y", "yes", " YES "] {
-            assert_eq!(interpret(input, DefaultAnswer::No), Ok(Answer::Yes));
-        }
-        for input in ["n", "N", "no", " NO "] {
-            assert_eq!(interpret(input, DefaultAnswer::Yes), Ok(Answer::No));
-        }
-    }
-
-    #[test]
-    fn unrecognized_answer_is_an_error() {
-        assert_eq!(
-            interpret(" maybe ", DefaultAnswer::Yes),
-            Err(AnswerError::Invalid("maybe".to_string()))
-        );
-    }
-
-    #[test]
-    fn prompt_hint_reflects_the_configured_default() {
-        assert_eq!(DefaultAnswer::Yes.hint(), "[Y/n]");
-        assert_eq!(DefaultAnswer::No.hint(), "[y/N]");
-    }
-
-    #[test]
-    fn input_read_failure_declines_safely() {
-        let read = Err(std::io::Error::other("closed stdin"));
-
-        assert_eq!(answer_from_input(read, DefaultAnswer::Yes), Ok(Answer::No));
-    }
-
-    #[test]
-    fn bypass_proceeds_without_an_interactive_terminal() {
-        let confirm = TestConfirm {
-            interactive: false,
-            answer: Err(AnswerError::Invalid("unused".to_string())),
-        };
-
-        assert_eq!(
-            request(&confirm, true, "Proceed?", DefaultAnswer::Yes),
-            Confirmation::Proceed
-        );
-    }
-
-    #[test]
-    fn non_interactive_request_refuses() {
-        let confirm = TestConfirm {
-            interactive: false,
-            answer: Ok(Answer::Yes),
-        };
-
-        assert_eq!(
-            request(&confirm, false, "Proceed?", DefaultAnswer::Yes),
-            Confirmation::RefuseNonInteractive
-        );
-    }
-
-    #[test]
-    fn interactive_request_maps_yes_and_no_answers() {
-        let yes = TestConfirm {
-            interactive: true,
-            answer: Ok(Answer::Yes),
-        };
-        let no = TestConfirm {
-            interactive: true,
-            answer: Ok(Answer::No),
-        };
-
-        assert_eq!(
-            request(&yes, false, "Proceed?", DefaultAnswer::Yes),
-            Confirmation::Proceed
-        );
-        assert_eq!(
-            request(&no, false, "Proceed?", DefaultAnswer::Yes),
-            Confirmation::Declined
-        );
-    }
-
-    #[test]
-    fn interactive_request_preserves_invalid_answer() {
-        let error = AnswerError::Invalid("maybe".to_string());
-        let confirm = TestConfirm {
-            interactive: true,
-            answer: Err(error.clone()),
-        };
-
-        assert_eq!(
-            request(&confirm, false, "Proceed?", DefaultAnswer::Yes),
-            Confirmation::Invalid(error)
-        );
     }
 }

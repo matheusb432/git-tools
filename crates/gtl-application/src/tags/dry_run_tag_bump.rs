@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use gtl_models::{
     diffs::CommitId,
-    git::{GitHead, GitRevision, TagName},
+    git::{GitHead, GitRevision, RemoteName, RemoteUrl, TagName},
     paths::RepositoryRoot,
     tags::{Tag, TagPatternName, TagSlot, TagTemplate},
 };
@@ -43,6 +43,7 @@ pub struct TagBumpPreview {
     pub slot: TagSlot,
     pub base_tag: Option<TagName>,
     pub next_tag: TagName,
+    pub push_urls: Vec<RemoteUrl>,
     pub message: String,
     pub push: bool,
 }
@@ -50,7 +51,7 @@ pub struct TagBumpPreview {
 /// Result of gathering a tag-bump proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DryRunTagBumpOk {
-    Ready(TagBumpPreview),
+    Ready(Box<TagBumpPreview>),
     Rejected { detail: String },
 }
 
@@ -165,7 +166,7 @@ fn evaluate_preview(
         }
     };
     match read_preview(repo_root, pattern, template, level, message, push, git) {
-        Ok(Ok(preview)) => Ok(DryRunTagBumpOk::Ready(preview)),
+        Ok(Ok(preview)) => Ok(DryRunTagBumpOk::Ready(Box::new(preview))),
         Ok(Err(detail)) | Err(GitCommandError::Rejected { detail, .. }) => {
             Ok(DryRunTagBumpOk::Rejected { detail })
         }
@@ -201,6 +202,11 @@ fn read_preview(
         slot: decision.slot,
         base_tag: decision.base_tag,
         next_tag: decision.next_tag,
+        push_urls: if push {
+            git.remote_push_urls(repo_path, &RemoteName::origin())?
+        } else {
+            Vec::new()
+        },
         message: message.to_owned(),
         push,
     }))
@@ -233,14 +239,15 @@ mod tests {
 
     fn scripted_repo(tags: &str) -> ScriptedGitClient {
         ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repo/sample_project"),
+            ScriptedGitClient::applied("/repo/example-project"),
             ScriptedGitClient::applied(tags),
             ScriptedGitClient::applied("main"),
             ScriptedGitClient::applied("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ScriptedGitClient::applied("git@example.invalid:team/example-project.git"),
         ])
     }
 
-    fn sample_project_settings() -> FixedUserSettingsStore {
+    fn project_settings() -> FixedUserSettingsStore {
         let patterns = TagPatternSet::try_new(
             [
                 (
@@ -258,14 +265,17 @@ mod tests {
         FixedUserSettingsStore::new(default_user_settings().with_tag_patterns(
             TagPatternSettings::new(
                 None,
-                [(ProjectName::try_new("sample_project".to_owned()).unwrap(), patterns)],
+                [(
+                    ProjectName::try_new("example-project".to_owned()).unwrap(),
+                    patterns,
+                )],
             ),
         ))
     }
 
     fn query(pattern: Option<&str>) -> DryRunTagBump {
         DryRunTagBump {
-            repo_path: "/repo/sample_project".into(),
+            repo_path: "/repo/example-project".into(),
             pattern: pattern.map(|name| TagPatternName::try_new(name).unwrap()),
             level: BumpLevel::Slot(TagSlot::RIGHTMOST),
             message: "release".into(),
@@ -275,7 +285,7 @@ mod tests {
 
     fn ready(result: DryRunTagBumpOk) -> super::TagBumpPreview {
         match result {
-            DryRunTagBumpOk::Ready(preview) => Some(preview),
+            DryRunTagBumpOk::Ready(preview) => Some(*preview),
             DryRunTagBumpOk::Rejected { .. } => None,
         }
         .unwrap()
@@ -300,7 +310,8 @@ mod tests {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\t0.19.1\t\t100\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\trelease-0.2.0\t\t100",
         );
 
-        let preview = ready(dry_run_tag_bump::execute(query(None), &git, &sample_project_settings()).unwrap());
+        let preview =
+            ready(dry_run_tag_bump::execute(query(None), &git, &project_settings()).unwrap());
 
         assert_eq!(preview.pattern.as_ref(), "dev");
         assert_eq!(preview.base_tag.as_ref().unwrap().as_ref(), "0.19.1");
@@ -312,7 +323,7 @@ mod tests {
         let git = scripted_repo("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\t0.19.1\t\t100");
 
         let preview = ready(
-            dry_run_tag_bump::execute(query(Some("release")), &git, &sample_project_settings()).unwrap(),
+            dry_run_tag_bump::execute(query(Some("release")), &git, &project_settings()).unwrap(),
         );
 
         assert_eq!(preview.base_tag, None);
@@ -321,10 +332,10 @@ mod tests {
 
     #[test]
     fn an_unknown_pattern_is_rejected_before_git_runs() {
-        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("/repo/sample_project")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("/repo/example-project")]);
 
         let result =
-            dry_run_tag_bump::execute(query(Some("nightly")), &git, &sample_project_settings()).unwrap();
+            dry_run_tag_bump::execute(query(Some("nightly")), &git, &project_settings()).unwrap();
 
         assert_eq!(
             result,

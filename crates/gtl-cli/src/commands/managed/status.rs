@@ -203,7 +203,7 @@ fn format_status_line(result: &StatusResult, palette: Option<&StatusColorPalette
     let detail = result.detail();
     if !result.is_present() {
         return format!(
-            "{} (absent) {}",
+            "{} {}",
             result.name(),
             format_bracketed_status(&detail, palette)
         );
@@ -291,7 +291,7 @@ mod tests {
 
         assert_eq!(
             format_status(false, false, &results).unwrap(),
-            "repo main [⇡1 !?]\nmissing (absent) [not present]"
+            "repo main [⇡1 !?]\nmissing [not present]"
         );
     }
 

@@ -67,10 +67,10 @@ pub fn execute(
         .map_err(|source| transport("read working tree", progress.clone(), source))?
     {
         GitEffect::Applied(tree) => !tree.files.is_empty(),
-        GitEffect::Rejected(_) => {
+        GitEffect::Rejected(detail) => {
             return Ok(ApplyCommitOk::new(
                 CommitStatus::Failed,
-                "git status failed",
+                super::git_failure("git status", &detail),
                 progress,
             ));
         }
@@ -83,13 +83,13 @@ pub fn execute(
             progress,
         ));
     }
-    if let GitEffect::Rejected(_) = git
+    if let GitEffect::Rejected(detail) = git
         .stage_all(&target.top)
         .map_err(|source| transport("stage changes", progress.clone(), source))?
     {
         return Ok(ApplyCommitOk::new(
             CommitStatus::Failed,
-            "git add failed",
+            super::git_failure("git add", &detail),
             progress,
         ));
     }
@@ -99,10 +99,10 @@ pub fn execute(
         .map_err(|source| transport("create commit", progress.clone(), source))?
     {
         GitEffect::Applied(receipt) => receipt,
-        GitEffect::Rejected(_) => {
+        GitEffect::Rejected(detail) => {
             return Ok(ApplyCommitOk::new(
                 CommitStatus::Failed,
-                "git commit failed",
+                super::git_failure("git commit", &detail),
                 progress,
             ));
         }
@@ -188,7 +188,7 @@ mod tests {
             result,
             ApplyCommitOk {
                 status: CommitStatus::Failed,
-                detail: "git add failed".into(),
+                detail: "git add failed: add rejected".into(),
                 progress: CommitProgress::Unchanged,
             }
         );
@@ -212,7 +212,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.status, CommitStatus::Failed);
-        assert_eq!(result.detail, "git commit failed");
+        assert_eq!(result.detail, "git commit failed: commit rejected");
         assert_eq!(result.progress, CommitProgress::Staged);
     }
 

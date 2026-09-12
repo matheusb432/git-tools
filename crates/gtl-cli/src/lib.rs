@@ -9,7 +9,6 @@ use crate::{
     commands::managed::{
         ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
     },
-    confirm::{Confirmation, DefaultAnswer, RealConfirm},
     server_client::ServerClient,
 };
 
@@ -19,6 +18,7 @@ pub mod preprocess;
 
 mod confirm;
 mod diff_viewer_client;
+mod output;
 mod server_client;
 #[cfg(test)]
 mod testing;
@@ -359,10 +359,20 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
         ..
     } = args;
     let interactive = confirm::stdin_is_terminal();
+    if message.is_some() && !json {
+        return managed_exit(&commands::managed::run_commit_and_push_all(
+            &ManagedOptions {
+                dry,
+                output: ManagedOutput::from_flags(false, output::stdout_color()),
+                message_for_all: message,
+                interactive,
+            },
+        ));
+    }
     if let Some(message) = message {
         let run = commands::managed::run_commit_for_push_all(&ManagedOptions {
             dry,
-            output: ManagedOutput::from_flags(json, false),
+            output: ManagedOutput::from_flags(json, output::stdout_color()),
             message_for_all: Some(message),
             interactive,
         });
@@ -374,7 +384,7 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
 
     managed_exit(&commands::managed::run_push_all(&ManagedOptions {
         dry,
-        output: ManagedOutput::from_flags(json, false),
+        output: ManagedOutput::from_flags(json, output::stdout_color()),
         message_for_all: None,
         interactive,
     }))
@@ -396,22 +406,12 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
         }
     };
 
-    println!("{}", sync::confirmation("push", &target, message));
-
-    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("push: non-interactive shell; pass --yes to confirm the push");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            eprintln!("push: aborted, nothing committed or pushed");
-            return ExitCode::Ok;
-        }
-        Confirmation::Invalid(err) => {
-            eprintln!("push: {err}, nothing committed or pushed");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
+    if target.pending.changed.is_zero() && target.pending.ahead.into_inner() == 0 {
+        println!("Nothing to commit or push");
+        return ExitCode::Ok;
+    }
+    if let Err(exit) = confirm::request("push", yes, &sync::confirmation(&target)) {
+        return exit;
     }
 
     let result = match client.execute_repository_push(v1::ExecuteRepositoryPushRequest {
@@ -439,29 +439,17 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
         }
     };
 
-    if confirm {
-        println!("{}", sync::push_confirmation(&target));
+    if !target.pending.changed.is_zero() {
+        eprintln!("push: working tree has uncommitted changes");
+        return ExitCode::Internal;
     }
-
-    match confirm::request(
-        &RealConfirm,
-        yes || !confirm,
-        "Proceed?",
-        DefaultAnswer::Yes,
-    ) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("push: non-interactive shell; pass --yes to confirm the push");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            eprintln!("push: aborted, nothing pushed");
-            return ExitCode::Ok;
-        }
-        Confirmation::Invalid(err) => {
-            eprintln!("push: {err}, nothing pushed");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
+    if target.pending.ahead.into_inner() == 0 {
+        println!("Already up to date");
+        return ExitCode::Ok;
+    }
+    if let Err(exit) = confirm::request("push", yes || !confirm, &sync::push_confirmation(&target))
+    {
+        return exit;
     }
 
     let result = match client.execute_repository_push(v1::ExecuteRepositoryPushRequest {
@@ -502,11 +490,12 @@ fn plan_current_push() -> anyhow::Result<(ServerClient, commands::sync::PushTarg
 fn finish_push_response(response: &v1::ExecuteRepositoryPushResponse) -> ExitCode {
     match v1::RepositoryPushStatus::try_from(response.status) {
         Ok(v1::RepositoryPushStatus::NoOp | v1::RepositoryPushStatus::Completed) => {
-            println!("push: {}", response.detail);
+            println!("{}", output::sentence(&response.detail));
             ExitCode::Ok
         }
         Ok(v1::RepositoryPushStatus::Refused | v1::RepositoryPushStatus::Failed) => {
             eprintln!("push: {}", response.detail);
+            commands::sync::print_failure_progress(response.progress.as_ref());
             ExitCode::Internal
         }
         Ok(v1::RepositoryPushStatus::Unspecified) | Err(_) => {
@@ -567,22 +556,12 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
         }
     };
 
-    println!("{}", sync::commit_confirmation(&target, message));
-
-    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("commit: non-interactive shell; pass --yes to confirm the commit");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            eprintln!("commit: aborted, nothing committed");
-            return ExitCode::Usage;
-        }
-        Confirmation::Invalid(err) => {
-            eprintln!("commit: {err}, nothing committed");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
+    if target.pending.changed.is_zero() {
+        println!("Nothing to commit");
+        return ExitCode::Ok;
+    }
+    if let Err(exit) = confirm::request("commit", yes, &sync::commit_confirmation(&target)) {
+        return exit;
     }
 
     let result = match client.execute_repository_commit(v1::ExecuteRepositoryCommitRequest {
@@ -597,11 +576,12 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     };
     match v1::RepositoryCommitStatus::try_from(result.status) {
         Ok(v1::RepositoryCommitStatus::Committed | v1::RepositoryCommitStatus::NoOp) => {
-            println!("commit: {}", result.detail);
+            println!("{}", output::sentence(&result.detail));
             ExitCode::Ok
         }
         Ok(v1::RepositoryCommitStatus::Failed) => {
             eprintln!("commit: {}", result.detail);
+            sync::print_failure_progress(result.progress.as_ref());
             ExitCode::Internal
         }
         Ok(v1::RepositoryCommitStatus::Unspecified) | Err(_) => {
@@ -660,22 +640,37 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         }
     };
 
-    println!("{}", confirmation(&root, &targets));
-
-    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("push -r: non-interactive shell; pass --yes to confirm the push");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            println!("push -r: aborted, nothing pushed");
-            return ExitCode::Ok;
-        }
-        Confirmation::Invalid(err) => {
-            eprintln!("push -r: {err}, nothing pushed");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
+    if !targets.iter().any(|target| {
+        matches!(
+            target.dest,
+            gtl_models::repository::recursive_push::Dest::Push { .. }
+        )
+    }) {
+        let reports = targets
+            .iter()
+            .map(|target| {
+                use gtl_models::repository::recursive_push::{Dest, RepoOutcome, RepoReport};
+                let outcome = match &target.dest {
+                    Dest::Skip { reason } => RepoOutcome::Skipped(reason.clone()),
+                    Dest::Push { .. } | Dest::Synced { .. } => RepoOutcome::UpToDate,
+                };
+                RepoReport {
+                    label: target.label.clone(),
+                    outcome,
+                }
+            })
+            .collect();
+        println!(
+            "{}",
+            format_push_subrepos_result(&gtl_models::repository::recursive_push::PushAllResult {
+                status: gtl_models::repository::recursive_push::Status::Ok,
+                reports,
+            })
+        );
+        return ExitCode::Ok;
+    }
+    if let Err(exit) = confirm::request("push -r", yes, &confirmation(&targets)) {
+        return exit;
     }
 
     let result =
@@ -695,48 +690,55 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
             }
         };
     let detail = format_push_subrepos_result(&result);
+    println!("{detail}");
     match result.status {
-        gtl_models::repository::recursive_push::Status::Ok => {
-            println!("{detail}");
-            ExitCode::Ok
-        }
+        gtl_models::repository::recursive_push::Status::Ok => ExitCode::Ok,
         gtl_models::repository::recursive_push::Status::Partial
-        | gtl_models::repository::recursive_push::Status::Fail => {
-            eprintln!("{detail}");
-            ExitCode::Internal
-        }
+        | gtl_models::repository::recursive_push::Status::Fail => ExitCode::Internal,
     }
 }
 
 fn format_push_subrepos_result(
     result: &gtl_models::repository::recursive_push::PushAllResult,
 ) -> String {
-    use gtl_models::repository::recursive_push::{RepoOutcome, Status};
+    use gtl_models::repository::recursive_push::RepoOutcome;
 
     let summary = PushSummary::from_outcomes(
         result.reports.iter().map(|report| match &report.outcome {
             RepoOutcome::Pushed => PushOutcome::Pushed,
-            RepoOutcome::UpToDate | RepoOutcome::Skipped(_) => PushOutcome::Skipped,
+            RepoOutcome::UpToDate => PushOutcome::UpToDate,
+            RepoOutcome::Skipped(_) => PushOutcome::Skipped,
             RepoOutcome::Failed(_) => PushOutcome::Failed,
         }),
         false,
         0,
     );
-    let exit_code = match result.status {
-        Status::Ok => 0,
-        Status::Partial | Status::Fail => 1,
-    };
-    let mut detail = summary.render(exit_code);
-    for report in &result.reports {
-        let line = match &report.outcome {
-            RepoOutcome::Pushed => format!("\n  {}: pushed", report.label),
-            RepoOutcome::UpToDate => format!("\n  {}: already up to date", report.label),
-            RepoOutcome::Skipped(reason) => format!("\n  {}: skipped: {reason}", report.label),
-            RepoOutcome::Failed(reason) => format!("\n  {}: failed: {reason}", report.label),
-        };
-        detail.push_str(&line);
-    }
-    detail
+    let rows = result
+        .reports
+        .iter()
+        .map(|report| {
+            let (status, detail) = match &report.outcome {
+                RepoOutcome::Pushed => ("Pushed", ""),
+                RepoOutcome::UpToDate => ("Up to date", ""),
+                RepoOutcome::Skipped(reason) => ("Skipped", reason.as_str()),
+                RepoOutcome::Failed(reason) => ("Failed", reason.as_str()),
+            };
+            [
+                report.label.to_string(),
+                status.to_string(),
+                detail.to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    format!(
+        "{}\n\n{}",
+        output::table(
+            ["Project", "Result", "Detail"],
+            &rows,
+            output::stdout_color()
+        ),
+        summary.render()
+    )
 }
 
 fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
@@ -769,7 +771,7 @@ fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::Sta
 
 fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
     let color = match args.color {
-        ColorChoice::Auto => stdout_is_terminal(),
+        ColorChoice::Auto => output::stdout_color(),
         ColorChoice::Always => true,
         ColorChoice::Never => false,
     };
@@ -785,7 +787,7 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
 fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
     ManagedOptions {
         dry: args.dry,
-        output: ManagedOutput::from_flags(args.json, false),
+        output: ManagedOutput::from_flags(args.json, output::stdout_color()),
         message_for_all,
         interactive: confirm::stdin_is_terminal(),
     }
@@ -803,10 +805,6 @@ fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
         ManagedExit::Warn => ExitCode::Internal,
         ManagedExit::Fail | ManagedExit::Usage => ExitCode::Usage,
     }
-}
-
-fn stdout_is_terminal() -> bool {
-    std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
 pub(crate) fn error_text(error: &anyhow::Error) -> String {

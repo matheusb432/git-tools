@@ -1,10 +1,9 @@
 //! CLI-owned summary formatting for managed and recursive push commands.
 
-use std::fmt::Write as _;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PushOutcome {
     Pushed,
+    UpToDate,
     Skipped,
     Failed,
     Warned,
@@ -14,6 +13,7 @@ pub(crate) enum PushOutcome {
 pub(crate) struct PushSummary {
     total: usize,
     pushed: usize,
+    up_to_date: usize,
     skipped: usize,
     failed: usize,
     warned: usize,
@@ -30,6 +30,7 @@ impl PushSummary {
         let mut summary = Self {
             total: excluded,
             pushed: 0,
+            up_to_date: 0,
             skipped: 0,
             failed: 0,
             warned: 0,
@@ -40,6 +41,7 @@ impl PushSummary {
             summary.total += 1;
             match outcome {
                 PushOutcome::Pushed => summary.pushed += 1,
+                PushOutcome::UpToDate => summary.up_to_date += 1,
                 PushOutcome::Skipped => summary.skipped += 1,
                 PushOutcome::Failed => summary.failed += 1,
                 PushOutcome::Warned => summary.warned += 1,
@@ -48,22 +50,33 @@ impl PushSummary {
         summary
     }
 
-    pub(crate) fn render(self, exit_code: i32) -> String {
+    pub(crate) fn render(self) -> String {
         let pushed_label = if self.dry { "would push" } else { "pushed" };
-        let mut output = format!(
-            "exit {exit_code}  -  {} repos: {} {pushed_label}, {} skipped",
-            self.total, self.pushed, self.skipped
-        );
-        if self.failed > 0 {
-            let _ = write!(output, ", {} fail", self.failed);
+        let total = crate::output::count_label(self.total, "project", "projects");
+        let counts = [
+            (self.pushed, pushed_label),
+            (self.up_to_date, "up to date"),
+            (self.skipped, "skipped"),
+            (self.failed, "failed"),
+            (
+                self.warned,
+                if self.warned == 1 {
+                    "warning"
+                } else {
+                    "warnings"
+                },
+            ),
+            (self.excluded, "excluded"),
+        ]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, label)| format!("{count} {label}"))
+        .collect::<Vec<_>>();
+        if counts.is_empty() {
+            total
+        } else {
+            format!("{total}: {}", counts.join(", "))
         }
-        if self.warned > 0 {
-            let _ = write!(output, ", {} warn", self.warned);
-        }
-        if self.excluded > 0 {
-            let _ = write!(output, ", {} excluded", self.excluded);
-        }
-        output
     }
 }
 
@@ -72,7 +85,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clean_summary_always_reports_pushed_and_skipped() {
+    fn clean_summary_reports_pushed_and_skipped() {
         let summary = PushSummary::from_outcomes(
             [
                 PushOutcome::Pushed,
@@ -84,7 +97,7 @@ mod tests {
         );
         assert_eq!(summary.pushed, 2);
         assert_eq!(summary.failed, 0);
-        assert_eq!(summary.render(0), "exit 0  -  3 repos: 2 pushed, 1 skipped");
+        assert_eq!(summary.render(), "3 projects: 2 pushed, 1 skipped");
     }
 
     #[test]
@@ -100,8 +113,8 @@ mod tests {
             0,
         );
         assert_eq!(
-            summary.render(1),
-            "exit 1  -  4 repos: 1 pushed, 1 skipped, 1 fail, 1 warn"
+            summary.render(),
+            "4 projects: 1 pushed, 1 skipped, 1 failed, 1 warning"
         );
     }
 
@@ -109,39 +122,27 @@ mod tests {
     fn failed_only_summary_omits_zero_warn_count() {
         let summary = PushSummary::from_outcomes([PushOutcome::Failed], false, 0);
         assert_eq!(summary.failed, 1);
-        assert_eq!(
-            summary.render(1),
-            "exit 1  -  1 repos: 0 pushed, 0 skipped, 1 fail"
-        );
-        assert!(!summary.render(1).contains("warn"));
+        assert_eq!(summary.render(), "1 project: 1 failed");
+        assert!(!summary.render().contains("warn"));
     }
 
     #[test]
     fn warned_only_summary_omits_zero_fail_count() {
         let summary = PushSummary::from_outcomes([PushOutcome::Warned], false, 0);
-        assert_eq!(
-            summary.render(1),
-            "exit 1  -  1 repos: 0 pushed, 0 skipped, 1 warn"
-        );
-        assert!(!summary.render(1).contains("fail"));
+        assert_eq!(summary.render(), "1 project: 1 warning");
+        assert!(!summary.render().contains("fail"));
     }
 
     #[test]
-    fn dry_summary_uses_would_push_and_keeps_zero_pushed_visible() {
+    fn dry_summary_omits_zero_counts() {
         let summary = PushSummary::from_outcomes([PushOutcome::Skipped], true, 0);
-        assert_eq!(
-            summary.render(0),
-            "exit 0  -  1 repos: 0 would push, 1 skipped"
-        );
+        assert_eq!(summary.render(), "1 project: 1 skipped");
     }
 
     #[test]
     fn excluded_repositories_extend_the_total_and_append_a_distinct_count() {
         let summary = PushSummary::from_outcomes([PushOutcome::Pushed], true, 2);
 
-        assert_eq!(
-            summary.render(0),
-            "exit 0  -  3 repos: 1 would push, 0 skipped, 2 excluded"
-        );
+        assert_eq!(summary.render(), "3 projects: 1 would push, 2 excluded");
     }
 }

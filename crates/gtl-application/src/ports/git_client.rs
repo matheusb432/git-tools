@@ -162,6 +162,12 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         remote: &RemoteName,
     ) -> anyhow::Result<Option<RemoteUrl>>;
 
+    fn remote_push_urls(
+        &self,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<Vec<RemoteUrl>>;
+
     fn revision_exists(
         &self,
         repo_path: &RepositoryRoot,

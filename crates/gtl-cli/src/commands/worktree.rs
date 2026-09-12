@@ -42,24 +42,15 @@ pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
         })
         .collect::<Vec<_>>();
 
-    let path_width = column_width("PATH", rows.iter().map(|row| row.path.as_str()));
-    let branch_width = column_width("BRANCH", rows.iter().map(|row| row.branch.as_str()));
-    let head_width = column_width("HEAD", rows.iter().map(|row| row.head.as_str()));
-    let state_width = column_width("STATE", rows.iter().map(|row| row.state.as_str()));
-
-    let mut lines = vec![format!(
-        "{:<path_width$}  {:<branch_width$}  {:<head_width$}  {:<state_width$}  DETAILS",
-        "PATH", "BRANCH", "HEAD", "STATE"
-    )];
-
-    lines.extend(rows.into_iter().map(|row| {
-        format!(
-            "{:<path_width$}  {:<branch_width$}  {:<head_width$}  {:<state_width$}  {}",
-            row.path, row.branch, row.head, row.state, row.details
-        )
-    }));
-
-    lines.join("\n")
+    let rows = rows
+        .into_iter()
+        .map(|row| [row.path, row.branch, row.head, row.state, row.details])
+        .collect::<Vec<_>>();
+    crate::output::table(
+        ["Path", "Branch", "Head", "State", "Details"],
+        &rows,
+        crate::output::stdout_color(),
+    )
 }
 
 fn branch_label(worktree: &Worktree) -> String {
@@ -107,14 +98,6 @@ struct WorktreeRow {
     details: String,
 }
 
-fn column_width<'src>(header: &str, values: impl Iterator<Item = &'src str>) -> usize {
-    values
-        .map(str::len)
-        .chain([header.len()])
-        .max()
-        .unwrap_or(header.len())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,8 +125,8 @@ mod tests {
         assert_eq!(
             render_list(&worktrees),
             concat!(
-                "PATH     BRANCH            HEAD     STATE    DETAILS\n",
-                "/repo    main              1234567  primary  \n",
+                "Path     Branch            Head     State    Details\n",
+                "/repo    main              1234567  primary\n",
                 "/linked  feature/worktree  abcdef1  linked   locked: maintenance",
             )
         );

@@ -56,7 +56,7 @@ pub fn execute(
         git,
         settings,
     ) {
-        Ok(DryRunTagBumpOk::Ready(current)) => current,
+        Ok(DryRunTagBumpOk::Ready(current)) => *current,
         Ok(DryRunTagBumpOk::Rejected { .. }) => return Ok(stale_preview()),
         Err(dry_run_tag_bump::DryRunTagBumpError::Settings(error)) => {
             return Err(BumpTagError::Settings(error));

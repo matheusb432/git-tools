@@ -23,7 +23,7 @@ fn non_empty_message(value: &str) -> Result<String, String> {
     }
 }
 
-/// Render Git workflow diff artifacts.
+/// Inspect repositories and run Git workflows.
 #[derive(Debug, Parser)]
 #[command(
     name = "git-tools",
@@ -224,7 +224,7 @@ pub enum TagCommand {
         /// Show the exact proposed mutation without creating or pushing a tag.
         #[arg(long, conflicts_with = "yes")]
         dry: bool,
-        /// Commit the displayed preview without prompting.
+        /// Create the tag without prompting or printing a review.
         #[arg(short = 'y', long = "yes")]
         yes: bool,
     },

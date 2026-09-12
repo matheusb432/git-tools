@@ -1,14 +1,12 @@
 //! Fanning `commit --all` out across every managed repo.
 
-use std::fmt::Write as _;
-
 use anyhow::Context as _;
 use gtl_models::paths::{ProjectName, RepositoryRelativePath};
 pub use gtl_models::repository::working_tree::CommitFile;
 use gtl_wire::v1;
 use serde::Serialize;
 
-use super::{ManagedExit, ManagedOptions, ManagedRun};
+use super::{ManagedExit, ManagedOptions, ManagedOutput, ManagedRun};
 use crate::server_client::ServerClient;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +48,31 @@ impl CommitResult {
 
     const fn action(&self) -> CommitAction {
         self.action
+    }
+
+    pub(super) fn annotate_push(&self, result: &mut super::PushPullResult) {
+        if self.name != result.name {
+            return;
+        }
+        let prefix = match self.action {
+            CommitAction::Committed => "Committed locally",
+            CommitAction::WouldCommit => {
+                if result.status == super::RepoSyncStatus::UpToDate {
+                    result.status = super::RepoSyncStatus::WouldPush;
+                    result.detail.clear();
+                }
+                "Would commit all changes"
+            }
+            CommitAction::Absent
+            | CommitAction::Clean
+            | CommitAction::Skipped
+            | CommitAction::Fail => return,
+        };
+        result.detail = if result.detail.is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{prefix}; {}", result.detail)
+        };
     }
 
     fn detail(&self) -> &str {
@@ -106,7 +129,7 @@ fn run_commit_all_with_scope(
     let execution = ServerClient::connect().and_then(|client| {
         client.commit_project_repositories(commit_request(options, use_push_all_exclusions))
     });
-    project_commit_execution(options.output.is_json(), execution)
+    project_commit_execution(options.output, execution)
 }
 
 fn commit_request(
@@ -130,7 +153,7 @@ fn usage_failure(message: &str) -> ManagedRun<CommitResult> {
 }
 
 fn project_commit_execution(
-    json: bool,
+    output: ManagedOutput,
     execution: anyhow::Result<v1::CommitProjectRepositoriesResponse>,
 ) -> ManagedRun<CommitResult> {
     let response = match execution {
@@ -154,7 +177,7 @@ fn project_commit_execution(
             return transport_failure("gtl-server returned an invalid project commit exit".into());
         }
     };
-    let stdout = format_commit(exit, json, &results);
+    let stdout = format_commit(output, &results);
     ManagedRun {
         exit,
         results,
@@ -204,8 +227,8 @@ fn commit_result_from_grpc(result: v1::ProjectCommitResult) -> anyhow::Result<Co
     })
 }
 
-fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> String {
-    if json {
+fn format_commit(output: ManagedOutput, results: &[CommitResult]) -> String {
+    if output.is_json() {
         let projected = results
             .iter()
             .map(|result| CommitResultJson {
@@ -220,19 +243,65 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
         return serde_json::to_string_pretty(&projected).unwrap_or_else(|_| "[]".to_string());
     }
 
-    let mut out = String::new();
-    let _ = writeln!(out, "{:<30} {:<14} DETAIL", "REPO", "ACTION");
-    for result in results {
-        let _ = writeln!(
-            out,
-            "{:<30} {:<14} {}",
-            result.name(),
-            action_wire(result.action()),
-            result.detail()
-        );
+    let rows = results
+        .iter()
+        .map(|result| {
+            let detail = match result.action {
+                CommitAction::Absent | CommitAction::Clean | CommitAction::Committed => {
+                    String::new()
+                }
+                CommitAction::WouldCommit => format!("{} files (all changes)", result.files.len()),
+                CommitAction::Skipped | CommitAction::Fail => result.detail.clone(),
+            };
+            [
+                result.name.to_string(),
+                action_label(result.action).to_string(),
+                detail,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let table = crate::output::table(
+        ["Project", "Result", "Detail"],
+        &rows,
+        output.color_enabled(),
+    );
+    let mut counts = Vec::new();
+    for action in [
+        CommitAction::Committed,
+        CommitAction::WouldCommit,
+        CommitAction::Clean,
+        CommitAction::Skipped,
+        CommitAction::Absent,
+        CommitAction::Fail,
+    ] {
+        let count = results
+            .iter()
+            .filter(|result| result.action == action)
+            .count();
+        if count > 0 {
+            counts.push(format!("{count} {}", action_label(action).to_lowercase()));
+        }
     }
-    let _ = write!(out, "\nexit {}  -  {} repos", exit.code(), results.len());
-    out
+    format!(
+        "{table}\n\n{}: {}",
+        crate::output::count_label(results.len(), "project", "projects"),
+        if counts.is_empty() {
+            "nothing to commit".into()
+        } else {
+            counts.join(", ")
+        }
+    )
+}
+
+fn action_label(action: CommitAction) -> &'static str {
+    match action {
+        CommitAction::Absent => "Absent",
+        CommitAction::Clean => "Clean",
+        CommitAction::WouldCommit => "Would commit",
+        CommitAction::Skipped => "Skipped",
+        CommitAction::Committed => "Committed",
+        CommitAction::Fail => "Failed",
+    }
 }
 
 #[cfg(test)]
@@ -252,6 +321,59 @@ mod tests {
             action: CommitAction::Committed,
             detail: "[main abc1234] save".into(),
         }
+    }
+
+    fn push_result(
+        status: super::super::RepoSyncStatus,
+        detail: &str,
+    ) -> super::super::PushPullResult {
+        super::super::PushPullResult {
+            name: project_name("api"),
+            branch: None,
+            status,
+            detail: detail.into(),
+        }
+    }
+
+    #[test]
+    fn combined_preview_replaces_the_precommit_noop() {
+        use super::super::RepoSyncStatus;
+
+        let mut commit = committed_result();
+        commit.action = CommitAction::WouldCommit;
+        let mut push = push_result(RepoSyncStatus::UpToDate, "up to date");
+
+        commit.annotate_push(&mut push);
+
+        assert_eq!(push.status, RepoSyncStatus::WouldPush);
+        assert_eq!(push.detail, "Would commit all changes");
+    }
+
+    #[test]
+    fn combined_preview_preserves_push_failures_and_warnings() {
+        use super::super::RepoSyncStatus;
+
+        let mut commit = committed_result();
+        commit.action = CommitAction::WouldCommit;
+        for status in [RepoSyncStatus::Fail, RepoSyncStatus::Warn] {
+            let mut push = push_result(status, "remote unavailable");
+
+            commit.annotate_push(&mut push);
+
+            assert_eq!(push.status, status);
+            assert_eq!(push.detail, "Would commit all changes; remote unavailable");
+        }
+    }
+
+    #[test]
+    fn combined_failure_keeps_the_completed_local_commit_visible() {
+        use super::super::RepoSyncStatus;
+
+        let mut push = push_result(RepoSyncStatus::Fail, "remote unavailable");
+        committed_result().annotate_push(&mut push);
+
+        assert_eq!(push.status, RepoSyncStatus::Fail);
+        assert_eq!(push.detail, "Committed locally; remote unavailable");
     }
 
     #[test]
@@ -282,7 +404,7 @@ mod tests {
         let results = vec![committed_result()];
 
         assert_eq!(
-            format_commit(ManagedExit::Clean, true, &results),
+            format_commit(ManagedOutput::Json, &results),
             concat!(
                 "[\n",
                 "  {\n",
@@ -323,16 +445,16 @@ mod tests {
             ),
         };
 
-        let run = project_commit_execution(false, Ok(response));
+        let run = project_commit_execution(ManagedOutput::Text { color: false }, Ok(response));
 
         assert_eq!(run.exit, ManagedExit::Fail);
         assert_eq!(run.results, vec![committed_result()]);
         assert_eq!(
             run.stdout,
             concat!(
-                "REPO                           ACTION         DETAIL\n",
-                "api                            committed      [main abc1234] save\n",
-                "\nexit 2  -  1 repos",
+                "Project  Result     Detail\n",
+                "api      Committed\n",
+                "\n1 project: 1 committed",
             )
         );
         assert_eq!(

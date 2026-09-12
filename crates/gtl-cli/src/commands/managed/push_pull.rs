@@ -7,7 +7,7 @@ use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{
-    ManagedExit, ManagedOptions, ManagedRun,
+    CommitResult, ManagedExit, ManagedOptions, ManagedOutput, ManagedRun,
     push_summary::{PushOutcome, PushSummary},
 };
 use crate::server_client::ServerClient;
@@ -34,32 +34,16 @@ pub enum RepoSyncStatus {
 impl std::fmt::Display for RepoSyncStatus {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let token = match self {
-            Self::Skip => "skip",
-            Self::UpToDate => "up-to-date",
-            Self::Pushed => "pushed",
-            Self::WouldPush => "would-push",
-            Self::Pulled => "pulled",
-            Self::WouldPull => "would-pull",
-            Self::Warn => "warn",
-            Self::Fail => "fail",
+            Self::Skip => "Skipped",
+            Self::UpToDate => "Up to date",
+            Self::Pushed => "Pushed",
+            Self::WouldPush => "Would push",
+            Self::Pulled => "Pulled",
+            Self::WouldPull => "Would pull",
+            Self::Warn => "Warning",
+            Self::Fail => "Failed",
         };
         formatter.pad(token)
-    }
-}
-
-impl SyncOperation {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Push => "push",
-            Self::Pull => "pull",
-        }
-    }
-
-    const fn arrow(self) -> &'static str {
-        match self {
-            Self::Push => "->",
-            Self::Pull => "<-",
-        }
     }
 }
 
@@ -105,6 +89,13 @@ fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
 
 #[must_use]
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
+    run_push_after_commit(options, &[])
+}
+
+pub(super) fn run_push_after_commit(
+    options: &ManagedOptions,
+    committed: &[CommitResult],
+) -> ManagedRun<PushPullResult> {
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
@@ -113,7 +104,7 @@ pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
         dry_run: options.dry,
     };
     match client.push_project_repositories(request) {
-        Ok(response) => finish(SyncOperation::Push, options, response),
+        Ok(response) => finish(SyncOperation::Push, options, response, committed),
         Err(error) => managed_error(&error),
     }
 }
@@ -128,7 +119,7 @@ pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
         dry_run: options.dry,
     };
     match client.pull_project_repositories(request) {
-        Ok(response) => finish(SyncOperation::Pull, options, response),
+        Ok(response) => finish(SyncOperation::Pull, options, response, &[]),
         Err(error) => managed_error(&error),
     }
 }
@@ -146,9 +137,10 @@ fn finish(
     operation: SyncOperation,
     options: &ManagedOptions,
     response: impl Into<ProjectRepositorySyncSummary>,
+    committed: &[CommitResult],
 ) -> ManagedRun<PushPullResult> {
     let response = response.into();
-    let results = match response
+    let mut results = match response
         .results
         .into_iter()
         .map(result_from_grpc)
@@ -174,14 +166,13 @@ fn finish(
         Ok(exit) => exit,
         Err(error) => return managed_error(&error),
     };
-    let stdout = match format_push_pull(
-        operation,
-        options.dry,
-        options.output.is_json(),
-        &results,
-        &excluded,
-        exit,
-    ) {
+    for result in &mut results {
+        for commit in committed {
+            commit.annotate_push(result);
+        }
+    }
+    let stdout = match format_push_pull(operation, options.dry, options.output, &results, &excluded)
+    {
         Ok(stdout) => stdout,
         Err(error) => return managed_error(&error.into()),
     };
@@ -251,10 +242,9 @@ fn result_from_grpc(result: v1::RepositorySyncResult) -> anyhow::Result<PushPull
 fn format_push_pull(
     operation: SyncOperation,
     dry: bool,
-    json: bool,
+    output: ManagedOutput,
     results: &[PushPullResult],
     excluded: &[ProjectName],
-    exit: ManagedExit,
 ) -> Result<String, PushPullFormatError> {
     let push_outcomes = match operation {
         SyncOperation::Push => Some(
@@ -266,7 +256,7 @@ fn format_push_pull(
         SyncOperation::Pull => None,
     };
 
-    if json {
+    if output.is_json() {
         return match operation {
             SyncOperation::Push => serde_json::to_string_pretty(&PushAllReport {
                 selected: results,
@@ -277,60 +267,81 @@ fn format_push_pull(
         .map_err(PushPullFormatError::SerializeJson);
     }
 
-    let mut out = String::new();
-    for result in results {
-        let verb = if dry {
-            format!("dry {}", operation.label())
-        } else {
-            operation.label().to_string()
-        };
-        let _ = writeln!(out, "{verb} {} {}", operation.arrow(), result.name);
-    }
-    for project in excluded {
-        let _ = writeln!(out, "exclude -> {project}");
-    }
-    out.push('\n');
-    let _ = writeln!(
-        out,
-        "{:<30} {:<18} {:<12} DETAIL",
-        "REPO", "BRANCH", "STATUS"
+    let rows = results
+        .iter()
+        .map(|result| {
+            let detail = if matches!(
+                result.detail.as_str(),
+                "up to date" | "up to date (already synced)"
+            ) {
+                String::new()
+            } else {
+                result.detail.clone()
+            };
+            [
+                result.name.to_string(),
+                result
+                    .branch
+                    .as_ref()
+                    .map_or_else(|| "-".into(), ToString::to_string),
+                result.status.to_string(),
+                detail,
+            ]
+        })
+        .chain(excluded.iter().map(|project| {
+            [
+                project.to_string(),
+                "-".into(),
+                "Excluded".into(),
+                String::new(),
+            ]
+        }))
+        .collect::<Vec<_>>();
+    let mut out = crate::output::table(
+        ["Project", "Branch", "Result", "Detail"],
+        &rows,
+        output.color_enabled(),
     );
-    for result in results {
-        let branch = result.branch.as_ref().map_or("-", AsRef::as_ref);
-        let _ = writeln!(
-            out,
-            "{:<30} {:<18} {:<12} {}",
-            result.name, branch, result.status, result.detail
-        );
-    }
-    if let Some(outcomes) = push_outcomes {
-        let summary = PushSummary::from_outcomes(outcomes, dry, excluded.len());
-        let _ = write!(out, "\n{}", summary.render(exit.code()));
-    } else {
-        let fail = results
-            .iter()
-            .filter(|result| result.status == RepoSyncStatus::Fail)
-            .count();
-        let warn = results
-            .iter()
-            .filter(|result| result.status == RepoSyncStatus::Warn)
-            .count();
-        let _ = write!(
-            out,
-            "\nexit {}  -  {} repos: {} fail, {} warn",
-            exit.code(),
-            results.len(),
-            fail,
-            warn
-        );
-    }
+    let summary = push_outcomes.map_or_else(
+        || pull_summary(results, dry),
+        |outcomes| PushSummary::from_outcomes(outcomes, dry, excluded.len()).render(),
+    );
+    let _ = write!(out, "\n\n{summary}");
     Ok(out)
+}
+
+fn pull_summary(results: &[PushPullResult], dry: bool) -> String {
+    let count = |status| {
+        results
+            .iter()
+            .filter(|result| result.status == status)
+            .count()
+    };
+    let pulled = count(RepoSyncStatus::Pulled) + count(RepoSyncStatus::WouldPull);
+    let verb = if dry { "would pull" } else { "pulled" };
+    let warnings = count(RepoSyncStatus::Warn);
+    let mut summary = format!(
+        "{}: {pulled} {verb}",
+        crate::output::count_label(results.len(), "project", "projects")
+    );
+    for (label, count) in [
+        ("up to date", count(RepoSyncStatus::UpToDate)),
+        ("skipped", count(RepoSyncStatus::Skip)),
+        ("failed", count(RepoSyncStatus::Fail)),
+        (if warnings == 1 { "warning" } else { "warnings" }, warnings),
+    ] {
+        if count > 0 {
+            let _ = write!(summary, ", {count} {label}");
+        }
+    }
+    summary
 }
 
 fn push_outcome(result: &PushPullResult) -> Result<PushOutcome, PushPullFormatError> {
     match result.status {
         RepoSyncStatus::Pushed | RepoSyncStatus::WouldPush => Ok(PushOutcome::Pushed),
-        RepoSyncStatus::Skip | RepoSyncStatus::UpToDate => Ok(PushOutcome::Skipped),
+        RepoSyncStatus::Skip => Ok(PushOutcome::Skipped),
+        RepoSyncStatus::UpToDate => Ok(PushOutcome::UpToDate),
         RepoSyncStatus::Fail => Ok(PushOutcome::Failed),
         RepoSyncStatus::Warn => Ok(PushOutcome::Warned),
         RepoSyncStatus::Pulled | RepoSyncStatus::WouldPull => {
@@ -354,7 +365,7 @@ mod tests {
 
     fn selected(status: RepoSyncStatus) -> PushPullResult {
         PushPullResult {
-            name: project("git-tools"),
+            name: project("example-project"),
             branch: Some(BranchName::try_new("main").unwrap()),
             status,
             detail: "ahead by 1".into(),
@@ -366,17 +377,16 @@ mod tests {
         let output = format_push_pull(
             SyncOperation::Push,
             true,
-            false,
+            ManagedOutput::Text { color: false },
             &[selected(RepoSyncStatus::WouldPush)],
-            &[project("sample_project")],
-            ManagedExit::Clean,
+            &[project("excluded-project")],
         )
         .unwrap();
 
-        assert!(output.contains("dry push -> git-tools"));
-        assert!(output.contains("exclude -> sample_project"));
-        assert!(output.contains("git-tools                      main               would-push"));
-        assert!(output.contains("exit 0  -  2 repos: 1 would push, 0 skipped, 1 excluded"));
+        assert_eq!(output.matches("example-project").count(), 1);
+        assert_eq!(output.matches("excluded-project").count(), 1);
+        assert!(output.contains("Would push"));
+        assert!(output.contains("2 projects: 1 would push, 1 excluded"));
     }
 
     #[test]
@@ -384,10 +394,9 @@ mod tests {
         let output = format_push_pull(
             SyncOperation::Push,
             false,
-            true,
+            ManagedOutput::Json,
             &[selected(RepoSyncStatus::Pushed)],
-            &[project("sample_project")],
-            ManagedExit::Clean,
+            &[project("excluded-project")],
         )
         .unwrap();
 
@@ -395,12 +404,12 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&output).unwrap(),
             json!({
                 "Selected": [{
-                    "Name": "git-tools",
+                    "Name": "example-project",
                     "Branch": "main",
                     "Status": "pushed",
                     "Detail": "ahead by 1"
                 }],
-                "Excluded": ["sample_project"]
+                "Excluded": ["excluded-project"]
             })
         );
     }
@@ -410,10 +419,9 @@ mod tests {
         let output = format_push_pull(
             SyncOperation::Pull,
             false,
-            true,
+            ManagedOutput::Json,
             &[selected(RepoSyncStatus::Pulled)],
             &[],
-            ManagedExit::Clean,
         )
         .unwrap();
 

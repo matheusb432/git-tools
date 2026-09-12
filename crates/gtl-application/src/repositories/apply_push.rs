@@ -115,9 +115,9 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> Result<ApplyPushOk, 
         .map_err(|source| transport("read working tree", progress.clone(), source))?
     {
         GitEffect::Applied(working_tree) => working_tree,
-        GitEffect::Rejected(_) => {
+        GitEffect::Rejected(detail) => {
             return Ok(ApplyPushOk::Failed {
-                detail: "git status failed".into(),
+                detail: super::git_failure("git status", &detail),
                 progress,
             });
         }
@@ -153,12 +153,12 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> Result<ApplyPushOk, 
             Ok(finish_push(effect, detail, "already up to date", basis))
         }
         PushAction::CommitAndPush { message } => {
-            if let GitEffect::Rejected(_) = git
+            if let GitEffect::Rejected(detail) = git
                 .stage_all(&target.top)
                 .map_err(|source| transport("stage changes", progress.clone(), source))?
             {
                 return Ok(ApplyPushOk::Failed {
-                    detail: "git add failed".into(),
+                    detail: super::git_failure("git add", &detail),
                     progress,
                 });
             }
@@ -168,9 +168,9 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> Result<ApplyPushOk, 
                 .map_err(|source| transport("create commit", progress.clone(), source))?
             {
                 GitEffect::Applied(receipt) => receipt,
-                GitEffect::Rejected(_) => {
+                GitEffect::Rejected(detail) => {
                     return Ok(ApplyPushOk::Failed {
-                        detail: "git commit failed".into(),
+                        detail: super::git_failure("git commit", &detail),
                         progress,
                     });
                 }
@@ -209,13 +209,13 @@ fn classify(state: RepositoryState, mode: PushMode) -> PushAction {
         };
     }
 
+    let noun = if ahead.into_inner() == 1 {
+        "commit"
+    } else {
+        "commits"
+    };
     PushAction::Push {
-        detail: match mode {
-            PushMode::ExistingOnly => format!("pushed {ahead} commit(s)"),
-            PushMode::CommitChanges { .. } => {
-                format!("nothing to commit; pushed {ahead} commit(s)")
-            }
-        },
+        detail: format!("pushed {ahead} {noun}"),
     }
 }
 
@@ -289,7 +289,9 @@ mod tests {
             top: crate::utils::repository_root("/repos/api"),
             branch: branch_name("main"),
             remote: remote_name("origin"),
-            remote_url: Some(RemoteUrl::try_new("git@example.com:team/api.git").unwrap()),
+            remote_urls: vec![
+                RemoteUrl::try_new("git@example.invalid:team/example-project.git").unwrap(),
+            ],
             pending: PendingChanges::default(),
         }
     }
@@ -306,7 +308,7 @@ mod tests {
         assert_eq!(
             action,
             PushAction::Push {
-                detail: "pushed 2 commit(s)".into()
+                detail: "pushed 2 commits".into()
             }
         );
     }
@@ -398,7 +400,7 @@ mod tests {
         assert_eq!(
             result,
             ApplyPushOk::Failed {
-                detail: "git commit failed".into(),
+                detail: "git commit failed: commit rejected".into(),
                 progress: PushProgress::Staged,
             }
         );
@@ -520,7 +522,7 @@ mod tests {
         assert_eq!(
             result,
             ApplyPushOk::Completed {
-                detail: "pushed 2 commit(s)".into(),
+                detail: "pushed 2 commits".into(),
                 completion: PushCompletion::RemoteUpdated {
                     basis: PushBasis::ExistingCommits,
                 },

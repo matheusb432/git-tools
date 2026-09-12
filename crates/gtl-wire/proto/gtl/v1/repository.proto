@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gtl.v1;
 
+import "gtl/v1/common.proto";
+
 service RepositoryService {
   rpc PlanRepositoryPush(PlanRepositoryPushRequest) returns (PlanRepositoryPushResponse);
   rpc ExecuteRepositoryPush(ExecuteRepositoryPushRequest) returns (ExecuteRepositoryPushResponse);
@@ -29,7 +31,9 @@ message RepositoryPushTarget {
   string repository_root = 2;
   string branch = 3;
   string remote = 4;
-  optional string remote_url = 5;
+  reserved 5;
+  reserved "remote_url";
+  repeated string remote_urls = 7;
   PendingChanges pending = 6;
 }
 
@@ -64,9 +68,23 @@ enum RepositoryPushStatus {
   REPOSITORY_PUSH_STATUS_FAILED = 4;
 }
 
+message RepositoryPushAttempt {
+  optional string created_commit_id = 1;
+}
+
+message RepositoryMutationProgress {
+  oneof state {
+    Empty unchanged = 1;
+    Empty staged = 2;
+    string created_commit_id = 3;
+    RepositoryPushAttempt push_attempted = 4;
+  }
+}
+
 message ExecuteRepositoryPushResponse {
   RepositoryPushStatus status = 1;
   string detail = 2;
+  RepositoryMutationProgress progress = 3;
 }
 
 message RepositoryCommitTarget {
@@ -102,6 +120,7 @@ enum RepositoryCommitStatus {
 message ExecuteRepositoryCommitResponse {
   RepositoryCommitStatus status = 1;
   string detail = 2;
+  RepositoryMutationProgress progress = 3;
 }
 
 message PushDestination {

@@ -1,4 +1,7 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context as _, Result, bail};
 
@@ -53,7 +56,8 @@ fn wait_for_server_endpoint(
     failure: &std::sync::mpsc::Receiver<String>,
 ) -> Result<()> {
     let endpoint = data_root.join("server").join("endpoint.json");
-    for _ in 0..100 {
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(15) {
         check_server_failure(failure)?;
         if endpoint.is_file() {
             return Ok(());

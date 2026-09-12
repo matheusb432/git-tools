@@ -369,6 +369,7 @@ fn tag_from_grpc(tag: v1::Tag) -> anyhow::Result<Tag> {
 struct TagActionResult {
     status: i32,
     detail: String,
+    progress: Option<v1::TagOperationProgress>,
 }
 
 fn finish_tag_action<Response>(result: anyhow::Result<Response>) -> crate::ExitCode
@@ -390,12 +391,25 @@ fn render_tag_action(outcome: &TagActionResult) -> crate::ExitCode {
             v1::TagActionStatus::Created | v1::TagActionStatus::NoOp | v1::TagActionStatus::Pushed,
         ) => {
             if !outcome.detail.is_empty() {
-                println!("{}", outcome.detail);
+                match action_detail(outcome) {
+                    Ok(detail) => println!("{detail}"),
+                    Err(error) => {
+                        eprintln!("tag: {error}");
+                        return crate::ExitCode::Internal;
+                    }
+                }
             }
             crate::ExitCode::Ok
         }
         Ok(v1::TagActionStatus::Failed | v1::TagActionStatus::Aborted) => {
             eprintln!("tag: {}", outcome.detail);
+            if let Some(progress) = &outcome.progress {
+                match failure_progress(progress) {
+                    Ok(detail) if !detail.is_empty() => eprintln!("{detail}"),
+                    Ok(_) => {}
+                    Err(error) => eprintln!("tag: {error}"),
+                }
+            }
             crate::ExitCode::Internal
         }
         Ok(v1::TagActionStatus::Unspecified) | Err(_) => {
@@ -405,11 +419,87 @@ fn render_tag_action(outcome: &TagActionResult) -> crate::ExitCode {
     }
 }
 
+fn progress_tags(references: &[String]) -> anyhow::Result<String> {
+    references
+        .iter()
+        .map(|reference| {
+            let name = reference
+                .strip_prefix("refs/tags/")
+                .context("server returned a non-tag reference")?;
+            TagName::try_new(name.to_string())
+                .map(|name| name.to_string())
+                .map_err(Into::into)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map(|tags| tags.join(", "))
+}
+
+fn action_detail(outcome: &TagActionResult) -> anyhow::Result<String> {
+    let progress = outcome
+        .progress
+        .as_ref()
+        .context("server omitted tag operation progress")?;
+    let created = progress_tags(&progress.created_refs)?;
+    let pushed = progress_tags(&progress.pushed_or_attempted_refs)?;
+    let noun = if progress.created_refs.len() == 1 {
+        "tag"
+    } else {
+        "tags"
+    };
+    match v1::TagRemotePushProgress::try_from(progress.remote_push)? {
+        v1::TagRemotePushProgress::Completed if !created.is_empty() && created == pushed => {
+            Ok(format!("Created {noun} {created} and pushed to origin"))
+        }
+        v1::TagRemotePushProgress::Completed if !created.is_empty() => Ok(format!(
+            "Created {noun} {created}; pushed {pushed} to origin"
+        )),
+        v1::TagRemotePushProgress::Completed => {
+            let noun = if progress.pushed_or_attempted_refs.len() == 1 {
+                "tag"
+            } else {
+                "tags"
+            };
+            Ok(format!("Pushed {noun} {pushed} to origin"))
+        }
+        v1::TagRemotePushProgress::NotStarted if !created.is_empty() => {
+            Ok(format!("Created {noun} {created}"))
+        }
+        v1::TagRemotePushProgress::NotStarted => Ok(crate::output::sentence(&outcome.detail)),
+        v1::TagRemotePushProgress::Indeterminate | v1::TagRemotePushProgress::Unspecified => {
+            anyhow::bail!("server returned an unconfirmed tag push as a success")
+        }
+    }
+}
+
+fn failure_progress(progress: &v1::TagOperationProgress) -> anyhow::Result<String> {
+    let mut lines = Vec::new();
+    if !progress.created_refs.is_empty() {
+        lines.push(format!(
+            "  Created locally: {}",
+            progress_tags(&progress.created_refs)?
+        ));
+    }
+    match v1::TagRemotePushProgress::try_from(progress.remote_push)? {
+        v1::TagRemotePushProgress::Completed => lines.push(format!(
+            "  Pushed to origin: {}",
+            progress_tags(&progress.pushed_or_attempted_refs)?
+        )),
+        v1::TagRemotePushProgress::Indeterminate => lines.push(format!(
+            "  Push outcome unconfirmed: {}",
+            progress_tags(&progress.pushed_or_attempted_refs)?
+        )),
+        v1::TagRemotePushProgress::NotStarted => {}
+        v1::TagRemotePushProgress::Unspecified => anyhow::bail!("server omitted tag push progress"),
+    }
+    Ok(lines.join("\n"))
+}
+
 impl From<v1::AddTagResponse> for TagActionResult {
     fn from(response: v1::AddTagResponse) -> Self {
         Self {
             status: response.status,
             detail: response.detail,
+            progress: response.progress,
         }
     }
 }
@@ -419,6 +509,7 @@ impl From<v1::PushTagsResponse> for TagActionResult {
         Self {
             status: response.status,
             detail: response.detail,
+            progress: response.progress,
         }
     }
 }
@@ -428,6 +519,7 @@ impl From<v1::AddAndPushTagResponse> for TagActionResult {
         Self {
             status: response.status,
             detail: response.detail,
+            progress: response.progress,
         }
     }
 }
@@ -437,6 +529,7 @@ impl From<v1::LabelTagResponse> for TagActionResult {
         Self {
             status: response.status,
             detail: response.detail,
+            progress: response.progress,
         }
     }
 }

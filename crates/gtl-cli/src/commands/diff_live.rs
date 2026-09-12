@@ -33,7 +33,7 @@ fn run_managed(client: &ServerClient) -> anyhow::Result<()> {
         })?;
     print_notes(&response.notes)?;
     if response.results.is_empty() {
-        println!("diff live: no managed repos with commits to compare");
+        println!("No managed projects with commits to compare");
         return Ok(());
     }
 
@@ -58,9 +58,20 @@ fn saved_from_response(response: v1::SaveLiveViewResponse) -> anyhow::Result<()>
         v1::save_live_view_response::Outcome::Saved(saved) => {
             print_notes(&response.notes)?;
             match v1::SaveLiveViewDisposition::try_from(saved.disposition) {
-                Ok(
-                    v1::SaveLiveViewDisposition::Created | v1::SaveLiveViewDisposition::Refreshed,
-                ) => Ok(()),
+                Ok(v1::SaveLiveViewDisposition::Created) => {
+                    println!(
+                        "Saved live view for {}",
+                        crate::output::single_line(&saved.display_name)
+                    );
+                    Ok(())
+                }
+                Ok(v1::SaveLiveViewDisposition::Refreshed) => {
+                    println!(
+                        "Refreshed live view for {}",
+                        crate::output::single_line(&saved.display_name)
+                    );
+                    Ok(())
+                }
                 Ok(v1::SaveLiveViewDisposition::Unspecified) | Err(_) => {
                     anyhow::bail!("gtl-server returned an invalid live-view disposition")
                 }
@@ -89,7 +100,7 @@ fn open_viewer_requested() -> bool {
 fn print_notes(notes: &[v1::Note]) -> anyhow::Result<()> {
     for note in notes {
         match v1::NoteLevel::try_from(note.level) {
-            Ok(v1::NoteLevel::Info) => println!("{}", note.text),
+            Ok(v1::NoteLevel::Info) => {}
             Ok(v1::NoteLevel::Warning) => eprintln!("{}", note.text),
             Ok(v1::NoteLevel::Error) => anyhow::bail!(note.text.clone()),
             Ok(v1::NoteLevel::Unspecified) | Err(_) => {

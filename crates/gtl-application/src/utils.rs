@@ -371,6 +371,19 @@ impl GitClient for FakeGitClient {
             .transpose()
             .map_err(Into::into)
     }
+    fn remote_push_urls(
+        &self,
+        _repo: &RepositoryRoot,
+        _remote: &RemoteName,
+    ) -> anyhow::Result<Vec<RemoteUrl>> {
+        self.project
+            .as_ref()
+            .filter(|script| script.has_remote)
+            .map(|_| RemoteUrl::try_new("configured"))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
     fn revision_exists(
         &self,
         _repo: &RepositoryRoot,
@@ -925,6 +938,22 @@ impl GitClient for ScriptedGitClient {
             .map(RemoteUrl::try_new)
             .transpose()
             .map_err(Into::into)
+    }
+    fn remote_push_urls(
+        &self,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<Vec<RemoteUrl>> {
+        scripted_capture(
+            self,
+            repo_path,
+            &["remote", "get-url", "--push", "--all", remote.as_ref()],
+        )?
+        .into_iter()
+        .flat_map(|urls| urls.lines().map(str::to_string).collect::<Vec<_>>())
+        .map(RemoteUrl::try_new)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
     }
     fn revision_exists(
         &self,

@@ -16,7 +16,7 @@ use gtl_application::{
 };
 use gtl_models::{
     diffs::CommitId,
-    git::{BranchName, GitHead, TagName},
+    git::{BranchName, GitHead, RemoteUrl, TagName},
     paths::RepositoryRoot,
     tags::{SemverComponent, Tag, TagPatternName, TagSlot, TagState, TagTemplate},
 };
@@ -64,16 +64,33 @@ impl TagService for TagGrpcService {
     ) -> Result<Response<v1::ExecuteTagBumpResponse>, Status> {
         let preview = required(request.into_inner().preview, "preview")?;
         let request = tag_bump_preview(preview)?;
+        let tag = request.next_tag.to_string();
         let state = self.state.clone();
         let result =
             run_blocking(move || bump_tag::execute(request, &state.git, &state.user_settings))
-                .await?
-                .map_err(|error| match error {
-                    BumpTagError::Settings(error) => user_settings_load_error(error),
-                    error => unexpected(error, "execute tag bump"),
-                })?;
-
-        Ok(Response::new(execute_response(result)))
+                .await?;
+        let response = match result {
+            Ok(result) => execute_response(result),
+            Err(BumpTagError::Settings(error)) => return Err(user_settings_load_error(error)),
+            Err(error) => {
+                let detail = error.to_string();
+                match error {
+                    BumpTagError::Unexpected { progress, .. } => v1::ExecuteTagBumpResponse {
+                        notes: Vec::new(),
+                        outcome: Some(v1::execute_tag_bump_response::Outcome::Applied(
+                            v1::TagBumpResult {
+                                tag,
+                                status: v1::TagBumpStatus::Failed as i32,
+                                detail,
+                                progress: Some(wire_progress(&progress)),
+                            },
+                        )),
+                    },
+                    error => return Err(unexpected(error, "execute tag bump")),
+                }
+            }
+        };
+        Ok(Response::new(response))
     }
 
     async fn list_tags(
@@ -295,6 +312,12 @@ fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Statu
         next_tag: tag_name(preview.next_tag, "preview.next_tag")?,
         message: preview.message,
         push: preview.push,
+        push_urls: preview
+            .push_urls
+            .into_iter()
+            .map(RemoteUrl::try_new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| Status::invalid_argument(error.to_string()))?,
     })
 }
 
@@ -323,13 +346,14 @@ fn wire_preview(preview: TagBumpPreview) -> v1::TagBumpPreview {
         next_tag: preview.next_tag.to_string(),
         message: preview.message,
         push: preview.push,
+        push_urls: preview.push_urls.iter().map(ToString::to_string).collect(),
     }
 }
 
 fn plan_response(result: DryRunTagBumpOk) -> v1::PlanTagBumpResponse {
     let outcome = match result {
         DryRunTagBumpOk::Ready(preview) => {
-            v1::plan_tag_bump_response::Outcome::Ready(wire_preview(preview))
+            v1::plan_tag_bump_response::Outcome::Ready(wire_preview(*preview))
         }
         DryRunTagBumpOk::Rejected { detail } => {
             v1::plan_tag_bump_response::Outcome::Rejected(v1::TagBumpRejection { detail })
@@ -368,6 +392,7 @@ fn execute_response(result: BumpTagOk) -> v1::ExecuteTagBumpResponse {
                         tag: tag.to_string(),
                         status: status as i32,
                         detail,
+                        progress: Some(wire_progress(outcome.progress())),
                     },
                 )),
             }
@@ -582,6 +607,9 @@ mod tests {
             next_tag: TagName::try_new("release-0.0.1").unwrap(),
             message: "release".into(),
             push: true,
+            push_urls: vec![
+                RemoteUrl::try_new("git@example.invalid:team/example-project.git").unwrap(),
+            ],
         };
 
         assert_eq!(

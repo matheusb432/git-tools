@@ -151,6 +151,25 @@ impl GitClient for HybridGitClient {
             .transpose()
             .map_err(Into::into)
     }
+    fn remote_push_urls(
+        &self,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<Vec<RemoteUrl>> {
+        let repository = gix::open(repo_path.as_ref())?;
+        let remote_name: &str = remote.as_ref();
+        let Some(remote) = repository
+            .try_find_remote(remote_name.as_bytes().as_bstr())
+            .transpose()?
+        else {
+            return Ok(Vec::new());
+        };
+        remote
+            .urls(gix::remote::Direction::Push)
+            .map(|url| RemoteUrl::try_new(url.to_bstring().to_str_lossy().into_owned()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
     fn revision_exists(
         &self,
         repo_path: &RepositoryRoot,

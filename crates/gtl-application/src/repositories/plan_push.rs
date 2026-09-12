@@ -14,7 +14,7 @@ pub struct PushTarget {
     pub top: RepositoryRoot,
     pub branch: BranchName,
     pub remote: RemoteName,
-    pub remote_url: Option<RemoteUrl>,
+    pub remote_urls: Vec<RemoteUrl>,
     pub pending: PendingChanges,
 }
 
@@ -65,8 +65,8 @@ pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanPushOk, Pla
         )));
     };
 
-    let remote_url = git
-        .remote_url(&top, &remote)
+    let remote_urls = git
+        .remote_push_urls(&top, &remote)
         .map_err(|source| transport("read remote URL", source))?;
     let working_tree = match git
         .working_tree(&top)
@@ -85,7 +85,7 @@ pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanPushOk, Pla
         top,
         branch,
         remote,
-        remote_url,
+        remote_urls,
         pending: PendingChanges {
             changed: PathCount::from_len(working_tree.files.len()),
             staged: working_tree.staged,
@@ -151,7 +151,7 @@ mod tests {
             ScriptedGitClient::applied("/repos/api\n"),
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),
-            ScriptedGitClient::applied("git@example.com:team/api.git\n"),
+            ScriptedGitClient::applied("git@example.invalid:team/example-project.git\n"),
             ScriptedGitClient::applied(" M a.txt\n?? b.txt\n"),
             ScriptedGitClient::applied("2\n"),
         ]);
@@ -165,7 +165,9 @@ mod tests {
                 top: crate::utils::repository_root("/repos/api"),
                 branch: branch_name("main"),
                 remote: remote_name("origin"),
-                remote_url: Some(RemoteUrl::try_new("git@example.com:team/api.git").unwrap()),
+                remote_urls: vec![
+                    RemoteUrl::try_new("git@example.invalid:team/example-project.git").unwrap()
+                ],
                 pending: PendingChanges {
                     changed: PathCount::new(2),
                     staged: PathCount::default(),

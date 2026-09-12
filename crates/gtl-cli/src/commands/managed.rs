@@ -76,3 +76,20 @@ pub struct ManagedRun<T> {
     pub stdout: String,
     pub stderr: String,
 }
+
+pub(crate) fn run_commit_and_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
+    let committed = run_commit_for_push_all(options);
+    if committed.exit != ManagedExit::Clean {
+        return ManagedRun {
+            exit: committed.exit,
+            results: Vec::new(),
+            stdout: committed.stdout,
+            stderr: committed.stderr,
+        };
+    }
+    let mut pushed = push_pull::run_push_after_commit(options, &committed.results);
+    if pushed.exit != ManagedExit::Clean && pushed.results.is_empty() {
+        pushed.stdout = committed.stdout;
+    }
+    pushed
+}
