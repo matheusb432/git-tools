@@ -12,8 +12,8 @@ fn server_request_failure_is_rendered_once_at_the_command_boundary() -> Result<(
     let _server = common::ServerHarness::start(Some(&config), None)?;
 
     for (arguments, exit_code) in [
-        (["push", "--all", "--dry"], 2),
-        (["diff", "HEAD", "--raw"], 1),
+        (&["project", "push", "--all", "--dry"][..], 2),
+        (&["diff", "HEAD", "--raw"][..], 1),
     ] {
         Command::new(env!("CARGO_BIN_EXE_git-tools"))
             .args(arguments)

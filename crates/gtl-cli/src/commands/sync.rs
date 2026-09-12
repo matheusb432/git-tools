@@ -16,14 +16,6 @@ pub struct PushTarget {
     pub pending: PendingChanges,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitTarget {
-    pub name: ProjectName,
-    pub top: RepositoryRoot,
-    pub branch: BranchName,
-    pub pending: PendingChanges,
-}
-
 pub(crate) fn push_target_from_grpc(
     target: v1::RepositoryPushTarget,
 ) -> anyhow::Result<PushTarget> {
@@ -57,33 +49,6 @@ pub(crate) fn push_target_to_grpc(target: &PushTarget) -> v1::RepositoryPushTarg
         branch: target.branch.to_string(),
         remote: target.remote.to_string(),
         remote_urls: target.remote_urls.iter().map(ToString::to_string).collect(),
-        pending: Some(pending_to_grpc(target.pending)),
-    }
-}
-
-pub(crate) fn commit_target_from_grpc(
-    target: v1::RepositoryCommitTarget,
-) -> anyhow::Result<CommitTarget> {
-    Ok(CommitTarget {
-        name: ProjectName::try_new(target.project_name)
-            .context("gtl-server returned an empty commit project name")?,
-        top: RepositoryRoot::try_new(target.repository_root.into())
-            .context("gtl-server returned a non-absolute commit repository root")?,
-        branch: BranchName::try_new(target.branch)
-            .context("gtl-server returned an empty commit branch")?,
-        pending: pending_from_grpc(
-            target
-                .pending
-                .context("gtl-server returned no pending commit state")?,
-        ),
-    })
-}
-
-pub(crate) fn commit_target_to_grpc(target: &CommitTarget) -> v1::RepositoryCommitTarget {
-    v1::RepositoryCommitTarget {
-        project_name: target.name.to_string(),
-        repository_root: target.top.to_string(),
-        branch: target.branch.to_string(),
         pending: Some(pending_to_grpc(target.pending)),
     }
 }
@@ -158,20 +123,6 @@ pub(crate) fn push_confirmation(target: &PushTarget) -> crate::confirm::Dialog {
             Detail::new("Push", remote_label(target)),
         ],
         "Push these commits?",
-    )
-}
-
-pub(crate) fn commit_confirmation(target: &CommitTarget) -> crate::confirm::Dialog {
-    use crate::confirm::{Detail, Dialog};
-
-    Dialog::new(
-        "Confirm commit",
-        vec![
-            Detail::new("Project", &target.name),
-            Detail::new("Branch", &target.branch),
-            Detail::new("Files to commit", files_to_commit(target.pending)),
-        ],
-        "Commit all changes?",
     )
 }
 

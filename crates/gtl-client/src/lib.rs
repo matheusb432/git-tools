@@ -14,7 +14,6 @@ use gtl_wire::v1::{
     project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, tag_service_client::TagServiceClient,
-    worktree_service_client::WorktreeServiceClient,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use tonic::{
@@ -235,17 +234,6 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn commit_project_repositories(
-        &self,
-        request: v1::CommitProjectRepositoriesRequest,
-    ) -> Result<v1::CommitProjectRepositoriesResponse, ClientError> {
-        self.project_client()
-            .commit_project_repositories(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
     pub async fn get_project_repository_statuses(
         &self,
     ) -> Result<v1::GetProjectRepositoryStatusesResponse, ClientError> {
@@ -278,28 +266,6 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn plan_repository_commit(
-        &self,
-        request: v1::PlanRepositoryCommitRequest,
-    ) -> Result<v1::PlanRepositoryCommitResponse, ClientError> {
-        self.repository_client()
-            .plan_repository_commit(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn execute_repository_commit(
-        &self,
-        request: v1::ExecuteRepositoryCommitRequest,
-    ) -> Result<v1::ExecuteRepositoryCommitResponse, ClientError> {
-        self.repository_client()
-            .execute_repository_commit(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
     pub async fn plan_recursive_repository_push(
         &self,
         request: v1::PlanRecursiveRepositoryPushRequest,
@@ -317,6 +283,28 @@ impl GtlClient {
     ) -> Result<v1::ExecuteRecursiveRepositoryPushResponse, ClientError> {
         self.repository_client()
             .execute_recursive_repository_push(request)
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn get_project_repository(
+        &self,
+        request: v1::GetProjectRepositoryRequest,
+    ) -> Result<v1::GetProjectRepositoryResponse, ClientError> {
+        self.project_client()
+            .get_project_repository(request)
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn pull_repository(
+        &self,
+        request: v1::PullRepositoryRequest,
+    ) -> Result<v1::PullRepositoryResponse, ClientError> {
+        self.repository_client()
+            .pull_repository(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -360,28 +348,6 @@ impl GtlClient {
     ) -> Result<v1::SetViewerThemeResponse, ClientError> {
         self.settings_client()
             .set_viewer_theme(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn get_worktree_base(
-        &self,
-        request: v1::GetWorktreeBaseRequest,
-    ) -> Result<v1::GetWorktreeBaseResponse, ClientError> {
-        self.worktree_client()
-            .get_worktree_base(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn list_worktrees(
-        &self,
-        request: v1::ListWorktreesRequest,
-    ) -> Result<v1::ListWorktreesResponse, ClientError> {
-        self.worktree_client()
-            .list_worktrees(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -600,12 +566,6 @@ impl GtlClient {
 
     fn tag_client(&self) -> TagServiceClient<AuthenticatedChannel> {
         TagServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-    }
-
-    fn worktree_client(&self) -> WorktreeServiceClient<AuthenticatedChannel> {
-        WorktreeServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }

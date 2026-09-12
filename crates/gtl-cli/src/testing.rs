@@ -1,7 +1,7 @@
 use gtl_models::{
     diffs::CommitId,
     git::{BranchName, CommitCount, GitObjectId, RemoteName, RemoteUrl, TagName},
-    paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
+    paths::{ProjectName, RepositoryRoot},
     repository::PathCount,
 };
 
@@ -11,10 +11,6 @@ pub(crate) fn project_name(raw: &str) -> ProjectName {
 
 pub(crate) fn repository_root(raw: &str) -> RepositoryRoot {
     RepositoryRoot::try_new(raw.into()).unwrap()
-}
-
-pub(crate) fn repository_relative_path(raw: &str) -> RepositoryRelativePath {
-    RepositoryRelativePath::try_new(raw.into()).unwrap()
 }
 
 pub(crate) fn branch_name(raw: &str) -> BranchName {

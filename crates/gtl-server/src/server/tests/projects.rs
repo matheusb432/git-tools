@@ -369,3 +369,82 @@ async fn rejects_invalid_project_requests_and_rolls_back_duplicate_creation() ->
     server.stop().await?;
     Ok(())
 }
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn resolves_managed_project_sources_including_paused_projects() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client =
+        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    client
+        .create_project(creation("DEMO", "Example project"))
+        .await?;
+    let request = || v1::GetProjectRepositoryRequest {
+        project_id: "DEMO".into(),
+    };
+    let expected = directories::BaseDirs::new()
+        .ok_or("home directory")?
+        .home_dir()
+        .join("tools/DEMO")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        client
+            .get_project_repository(request())
+            .await?
+            .into_inner()
+            .repository_root,
+        expected
+    );
+
+    client
+        .pause_project(v1::PauseProjectRequest {
+            project_id: "DEMO".into(),
+            mode: v1::ProjectOperationMode::Apply.into(),
+        })
+        .await?;
+    assert_eq!(
+        client
+            .get_project_repository(request())
+            .await?
+            .into_inner()
+            .repository_root,
+        expected
+    );
+    assert!(
+        client
+            .list_active_projects(v1::ListActiveProjectsRequest {})
+            .await?
+            .into_inner()
+            .projects
+            .is_empty()
+    );
+
+    client
+        .unmanage_projects(v1::UnmanageProjectsRequest {
+            project_ids: vec!["DEMO".into()],
+            mode: v1::ProjectOperationMode::Apply.into(),
+        })
+        .await?;
+    assert_eq!(
+        client
+            .get_project_repository(request())
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        client
+            .get_project_repository(v1::GetProjectRepositoryRequest {
+                project_id: "invalid-id".into()
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+    server.stop().await?;
+    Ok(())
+}

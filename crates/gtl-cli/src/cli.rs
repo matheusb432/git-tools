@@ -4,6 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use gtl_models::{
     diffs::PinnedRange,
     git::{GitRange, GitRevision},
+    projects::catalogue::ProjectId,
 };
 
 fn non_empty_name(value: &str) -> Result<String, String> {
@@ -21,6 +22,11 @@ fn non_empty_message(value: &str) -> Result<String, String> {
     } else {
         Ok(value.to_string())
     }
+}
+
+fn project_id(value: &str) -> Result<ProjectId, String> {
+    ProjectId::try_new(value.to_ascii_uppercase())
+        .map_err(|_| "project ID must contain 2 to 4 ASCII letters".to_string())
 }
 
 /// Inspect repositories and run Git workflows.
@@ -48,27 +54,23 @@ impl Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Diff the current repo (all managed repos with `--all`, nested subrepos with `-r`),
-    /// opening it in the app's viewer unless `--raw` prints an artifact URL instead.
+    /// View a repository diff.
     #[command(visible_alias = "d")]
     Diff(DiffArgs),
-    /// Push existing commits, or stage all changes, commit with MESSAGE, and push.
+    /// Push commits, optionally committing all changes first.
     #[command(visible_alias = "p")]
     Push(PushArgs),
-    /// Pull every active project managed in Git Tools.
+    /// Fast-forward a repository from origin.
     Pull(PullArgs),
-    /// Stage all changes and commit them, without pushing.
-    Commit(CommitArgs),
+    /// Run workflows across managed projects.
+    Project(ProjectArgs),
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
-    /// Inspect git worktrees.
-    #[command(visible_alias = "wk")]
-    Worktree(WorktreeArgs),
-    /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses
-    /// into nested subrepos.
+    /// Show repository status.
     #[command(visible_alias = "s")]
     Status(StatusArgs),
-    /// Aliases `status --all`
+    /// Alias for `project ls`.
+    #[command(hide = true)]
     Ls(LsArgs),
     /// Inspect the resident gtl-server.
     Server(ServerArgs),
@@ -89,6 +91,8 @@ pub enum ServerCommand {
 #[derive(Debug, Args)]
 #[command(args_conflicts_with_subcommands = true)]
 pub struct DiffArgs {
+    #[command(flatten)]
+    pub repository: RepositoryArgs,
     #[command(subcommand)]
     pub sub: Option<DiffSub>,
     /// Render an artifact and print its URL without opening a viewer.
@@ -127,47 +131,80 @@ pub struct LiveArgs {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Args)]
-pub struct PushArgs {
-    /// Commit message. When present, changes are staged and committed before pushing.
-    #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
-    pub message: Option<String>,
-    /// Operate on active Git Tools projects except config entries with
-    /// `excluded_from_push_all = true`.
-    #[arg(long, conflicts_with = "recursive")]
-    pub all: bool,
-    /// Operate on the current repo plus nested subrepos under the current directory.
-    #[arg(short = 'r', long, conflicts_with = "all")]
-    pub recursive: bool,
-    #[command(flatten)]
-    pub managed: ManagedArgs,
-    /// Skip confirmation where the selected push mode supports it.
-    #[arg(short = 'y', long = "yes")]
-    pub yes: bool,
+#[derive(Debug, Clone, Args, Default)]
+pub struct RepositoryArgs {
+    /// Select a managed project by ID instead of the current repository.
+    #[arg(long, value_name = "PROJECT_ID", value_parser = project_id)]
+    pub id: Option<ProjectId>,
 }
 
 #[derive(Debug, Args)]
-pub struct CommitArgs {
-    /// Commit message.
-    #[arg(allow_hyphen_values = true, required_unless_present = "all")]
-    pub message: Option<String>,
-    /// Operate on every active project managed in Git Tools.
-    #[arg(long)]
-    pub all: bool,
+pub struct PushArgs {
     #[command(flatten)]
-    pub managed: ManagedArgs,
-    /// Skip confirmation where the selected commit mode supports it.
-    #[arg(short = 'y', long = "yes", conflicts_with = "all")]
+    pub repository: RepositoryArgs,
+    /// Stage all changes, commit with MESSAGE, and push.
+    #[arg(value_parser = non_empty_message, conflicts_with = "recursive")]
+    pub message: Option<String>,
+    /// Push the repository and its nested subrepos.
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+    /// Skip confirmation.
+    #[arg(short = 'y', long)]
     pub yes: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct PullArgs {
-    /// Pull every active project managed in Git Tools.
+    #[command(flatten)]
+    pub repository: RepositoryArgs,
+    #[command(flatten)]
+    pub managed: ManagedArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectArgs {
+    #[command(subcommand)]
+    pub command: ProjectCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// List active projects and their repository status.
+    Ls(LsArgs),
+    /// Push active projects, respecting configured push exclusions.
+    Push(ProjectPushArgs),
+    /// Fast-forward all active projects from origin.
+    Pull(ProjectPullArgs),
+    /// View diffs for active projects with unpushed changes.
+    Diff(ProjectDiffArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectPushArgs {
+    /// Operate on all active projects except configured push exclusions.
     #[arg(long, required = true)]
     pub all: bool,
     #[command(flatten)]
     pub managed: ManagedArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectPullArgs {
+    /// Operate on all active projects.
+    #[arg(long, required = true)]
+    pub all: bool,
+    #[command(flatten)]
+    pub managed: ManagedArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectDiffArgs {
+    /// Operate on all active projects.
+    #[arg(long, required = true)]
+    pub all: bool,
+    /// Print an artifact URL without opening a viewer.
+    #[arg(long)]
+    pub raw: bool,
 }
 
 #[derive(Debug, Args)]
@@ -251,20 +288,6 @@ fn parse_tag_bump_level(value: &str) -> Result<TagBumpLevel, String> {
 }
 
 #[derive(Debug, Args)]
-pub struct WorktreeArgs {
-    #[command(subcommand)]
-    pub command: WorktreeCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum WorktreeCommand {
-    /// Print the primary worktree path.
-    Base,
-    /// List worktrees in a readable table.
-    Ls,
-}
-
-#[derive(Debug, Args)]
 pub struct DiffTargetArgs {
     #[command(flatten)]
     pub scope: DiffScopeArgs,
@@ -280,7 +303,7 @@ pub struct DiffTargetArgs {
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
     pub last: Option<NonZeroU32>,
     /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
-    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all", "recursive"])]
+    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
     pub merge: Option<String>,
     /// Name the generated diff in the viewer history label.
     ///
@@ -292,18 +315,15 @@ pub struct DiffTargetArgs {
     #[arg(
         long,
         value_name = "THEME",
-        conflicts_with_all = ["all", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name"],
+        conflicts_with_all = ["id", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name"],
     )]
     pub set_theme: Option<Theme>,
 }
 
 #[derive(Debug, Args)]
 pub struct DiffScopeArgs {
-    /// Render managed repos with commits ahead of upstream or their local comparison branch.
-    #[arg(long, conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
-    pub all: bool,
     /// Render one tabbed HTML diff for every git repo under the current directory.
-    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["all", "target", "merge", "name"])]
+    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["target", "merge", "name"])]
     pub recursive: bool,
     /// Include nested linked worktrees in a recursive diff scan.
     #[arg(short = 'w', long = "worktrees", requires = "recursive")]
@@ -338,9 +358,6 @@ impl From<Theme> for gtl_models::viewer::Theme {
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Report every active project managed in Git Tools.
-    #[arg(long, conflicts_with = "recursive")]
-    pub all: bool,
     /// Report the current repo plus any nested subrepos under the current directory (linked
     /// worktrees are skipped).
     #[arg(short = 'r', long)]
@@ -355,19 +372,9 @@ pub struct LsArgs {
     pub read: ManagedReadArgs,
 }
 
-impl From<LsArgs> for StatusArgs {
-    fn from(value: LsArgs) -> Self {
-        Self {
-            all: true,
-            recursive: false,
-            read: value.read,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedReadArgs {
-    /// Emit machine-readable JSON instead of human text.
+    /// Serializes output as JSON
     #[arg(long)]
     pub json: bool,
     /// When to emit ANSI colors in human output.
@@ -387,12 +394,11 @@ pub enum ColorChoice {
 
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedArgs {
-    /// Preview actions without performing them.
-    #[arg(long, requires = "all")]
+    /// Preview changes without pushing or merging.
+    #[arg(long)]
     pub dry: bool,
-    /// Emit machine-readable JSON instead of human text. Managed push reports
-    /// separate `Selected` results and `Excluded` project names.
-    #[arg(long, requires = "all")]
+    /// Serializes output as JSON
+    #[arg(long)]
     pub json: bool,
 }
 
@@ -552,39 +558,5 @@ mod tests {
     #[test]
     fn parse_args_push_recursive_rejects_message() {
         assert!(Cli::parse_args(&["push".into(), "-r".into(), "save work".into()]).is_err());
-    }
-
-    #[test]
-    fn push_help_documents_config_exclusions_and_json_groups() {
-        use clap::CommandFactory as _;
-
-        let mut command = Cli::command();
-        let push = command.find_subcommand_mut("push").unwrap();
-        let help = push.render_long_help().to_string();
-
-        assert!(help.contains("excluded_from_push_all = true"));
-        assert!(help.contains("Selected"));
-        assert!(help.contains("Excluded"));
-    }
-
-    #[test]
-    fn parse_args_managed_flags_require_all() {
-        for command in ["push", "commit", "pull"] {
-            assert_managed_flags_require_all(command);
-        }
-    }
-
-    fn assert_managed_flags_require_all(command: &str) {
-        for flag in ["--dry", "--json"] {
-            assert!(Cli::parse_args(&[command.into(), flag.into()]).is_err());
-            assert!(Cli::parse_args(&[command.into(), "--all".into(), flag.into()]).is_ok());
-        }
-    }
-
-    #[test]
-    fn parse_args_worktree_accepts_short_alias() {
-        for command in ["worktree", "wk"] {
-            assert!(Cli::parse_args(&[command.into(), "base".into()]).is_ok());
-        }
     }
 }

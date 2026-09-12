@@ -27,7 +27,7 @@ impl ServerHarness {
 
         wait_for_server_endpoint(data_root.path(), &failure_rx)?;
         if let Some(repository) = project_repository {
-            create_fixture_project(repository)?;
+            register_project("RP", "repo", repository)?;
         }
         Ok(Self {
             _data_root: data_root,
@@ -80,7 +80,7 @@ fn check_server_failure(failure: &std::sync::mpsc::Receiver<String>) -> Result<(
     }
 }
 
-fn create_fixture_project(repository: &Path) -> Result<()> {
+pub fn register_project(id: &str, title: &str, repository: &Path) -> Result<()> {
     use gtl_wire::v1;
 
     let home = std::env::var_os("HOME").context("fixture home")?;
@@ -94,16 +94,16 @@ fn create_fixture_project(repository: &Path) -> Result<()> {
         let client = gtl_client::GtlClient::connect_local().await?;
         client
             .create_project(v1::CreateProjectRequest {
-                project_id: "RP".into(),
+                project_id: id.into(),
                 project: Some(v1::ProjectCreation {
-                    title: "repo".into(),
+                    title: title.into(),
                     source: Some(v1::ProjectSource {
                         source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
                             path: format!("~/{}", relative.to_string_lossy().replace('\\', "/")),
                         })),
                     }),
                     git_remote: None,
-                    mux_session_name: "repo".into(),
+                    mux_session_name: id.to_ascii_lowercase(),
                     affiliation: v1::ProjectAffiliation::Personal.into(),
                     color: None,
                     groups: Vec::new(),

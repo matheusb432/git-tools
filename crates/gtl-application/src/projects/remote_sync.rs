@@ -33,7 +33,7 @@ pub enum SyncExit {
     Fail,
 }
 
-pub(super) fn result(
+pub(crate) fn result(
     repo: &ProjectRepository,
     branch: Option<&BranchName>,
     status: SyncStatus,
@@ -57,12 +57,12 @@ pub(super) fn classify_exit(results: &[RepoSyncResult]) -> SyncExit {
     SyncExit::Clean
 }
 
-pub(super) enum Preflight {
+pub(crate) enum Preflight {
     Ready { branch: BranchName },
     Done(RepoSyncResult),
 }
 
-pub(super) fn preflight(
+pub(crate) fn preflight(
     git: &impl GitClient,
     repo: &ProjectRepository,
     detached_detail: &str,

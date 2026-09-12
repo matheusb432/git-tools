@@ -12,7 +12,7 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         theme: Option<Theme>,
     ) -> anyhow::Result<String>;
 
-    /// Renders several views as one tab-stripped document (diff-subrepos / diff --all).
+    /// Renders several views in one document with a tab per repository.
     fn build_tabbed_html(
         &self,
         title: &str,

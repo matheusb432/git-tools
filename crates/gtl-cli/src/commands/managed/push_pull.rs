@@ -7,7 +7,7 @@ use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{
-    CommitResult, ManagedExit, ManagedOptions, ManagedOutput, ManagedRun,
+    ManagedExit, ManagedOptions, ManagedOutput, ManagedRun,
     push_summary::{PushOutcome, PushSummary},
 };
 use crate::server_client::ServerClient;
@@ -89,13 +89,6 @@ fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
 
 #[must_use]
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    run_push_after_commit(options, &[])
-}
-
-pub(super) fn run_push_after_commit(
-    options: &ManagedOptions,
-    committed: &[CommitResult],
-) -> ManagedRun<PushPullResult> {
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
@@ -104,7 +97,7 @@ pub(super) fn run_push_after_commit(
         dry_run: options.dry,
     };
     match client.push_project_repositories(request) {
-        Ok(response) => finish(SyncOperation::Push, options, response, committed),
+        Ok(response) => finish(SyncOperation::Push, options, response),
         Err(error) => managed_error(&error),
     }
 }
@@ -119,7 +112,7 @@ pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
         dry_run: options.dry,
     };
     match client.pull_project_repositories(request) {
-        Ok(response) => finish(SyncOperation::Pull, options, response, &[]),
+        Ok(response) => finish(SyncOperation::Pull, options, response),
         Err(error) => managed_error(&error),
     }
 }
@@ -137,10 +130,9 @@ fn finish(
     operation: SyncOperation,
     options: &ManagedOptions,
     response: impl Into<ProjectRepositorySyncSummary>,
-    committed: &[CommitResult],
 ) -> ManagedRun<PushPullResult> {
     let response = response.into();
-    let mut results = match response
+    let results = match response
         .results
         .into_iter()
         .map(result_from_grpc)
@@ -166,11 +158,6 @@ fn finish(
         Ok(exit) => exit,
         Err(error) => return managed_error(&error),
     };
-    for result in &mut results {
-        for commit in committed {
-            commit.annotate_push(result);
-        }
-    }
     let stdout = match format_push_pull(operation, options.dry, options.output, &results, &excluded)
     {
         Ok(stdout) => stdout,
@@ -207,6 +194,14 @@ impl From<v1::PullProjectRepositoriesResponse> for ProjectRepositorySyncSummary 
             excluded_project_names: Vec::new(),
             exit: response.exit,
         }
+    }
+}
+
+impl TryFrom<v1::RepositorySyncResult> for PushPullResult {
+    type Error = anyhow::Error;
+
+    fn try_from(result: v1::RepositorySyncResult) -> anyhow::Result<Self> {
+        result_from_grpc(result)
     }
 }
 

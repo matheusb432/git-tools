@@ -1,5 +1,6 @@
 mod live_views;
 mod projects;
+mod repositories;
 mod row_sessions;
 
 use std::{error::Error, time::Duration};
@@ -7,13 +8,12 @@ use std::{error::Error, time::Duration};
 use gtl_wire::v1::{
     BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, ExtensionsFieldUpdate,
     ExtensionsValue, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetViewerSettingsRequest, GetViewerShellRequest, GetWorktreeBaseRequest, MoveViewerTabRequest,
+    GetViewerSettingsRequest, GetViewerShellRequest, MoveViewerTabRequest,
     PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest, ViewerTabPlacement,
     ViewerTheme, WatchViewerRequest, bool_field_update, diff_service_client::DiffServiceClient,
     diff_target, extensions_field_update, project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
-    worktree_service_client::WorktreeServiceClient,
 };
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
@@ -273,16 +273,6 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
         .await
         .unwrap_err();
     assert_eq!(error.code(), tonic::Code::NotFound);
-
-    let mut worktree_client =
-        WorktreeServiceClient::with_interceptor(server.native_channel(), server.authorization());
-    let error = worktree_client
-        .get_worktree_base(GetWorktreeBaseRequest {
-            repository_path: directory.path().to_string_lossy().into_owned(),
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
     server.stop().await?;
     Ok(())
@@ -591,7 +581,6 @@ async fn assert_health_serving(
         "gtl.v1.SettingsService",
         "gtl.v1.TagService",
         "gtl.v1.ViewerService",
-        "gtl.v1.WorktreeService",
     ] {
         let response = client
             .check(HealthCheckRequest {
@@ -658,7 +647,6 @@ async fn assert_reflection_describes_gtl_contract(
             "gtl.v1.SettingsService",
             "gtl.v1.TagService",
             "gtl.v1.ViewerService",
-            "gtl.v1.WorktreeService",
         ]
     );
     let encoded_descriptors = match next_reflection_response(&mut responses).await? {

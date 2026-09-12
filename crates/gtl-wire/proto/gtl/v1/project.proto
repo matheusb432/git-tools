@@ -10,6 +10,8 @@ service ProjectService {
 
   // Gets a managed project, including a paused project.
   rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  // Resolves the directory source of a managed project, including a paused project.
+  rpc GetProjectRepository(GetProjectRepositoryRequest) returns (GetProjectRepositoryResponse);
 
   // Lists active projects in ascending project ID order.
   rpc ListActiveProjects(ListActiveProjectsRequest) returns (ListActiveProjectsResponse);
@@ -27,7 +29,6 @@ service ProjectService {
   rpc UnmanageProjects(UnmanageProjectsRequest) returns (UnmanageProjectsResponse);
   rpc PushProjectRepositories(PushProjectRepositoriesRequest) returns (PushProjectRepositoriesResponse);
   rpc PullProjectRepositories(PullProjectRepositoriesRequest) returns (PullProjectRepositoriesResponse);
-  rpc CommitProjectRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
   rpc GetProjectRepositoryStatuses(GetProjectRepositoryStatusesRequest) returns (GetProjectRepositoryStatusesResponse);
 }
 
@@ -37,25 +38,6 @@ message PushProjectRepositoriesRequest {
 
 message PullProjectRepositoriesRequest {
   bool dry_run = 1;
-}
-
-enum RepositorySyncStatus {
-  REPOSITORY_SYNC_STATUS_UNSPECIFIED = 0;
-  REPOSITORY_SYNC_STATUS_SKIP = 1;
-  REPOSITORY_SYNC_STATUS_UP_TO_DATE = 2;
-  REPOSITORY_SYNC_STATUS_PUSHED = 3;
-  REPOSITORY_SYNC_STATUS_WOULD_PUSH = 4;
-  REPOSITORY_SYNC_STATUS_PULLED = 5;
-  REPOSITORY_SYNC_STATUS_WOULD_PULL = 6;
-  REPOSITORY_SYNC_STATUS_WARNING = 7;
-  REPOSITORY_SYNC_STATUS_FAILED = 8;
-}
-
-message RepositorySyncResult {
-  string project_name = 1;
-  optional string branch = 2;
-  RepositorySyncStatus status = 3;
-  string detail = 4;
 }
 
 enum ProjectSyncExit {
@@ -74,49 +56,6 @@ message PushProjectRepositoriesResponse {
 message PullProjectRepositoriesResponse {
   repeated RepositorySyncResult results = 1;
   ProjectSyncExit exit = 2;
-}
-
-message CommitProjectRepositoriesRequest {
-  bool dry_run = 1;
-  optional string message = 2;
-  bool use_push_all_exclusions = 3;
-}
-
-enum ProjectCommitAction {
-  PROJECT_COMMIT_ACTION_UNSPECIFIED = 0;
-  PROJECT_COMMIT_ACTION_ABSENT = 1;
-  PROJECT_COMMIT_ACTION_CLEAN = 2;
-  PROJECT_COMMIT_ACTION_WOULD_COMMIT = 3;
-  PROJECT_COMMIT_ACTION_SKIPPED = 4;
-  PROJECT_COMMIT_ACTION_COMMITTED = 5;
-  PROJECT_COMMIT_ACTION_FAILED = 6;
-}
-
-message CommitFile {
-  string status = 1;
-  string path = 2;
-}
-
-message ProjectCommitResult {
-  string project_name = 1;
-  bool present = 2;
-  bool dirty = 3;
-  repeated CommitFile files = 4;
-  ProjectCommitAction action = 5;
-  string detail = 6;
-}
-
-enum ProjectCommitExit {
-  PROJECT_COMMIT_EXIT_UNSPECIFIED = 0;
-  PROJECT_COMMIT_EXIT_CLEAN = 1;
-  PROJECT_COMMIT_EXIT_WARNING = 2;
-  PROJECT_COMMIT_EXIT_FAILED = 3;
-}
-
-message CommitProjectRepositoriesResponse {
-  repeated ProjectCommitResult results = 1;
-  ProjectCommitExit exit = 2;
-  optional string failure_detail = 3;
 }
 
 message GetProjectRepositoryStatusesRequest {}
@@ -145,6 +84,14 @@ message ProjectCreation {
   repeated string groups = 7;
   // Defaults to true when omitted.
   optional bool include_in_full_export = 8;
+}
+
+message GetProjectRepositoryRequest {
+  string project_id = 1;
+}
+
+message GetProjectRepositoryResponse {
+  string repository_root = 1;
 }
 
 message GetProjectRequest {

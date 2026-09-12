@@ -1,4 +1,4 @@
-//! Shared working-tree reads for project commit and repository status operations.
+//! Working-tree reads shared by push preparation and status.
 
 use gtl_models::{paths::RepositoryRoot, repository::working_tree::DirtyState};
 

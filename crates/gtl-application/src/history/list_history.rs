@@ -93,9 +93,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_generated_at_when_head_commit_is_absent() {
-        // `diff -r`/`diff --all` have no single head commit. Without a fallback
-        // they would always sort last,
-        // regardless of how recently they were generated.
+        // Multi-repository diffs have no single head commit, so use their generation time.
         let store = InMemoryArtifactStore {
             history: vec![
                 record(

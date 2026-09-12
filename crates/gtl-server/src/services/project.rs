@@ -1,7 +1,6 @@
 mod catalogue;
 
 use gtl_application::{
-    ports::UserSettingsReader as _,
     projects::{
         RepoSyncResult, SyncExit, SyncStatus,
         catalogue::{
@@ -9,10 +8,7 @@ use gtl_application::{
             set_project_membership::{self, ProjectMembership, SetProjectMembership},
             set_project_status::{self, SetProjectStatus},
         },
-        commit_repositories::{
-            self, CommitAction, CommitExit, CommitRepositories, CommitRepositoriesError,
-            CommitRepositoriesMode, CommitRepositoriesOk, CommitRepositoriesScope, CommitResult,
-        },
+        get_project_repository::{self, GetProjectRepository},
         pull_repositories::{self, PullRepositoriesError},
         push_repositories::{self, PushRepositoriesError},
     },
@@ -83,6 +79,35 @@ impl ProjectService for ProjectGrpcService {
         })
         .await??;
         Ok(Response::new(catalogue::get_response(project)))
+    }
+
+    async fn get_project_repository(
+        &self,
+        request: Request<v1::GetProjectRepositoryRequest>,
+    ) -> Result<Response<v1::GetProjectRepositoryResponse>, Status> {
+        let request = GetProjectRepository {
+            id: request
+                .into_inner()
+                .project_id
+                .try_into()
+                .map_err(catalogue::invalid)?,
+            home: directories::BaseDirs::new()
+                .ok_or_else(|| Status::failed_precondition("home directory unavailable"))?
+                .home_dir()
+                .to_path_buf(),
+        };
+        let state = self.state.clone();
+        let repository = run_blocking(move || {
+            let connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| catalogue::lock_error(&error))?;
+            get_project_repository::execute(&request, &connection).map_err(catalogue::error)
+        })
+        .await??;
+        Ok(Response::new(v1::GetProjectRepositoryResponse {
+            repository_root: repository.to_string(),
+        }))
     }
 
     async fn list_active_projects(
@@ -251,44 +276,6 @@ impl ProjectService for ProjectGrpcService {
         ))
     }
 
-    async fn commit_project_repositories(
-        &self,
-        request: Request<v1::CommitProjectRepositoriesRequest>,
-    ) -> Result<Response<v1::CommitProjectRepositoriesResponse>, Status> {
-        let request = request.into_inner();
-        let state = self.state.clone();
-        let scope = if request.use_push_all_exclusions {
-            CommitRepositoriesScope::PushAll {
-                exclusions: state
-                    .user_settings
-                    .load()
-                    .map_err(user_settings_load_error)?
-                    .push_all_exclusions()
-                    .clone(),
-            }
-        } else {
-            CommitRepositoriesScope::All
-        };
-        let repos = state
-            .projects
-            .list_projects()
-            .await
-            .map_err(|error| project_client_error(&error))?;
-        let mode = if request.dry_run {
-            CommitRepositoriesMode::DryRun
-        } else {
-            CommitRepositoriesMode::Apply {
-                message: request.message,
-            }
-        };
-        let result = run_blocking(move || {
-            commit_repositories::execute(CommitRepositories { repos, mode, scope }, &state.git)
-        })
-        .await?;
-
-        Ok(Response::new(commit_response(result)))
-    }
-
     async fn get_project_repository_statuses(
         &self,
         _request: Request<v1::GetProjectRepositoryStatusesRequest>,
@@ -378,7 +365,7 @@ impl From<ProjectRepositorySyncSummary> for v1::PullProjectRepositoriesResponse 
     }
 }
 
-fn sync_result(result: RepoSyncResult) -> v1::RepositorySyncResult {
+pub(super) fn sync_result(result: RepoSyncResult) -> v1::RepositorySyncResult {
     v1::RepositorySyncResult {
         project_name: result.name.to_string(),
         branch: result.branch.map(|branch| branch.to_string()),
@@ -396,70 +383,8 @@ fn sync_result(result: RepoSyncResult) -> v1::RepositorySyncResult {
     }
 }
 
-fn commit_response(
-    result: Result<CommitRepositoriesOk, CommitRepositoriesError>,
-) -> v1::CommitProjectRepositoriesResponse {
-    match result {
-        Ok(result) => v1::CommitProjectRepositoriesResponse {
-            results: result.results.iter().map(commit_result).collect(),
-            exit: match result.exit {
-                CommitExit::Clean => v1::ProjectCommitExit::Clean,
-                CommitExit::Warn => v1::ProjectCommitExit::Warning,
-                CommitExit::Fail => v1::ProjectCommitExit::Failed,
-            } as i32,
-            failure_detail: None,
-        },
-        Err(error) => {
-            let failure_detail = error.to_string();
-            tracing::error!(error = ?error, "project commit stopped before completion");
-            let completed_results = match error {
-                CommitRepositoriesError::Transport {
-                    mut completed_results,
-                    failed_result,
-                    ..
-                } => {
-                    completed_results.extend(failed_result.map(|result| *result));
-                    completed_results
-                }
-                _ => Vec::new(),
-            };
-            v1::CommitProjectRepositoriesResponse {
-                results: completed_results.iter().map(commit_result).collect(),
-                exit: v1::ProjectCommitExit::Failed as i32,
-                failure_detail: Some(failure_detail),
-            }
-        }
-    }
-}
-
-fn commit_result(result: &CommitResult) -> v1::ProjectCommitResult {
-    v1::ProjectCommitResult {
-        project_name: result.name().to_string(),
-        present: result.is_present(),
-        dirty: result.is_dirty(),
-        files: result
-            .files()
-            .iter()
-            .map(|file| v1::CommitFile {
-                status: file.status.clone(),
-                path: file.path.as_ref().to_string_lossy().into_owned(),
-            })
-            .collect(),
-        action: match result.action() {
-            CommitAction::Absent => v1::ProjectCommitAction::Absent,
-            CommitAction::Clean => v1::ProjectCommitAction::Clean,
-            CommitAction::WouldCommit => v1::ProjectCommitAction::WouldCommit,
-            CommitAction::Skipped => v1::ProjectCommitAction::Skipped,
-            CommitAction::Committed => v1::ProjectCommitAction::Committed,
-            CommitAction::Fail => v1::ProjectCommitAction::Failed,
-        } as i32,
-        detail: result.detail().into_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use gtl_application::projects::commit_repositories::CommitOutcome;
     use gtl_models::git::BranchName;
 
     use super::*;
@@ -500,17 +425,5 @@ mod tests {
             status.message(),
             "user settings at /tmp/config.toml are invalid: bad project settings"
         );
-    }
-
-    #[test]
-    fn commit_projection_preserves_closed_result_facts() {
-        let result = CommitResult::new(ProjectName::try_new("api").unwrap(), CommitOutcome::Clean);
-        let projected = commit_result(&result);
-
-        assert_eq!(projected.project_name, "api");
-        assert!(projected.present);
-        assert!(!projected.dirty);
-        assert_eq!(projected.action(), v1::ProjectCommitAction::Clean);
-        assert_eq!(projected.detail, "nothing to commit");
     }
 }

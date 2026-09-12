@@ -9,7 +9,7 @@ use gtl_wire::{
         project_service_server::ProjectServiceServer,
         repository_service_server::RepositoryServiceServer,
         settings_service_server::SettingsServiceServer, tag_service_server::TagServiceServer,
-        viewer_service_server::ViewerServiceServer, worktree_service_server::WorktreeServiceServer,
+        viewer_service_server::ViewerServiceServer,
     },
     viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
 };
@@ -35,7 +35,7 @@ use crate::uds_listener::BoundUdsListener;
 use crate::{
     services::{
         DiffGrpcService, LiveViewGrpcService, ProjectGrpcService, RepositoryGrpcService,
-        SettingsGrpcService, TagGrpcService, ViewerGrpcService, WorktreeGrpcService,
+        SettingsGrpcService, TagGrpcService, ViewerGrpcService,
     },
     state::AppState,
 };
@@ -49,7 +49,7 @@ const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 const AUTHORIZATION_SCHEME: &str = "Bearer ";
 const HEALTH_SERVICE_NAME: &str = "grpc.health.v1.Health";
 const REFLECTION_SERVICE_NAME: &str = "grpc.reflection.v1.ServerReflection";
-const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 8] = [
+const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 7] = [
     DiffServiceServer::<DiffGrpcService>::NAME,
     LiveViewServiceServer::<LiveViewGrpcService>::NAME,
     ProjectServiceServer::<ProjectGrpcService>::NAME,
@@ -57,7 +57,6 @@ const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 8] = [
     SettingsServiceServer::<SettingsGrpcService>::NAME,
     TagServiceServer::<TagGrpcService>::NAME,
     ViewerServiceServer::<ViewerGrpcService>::NAME,
-    WorktreeServiceServer::<WorktreeGrpcService>::NAME,
 ];
 
 type GrpcTraceLayer = TraceLayer<
@@ -163,9 +162,6 @@ pub(crate) async fn serve(
     let tag_server = TagServiceServer::new(TagGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let worktree_server = WorktreeServiceServer::new(WorktreeGrpcService::new(state.clone()))
-        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
     let viewer_server = ViewerServiceServer::new(ViewerGrpcService::new(state))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(VIEWER_MAX_RESPONSE_MESSAGE_SIZE);
@@ -197,8 +193,6 @@ pub(crate) async fn serve(
     let settings_server =
         InterceptorLayer::new(native_authentication()).named_layer(settings_server);
     let tag_server = InterceptorLayer::new(native_authentication()).named_layer(tag_server);
-    let worktree_server =
-        InterceptorLayer::new(native_authentication()).named_layer(worktree_server);
     let viewer_server = InterceptorLayer::new(native_authentication()).named_layer(viewer_server);
     let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
     let server_shutdown = wait_for_shutdown(shutdown_receiver);
@@ -215,8 +209,7 @@ pub(crate) async fn serve(
         .add_service(repository_server)
         .add_service(settings_server)
         .add_service(tag_server)
-        .add_service(viewer_server)
-        .add_service(worktree_server);
+        .add_service(viewer_server);
     #[cfg(unix)]
     let grpc_server = server.serve_with_incoming_shutdown(listeners.native, server_shutdown);
     #[cfg(windows)]

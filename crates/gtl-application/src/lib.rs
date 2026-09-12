@@ -17,7 +17,6 @@ pub mod settings;
 pub mod shared;
 pub mod tags;
 pub mod viewer;
-pub mod worktrees;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod utils;

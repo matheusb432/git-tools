@@ -88,7 +88,10 @@ mod tests {
             v(&["diff", "merge", "--repo", "r"])
         );
         assert_eq!(normalize(v(&["diff", "-l", "5"])), v(&["diff", "-l", "5"]));
-        assert_eq!(normalize(v(&["status", "--all"])), v(&["status", "--all"]));
+        assert_eq!(
+            normalize(v(&["status", "--json"])),
+            v(&["status", "--json"])
+        );
         assert_eq!(normalize(Vec::new()), Vec::<String>::new());
     }
 }

@@ -7,12 +7,39 @@ import "gtl/v1/common.proto";
 service RepositoryService {
   rpc PlanRepositoryPush(PlanRepositoryPushRequest) returns (PlanRepositoryPushResponse);
   rpc ExecuteRepositoryPush(ExecuteRepositoryPushRequest) returns (ExecuteRepositoryPushResponse);
-  rpc PlanRepositoryCommit(PlanRepositoryCommitRequest) returns (PlanRepositoryCommitResponse);
-  rpc ExecuteRepositoryCommit(ExecuteRepositoryCommitRequest) returns (ExecuteRepositoryCommitResponse);
   rpc PlanRecursiveRepositoryPush(PlanRecursiveRepositoryPushRequest) returns (PlanRecursiveRepositoryPushResponse);
   rpc ExecuteRecursiveRepositoryPush(ExecuteRecursiveRepositoryPushRequest) returns (ExecuteRecursiveRepositoryPushResponse);
+  rpc PullRepository(PullRepositoryRequest) returns (PullRepositoryResponse);
   rpc GetRepositoryStatus(GetRepositoryStatusRequest) returns (GetRepositoryStatusResponse);
   rpc GetRecursiveRepositoryStatuses(GetRecursiveRepositoryStatusesRequest) returns (GetRecursiveRepositoryStatusesResponse);
+}
+
+message PullRepositoryRequest {
+  string repository_path = 1;
+  bool dry_run = 2;
+}
+
+message PullRepositoryResponse {
+  RepositorySyncResult result = 1;
+}
+
+enum RepositorySyncStatus {
+  REPOSITORY_SYNC_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_SYNC_STATUS_SKIP = 1;
+  REPOSITORY_SYNC_STATUS_UP_TO_DATE = 2;
+  REPOSITORY_SYNC_STATUS_PUSHED = 3;
+  REPOSITORY_SYNC_STATUS_WOULD_PUSH = 4;
+  REPOSITORY_SYNC_STATUS_PULLED = 5;
+  REPOSITORY_SYNC_STATUS_WOULD_PULL = 6;
+  REPOSITORY_SYNC_STATUS_WARNING = 7;
+  REPOSITORY_SYNC_STATUS_FAILED = 8;
+}
+
+message RepositorySyncResult {
+  string project_name = 1;
+  optional string branch = 2;
+  RepositorySyncStatus status = 3;
+  string detail = 4;
 }
 
 message OperationDetail {
@@ -83,42 +110,6 @@ message RepositoryMutationProgress {
 
 message ExecuteRepositoryPushResponse {
   RepositoryPushStatus status = 1;
-  string detail = 2;
-  RepositoryMutationProgress progress = 3;
-}
-
-message RepositoryCommitTarget {
-  string project_name = 1;
-  string repository_root = 2;
-  string branch = 3;
-  PendingChanges pending = 4;
-}
-
-message PlanRepositoryCommitRequest {
-  string repository_path = 1;
-}
-
-message PlanRepositoryCommitResponse {
-  oneof outcome {
-    RepositoryCommitTarget ready = 1;
-    OperationDetail refused = 2;
-  }
-}
-
-message ExecuteRepositoryCommitRequest {
-  RepositoryCommitTarget target = 1;
-  string message = 2;
-}
-
-enum RepositoryCommitStatus {
-  REPOSITORY_COMMIT_STATUS_UNSPECIFIED = 0;
-  REPOSITORY_COMMIT_STATUS_COMMITTED = 1;
-  REPOSITORY_COMMIT_STATUS_NO_OP = 2;
-  REPOSITORY_COMMIT_STATUS_FAILED = 3;
-}
-
-message ExecuteRepositoryCommitResponse {
-  RepositoryCommitStatus status = 1;
   string detail = 2;
   RepositoryMutationProgress progress = 3;
 }

@@ -23,10 +23,9 @@ use gtl_models::{
     paths::RepositoryRoot,
     tags::Tag,
     timestamps::MachineTimestamp,
-    worktrees::Worktree,
 };
 
-use self::parsing::{parse_local_tags, parse_remote_tags, parse_worktrees};
+use self::parsing::{parse_local_tags, parse_remote_tags};
 
 /// Production Git adapter using stable `gix` facade APIs with a private process fallback.
 #[derive(Debug, Clone, Copy, Default)]
@@ -223,16 +222,6 @@ impl GitClient for HybridGitClient {
         repo_path: &RepositoryRoot,
     ) -> anyhow::Result<GitEffect<GitWorkingTree>> {
         working_tree::read(repo_path).map(GitEffect::Applied)
-    }
-    fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>> {
-        match effect(
-            repo_path,
-            &["worktree", "list", "--porcelain"],
-            parse_worktrees,
-        )? {
-            GitEffect::Applied(worktrees) => worktrees.map(GitEffect::Applied),
-            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
-        }
     }
     fn local_tags(
         &self,

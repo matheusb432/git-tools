@@ -31,7 +31,7 @@ pub enum ProjectsViewMode {
 )]
 pub struct ProjectsPageSize(u32);
 
-/// Exact, case-sensitive Git Tools project names omitted from `push --all` before Git inspection.
+/// Exact, case-sensitive project names omitted from `project push --all` before Git inspection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PushAllExclusions(BTreeSet<ProjectName>);
 

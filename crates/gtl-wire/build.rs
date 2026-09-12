@@ -9,7 +9,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "proto/gtl/v1/settings.proto",
         "proto/gtl/v1/tag.proto",
         "proto/gtl/v1/viewer.proto",
-        "proto/gtl/v1/worktree.proto",
     ];
     tonic_prost_build::configure()
         .build_transport(false)

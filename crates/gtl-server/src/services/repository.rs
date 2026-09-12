@@ -1,15 +1,13 @@
 use gtl_application::repositories::{
-    CommitProgress,
-    apply_commit::{self, ApplyCommit, ApplyCommitError, CommitStatus},
     apply_push::{self, ApplyPush, ApplyPushError, ApplyPushOk, PushBasis, PushMode, PushProgress},
     apply_recursive_push,
     get_recursive_repository_statuses::{
         self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
     },
     get_repository_status,
-    plan_commit::{self, CommitTarget, PlanCommitOk},
     plan_push::{self, PlanPushOk, PushTarget},
     plan_recursive_push,
+    pull_repository::{self, PullRepository},
 };
 use gtl_models::{
     git::{BranchName, CommitCount, RemoteName, RemoteUrl},
@@ -92,54 +90,6 @@ impl RepositoryService for RepositoryGrpcService {
         Ok(Response::new(push_response(result)?))
     }
 
-    async fn plan_repository_commit(
-        &self,
-        request: Request<v1::PlanRepositoryCommitRequest>,
-    ) -> Result<Response<v1::PlanRepositoryCommitResponse>, Status> {
-        let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
-        let state = self.state.clone();
-        let result = run_blocking(move || plan_commit::execute(&request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "plan repository commit"))?;
-        let outcome = match result {
-            PlanCommitOk::Ready(target) => {
-                v1::plan_repository_commit_response::Outcome::Ready(commit_target(&target))
-            }
-            PlanCommitOk::Refused(detail) => {
-                v1::plan_repository_commit_response::Outcome::Refused(v1::OperationDetail {
-                    detail,
-                })
-            }
-        };
-
-        Ok(Response::new(v1::PlanRepositoryCommitResponse {
-            outcome: Some(outcome),
-        }))
-    }
-
-    async fn execute_repository_commit(
-        &self,
-        request: Request<v1::ExecuteRepositoryCommitRequest>,
-    ) -> Result<Response<v1::ExecuteRepositoryCommitResponse>, Status> {
-        let request = request.into_inner();
-        if request.message.trim().is_empty() {
-            return Err(Status::invalid_argument("message must not be empty"));
-        }
-        let target = application_commit_target(required(request.target, "target")?)?;
-        let state = self.state.clone();
-        let result = run_blocking(move || {
-            apply_commit::execute(
-                ApplyCommit {
-                    target,
-                    message: request.message,
-                },
-                &state.git,
-            )
-        })
-        .await?;
-        Ok(Response::new(commit_response(result)?))
-    }
-
     async fn plan_recursive_repository_push(
         &self,
         request: Request<v1::PlanRecursiveRepositoryPushRequest>,
@@ -220,6 +170,28 @@ impl RepositoryService for RepositoryGrpcService {
         }))
     }
 
+    async fn pull_repository(
+        &self,
+        request: Request<v1::PullRepositoryRequest>,
+    ) -> Result<Response<v1::PullRepositoryResponse>, Status> {
+        let request = request.into_inner();
+        let request = PullRepository {
+            path: absolute_path(request.repository_path, "repository_path")?,
+            mode: if request.dry_run {
+                gtl_models::git::GitEffectMode::DryRun
+            } else {
+                gtl_models::git::GitEffectMode::Apply
+            },
+        };
+        let state = self.state.clone();
+        let result = run_blocking(move || pull_repository::execute(request, &state.git))
+            .await?
+            .map_err(repository_resolution_error)?;
+        Ok(Response::new(v1::PullRepositoryResponse {
+            result: Some(super::project::sync_result(result)),
+        }))
+    }
+
     async fn get_repository_status(
         &self,
         request: Request<v1::GetRepositoryStatusRequest>,
@@ -270,15 +242,6 @@ fn push_target(target: PushTarget) -> v1::RepositoryPushTarget {
     }
 }
 
-fn commit_target(target: &CommitTarget) -> v1::RepositoryCommitTarget {
-    v1::RepositoryCommitTarget {
-        project_name: target.name.to_string(),
-        repository_root: target.top.to_string(),
-        branch: target.branch.to_string(),
-        pending: Some(pending_changes(target.pending)),
-    }
-}
-
 fn pending_changes(pending: PendingChanges) -> v1::PendingChanges {
     v1::PendingChanges {
         changed_paths: pending.changed.value(),
@@ -301,15 +264,6 @@ fn application_push_target(target: v1::RepositoryPushTarget) -> Result<PushTarge
             .map(RemoteUrl::try_new)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| Status::invalid_argument("target.remote_urls must not be empty"))?,
-        pending: application_pending(required(target.pending, "target.pending")?),
-    })
-}
-
-fn application_commit_target(target: v1::RepositoryCommitTarget) -> Result<CommitTarget, Status> {
-    Ok(CommitTarget {
-        name: project_name(target.project_name, "target.project_name")?,
-        top: repository_root(target.repository_root, "target.repository_root")?,
-        branch: branch_name(target.branch, "target.branch")?,
         pending: application_pending(required(target.pending, "target.pending")?),
     })
 }
@@ -445,47 +399,6 @@ fn push_response(
         detail,
         progress,
     })
-}
-
-fn commit_response(
-    result: Result<apply_commit::ApplyCommitOk, ApplyCommitError>,
-) -> Result<v1::ExecuteRepositoryCommitResponse, Status> {
-    let (status, detail, progress) = match result {
-        Ok(result) => {
-            let status = match result.status {
-                CommitStatus::Committed => v1::RepositoryCommitStatus::Committed,
-                CommitStatus::Noop => v1::RepositoryCommitStatus::NoOp,
-                CommitStatus::Failed => v1::RepositoryCommitStatus::Failed,
-            };
-            (status, result.detail, commit_progress(&result.progress))
-        }
-        Err(error) => {
-            let detail = error.to_string();
-            match error {
-                ApplyCommitError::Transport { progress, .. } => (
-                    v1::RepositoryCommitStatus::Failed,
-                    detail,
-                    commit_progress(&progress),
-                ),
-                error => return Err(unexpected(error, "execute repository commit")),
-            }
-        }
-    };
-    Ok(v1::ExecuteRepositoryCommitResponse {
-        status: status as i32,
-        detail,
-        progress: Some(progress),
-    })
-}
-
-fn commit_progress(progress: &CommitProgress) -> v1::RepositoryMutationProgress {
-    use v1::repository_mutation_progress::State;
-    let state = match progress {
-        CommitProgress::Unchanged => State::Unchanged(v1::Empty {}),
-        CommitProgress::Staged => State::Staged(v1::Empty {}),
-        CommitProgress::Created { id } => State::CreatedCommitId(id.to_string()),
-    };
-    v1::RepositoryMutationProgress { state: Some(state) }
 }
 
 fn push_progress(progress: &PushProgress) -> v1::RepositoryMutationProgress {

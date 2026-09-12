@@ -12,4 +12,3 @@ pub mod settings;
 pub mod tags;
 pub mod timestamps;
 pub mod viewer;
-pub mod worktrees;

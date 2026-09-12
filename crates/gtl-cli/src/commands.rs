@@ -9,11 +9,27 @@ pub mod diff_live;
 pub mod diff_subrepos;
 pub mod managed;
 pub mod merge_diff;
+pub mod pull;
 pub mod push_subrepos;
 pub mod server_ctl;
 pub mod sync;
 pub mod tag;
-pub mod worktree;
+
+pub(crate) fn repository_path(
+    id: Option<&gtl_models::projects::catalogue::ProjectId>,
+) -> anyhow::Result<PathBuf> {
+    let Some(id) = id else {
+        return canonical_working_directory();
+    };
+    let response = ServerClient::connect()?.get_project_repository(
+        gtl_wire::v1::GetProjectRepositoryRequest {
+            project_id: id.to_string(),
+        },
+    )?;
+    let root = gtl_models::paths::RepositoryRoot::try_new(response.repository_root.into())
+        .context("server returned an invalid project repository path")?;
+    Ok(root.as_ref().to_path_buf())
+}
 
 pub(crate) fn canonical_working_directory() -> anyhow::Result<PathBuf> {
     let current = std::env::current_dir().context("resolving the current directory")?;

@@ -1,10 +1,11 @@
+use gtl_models::projects::catalogue::ProjectId;
 use gtl_wire::v1;
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, CommitArgs, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
-        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, PushArgs, ServerArgs,
-        ServerCommand, StatusArgs, Theme, WorktreeCommand,
+        Cli, ColorChoice, Command, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
+        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, ProjectCommand, PullArgs,
+        PushArgs, ServerArgs, ServerCommand, StatusArgs, Theme,
     },
     commands::managed::{
         ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
@@ -58,47 +59,12 @@ fn render_clap_error(error: &clap::Error) -> ExitCode {
 fn dispatch(command: Command) -> ExitCode {
     match command {
         Command::Diff(args) => run_diff(args),
-        Command::Push(PushArgs {
-            all: false,
-            recursive: false,
-            message: Some(message),
-            yes,
-            ..
-        }) => run_push_with_message(&message, yes),
-        Command::Push(PushArgs {
-            all: false,
-            recursive: false,
-            message: None,
-            yes,
-            ..
-        }) => match ServerClient::connect()
-            .and_then(|client| client.get_push_confirmation_requirement())
-        {
-            Ok(settings) => run_push_current(yes, settings.push_confirmation_required),
-            Err(error) => {
-                eprintln!("error: {}", error_text(&error));
-                ExitCode::Internal
-            }
-        },
-        Command::Push(PushArgs {
-            all: false,
-            recursive: true,
-            yes,
-            ..
-        }) => run_push_subrepos(yes),
-        Command::Push(args) => run_push_managed(args),
-        Command::Pull(args) => managed_exit(&commands::managed::run_pull_all(&managed_options(
-            args.managed,
-            None,
-        ))),
-        Command::Commit(args) => run_commit(args),
+        Command::Push(args) => run_push(args),
+        Command::Pull(args) => run_pull(&args),
+        Command::Project(args) => run_project(args.command),
         Command::Tag(args) => commands::tag::run(args.command, args.commits, args.state),
-        Command::Worktree(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(&args)),
-        Command::Ls(args) => {
-            let args = args.into();
-            managed_exit(&run_status(&args))
-        }
+        Command::Ls(args) => run_project(ProjectCommand::Ls(args)),
         Command::Server(ServerArgs { command }) => run_server_ctl(&command),
     }
 }
@@ -117,15 +83,13 @@ fn run_diff(args: DiffArgs) -> ExitCode {
                 return run_set_theme(theme);
             }
             if args.target.scope.recursive {
-                return run_recursive_diff(&args.target, raw);
+                return run_recursive_diff(&args.target, raw, args.repository.id.as_ref());
             }
-            match diff_invocation(args.target) {
-                Ok(DiffInvocation::Single { target, name }) => {
-                    diff_exit(commands::diff::run(&target, name.as_deref(), raw))
-                }
-                Ok(DiffInvocation::ManagedAll) => diff_exit(
-                    commands::canonical_working_directory()
-                        .and_then(|root| commands::diff_subrepos::run_managed_all(root, raw)),
+            let name = args.target.name.clone();
+            match diff_target(args.target) {
+                Ok(target) => diff_exit(
+                    commands::repository_path(args.repository.id.as_ref())
+                        .and_then(|root| commands::diff::run(&root, &target, name.as_deref(), raw)),
                 ),
                 Err(error) => {
                     eprintln!("diff: {error}");
@@ -136,36 +100,56 @@ fn run_diff(args: DiffArgs) -> ExitCode {
     }
 }
 
-fn run_recursive_diff(target: &DiffTargetArgs, raw: bool) -> ExitCode {
-    diff_exit(commands::canonical_working_directory().and_then(|root| {
+fn run_recursive_diff(target: &DiffTargetArgs, raw: bool, id: Option<&ProjectId>) -> ExitCode {
+    diff_exit(commands::repository_path(id).and_then(|root| {
         commands::diff_subrepos::run_scan(root, target.last, target.scope.worktrees, raw)
     }))
 }
 
-fn run_commit(args: CommitArgs) -> ExitCode {
-    match args {
-        CommitArgs {
-            all: false,
-            message: Some(message),
-            yes,
-            ..
-        } => run_commit_current(&message, yes),
-        CommitArgs {
-            all: false,
-            message: None,
-            ..
-        } => {
-            eprintln!("commit: a non-empty commit message is required");
-            ExitCode::Usage
+fn run_project(command: ProjectCommand) -> ExitCode {
+    match command {
+        ProjectCommand::Ls(args) => managed_exit(&commands::managed::run_status(
+            &managed_read_options(args.read),
+        )),
+        ProjectCommand::Push(args) => managed_exit(&commands::managed::run_push_all(
+            &managed_options(args.managed),
+        )),
+        ProjectCommand::Pull(args) => managed_exit(&commands::managed::run_pull_all(
+            &managed_options(args.managed),
+        )),
+        ProjectCommand::Diff(args) => diff_exit(
+            commands::canonical_working_directory()
+                .and_then(|root| commands::diff_subrepos::run_managed_all(root, args.raw)),
+        ),
+    }
+}
+
+fn run_push(args: PushArgs) -> ExitCode {
+    let id = args.repository.id.as_ref();
+    if args.recursive {
+        return run_push_subrepos(args.yes, id);
+    }
+    if let Some(message) = args.message {
+        return run_push_with_message(&message, args.yes, id);
+    }
+    match ServerClient::connect().and_then(|client| client.get_push_confirmation_requirement()) {
+        Ok(settings) => run_push_current(args.yes, settings.push_confirmation_required, id),
+        Err(error) => {
+            eprintln!("push: {}", error_text(&error));
+            ExitCode::Internal
         }
-        CommitArgs {
-            all: true,
-            message,
-            managed,
-            ..
-        } => managed_exit(&commands::managed::run_commit_all(&managed_options(
-            managed, message,
-        ))),
+    }
+}
+
+fn run_pull(args: &PullArgs) -> ExitCode {
+    let result = commands::repository_path(args.repository.id.as_ref())
+        .and_then(|root| commands::pull::run(&root, args.managed));
+    match result {
+        Ok(()) => ExitCode::Ok,
+        Err(error) => {
+            eprintln!("pull: {}", error_text(&error));
+            ExitCode::Internal
+        }
     }
 }
 
@@ -212,114 +196,6 @@ fn run_set_theme(theme: Theme) -> ExitCode {
     }
 }
 
-fn run_worktree(command: &WorktreeCommand) -> ExitCode {
-    let repo_path = match commands::canonical_working_directory() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("worktree: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let client = match ServerClient::connect() {
-        Ok(client) => client,
-        Err(error) => {
-            eprintln!("worktree: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let repository_path = repo_path.to_string_lossy().into_owned();
-    match command {
-        WorktreeCommand::Base => {
-            match client.get_worktree_base(v1::GetWorktreeBaseRequest { repository_path }) {
-                Ok(response) => match response.outcome {
-                    Some(v1::get_worktree_base_response::Outcome::Found(found)) => {
-                        println!("{}", found.path);
-                        ExitCode::Ok
-                    }
-                    Some(v1::get_worktree_base_response::Outcome::Failed(failed)) => {
-                        eprintln!("worktree: {}", failed.detail);
-                        ExitCode::Internal
-                    }
-                    None => {
-                        eprintln!("worktree: gtl-server returned no worktree-base outcome");
-                        ExitCode::Internal
-                    }
-                },
-                Err(error) => {
-                    eprintln!("worktree: {}", error_text(&error));
-                    ExitCode::Internal
-                }
-            }
-        }
-        WorktreeCommand::Ls => run_worktree_list(&client, repository_path),
-    }
-}
-
-fn run_worktree_list(client: &ServerClient, repository_path: String) -> ExitCode {
-    let response = match client.list_worktrees(v1::ListWorktreesRequest { repository_path }) {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("worktree: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-
-    match response.outcome {
-        Some(v1::list_worktrees_response::Outcome::Listed(listed)) => render_worktree_list(listed),
-        Some(v1::list_worktrees_response::Outcome::Failed(failed)) => {
-            eprintln!("worktree: {}", failed.detail);
-            ExitCode::Internal
-        }
-        None => {
-            eprintln!("worktree: gtl-server returned no worktree-list outcome");
-            ExitCode::Internal
-        }
-    }
-}
-
-fn render_worktree_list(listed: v1::WorktreeList) -> ExitCode {
-    use crate::commands::worktree;
-
-    let worktrees = match listed
-        .worktrees
-        .into_iter()
-        .map(worktree::from_grpc)
-        .collect::<anyhow::Result<Vec<_>>>()
-    {
-        Ok(worktrees) => worktrees,
-        Err(error) => {
-            eprintln!("worktree: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let detail = worktree::render_list(&worktrees);
-    if !detail.is_empty() {
-        println!("{detail}");
-    }
-    ExitCode::Ok
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum DiffInvocation {
-    Single {
-        target: DiffTarget,
-        name: Option<String>,
-    },
-    ManagedAll,
-}
-
-fn diff_invocation(args: DiffTargetArgs) -> Result<DiffInvocation, DiffTargetParseError> {
-    if args.scope.all {
-        return Ok(DiffInvocation::ManagedAll);
-    }
-
-    let name = args.name.clone();
-    Ok(DiffInvocation::Single {
-        target: diff_target(args)?,
-        name,
-    })
-}
-
 fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError> {
     if args.unpushed {
         Ok(DiffTarget::Unpushed { pinned: None })
@@ -352,45 +228,7 @@ fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError>
     }
 }
 
-fn run_push_managed(args: PushArgs) -> ExitCode {
-    let PushArgs {
-        message,
-        managed: ManagedArgs { dry, json },
-        ..
-    } = args;
-    let interactive = confirm::stdin_is_terminal();
-    if message.is_some() && !json {
-        return managed_exit(&commands::managed::run_commit_and_push_all(
-            &ManagedOptions {
-                dry,
-                output: ManagedOutput::from_flags(false, output::stdout_color()),
-                message_for_all: message,
-                interactive,
-            },
-        ));
-    }
-    if let Some(message) = message {
-        let run = commands::managed::run_commit_for_push_all(&ManagedOptions {
-            dry,
-            output: ManagedOutput::from_flags(json, output::stdout_color()),
-            message_for_all: Some(message),
-            interactive,
-        });
-        let exit = managed_exit(&run);
-        if exit != ExitCode::Ok {
-            return exit;
-        }
-    }
-
-    managed_exit(&commands::managed::run_push_all(&ManagedOptions {
-        dry,
-        output: ManagedOutput::from_flags(json, output::stdout_color()),
-        message_for_all: None,
-        interactive,
-    }))
-}
-
-fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
+fn run_push_with_message(message: &str, yes: bool, id: Option<&ProjectId>) -> ExitCode {
     use crate::commands::sync;
 
     if message.trim().is_empty() {
@@ -398,7 +236,7 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
         return ExitCode::Usage;
     }
 
-    let (client, target) = match plan_current_push() {
+    let (client, target) = match plan_push(id) {
         Ok(planned) => planned,
         Err(error) => {
             eprintln!("push: {}", error_text(&error));
@@ -428,10 +266,10 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     finish_push_response(&result)
 }
 
-fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
+fn run_push_current(yes: bool, confirm: bool, id: Option<&ProjectId>) -> ExitCode {
     use crate::commands::sync;
 
-    let (client, target) = match plan_current_push() {
+    let (client, target) = match plan_push(id) {
         Ok(planned) => planned,
         Err(error) => {
             eprintln!("push: {}", error_text(&error));
@@ -466,8 +304,8 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     finish_push_response(&result)
 }
 
-fn plan_current_push() -> anyhow::Result<(ServerClient, commands::sync::PushTarget)> {
-    let repository_path = commands::canonical_working_directory()?
+fn plan_push(id: Option<&ProjectId>) -> anyhow::Result<(ServerClient, commands::sync::PushTarget)> {
+    let repository_path = commands::repository_path(id)?
         .to_string_lossy()
         .into_owned();
     let client = ServerClient::connect()?;
@@ -505,98 +343,12 @@ fn finish_push_response(response: &v1::ExecuteRepositoryPushResponse) -> ExitCod
     }
 }
 
-fn run_commit_current(message: &str, yes: bool) -> ExitCode {
-    use crate::commands::sync;
-
-    if message.trim().is_empty() {
-        eprintln!("commit: a non-empty commit message is required");
-        return ExitCode::Usage;
-    }
-
-    let repo_path = match commands::canonical_working_directory() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("commit: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let client = match ServerClient::connect() {
-        Ok(client) => client,
-        Err(error) => {
-            eprintln!("commit: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let response = match client.plan_repository_commit(v1::PlanRepositoryCommitRequest {
-        repository_path: repo_path.to_string_lossy().into_owned(),
-    }) {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("commit: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let target = match response.outcome {
-        Some(v1::plan_repository_commit_response::Outcome::Refused(refusal)) => {
-            eprintln!("commit: {}", refusal.detail);
-            return ExitCode::Internal;
-        }
-        Some(v1::plan_repository_commit_response::Outcome::Ready(target)) => {
-            match sync::commit_target_from_grpc(target) {
-                Ok(target) => target,
-                Err(error) => {
-                    eprintln!("commit: {}", error_text(&error));
-                    return ExitCode::Internal;
-                }
-            }
-        }
-        None => {
-            eprintln!("commit: gtl-server returned no commit plan outcome");
-            return ExitCode::Internal;
-        }
-    };
-
-    if target.pending.changed.is_zero() {
-        println!("Nothing to commit");
-        return ExitCode::Ok;
-    }
-    if let Err(exit) = confirm::request("commit", yes, &sync::commit_confirmation(&target)) {
-        return exit;
-    }
-
-    let result = match client.execute_repository_commit(v1::ExecuteRepositoryCommitRequest {
-        target: Some(sync::commit_target_to_grpc(&target)),
-        message: message.into(),
-    }) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("commit: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    match v1::RepositoryCommitStatus::try_from(result.status) {
-        Ok(v1::RepositoryCommitStatus::Committed | v1::RepositoryCommitStatus::NoOp) => {
-            println!("{}", output::sentence(&result.detail));
-            ExitCode::Ok
-        }
-        Ok(v1::RepositoryCommitStatus::Failed) => {
-            eprintln!("commit: {}", result.detail);
-            sync::print_failure_progress(result.progress.as_ref());
-            ExitCode::Internal
-        }
-        Ok(v1::RepositoryCommitStatus::Unspecified) | Err(_) => {
-            eprintln!("commit: gtl-server returned an invalid commit status");
-            ExitCode::Internal
-        }
-    }
-}
-
-fn run_push_subrepos(yes: bool) -> ExitCode {
+fn run_push_subrepos(yes: bool, id: Option<&ProjectId>) -> ExitCode {
     use crate::commands::push_subrepos::{
         confirmation, result_from_grpc, targets_from_grpc, targets_to_grpc,
     };
 
-    let root = match commands::canonical_working_directory() {
+    let root = match commands::repository_path(id) {
         Ok(root) => root,
         Err(error) => {
             eprintln!("push -r: {}", error_text(&error));
@@ -743,9 +495,7 @@ fn format_push_subrepos_result(
 
 fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
     let options = managed_read_options(args.read);
-    if args.all {
-        commands::managed::run_status(&options)
-    } else if args.recursive {
+    if args.recursive {
         let root = match commands::canonical_working_directory() {
             Ok(root) => root,
             Err(error) => return status_path_error(&error),
@@ -779,17 +529,13 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
     ManagedOptions {
         dry: false,
         output: ManagedOutput::from_flags(args.json, color),
-        message_for_all: None,
-        interactive: false,
     }
 }
 
-fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
+fn managed_options(args: ManagedArgs) -> ManagedOptions {
     ManagedOptions {
         dry: args.dry,
         output: ManagedOutput::from_flags(args.json, output::stdout_color()),
-        message_for_all,
-        interactive: confirm::stdin_is_terminal(),
     }
 }
 
@@ -803,7 +549,7 @@ fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
     match run.exit {
         ManagedExit::Clean => ExitCode::Ok,
         ManagedExit::Warn => ExitCode::Internal,
-        ManagedExit::Fail | ManagedExit::Usage => ExitCode::Usage,
+        ManagedExit::Fail => ExitCode::Usage,
     }
 }
 
@@ -849,7 +595,6 @@ mod tests {
     fn target_args(target: Option<&str>) -> DiffTargetArgs {
         DiffTargetArgs {
             scope: crate::cli::DiffScopeArgs {
-                all: false,
                 recursive: false,
                 worktrees: false,
             },
@@ -903,14 +648,6 @@ mod tests {
     #[test]
     fn version_flag_exits_ok() {
         assert_eq!(run(&["--version".into()]), ExitCode::Ok);
-    }
-
-    #[test]
-    fn blank_managed_commit_message_is_usage() {
-        assert_eq!(
-            run(&["commit".into(), "--all".into(), String::new()]),
-            ExitCode::Usage
-        );
     }
 
     #[test]

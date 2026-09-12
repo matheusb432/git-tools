@@ -13,7 +13,6 @@ use gtl_models::{
     repository::{PathCount, working_tree::CommitFile},
     tags::Tag,
     timestamps::MachineTimestamp,
-    worktrees::Worktree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,8 +226,6 @@ pub trait GitClient: Clone + Send + Sync + 'static {
 
     fn working_tree(&self, repo_path: &RepositoryRoot)
     -> anyhow::Result<GitEffect<GitWorkingTree>>;
-
-    fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>>;
 
     fn local_tags(
         &self,

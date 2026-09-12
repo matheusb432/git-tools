@@ -45,7 +45,21 @@ impl BareRemote {
 
 impl CliFixture {
     pub fn new() -> Result<Self> {
-        let temporary = tempfile::tempdir()?;
+        Self::in_temporary(tempfile::tempdir()?)
+    }
+
+    pub fn nested(&self) -> Result<Self> {
+        Self::in_temporary(tempfile::tempdir_in(&self.repository)?)
+    }
+
+    pub fn managed(id: &str, title: &str) -> Result<Self> {
+        let fixture_home = std::env::var_os("HOME").context("fixture home")?;
+        let fixture = Self::in_temporary(tempfile::tempdir_in(fixture_home)?)?;
+        super::common::register_project(id, title, &fixture.repository)?;
+        Ok(fixture)
+    }
+
+    fn in_temporary(temporary: tempfile::TempDir) -> Result<Self> {
         let repository = temporary.path().join("example-project");
         std::fs::create_dir(&repository)?;
         let fixture = Self {
@@ -74,12 +88,83 @@ impl CliFixture {
         Ok(fixture)
     }
 
+    pub fn write_settings(&self, contents: &str) -> Result<()> {
+        std::fs::write(self.config_path(), contents).context("write fixture settings")
+    }
+
     pub fn config_path(&self) -> PathBuf {
         self.temporary.path().join("config.toml")
     }
 
     pub fn write_file(&self, path: &str, contents: &str) -> Result<()> {
-        std::fs::write(self.repository.join(path), contents).context("write fixture file")
+        let path = self.repository.join(path);
+        std::fs::create_dir_all(path.parent().context("fixture file parent")?)?;
+        std::fs::write(path, contents).context("write fixture file")
+    }
+
+    pub fn commit_file(&self, path: &str, contents: &str, message: &str) -> Result<()> {
+        self.write_file(path, contents)?;
+        self.git(&["add", "--", path])?;
+        self.git(&["commit", "-q", "-m", message])?;
+        Ok(())
+    }
+
+    pub fn advance_origin(&self, path: &str, contents: &str) -> Result<String> {
+        let checkout = tempfile::tempdir()?;
+        run_git(
+            process::Command::new("git")
+                .args(["clone", "-q", "--branch", "main"])
+                .arg(self.temporary.path().join("origin.git"))
+                .arg(checkout.path()),
+        )?;
+        std::fs::write(checkout.path().join(path), contents)?;
+        run_git(
+            process::Command::new("git")
+                .arg("-C")
+                .arg(checkout.path())
+                .args(["add", "--", path]),
+        )?;
+        run_git(
+            process::Command::new("git")
+                .arg("-C")
+                .arg(checkout.path())
+                .args([
+                    "-c",
+                    "user.name=Example Author",
+                    "-c",
+                    "user.email=author@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-qm",
+                    "Remote change",
+                ]),
+        )?;
+        run_git(
+            process::Command::new("git")
+                .arg("-C")
+                .arg(checkout.path())
+                .args(["push", "-q", "origin", "main"]),
+        )?;
+        self.origin_head()
+    }
+
+    pub fn origin_head(&self) -> Result<String> {
+        run_git(
+            process::Command::new("git")
+                .arg("-C")
+                .arg(self.temporary.path().join("origin.git"))
+                .args(["rev-parse", "main"]),
+        )
+    }
+
+    pub fn artifact(&self, arguments: &[&str]) -> Result<String> {
+        let output = self.output(arguments)?;
+        let path = output
+            .trim()
+            .strip_prefix("file://")
+            .context("artifact URL")?;
+        std::fs::read_to_string(path).context("read diff artifact")
     }
 
     pub fn head(&self) -> Result<String> {
@@ -148,7 +233,12 @@ impl CliFixture {
 
     #[track_caller]
     pub fn output(&self, arguments: &[&str]) -> Result<String> {
-        let result = self.run(arguments).assert().success().stderr("");
+        self.output_with_exit(arguments, 0)
+    }
+
+    #[track_caller]
+    pub fn output_with_exit(&self, arguments: &[&str], exit_code: i32) -> Result<String> {
+        let result = self.run(arguments).assert().code(exit_code).stderr("");
         String::from_utf8(result.get_output().stdout.clone()).context("CLI output is UTF-8")
     }
 
@@ -197,7 +287,9 @@ impl CliFixture {
     }
 
     fn command(&self, arguments: &[&str]) -> process::Command {
-        let mut command = process::Command::new(env!("CARGO_BIN_EXE_git-tools"));
+        let executable = std::env::var_os("GTL_CLI_TEST_BINARY")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_git-tools").into());
+        let mut command = process::Command::new(executable);
         command
             .args(arguments)
             .current_dir(&self.repository)

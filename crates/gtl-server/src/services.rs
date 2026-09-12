@@ -5,7 +5,6 @@ mod repository;
 mod settings;
 mod tag;
 mod viewer;
-mod worktree;
 
 use std::path::PathBuf;
 
@@ -26,7 +25,6 @@ pub(crate) use settings::SettingsGrpcService;
 pub(crate) use tag::TagGrpcService;
 use tonic::{Code, Status};
 pub(crate) use viewer::ViewerGrpcService;
-pub(crate) use worktree::WorktreeGrpcService;
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {
     notes

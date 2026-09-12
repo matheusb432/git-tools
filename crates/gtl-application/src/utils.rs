@@ -4,7 +4,6 @@ mod tags;
 pub(crate) mod diffs;
 #[cfg(test)]
 pub(crate) mod viewer;
-mod worktrees;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
@@ -425,12 +424,6 @@ impl GitClient for FakeGitClient {
     }
     fn working_tree(&self, _repo: &RepositoryRoot) -> anyhow::Result<GitEffect<GitWorkingTree>> {
         Ok(GitEffect::Applied(GitWorkingTree::default()))
-    }
-    fn worktrees(
-        &self,
-        _repo: &RepositoryRoot,
-    ) -> anyhow::Result<GitEffect<Vec<gtl_models::worktrees::Worktree>>> {
-        Ok(GitEffect::Applied(Vec::new()))
     }
     fn local_tags(
         &self,
@@ -1006,20 +999,6 @@ impl GitClient for ScriptedGitClient {
             parse_working_tree,
         )? {
             GitEffect::Applied(tree) => Ok(GitEffect::Applied(tree?)),
-            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
-        }
-    }
-    fn worktrees(
-        &self,
-        repo_path: &RepositoryRoot,
-    ) -> anyhow::Result<GitEffect<Vec<gtl_models::worktrees::Worktree>>> {
-        match scripted_effect(
-            self,
-            repo_path,
-            &["worktree", "list", "--porcelain"],
-            worktrees::parse,
-        )? {
-            GitEffect::Applied(worktrees) => worktrees.map(GitEffect::Applied),
             GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
         }
     }

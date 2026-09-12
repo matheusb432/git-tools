@@ -1,16 +1,7 @@
-//! Fanning Git operations out across active projects managed in Git Tools: `push --all`,
-//! `pull --all`, `commit --all`, and `status --all`. Managed push omits
-//! its configured project exclusions. Each concern lives in its own submodule;
-//! this facade owns the shared request/response seam (`ManagedOptions`, `ManagedRun`,
-//! `ManagedExit`) and re-exports each submodule's entry points under the historical
-//! `managed::` path.
-
-mod commit;
 mod push_pull;
 mod push_summary;
 mod status;
 
-pub use commit::{CommitFile, CommitResult, run_commit_all, run_commit_for_push_all};
 pub use push_pull::{PushPullResult, RepoSyncStatus, run_pull_all, run_push_all};
 pub(crate) use push_summary::{PushOutcome, PushSummary};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};
@@ -20,26 +11,12 @@ pub enum ManagedExit {
     Clean,
     Warn,
     Fail,
-    Usage,
-}
-
-impl ManagedExit {
-    #[must_use]
-    pub fn code(self) -> i32 {
-        match self {
-            ManagedExit::Clean => 0,
-            ManagedExit::Warn => 1,
-            ManagedExit::Fail | ManagedExit::Usage => 2,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedOptions {
     pub dry: bool,
     pub output: ManagedOutput,
-    pub message_for_all: Option<String>,
-    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,21 +52,4 @@ pub struct ManagedRun<T> {
     pub results: Vec<T>,
     pub stdout: String,
     pub stderr: String,
-}
-
-pub(crate) fn run_commit_and_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    let committed = run_commit_for_push_all(options);
-    if committed.exit != ManagedExit::Clean {
-        return ManagedRun {
-            exit: committed.exit,
-            results: Vec::new(),
-            stdout: committed.stdout,
-            stderr: committed.stderr,
-        };
-    }
-    let mut pushed = push_pull::run_push_after_commit(options, &committed.results);
-    if pushed.exit != ManagedExit::Clean && pushed.results.is_empty() {
-        pushed.stdout = committed.stdout;
-    }
-    pushed
 }

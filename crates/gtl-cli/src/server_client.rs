@@ -119,15 +119,6 @@ impl ServerClient {
             .block_on(self.client.pull_project_repositories(request))?)
     }
 
-    pub(crate) fn commit_project_repositories(
-        &self,
-        request: v1::CommitProjectRepositoriesRequest,
-    ) -> anyhow::Result<v1::CommitProjectRepositoriesResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.commit_project_repositories(request))?)
-    }
-
     pub(crate) fn get_project_repository_statuses(
         &self,
     ) -> anyhow::Result<v1::GetProjectRepositoryStatusesResponse> {
@@ -154,24 +145,6 @@ impl ServerClient {
             .block_on(self.client.execute_repository_push(request))?)
     }
 
-    pub(crate) fn plan_repository_commit(
-        &self,
-        request: v1::PlanRepositoryCommitRequest,
-    ) -> anyhow::Result<v1::PlanRepositoryCommitResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.plan_repository_commit(request))?)
-    }
-
-    pub(crate) fn execute_repository_commit(
-        &self,
-        request: v1::ExecuteRepositoryCommitRequest,
-    ) -> anyhow::Result<v1::ExecuteRepositoryCommitResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.execute_repository_commit(request))?)
-    }
-
     pub(crate) fn plan_recursive_repository_push(
         &self,
         request: v1::PlanRecursiveRepositoryPushRequest,
@@ -188,6 +161,24 @@ impl ServerClient {
         Ok(self
             .runtime
             .block_on(self.client.execute_recursive_repository_push(request))?)
+    }
+
+    pub(crate) fn get_project_repository(
+        &self,
+        request: v1::GetProjectRepositoryRequest,
+    ) -> anyhow::Result<v1::GetProjectRepositoryResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.get_project_repository(request))?)
+    }
+
+    pub(crate) fn pull_repository(
+        &self,
+        request: v1::PullRepositoryRequest,
+    ) -> anyhow::Result<v1::PullRepositoryResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.pull_repository(request))?)
     }
 
     pub(crate) fn get_repository_status(
@@ -223,22 +214,6 @@ impl ServerClient {
         Ok(self
             .runtime
             .block_on(self.client.set_viewer_theme(request))?)
-    }
-
-    pub(crate) fn get_worktree_base(
-        &self,
-        request: v1::GetWorktreeBaseRequest,
-    ) -> anyhow::Result<v1::GetWorktreeBaseResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.get_worktree_base(request))?)
-    }
-
-    pub(crate) fn list_worktrees(
-        &self,
-        request: v1::ListWorktreesRequest,
-    ) -> anyhow::Result<v1::ListWorktreesResponse> {
-        Ok(self.runtime.block_on(self.client.list_worktrees(request))?)
     }
 
     pub(crate) fn save_and_present_live_view(

@@ -116,7 +116,7 @@ impl PushFixture {
 
 fn managed_report(fixture: &PushFixture, config: &Path) -> Result<serde_json::Value> {
     let output = fixture
-        .run(&["push", "--all", "--dry", "--json"])
+        .run(&["project", "push", "--all", "--dry", "--json"])
         .env("GIT_TOOLS_CONFIG", config)
         .assert()
         .success()

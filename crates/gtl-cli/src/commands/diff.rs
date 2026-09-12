@@ -9,10 +9,13 @@ pub enum DiffOutcome {
     Forwarded,
 }
 
-pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result<DiffOutcome> {
-    let working_directory = super::canonical_working_directory()?
-        .to_string_lossy()
-        .into_owned();
+pub fn run(
+    root: &std::path::Path,
+    target: &DiffTarget,
+    name: Option<&str>,
+    raw: bool,
+) -> anyhow::Result<DiffOutcome> {
+    let working_directory = root.to_string_lossy().into_owned();
     let present = v1::PresentDiffRequest {
         working_directory: working_directory.clone(),
         target: Some(grpc_target(target)),
