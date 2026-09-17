@@ -5,7 +5,7 @@ use gtl_models::{
 };
 
 use super::file::FileDiff;
-use crate::ports::{GitDiffFormat, GitDiffRequest};
+use crate::ports::{GitDiffFormat, GitDiffPaths, GitDiffRequest};
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,7 +40,7 @@ impl FullContextDiffSource {
             git_request: GitDiffRequest {
                 spec,
                 format: GitDiffFormat::FullContext,
-                excluded_paths,
+                paths: GitDiffPaths::Excluding(excluded_paths),
             },
         }
     }
@@ -54,7 +54,9 @@ impl FullContextDiffSource {
     }
 
     pub(crate) fn excluded_paths(&self) -> &[RepositoryRelativePath] {
-        &self.git_request.excluded_paths
+        match &self.git_request.paths {
+            GitDiffPaths::Excluding(paths) | GitDiffPaths::Including(paths) => paths,
+        }
     }
 }
 
@@ -80,6 +82,7 @@ pub enum FullContextDiffTransitionError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    pub file_filter: super::file_filter::DiffFileFilter,
     pub repo_name: ProjectName,
     pub repo_root: RepositoryRoot,
     pub branch: GitHead,
@@ -98,7 +101,7 @@ pub struct View {
 impl View {
     #[must_use]
     pub fn has_diff_content(&self) -> bool {
-        !self.commits.is_empty() || !self.files.is_empty()
+        !self.commits.is_empty() || !self.files.is_empty() || self.exclusions.is_some()
     }
 
     /// Applies fetched full-context source to a deferred view.
@@ -122,7 +125,7 @@ impl View {
     }
 }
 
-fn attach_full_context(files: &mut [FileDiff], full_context: FullContextDiff) {
+pub(super) fn attach_full_context(files: &mut [FileDiff], full_context: FullContextDiff) {
     let mut full_by_path: std::collections::HashMap<
         RepositoryRelativePath,
         super::source_lines::DiffSourceLines,

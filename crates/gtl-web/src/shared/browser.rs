@@ -85,6 +85,13 @@ pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + '
 #[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
 pub(crate) fn use_window_keydown(_handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {}
 
+#[cfg(any(feature = "component-preview", feature = "desktop"))]
+pub(crate) fn popover_is_open(id: &str) -> bool {
+    document()
+        .and_then(|document| document.get_element_by_id(id))
+        .is_some_and(|element| element.matches(":popover-open").unwrap_or(false))
+}
+
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn hide_popover(id: &str) {
     let Some(element) = document()

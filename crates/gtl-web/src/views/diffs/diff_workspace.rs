@@ -50,6 +50,8 @@ use crate::{entities::diffs::ClientDiffWorkspace, views::diffs::StaticDiffDocume
 pub(crate) mod commits_panel;
 #[cfg(feature = "desktop")]
 mod desktop;
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
+pub(crate) mod extension_filters;
 mod file_search;
 mod files_panel;
 pub(super) mod panel_scroll;
@@ -673,6 +675,7 @@ mod artifact_tests {
             },
         };
         let file = ViewerFileSummary {
+            source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/<unsafe>.rs")?,
             absolute_path: absolute_file_path("/repo/src/<unsafe>.rs")?,

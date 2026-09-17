@@ -5,7 +5,10 @@ use dioxus::{
     prelude::*,
 };
 use gtl_models::viewer::{ViewerTabId, ViewerVersion};
-use gtl_wire::viewer::{ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme};
+use gtl_wire::viewer::{
+    ViewerActiveState, ViewerCommitSelection, ViewerFeedback, ViewerShell, ViewerTabRequest,
+    ViewerTheme,
+};
 
 use crate::{
     app::{
@@ -294,7 +297,20 @@ impl ViewerContext {
         }
     }
 
-    fn publish_shell(mut self, shell: ViewerShell) {
+    fn publish_shell(mut self, mut shell: ViewerShell) {
+        if let ViewerShellLoad::Ready(previous) = &*self.shell.peek()
+            && let ViewerActiveState::Ready { view: displayed } = &previous.active
+            && let ViewerActiveState::Ready { view: incoming } = &mut shell.active
+            && matches!(
+                incoming.commit_selection,
+                ViewerCommitSelection::Pending { .. }
+            )
+            && incoming.identity == displayed.identity
+        {
+            let mut retained = displayed.clone();
+            retained.commit_selection = incoming.commit_selection.clone();
+            *incoming = retained;
+        }
         let next = ViewerShellLoad::Ready(shell);
         if *self.shell.peek() != next {
             self.shell.set(next);
@@ -491,6 +507,8 @@ fn ApplicationLayoutContent() -> Element {
     };
     use_context_provider(|| context);
     crate::views::diffs::use_diff_presentation_provider();
+    crate::views::diffs::file_filter_changes::use_file_filter_changes_provider();
+    crate::views::projects::cache::use_status_cache_provider();
     use_viewer_routes(context);
 
     let visible = browser::use_document_visible();
@@ -515,7 +533,10 @@ fn ApplicationLayoutContent() -> Element {
         } else {
             None
         };
-        gtl_wire::viewer::WatchViewer { live_tab_id }
+        gtl_wire::viewer::WatchViewer {
+            live_tab_id,
+            ..Default::default()
+        }
     }));
     use_effect(move || {
         if let ViewerShellLoad::Ready(shell) = &*shell.read() {
@@ -535,7 +556,7 @@ fn ApplicationLayoutContent() -> Element {
                 let received_event = Rc::new(Cell::new(false));
                 let event_received = Rc::clone(&received_event);
                 let result = viewer_server::listen_for_state_changes(
-                    request,
+                    request.clone(),
                     move |server_instance_id| {
                         if context.connected_to(server_instance_id) {
                             let mut version = state_change_version;
@@ -617,6 +638,7 @@ fn ApplicationLayoutContent() -> Element {
                     if matches!(&*state, ViewerShellLoad::Error(ViewerClientError::InvalidSettings)) {
                         crate::views::settings_recovery::SettingsRecovery { onretry: move |()| context.refresh(false) }
                     } else {
+                        super::projects_host::ProjectsHost {}
                         Outlet::<Route> {}
                     }
                 }

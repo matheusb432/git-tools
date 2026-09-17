@@ -2,6 +2,7 @@
 @import "./controls.css";
 @import "./app-controls.css";
 @import "./overlays.css";
+@import "./extension-filter.css";
 @import "./viewer-tabs.css";
 @import "./diff-rows.css";
 @import "./diff-workspace.css";

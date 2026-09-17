@@ -42,6 +42,9 @@ pub fn settings_patch(
         FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     };
     Ok(UserSettingsPatch {
+        expected_revision: request.expected_revision,
+        diff_exclusions: None,
+        focus_window_on_diff: application_field_update(request.focus_window_on_diff, |value| value),
         files_sidebar_visible: application_field_update(request.files_sidebar_visible, |value| {
             value
         }),
@@ -51,6 +54,7 @@ pub fn settings_patch(
         ),
         wrap_lines: application_field_update(request.wrap_lines, |value| value),
         projects_view: application_field_update(request.projects_view, |value| value),
+        projects_sort: application_field_update(request.projects_sort, |value| value),
         projects_page_size: application_field_update(request.projects_page_size, |value| value),
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Light => Theme::Light,
@@ -106,16 +110,19 @@ pub fn preference_setting(preference: SetViewerPreference) -> SettingKeyValue {
 
 pub fn project_settings(
     settings: &UserSettings,
-    projects_view: gtl_models::settings::ProjectsViewMode,
-    projects_page_size: gtl_models::settings::ProjectsPageSize,
+    projects: gtl_models::settings::ProjectsPreferences,
+    revision: gtl_models::settings::UserSettingsRevision,
     configuration_path: Option<String>,
 ) -> ViewerUserSettings {
     let configured_theme = settings.theme().map(super::project_theme);
     let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
+        revision,
+        focus_window_on_diff: settings.focus_window_on_diff(),
         sidebars: settings.sidebar_visibility(),
-        projects_view,
-        projects_page_size,
+        projects_view: projects.view,
+        projects_sort: projects.sort,
+        projects_page_size: projects.page_size,
         configuration_path,
         configured_theme,
         effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),
@@ -134,6 +141,7 @@ pub fn project_settings(
                 names
                     .into_iter()
                     .map(|project_name| ViewerProjectDiffExclusions {
+                        configured: exclusions.for_project(&project_name).is_some(),
                         extensions: exclusions
                             .for_project(&project_name)
                             .cloned()
@@ -146,5 +154,29 @@ pub fn project_settings(
                     .collect()
             },
         },
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct TabSettings<S> {
+    source: S,
+    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
+}
+
+impl<S> TabSettings<S> {
+    pub(super) fn new(source: S, excluded: Option<gtl_models::diffs::ExcludedExtensions>) -> Self {
+        Self { source, excluded }
+    }
+}
+
+impl<S: crate::ports::UserSettingsReader> crate::ports::UserSettingsReader for TabSettings<S> {
+    fn load(&self) -> Result<UserSettings, crate::ports::UserSettingsLoadError> {
+        let settings = self.source.load()?;
+        Ok(match &self.excluded {
+            Some(excluded) => settings.with_diff_exclusions(
+                gtl_models::diffs::DiffExclusions::new([], Some(excluded.extensions().to_vec())),
+            ),
+            None => settings,
+        })
     }
 }

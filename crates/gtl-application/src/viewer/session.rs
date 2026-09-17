@@ -1,4 +1,5 @@
 mod cache;
+pub(super) mod file_filters;
 
 use std::sync::Arc;
 
@@ -161,6 +162,7 @@ pub(crate) enum MoveOutcome {
 /// Session-owned metadata for one recipe tab.
 #[derive(Debug, Clone)]
 pub struct SessionTab {
+    file_exclusions: Option<gtl_models::diffs::ExcludedExtensions>,
     pub tab: ViewerTab,
     pub recipe: Recipe,
     pub batch_id: RecipeBatchId,
@@ -257,6 +259,7 @@ impl ViewerSession {
             .and_then(|value| ViewerTabId::try_new(value).ok())?;
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.push(SessionTab {
+            file_exclusions: None,
             tab: ViewerTab::new(
                 id,
                 label,
@@ -335,6 +338,8 @@ impl ViewerSession {
         {
             tab.selection = CommitSelection::None;
         }
+        tab.file_exclusions
+            .get_or_insert_with(|| value.view.file_filter.excluded().clone());
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_version();
@@ -941,7 +946,14 @@ impl ViewerSession {
     }
 
     pub fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
-        let identity = self.active_content_identity()?;
+        self.content_snapshot(self.active?)
+    }
+
+    pub(super) fn content_snapshot(
+        &mut self,
+        tab_id: ViewerTabId,
+    ) -> Option<ActiveContentSnapshot> {
+        let identity = self.content_identity(tab_id)?;
         if let Some(view) = self.full_context_snapshot(identity) {
             return Some(ActiveContentSnapshot {
                 identity,
@@ -1194,6 +1206,7 @@ mod tests {
 
     fn view(title: &str) -> Arc<View> {
         Arc::new(View {
+            file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             exclusions: None,
             repo_name: project_name("repo"),
             repo_root: repository_root("/repo"),

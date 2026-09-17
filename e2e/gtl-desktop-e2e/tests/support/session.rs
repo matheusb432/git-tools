@@ -67,14 +67,37 @@ impl TestSession {
             .count())
     }
 
-    #[cfg(unix)]
-    pub fn pause_server(&self) -> Result<ServerPause<'_>> {
-        let child = self
+    pub fn project_status_checks(&self) -> Result<usize> {
+        let log = fs::read_to_string(self.data_root.join("server.stderr.log"))?;
+        Ok(log
+            .lines()
+            .filter(|line| line.contains("project status checked"))
+            .count())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub fn project_watch_registrations(&self) -> Result<usize> {
+        let server = self
             .server_child
             .as_ref()
             .context("running fixture server")?;
-        child.signal(Signal::SIGSTOP)?;
-        Ok(ServerPause(child))
+        let mut count = 0;
+        for entry in fs::read_dir(format!("/proc/{}/fdinfo", server.id()))? {
+            let path = entry?.path();
+            match fs::read_to_string(&path) {
+                Ok(contents) => {
+                    count += contents
+                        .lines()
+                        .filter(|line| line.starts_with("inotify wd:"))
+                        .count();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).with_context(|| format!("read {}", path.display()));
+                }
+            }
+        }
+        Ok(count)
     }
 
     pub fn driver(&self) -> &WebDriver {
@@ -259,16 +282,6 @@ impl Drop for TestSession {
     }
 }
 
-#[cfg(unix)]
-pub struct ServerPause<'child>(&'child GroupChild);
-
-#[cfg(unix)]
-impl Drop for ServerPause<'_> {
-    fn drop(&mut self) {
-        let _ = self.0.signal(Signal::SIGCONT);
-    }
-}
-
 async fn start_server(data_root: &Path) -> Result<GroupChild> {
     let server_binary = required_binary("GTL_E2E_SERVER_BINARY", "gtl-server")?;
     let endpoint = data_root.join("server").join("endpoint.json");
@@ -284,7 +297,10 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
     command
         .env("GIT_TOOLS_DATA_DIR", data_root)
         .env("GIT_TOOLS_CONFIG", data_root.join("config.toml"))
-        .env("RUST_LOG", "info")
+        .env(
+            "RUST_LOG",
+            "info,gtl_server::services::viewer::project_watch=debug",
+        )
         .stderr(Stdio::from(fs::File::create(
             data_root.join("server.stderr.log"),
         )?))
@@ -363,8 +379,9 @@ async fn connect_driver(
         .await
         .context("create one WebDriver session after tauri-driver became reachable")?;
     driver
-        .query(By::Css("button[aria-label='Refresh projects']"))
-        .and_enabled()
+        .query(By::Css(
+            ".viewer-connection-content[aria-busy='false'] #projects-heading",
+        ))
         .and_displayed()
         .wait(wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
         .first()

@@ -88,6 +88,10 @@ pub(super) fn build(
     sort_files_tree_order(&mut files);
 
     let view = View {
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(
+            io_ranges.diff.clone(),
+            excluded.clone(),
+        ),
         repo_name: repo_name.clone(),
         repo_root: top.clone(),
         branch,

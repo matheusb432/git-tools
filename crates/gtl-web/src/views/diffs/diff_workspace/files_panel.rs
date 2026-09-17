@@ -232,6 +232,7 @@ mod tests {
 
     fn file(path: &str, added: u64, removed: u64) -> TestResult<ViewerFileSummary> {
         Ok(ViewerFileSummary {
+            source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path(path)?,
             absolute_path: absolute_file_path(format!("/repo/{path}"))?,

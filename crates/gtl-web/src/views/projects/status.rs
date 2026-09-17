@@ -6,10 +6,11 @@ use gtl_models::{
         status::{RepositoryStatus, StatusChanges, StatusClass, StatusHead, StatusUpstream},
     },
 };
-use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectBranchComparison};
+use gtl_wire::viewer::projects::{ViewerProjectBranchComparison, ViewerProjectStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProjectIssue {
+    RequestFailed,
     RepositoryAbsent,
     HeadUnavailable,
     WorkingTreeUnavailable,
@@ -19,6 +20,7 @@ pub(super) enum ProjectIssue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProjectSignal {
+    Loading,
     Local {
         tracked: PathCount,
         untracked: PathCount,
@@ -35,24 +37,25 @@ impl ProjectSignal {
         match self {
             Self::Ahead { count, .. } => count.into_inner() > 0,
             Self::Local { tracked, untracked } => !tracked.is_zero() || !untracked.is_zero(),
-            Self::Unavailable(_) => false,
+            Self::Loading | Self::Unavailable(_) => false,
         }
     }
 
     pub(super) const fn is_available(&self) -> bool {
-        !matches!(self, Self::Unavailable(_))
+        !matches!(self, Self::Loading | Self::Unavailable(_))
     }
 
     pub(super) const fn issue(&self) -> Option<&ProjectIssue> {
         match self {
             Self::Unavailable(issue) => Some(issue),
-            Self::Local { .. } | Self::Ahead { .. } => None,
+            Self::Loading | Self::Local { .. } | Self::Ahead { .. } => None,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProjectReview {
+    Loading,
     Pending,
     Clean,
     ComparisonUnavailable,
@@ -67,7 +70,7 @@ pub(super) struct ProjectStatus {
 }
 
 impl ProjectStatus {
-    pub(super) fn from_project(project: &ViewerProject) -> Self {
+    pub(super) fn from_project(project: &ViewerProjectStatus) -> Self {
         let local = match &project.status {
             RepositoryStatus::Absent => ProjectSignal::Unavailable(ProjectIssue::RepositoryAbsent),
             RepositoryStatus::Present { changes, .. } => match *changes {
@@ -114,7 +117,7 @@ impl ProjectStatus {
             ProjectReview::ComparisonUnavailable
             | ProjectReview::StatusUnavailable
             | ProjectReview::Absent => self.ahead.issue().or_else(|| self.local.issue()),
-            ProjectReview::Pending | ProjectReview::Clean => None,
+            ProjectReview::Loading | ProjectReview::Pending | ProjectReview::Clean => None,
         }
     }
 }

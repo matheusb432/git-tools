@@ -6,7 +6,7 @@ use gtl_models::{
 
 use crate::{
     diffs::{FileDiff, FileStatus, FullContextDiffSource, FullContextDiffState, unified_diff},
-    ports::{GitClient, GitDiffFormat, GitDiffRequest},
+    ports::{GitClient, GitDiffFormat, GitDiffPaths, GitDiffRequest},
 };
 
 pub(super) struct DiffData {
@@ -32,7 +32,7 @@ pub(super) fn assemble(
     let content_request = GitDiffRequest {
         spec: diff_spec.clone(),
         format: GitDiffFormat::Unified,
-        excluded_paths: hidden_paths.clone(),
+        paths: GitDiffPaths::Excluding(hidden_paths.clone()),
     };
     // Enforce exclusions even when the Git adapter ignores pathspecs.
     let (files, _) = filter_excluded_files(
@@ -45,7 +45,7 @@ pub(super) fn assemble(
     {
         FullContextDiffState::Deferred(FullContextDiffSource::new(
             content_request.spec,
-            content_request.excluded_paths,
+            hidden_paths.clone(),
         ))
     } else {
         FullContextDiffState::Loaded
@@ -86,7 +86,7 @@ fn hidden_paths(
             &GitDiffRequest {
                 spec: spec.clone(),
                 format: GitDiffFormat::NamesOnly,
-                excluded_paths: Vec::new(),
+                paths: GitDiffPaths::Excluding(Vec::new()),
             },
         )?
         .lines()

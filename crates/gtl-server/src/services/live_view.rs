@@ -8,6 +8,7 @@ use gtl_application::{
     },
     projects::select_comparison_repositories,
     recipes::{Recipe, RecipeBatch, RecipeBatchKind},
+    settings::get_user_settings::{self, GetUserSettings, GetUserSettingsError},
 };
 use gtl_models::{live_views::LiveSource, recipes::RecipeBatchId};
 use gtl_wire::v1::{self, live_view_service_server::LiveViewService};
@@ -135,7 +136,13 @@ fn present_saved_live_views(
     if !open_viewer || recipes.is_empty() {
         return Ok(None);
     }
-    if let Err(error) = viewer_process::open() {
+    let settings =
+        get_user_settings::execute(GetUserSettings, &state.user_settings).map_err(|error| {
+            match error {
+                GetUserSettingsError::Settings(error) => super::user_settings_load_error(error),
+            }
+        })?;
+    if let Err(error) = viewer_process::open(settings.focus_window_on_diff()) {
         tracing::warn!(error = ?error, "desktop viewer could not be opened for saved live views");
         return Ok(Some(v1::DiffPresentation {
             notes: vec![v1::Note {

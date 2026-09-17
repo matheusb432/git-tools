@@ -15,6 +15,4 @@
   .icon-popover-trigger {
     @apply group-has-[:popover-open]/icon-popover:border-acc-line group-has-[:popover-open]/icon-popover:bg-acc-soft group-has-[:popover-open]/icon-popover:text-acc;
   }
-
-
 }

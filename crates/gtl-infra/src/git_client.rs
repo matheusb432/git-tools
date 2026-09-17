@@ -1,5 +1,7 @@
 //! The production Git adapter.
 
+pub mod status_context;
+
 mod parsing;
 mod working_tree;
 
@@ -436,24 +438,25 @@ fn status_snapshot(
     repo_path: &RepositoryRoot,
     known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
 ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
-    let repository = gix::open(repo_path.as_ref()).context("open Git repository")?;
-    let head = repository_head(&repository)?;
-    let upstream = repository_upstream(&repository, repo_path)?
-        .map(|reference| -> anyhow::Result<GitStatusUpstream> {
-            let ahead = capture(repo_path, &["rev-list", "--count", "@{u}..HEAD"])?
-                .and_then(|count| count.parse().ok())
-                .map(CommitCount::new)
-                .unwrap_or_default();
-            Ok(GitStatusUpstream { reference, ahead })
-        })
-        .transpose()?;
-    let working_tree =
-        working_tree::read_repository_with_known_descendants(&repository, known_descendants)?;
-    Ok(GitEffect::Applied(GitStatusSnapshot {
-        head,
-        upstream,
-        working_tree,
-    }))
+    status_context::with_repository(repo_path.as_ref(), |repository| {
+        let head = repository_head(repository)?;
+        let upstream = repository_upstream(repository, repo_path)?
+            .map(|reference| -> anyhow::Result<GitStatusUpstream> {
+                let ahead = capture(repo_path, &["rev-list", "--count", "@{u}..HEAD"])?
+                    .and_then(|count| count.parse().ok())
+                    .map(CommitCount::new)
+                    .unwrap_or_default();
+                Ok(GitStatusUpstream { reference, ahead })
+            })
+            .transpose()?;
+        let working_tree =
+            working_tree::read_repository_with_known_descendants(repository, known_descendants)?;
+        Ok(GitEffect::Applied(GitStatusSnapshot {
+            head,
+            upstream,
+            working_tree,
+        }))
+    })
 }
 
 fn repository_head(repository: &gix::Repository) -> anyhow::Result<GitHead> {

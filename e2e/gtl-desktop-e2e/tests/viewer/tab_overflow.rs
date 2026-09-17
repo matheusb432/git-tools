@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
 use serde::Deserialize;
-use thirtyfour::{By, Key, WebDriver, WebElement};
+use thirtyfour::{
+    By, Key, WebDriver, WebElement,
+    prelude::{ElementQueryable as _, ElementWaitable as _},
+};
 
 use crate::support::{self, fixture::TabOverflowFixture, wait};
 
@@ -713,7 +716,94 @@ async fn verify_overflow_menu(driver: &WebDriver, fixture: &TabOverflowFixture) 
         .click()
         .await
         .context("activate the moved overflowed tab")?;
-    wait_for_collapsed_active_diff(driver, first_repository, first_marker).await
+    wait_for_collapsed_active_diff(driver, first_repository, first_marker).await?;
+    menu.wait_until().not_displayed().await?;
+    verify_overflow_closing(driver, fixture.len()).await
+}
+
+async fn verify_overflow_closing(driver: &WebDriver, tab_count: usize) -> Result<()> {
+    wait_for_overflow_trigger(driver).await?.click().await?;
+    let menu = support::selectors::by_test_id(driver, test_ids::VIEWER_TAB_OVERFLOW_MENU).await?;
+    menu.wait_until().displayed().await?;
+    let active_close = menu
+        .find(By::Css(
+            "li[data-active='true'] button[aria-label^='Close ']",
+        ))
+        .await?;
+    active_close.click().await?;
+    wait_for_menu_tab_count(&menu, tab_count - 1).await?;
+    ensure!(
+        menu.is_displayed().await?,
+        "closing the active tab dismissed the overflow menu"
+    );
+
+    driver
+        .action_chain()
+        .send_keys(Key::Escape)
+        .perform()
+        .await?;
+    menu.wait_until().not_displayed().await?;
+    wait_for_overflow_trigger(driver).await?.click().await?;
+    menu.wait_until().displayed().await?;
+    driver
+        .action_chain()
+        .move_to(10, i64::from(WINDOW_HEIGHT - 100))
+        .click()
+        .perform()
+        .await?;
+    menu.wait_until().not_displayed().await?;
+    wait_for_overflow_trigger(driver).await?.click().await?;
+    menu.wait_until().displayed().await?;
+
+    for remaining in (0..tab_count - 1).rev() {
+        menu.find(By::Css("button[aria-label^='Close ']"))
+            .await?
+            .click()
+            .await?;
+        wait_for_menu_tab_count(&menu, remaining).await?;
+        ensure!(
+            menu.is_displayed().await?,
+            "closing a tab dismissed the overflow menu with {remaining} tabs left"
+        );
+        if remaining == 1 {
+            support::evidence::capture(driver, "viewer-tab-overflow-one-remaining", true).await?;
+        }
+    }
+    ensure!(
+        menu.text().await?.contains("No open diffs"),
+        "the empty overflow menu lost its empty state"
+    );
+    support::evidence::capture(driver, "viewer-tab-overflow-empty", true).await?;
+    driver
+        .action_chain()
+        .send_keys(Key::Escape)
+        .perform()
+        .await?;
+    wait::until(
+        "overflow trigger removed after empty menu dismissal",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok(visible_overflow_trigger(driver)
+                .await?
+                .is_none()
+                .then_some(()))
+        },
+    )
+    .await
+}
+
+async fn wait_for_menu_tab_count(menu: &WebElement, expected: usize) -> Result<()> {
+    wait::until(
+        "remaining overflow tabs",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let tabs = menu
+                .find_all(By::Css("li > button[aria-controls='viewer-active-view']"))
+                .await?;
+            Ok((tabs.len() == expected).then_some(()))
+        },
+    )
+    .await
 }
 
 async fn assert_menu_geometry(
@@ -819,7 +909,11 @@ async fn wait_for_collapsed_active_diff(
             if !label.contains(repository) {
                 return Ok(None);
             }
-            let main = driver.find(By::Css("main")).await?;
+            let main = driver
+                .query(By::Css("main"))
+                .and_displayed()
+                .first()
+                .await?;
             Ok((main.is_displayed().await? && main.text().await?.contains(marker)).then_some(()))
         },
     )

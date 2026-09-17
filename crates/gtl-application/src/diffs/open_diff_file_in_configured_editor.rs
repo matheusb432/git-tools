@@ -300,6 +300,7 @@ mod tests {
 
     fn view<'path>(paths_and_statuses: impl IntoIterator<Item = (&'path str, FileStatus)>) -> View {
         View {
+            file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             repo_root: utils::repository_root("/repos/git-tools"),
             files: paths_and_statuses
                 .into_iter()

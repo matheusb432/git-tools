@@ -445,11 +445,6 @@ fn ViewportRowWindow(
     retry_allowed: bool,
 ) -> Element {
     let context = use_context::<ViewportContext>();
-    use_context_provider(move || crate::views::diffs::presentation::DiffRowBatch {
-        tab: context.identity.tab_id,
-        content: context.content_id,
-        file: std::rc::Rc::from(file.summary().peek().path.to_string_lossy().as_ref()),
-    });
     let loaded = match layout {
         ViewerDiffLayout::Unified => file
             .rows()

@@ -7,9 +7,13 @@ import "gtl/v1/repository.proto";
 import "gtl/v1/settings.proto";
 
 service ViewerService {
+  rpc GetViewerFileFilters(GetViewerFileFiltersRequest) returns (GetViewerFileFiltersResponse);
+  rpc SetViewerFileFilters(SetViewerFileFiltersRequest) returns (SetViewerFileFiltersResponse);
+  rpc UpdateDiffExclusions(UpdateDiffExclusionsRequest) returns (UpdateDiffExclusionsResponse);
   rpc SetViewerTabPinned(SetViewerTabPinnedRequest) returns (SetViewerTabPinnedResponse);
   rpc CloseOtherViewerTabs(CloseOtherViewerTabsRequest) returns (CloseOtherViewerTabsResponse);
   rpc SetViewerModifiedFiles(SetViewerModifiedFilesRequest) returns (SetViewerModifiedFilesResponse);
+  rpc GetViewerProjectStatus(GetViewerProjectStatusRequest) returns (GetViewerProjectStatusResponse);
   rpc ListViewerProjects(ListViewerProjectsRequest) returns (ListViewerProjectsResponse);
   rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
   rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
@@ -58,11 +62,13 @@ message ReadViewerDiffTextResponse {
 
 message WatchViewerRequest {
   optional uint64 live_tab_id = 1;
+  repeated string project_ids = 2;
 }
 
 message WatchViewerResponse {
   uint64 version = 1;
   optional ViewerLiveCheck live_check = 2;
+  optional ViewerProjectStatusUpdate project_status = 3;
 }
 
 message ViewerLiveCheck {
@@ -130,6 +136,7 @@ enum ViewerFileStatus {
 }
 
 message ViewerFileSummary {
+  optional bytes source_id = 11;
   string id = 1;
   string path = 2;
   string absolute_path = 3;
@@ -470,7 +477,9 @@ message ViewerCodeSpan {
 message ViewerCodeLine {
   string text = 1;
   repeated ViewerCodeSpan spans = 2;
-  optional uint32 long_line_character_count = 3;
+  reserved 3;
+  reserved "long_line_character_count";
+  optional uint32 omitted_character_count = 4;
 }
 
 message ViewerUnifiedSourceRow {
@@ -632,6 +641,7 @@ message GetViewerHistoryCopyResponse {
 message GetViewerSettingsRequest {}
 
 message ViewerProjectDiffExclusions {
+  bool configured = 4;
   string project_name = 1;
   repeated string extensions = 2;
   bool excluded_from_push_all = 3;
@@ -654,7 +664,26 @@ message ProjectsViewFieldUpdate {
   }
 }
 
+enum ProjectsSort {
+  PROJECTS_SORT_UNSPECIFIED = 0;
+  PROJECTS_SORT_CHANGES = 1;
+  PROJECTS_SORT_NAME = 2;
+  PROJECTS_SORT_BRANCH = 3;
+  PROJECTS_SORT_CHANGES_ASCENDING = 4;
+  PROJECTS_SORT_NAME_DESCENDING = 5;
+  PROJECTS_SORT_BRANCH_DESCENDING = 6;
+}
+message ProjectsSortFieldUpdate {
+  oneof operation {
+    ProjectsSort update = 1;
+    ClearSetting clear = 2;
+  }
+}
+
 message GetViewerSettingsResponse {
+  ProjectsSort projects_sort = 13;
+  string revision = 12;
+  optional bool focus_window_on_diff = 11;
   uint32 projects_page_size = 10;
   ViewerSidebarVisibility sidebars = 9;
   ProjectsViewMode projects_view = 7;
@@ -717,6 +746,9 @@ message ProjectSettingsFieldUpdate {
 }
 
 message EditSettingsRequest {
+  ProjectsSortFieldUpdate projects_sort = 14;
+  optional string expected_revision = 13;
+  BoolFieldUpdate focus_window_on_diff = 12;
   ProjectsPageSizeFieldUpdate projects_page_size = 11;
   BoolFieldUpdate files_sidebar_visible = 9;
   BoolFieldUpdate commits_sidebar_visible = 10;
@@ -746,14 +778,39 @@ message OpenViewerDiffFileRequest {
 
 message OpenViewerDiffFileResponse {}
 
-message ListViewerProjectsRequest {}
+message ListViewerProjectsRequest {
+  optional ProjectsSort sort = 6;
+  uint32 page_size = 1;
+  oneof cursor {
+    Empty first = 2;
+    string after_project_id = 3;
+    string before_project_id = 4;
+    Empty last = 5;
+  }
+}
 message ListViewerProjectsResponse {
   repeated ViewerProject projects = 1;
+  uint32 total = 2;
+  uint32 count_before = 3;
 }
 message ViewerProject {
   string path = 1;
-  RepositoryStatusResult status = 2;
+  reserved 2, 5;
+  reserved "status", "branch_comparison";
   optional string last_rendered_at = 3;
+  string comparison_branch = 4;
+  string id = 6;
+  string name = 7;
+}
+message GetViewerProjectStatusRequest {
+  string project_id = 1;
+}
+message GetViewerProjectStatusResponse {
+  string project_id = 1;
+  oneof status {
+    RepositoryAbsentStatus absent = 2;
+    RepositoryPresentStatus present = 3;
+  }
   string comparison_branch = 4;
   ViewerProjectBranchComparison branch_comparison = 5;
 }
@@ -822,3 +879,34 @@ message CloseOtherViewerTabsRequest {
   uint64 tab_id = 1;
 }
 message CloseOtherViewerTabsResponse {}
+
+message ViewerProjectStatusUpdate {
+  string project_id = 1;
+  oneof result {
+    GetViewerProjectStatusResponse status = 2;
+    Empty unavailable = 3;
+  }
+}
+
+message GetViewerFileFiltersRequest {
+  uint64 tab_id = 1;
+}
+message GetViewerFileFiltersResponse {
+  ExtensionsValue excluded = 1;
+  repeated string extensions = 2;
+  optional string project = 3;
+  ExtensionsValue saved = 4;
+  ExtensionsValue defaults = 5;
+}
+message SetViewerFileFiltersRequest {
+  uint64 tab_id = 1;
+  ExtensionsFieldUpdate exclusions = 2;
+  ExtensionsValue expected = 3;
+}
+message SetViewerFileFiltersResponse {}
+message UpdateDiffExclusionsRequest {
+  optional string project = 1;
+  ExtensionsFieldUpdate extensions = 2;
+  ExtensionsValue expected = 3;
+}
+message UpdateDiffExclusionsResponse {}

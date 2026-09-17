@@ -11,6 +11,7 @@ use gtl_application::{
     ports::{UserSettingsEditConflict, UserSettingsEditError, UserSettingsEditOutcome},
     settings::UserSettingsPatch,
 };
+use gtl_models::settings::UserSettingsRevision;
 
 use super::{document::UserSettingsDocumentEdit, settings_document};
 
@@ -165,7 +166,26 @@ pub(super) fn edit(
     })?;
     let _lease = acquire_lock(&replacement_path)?;
     let baseline_bytes = read_document_bytes(&replacement_path)?;
+    if settings_patch
+        .expected_revision
+        .is_some_and(|expected| expected != revision(&baseline_bytes))
+    {
+        return Err(UserSettingsEditConflict::StaleRevision {
+            path: replacement_path,
+        }
+        .into());
+    }
     let document = settings_document(&replacement_path, baseline_bytes.clone())?;
+    if settings_patch
+        .diff_exclusions
+        .as_ref()
+        .is_some_and(|update| !document.exclusions_match(update))
+    {
+        return Err(UserSettingsEditConflict::ConcurrentModification {
+            path: replacement_path,
+        }
+        .into());
+    }
     let UserSettingsDocumentEdit::Changed(raw_new) = document.apply(settings_patch) else {
         return Ok(UserSettingsEditOutcome::Unchanged);
     };
@@ -253,18 +273,10 @@ struct BeforePersistHook {
 static BEFORE_PERSIST_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<BeforePersistHook>>> =
     std::sync::OnceLock::new();
 
-pub(super) fn revision(bytes: &[u8]) -> String {
+pub(super) fn revision(bytes: &[u8]) -> UserSettingsRevision {
     use sha2::{Digest as _, Sha256};
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    Sha256::digest(bytes)
-        .into_iter()
-        .flat_map(|byte| {
-            [
-                char::from(HEX[usize::from(byte >> 4)]),
-                char::from(HEX[usize::from(byte & 15)]),
-            ]
-        })
-        .collect()
+
+    UserSettingsRevision::from_digest(Sha256::digest(bytes).into())
 }
 
 pub(super) fn reset_invalid(
@@ -275,7 +287,7 @@ pub(super) fn reset_invalid(
     let target = replacement_path(settings_path)?;
     let _lease = acquire_lock(&target)?;
     let bytes = read_document_bytes(&target)?;
-    if revision(&bytes) != expected_revision
+    if revision(&bytes).to_string() != expected_revision
         || settings_document(settings_path, bytes.clone()).is_ok()
     {
         return Err(UserSettingsEditConflict::ConcurrentModification {
@@ -348,7 +360,7 @@ mod tests {
             UserSettingsEditConflict, UserSettingsEditError, UserSettingsEditOutcome,
             UserSettingsEditor,
         },
-        settings::UserSettingsPatch,
+        settings::{UserSettingsFieldUpdate, UserSettingsPatch},
     };
     use gtl_models::{
         settings::{SettingKey, SettingKeyValue},
@@ -359,6 +371,106 @@ mod tests {
         BEFORE_PERSIST_HOOK, BeforePersistHook, USER_SETTINGS_LOCK_WAIT_MAX, edit,
         lock_identity_path, lock_path, replacement_path,
     };
+
+    #[test]
+    fn scoped_exclusions_preserve_other_fields_and_distinguish_empty_from_inherited() {
+        use gtl_application::{
+            ports::UserSettingsReader as _,
+            settings::{DiffExclusionsUpdate, UserSettingsFieldUpdate},
+        };
+        use gtl_models::{diffs::ExcludedExtensions, paths::ProjectName};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let raw = "# preserve comment\n[diff]\nexclude = ['lock']\n[[projects]]\nname = 'first'\nexcluded_from_push_all = true\ndiff = { exclude = ['md'] }\n[[projects]]\nname = 'second'\ndiff = { exclude = ['txt'] }\n";
+        std::fs::write(&path, raw).unwrap();
+        let first = ProjectName::try_new("first").unwrap();
+        let second = ProjectName::try_new("second").unwrap();
+        let mut store = crate::user_config::TomlSettingsStore::new(Some(path.clone()));
+        let update = |extensions, expected| UserSettingsPatch {
+            diff_exclusions: Some(DiffExclusionsUpdate {
+                project: Some(first.clone()),
+                extensions,
+                expected,
+            }),
+            ..UserSettingsPatch::default()
+        };
+        store
+            .edit(update(
+                UserSettingsFieldUpdate::Update(ExcludedExtensions::default()),
+                Some(ExcludedExtensions::new(["md"])),
+            ))
+            .unwrap();
+        let settings = store.load().unwrap();
+        assert!(
+            settings
+                .diff_exclusions()
+                .for_project(&first)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default(&first)
+                .is_empty()
+        );
+        assert_eq!(
+            settings
+                .diff_exclusions()
+                .for_project(&second)
+                .unwrap()
+                .extensions(),
+            &["txt"]
+        );
+        assert!(settings.push_all_exclusions().contains(&first));
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("# preserve comment"));
+        assert!(
+            store
+                .edit(update(
+                    UserSettingsFieldUpdate::Clear,
+                    Some(ExcludedExtensions::new(["md"]))
+                ))
+                .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        store
+            .edit(update(
+                UserSettingsFieldUpdate::Clear,
+                Some(ExcludedExtensions::default()),
+            ))
+            .unwrap();
+        let settings = store.load().unwrap();
+        assert!(settings.diff_exclusions().for_project(&first).is_none());
+        assert_eq!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default(&first)
+                .extensions(),
+            &["lock"]
+        );
+        let third = ProjectName::try_new("third").unwrap();
+        store
+            .edit(UserSettingsPatch {
+                diff_exclusions: Some(DiffExclusionsUpdate {
+                    project: Some(third.clone()),
+                    extensions: UserSettingsFieldUpdate::Update(ExcludedExtensions::new(["rs"])),
+                    expected: None,
+                }),
+                ..UserSettingsPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .diff_exclusions()
+                .for_project(&third)
+                .unwrap()
+                .extensions(),
+            &["rs"]
+        );
+    }
 
     const LOCK_ATTEMPT_WAIT_TEST_MAX: Duration = Duration::from_millis(100);
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);
@@ -377,7 +489,8 @@ mod tests {
             std::fs::write(&path, raw).unwrap();
             let timestamp =
                 gtl_models::timestamps::MachineTimestamp::try_from("2026-09-08T03:10:09Z").unwrap();
-            let backup = super::reset_invalid(&path, &super::revision(raw), &timestamp).unwrap();
+            let backup =
+                super::reset_invalid(&path, &super::revision(raw).to_string(), &timestamp).unwrap();
             assert_eq!(
                 backup.file_name().unwrap(),
                 "config.20260908-031009-backup.toml"
@@ -398,13 +511,19 @@ mod tests {
         let raw = b"theme = 7";
         std::fs::write(&path, raw).unwrap();
         assert!(matches!(
-            super::reset_invalid(&path, &super::revision(b"theme = 8"), &timestamp),
+            super::reset_invalid(
+                &path,
+                &super::revision(b"theme = 8").to_string(),
+                &timestamp,
+            ),
             Err(UserSettingsEditError::Conflict(_))
         ));
         assert_eq!(std::fs::read(&path).unwrap(), raw);
         let backup = path.with_file_name("config.20260908-031009-backup.toml");
         std::fs::write(&backup, "keep this backup").unwrap();
-        assert!(super::reset_invalid(&path, &super::revision(raw), &timestamp).is_err());
+        assert!(
+            super::reset_invalid(&path, &super::revision(raw).to_string(), &timestamp).is_err()
+        );
         assert_eq!(
             std::fs::read_to_string(&backup).unwrap(),
             "keep this backup"
@@ -412,7 +531,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), raw);
         std::fs::write(&path, b"").unwrap();
         assert!(matches!(
-            super::reset_invalid(&path, &super::revision(b""), &timestamp),
+            super::reset_invalid(&path, &super::revision(b"").to_string(), &timestamp),
             Err(UserSettingsEditError::Conflict(_))
         ));
     }
@@ -429,7 +548,8 @@ mod tests {
         std::os::unix::fs::symlink(&target, &path).unwrap();
         let timestamp =
             gtl_models::timestamps::MachineTimestamp::try_from("2026-09-08T03:10:09Z").unwrap();
-        let backup = super::reset_invalid(&path, &super::revision(raw), &timestamp).unwrap();
+        let backup =
+            super::reset_invalid(&path, &super::revision(raw).to_string(), &timestamp).unwrap();
         assert!(
             std::fs::symlink_metadata(&path)
                 .unwrap()
@@ -694,6 +814,34 @@ mod tests {
             ) if error_path == path
         ));
         assert_eq!(std::fs::read_to_string(path).unwrap(), changed_raw);
+    }
+
+    #[test]
+    fn stale_revision_rejects_the_edit_before_parsing_or_replacing_the_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        let loaded_raw = b"theme = \"dark\"\n";
+        let current_raw = "theme = \"hearth\"\n";
+        let expected_revision = super::revision(loaded_raw);
+        std::fs::write(&path, current_raw).unwrap();
+
+        let error = edit(
+            &path,
+            UserSettingsPatch {
+                expected_revision: Some(expected_revision),
+                theme: UserSettingsFieldUpdate::Update(Theme::Light),
+                ..UserSettingsPatch::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            UserSettingsEditError::Conflict(UserSettingsEditConflict::StaleRevision {
+                path: error_path
+            }) if error_path == path
+        ));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), current_raw);
     }
 
     #[test]

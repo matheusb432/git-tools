@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
+use lucide_dioxus::{ArrowDown, ArrowUp, ArrowUpDown};
 
 use super::ScrollArea;
 
@@ -36,6 +37,55 @@ pub(crate) fn TableHeading(
     rsx! {
         th { ..attributes,{children} }
     }
+}
+
+#[component]
+pub(crate) fn TableSortHeading(
+    label: String,
+    direction: Option<TableSortDirection>,
+    #[props(default)] disabled: bool,
+    onsort: EventHandler<()>,
+) -> Element {
+    let (aria_sort, title) = match direction {
+        Some(TableSortDirection::Ascending) => {
+            (Some("ascending"), format!("Sort {label} descending"))
+        }
+        Some(TableSortDirection::Descending) => {
+            (Some("descending"), format!("Sort {label} ascending"))
+        }
+        None => (None, format!("Sort by {label}")),
+    };
+    rsx! {
+        TableHeading { aria_sort,
+            button {
+                r#type: "button",
+                class: "control-table-sort",
+                title,
+                disabled,
+                onclick: move |_| onsort(()),
+                "{label}"
+                span { class: "inline-flex shrink-0", aria_hidden: "true",
+                    match direction {
+                        Some(TableSortDirection::Ascending) => rsx! {
+                            ArrowUp { size: 13 }
+                        },
+                        Some(TableSortDirection::Descending) => rsx! {
+                            ArrowDown { size: 13 }
+                        },
+                        None => rsx! {
+                            ArrowUpDown { size: 13 }
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TableSortDirection {
+    Ascending,
+    Descending,
 }
 
 #[component]

@@ -4,7 +4,10 @@ use gtl_wire::viewer::{
     SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabPinned, StreamViewerRows,
     ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
     ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
+    projects::{
+        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject,
+        ViewerProjectPage,
+    },
 };
 
 use crate::shared::viewer_client::ViewerClientError;
@@ -45,7 +48,13 @@ macro_rules! viewer_query {
 }
 
 viewer_query!(get_shell, ViewerShell, get_shell);
-viewer_query!(list_projects, Vec<ViewerProject>, list_projects);
+viewer_request!(
+    list_projects,
+    ListViewerProjects,
+    ViewerProjectPage,
+    list_projects
+);
+
 viewer_request!(
     open_project,
     OpenViewerProject,
@@ -165,3 +174,23 @@ viewer_request!(
 
 viewer_request!(set_tab_pinned, SetViewerTabPinned, (), set_tab_pinned);
 viewer_request!(close_other_tabs, ViewerTabRequest, (), close_other_tabs);
+
+viewer_request!(
+    get_file_filters,
+    gtl_wire::viewer::ViewerTabRequest,
+    gtl_wire::viewer::file_filters::ViewerFileFilters,
+    get_file_filters
+);
+viewer_request!(
+    set_file_filters,
+    gtl_wire::viewer::file_filters::SetViewerFileFilters,
+    (),
+    set_file_filters
+);
+
+viewer_request!(
+    update_diff_exclusions,
+    gtl_wire::viewer::file_filters::UpdateDiffExclusions,
+    (),
+    update_diff_exclusions
+);

@@ -20,7 +20,7 @@ fn density_default() -> String {
 
 /// Bumped when the renderer's HTML output changes materially so range reuse never serves an
 /// artifact rendered by an older renderer.
-pub const RENDERER_VERSION: u32 = 4;
+pub const RENDERER_VERSION: u32 = 5;
 
 /// Metadata stored alongside each artifact as `<hash>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

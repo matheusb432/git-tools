@@ -7,9 +7,10 @@ pub(super) async fn desktop_window_state(
     window: tauri::WebviewWindow,
 ) -> Result<WindowState, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        window.is_maximized().map(|maximized| WindowState {
+        Ok::<_, tauri::Error>(WindowState {
             custom_titlebar: CUSTOM_TITLEBAR,
-            maximized,
+            maximized: window.is_maximized()?,
+            visible: window.is_visible()? && !window.is_minimized()?,
         })
     })
     .await

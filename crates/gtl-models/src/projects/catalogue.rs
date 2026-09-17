@@ -9,7 +9,7 @@ pub const PROJECT_MUTATIONS_MAX: usize = 256;
 
 #[nutype(
     validate(predicate = |value| (2..=4).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_uppercase())),
-    derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, AsRef, Display, TryFrom)
+    derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, AsRef, Display, TryFrom, Serialize, Deserialize)
 )]
 pub struct ProjectId(String);
 

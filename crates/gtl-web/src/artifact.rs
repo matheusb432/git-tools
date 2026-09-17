@@ -326,7 +326,7 @@ mod tests {
                         syntax_class: None,
                         changed: false,
                     }],
-                    long_line_character_count: None,
+                    omitted_character_count: None,
                 },
             })]),
             line_number_digits: 1,
@@ -337,6 +337,7 @@ mod tests {
         let files = (0..file_count)
             .map(|index| {
                 Ok(ViewerFileSummary {
+                    source_id: None,
                     id: ViewerDiffFileId::for_index(index),
                     path: repository_relative_path(&format!("src/file_{index}.rs"))?,
                     absolute_path: absolute_file_path(format!("/repo/src/file_{index}.rs"))?,

@@ -25,15 +25,15 @@ pub(super) fn get_viewer_settings(
     state: &AppState,
     _request: Request<v1::GetViewerSettingsRequest>,
 ) -> Result<Response<v1::GetViewerSettingsResponse>, Status> {
-    let (settings, projects_view, projects_page_size) = state
+    let ((settings, projects_preferences), revision) = state
         .user_settings
-        .load_viewer_settings()
+        .load_viewer_settings_with_revision()
         .map_err(user_settings_load_error)?;
     Ok(Response::new(
         proto::viewer::encode_get_viewer_settings_response(viewer::settings::project_settings(
             &settings,
-            projects_view,
-            projects_page_size,
+            projects_preferences,
+            revision,
             state
                 .user_settings
                 .path()

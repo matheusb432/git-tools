@@ -22,6 +22,9 @@ mod projects;
 #[path = "viewer/settings_recovery.rs"]
 mod settings_recovery;
 
+#[path = "viewer/settings_editing.rs"]
+mod settings_editing;
+
 #[path = "viewer/line_wrapping.rs"]
 mod line_wrapping;
 
@@ -30,3 +33,12 @@ mod panel_scroll;
 
 #[path = "viewer/desktop_shell.rs"]
 mod desktop_shell;
+
+#[path = "viewer/window_focus.rs"]
+mod window_focus;
+
+#[path = "viewer/file_filters.rs"]
+mod file_filters;
+
+#[path = "viewer/long_lines.rs"]
+mod long_lines;

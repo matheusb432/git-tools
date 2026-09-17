@@ -343,10 +343,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
 fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
 -> anyhow::Result<()> {
     use gtl_application::{
-        projects::{
-            list_viewer_projects,
-            open_viewer_project::{self, OpenProjectComparison},
-        },
+        projects::open_viewer_project::{self, OpenProjectComparison},
         utils::{FixedClock, FixedUserSettingsStore},
     };
     use gtl_infra::git_client::HybridGitClient;
@@ -422,10 +419,27 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         assert_eq!(repeated.ticket().tab_id, id);
     }
     assert_ne!(ids[0], ids[1]);
-    let projects =
-        list_viewer_projects::execute(repositories, &HybridGitClient, &connection).unwrap();
+    assert_viewer_project_recency(directory.path(), &connection)?;
+    assert_live_restores_independently(&mut connection, &viewer, ids[1]);
+    Ok(())
+}
+
+fn assert_viewer_project_recency(
+    home: &std::path::Path,
+    connection: &rusqlite::Connection,
+) -> anyhow::Result<()> {
+    use gtl_application::projects::{get_viewer_project_status, list_viewer_projects};
+    use gtl_infra::git_client::HybridGitClient;
+    register_viewer_project(connection, "ALP", "Alpha", "~/alpha")?;
+    let projects = list_viewer_projects::execute(
+        &gtl_wire::viewer::projects::ListViewerProjects::default(),
+        home,
+        connection,
+    )?;
+    let project = &projects.projects()[0];
+    let status = get_viewer_project_status::execute(project.clone(), &HybridGitClient)?;
     assert!(matches!(
-        &projects[0].status,
+        &status.status,
         gtl_models::repository::status::RepositoryStatus::Present {
             head: gtl_models::repository::status::StatusHead::Branch {
                 upstream: gtl_models::repository::status::StatusUpstream::Tracking { .. },
@@ -435,10 +449,9 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
         }
     ));
     assert_eq!(
-        projects[0].last_rendered_at.as_ref().unwrap().as_ref(),
+        project.last_rendered_at.as_ref().unwrap().as_ref(),
         "2026-09-06T11:00:00Z"
     );
-    assert_live_restores_independently(&mut connection, &viewer, ids[1]);
     Ok(())
 }
 
@@ -500,67 +513,77 @@ fn assert_live_restores_independently(
     );
 }
 
+fn register_viewer_project(
+    connection: &rusqlite::Connection,
+    id: &str,
+    name: &str,
+    source: &str,
+) -> anyhow::Result<()> {
+    connection.execute(
+        "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
+        [source],
+    )?;
+    connection.execute("INSERT INTO projects (id, title, source_id, mux_session_name, affiliation) VALUES (?1, ?2, last_insert_rowid(), ?1, 'personal')", rusqlite::params![id, name])?;
+    Ok(())
+}
+
 #[test]
-fn projects_sort_by_review_status_before_render_recency() -> anyhow::Result<()> {
+fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyhow::Result<()> {
     use gtl_application::projects::{
         list_viewer_projects,
         record_project_render::{self, RecordProjectRender},
     };
-    use gtl_infra::git_client::HybridGitClient;
-    use gtl_models::projects::ProjectRepository;
+    use gtl_wire::viewer::projects::{
+        ListViewerProjects, ViewerProjectsCursor, ViewerProjectsPageSize,
+    };
 
     let directory = tempfile::tempdir()?;
     let state = SqliteAppState::open(directory.path())?;
     let connection = state.connection_lock()?;
-    let mut repositories = Vec::new();
-    for (name, timestamp) in [
-        ("Alpha", "2026-09-06T10:00:00Z"),
-        ("Beta", "2026-09-06T12:00:00Z"),
-        ("Gamma", "2026-09-06T11:00:00Z"),
-    ] {
-        let root = directory.path().join(name);
-        create_project_comparison_repository(&root);
-        if name == "Beta" {
-            std::fs::remove_file(root.join("new.txt"))?;
-        }
-        let path = repository_root(&root);
-        record_project_render::execute(
-            &RecordProjectRender {
-                path: path.clone(),
-                rendered_at: timestamp.try_into()?,
-            },
-            &connection,
-        )?;
-        repositories.push(ProjectRepository {
-            name: name.try_into()?,
-            path,
-            remote: None,
-        });
+    for (id, name) in [("GAM", "Alpha"), ("BET", "Gamma"), ("ALP", "Beta")] {
+        register_viewer_project(&connection, id, name, &format!("~/{id}"))?;
     }
-    let projects =
-        list_viewer_projects::execute(repositories.clone(), &HybridGitClient, &connection)?;
-    assert_eq!(
-        projects
-            .iter()
-            .map(|project| project.name.as_str())
-            .collect::<Vec<_>>(),
-        ["Gamma", "Alpha", "Beta"]
-    );
     record_project_render::execute(
         &RecordProjectRender {
-            path: repositories[0].path.clone(),
+            path: repository_root(&directory.path().join("GAM")),
             rendered_at: "2026-09-06T13:00:00Z".try_into()?,
         },
         &connection,
     )?;
-    let projects = list_viewer_projects::execute(repositories, &HybridGitClient, &connection)?;
+    let request = ListViewerProjects {
+        sort: None,
+        page_size: ViewerProjectsPageSize::try_new(2)?,
+        cursor: ViewerProjectsCursor::First,
+    };
+    let page = list_viewer_projects::execute(&request, directory.path(), &connection)?;
     assert_eq!(
-        projects
+        page.projects()
             .iter()
-            .map(|project| project.name.as_str())
+            .map(|project| project.id.as_ref())
             .collect::<Vec<_>>(),
-        ["Alpha", "Gamma", "Beta"]
+        ["ALP", "BET"]
     );
+    assert_eq!(page.total(), 3);
+    assert_eq!(page.count_before(), 0);
+    let page = list_viewer_projects::execute(
+        &ListViewerProjects {
+            cursor: ViewerProjectsCursor::After("BET".try_into()?),
+            ..request
+        },
+        directory.path(),
+        &connection,
+    )?;
+    assert_eq!(page.projects()[0].id.as_ref(), "GAM");
+    assert_eq!(
+        page.projects()[0]
+            .last_rendered_at
+            .as_ref()
+            .unwrap()
+            .as_ref(),
+        "2026-09-06T13:00:00Z"
+    );
+    assert_eq!(page.count_before(), 2);
+    assert!(!page.projects()[0].path.as_ref().exists());
     Ok(())
 }
 
@@ -574,5 +597,169 @@ fn app_state_schema_matches_the_committed_snapshot() -> anyhow::Result<()> {
         .collect::<Result<Vec<_>, _>>()?
         .into_iter().map(|sql| format!("{sql};")).collect::<Vec<_>>().join("\n\n") + "\n";
     assert_eq!(schema, include_str!("../db/schema.sql"));
+    Ok(())
+}
+
+#[test]
+fn sqlite_sorts_every_change_combination_before_project_pagination() -> anyhow::Result<()> {
+    use ProjectsSort::{Branch, BranchDescending, Changes, ChangesAscending, Name, NameDescending};
+    use ViewerProjectsCursor::{After, Before, First, Last};
+    use gtl_application::projects::list_viewer_projects;
+    use gtl_models::settings::ProjectsSort;
+    use gtl_wire::viewer::projects::{
+        ListViewerProjects, ViewerProjectsCursor, ViewerProjectsPageSize,
+    };
+    let directory = tempfile::tempdir()?;
+    let state = SqliteAppState::open(directory.path())?;
+    let connection = state.connection_lock()?;
+    register_project_status_combinations(directory.path(), &connection)?;
+    let assert_page = |sort, cursor, expected: &[&str], count_before| -> anyhow::Result<()> {
+        let request = ListViewerProjects {
+            cursor,
+            page_size: ViewerProjectsPageSize::try_new(3)?,
+            sort: Some(sort),
+        };
+        let page = list_viewer_projects::execute(&request, directory.path(), &connection)?;
+        assert_eq!(
+            page.projects()
+                .iter()
+                .map(|project| project.id.as_ref())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!((page.total(), page.count_before()), (10, count_before));
+        Ok(())
+    };
+    assert_page(Changes, First, &["HH", "GG", "FF"], 0)?;
+    assert_page(Changes, After("FF".try_into()?), &["II", "EE", "DD"], 3)?;
+    assert_page(Changes, Before("II".try_into()?), &["HH", "GG", "FF"], 0)?;
+    assert_page(Changes, Last, &["ZZ"], 9)?;
+    assert_page(Changes, Before("ZZ".try_into()?), &["CC", "BB", "AA"], 6)?;
+    assert_page(Name, First, &["II", "HH", "GG"], 0)?;
+    assert_page(Branch, First, &["AA", "II", "HH"], 0)?;
+    assert_page(ChangesAscending, First, &["AA", "BB", "CC"], 0)?;
+    assert_page(
+        ChangesAscending,
+        After("CC".try_into()?),
+        &["DD", "EE", "II"],
+        3,
+    )?;
+    assert_page(
+        ChangesAscending,
+        Before("DD".try_into()?),
+        &["AA", "BB", "CC"],
+        0,
+    )?;
+    assert_page(ChangesAscending, Last, &["ZZ"], 9)?;
+    assert_page(NameDescending, First, &["ZZ", "AA", "BB"], 0)?;
+    assert_page(
+        NameDescending,
+        After("BB".try_into()?),
+        &["CC", "DD", "EE"],
+        3,
+    )?;
+    assert_page(BranchDescending, First, &["II", "HH", "GG"], 0)?;
+    assert_page(BranchDescending, Last, &["ZZ"], 9)?;
+    let candidates =
+        list_viewer_projects::status_refresh_candidates(directory.path(), &connection)?;
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|project| project.id.as_ref())
+            .collect::<Vec<_>>(),
+        ["ZZ"]
+    );
+    Ok(())
+}
+
+fn register_project_status_combinations(
+    home: &std::path::Path,
+    connection: &rusqlite::Connection,
+) -> anyhow::Result<()> {
+    use gtl_application::projects::{list_viewer_projects, status_index};
+    use gtl_models::repository::{
+        PathCount,
+        status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
+    };
+    use gtl_wire::viewer::projects::{ViewerProjectBranchComparison, ViewerProjectStatus};
+    let cases = [
+        ("AA", 0, 0, 0),
+        ("BB", 0, 0, 1),
+        ("CC", 0, 1, 0),
+        ("DD", 0, 1, 1),
+        ("EE", 2, 0, 0),
+        ("FF", 1, 0, 1),
+        ("GG", 1, 1, 0),
+        ("HH", 1, 1, 1),
+        ("II", 10, 0, 0),
+    ];
+    for (index, (id, ahead, tracked, untracked)) in cases.into_iter().enumerate() {
+        register_viewer_project(
+            connection,
+            id,
+            &format!("Project {:02}", 20 - index),
+            &format!("~/{id}"),
+        )?;
+        let project =
+            list_viewer_projects::get_project(&id.try_into()?, home, connection)?.unwrap();
+        let status = ViewerProjectStatus {
+            project_id: project.id.clone(),
+            comparison_branch: project.comparison_branch.clone(),
+            status: RepositoryStatus::Present {
+                head: StatusHead::Branch {
+                    name: if id == "AA" { "alpha" } else { "zulu" }.try_into()?,
+                    upstream: StatusUpstream::Missing,
+                },
+                changes: StatusChanges::from_counts(
+                    PathCount::new(tracked),
+                    PathCount::new(untracked),
+                ),
+            },
+            branch_comparison: ViewerProjectBranchComparison::Branch {
+                commits_ahead: gtl_models::git::CommitCount::new(ahead),
+            },
+        };
+        status_index::record(&project, Some(&status), home, connection)?;
+        status_index::record(&project, None, home, connection)?;
+    }
+    register_viewer_project(connection, "ZZ", "Unavailable", "~/ZZ")?;
+    Ok(())
+}
+
+#[test]
+fn project_status_index_ignores_results_for_replaced_repositories() -> anyhow::Result<()> {
+    use gtl_application::projects::{list_viewer_projects, status_index};
+
+    let directory = tempfile::tempdir()?;
+    let database = SqliteAppState::open(directory.path())?;
+    let connection = database.connection_lock()?;
+    register_viewer_project(&connection, "AA", "Original", "~/original")?;
+    connection.execute(
+        "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', '~/replacement')",
+        [],
+    )?;
+    let replacement = connection.last_insert_rowid();
+    let original =
+        list_viewer_projects::get_project(&"AA".try_into()?, directory.path(), &connection)?
+            .unwrap();
+    connection.execute(
+        "UPDATE projects SET source_id = ?1 WHERE id = 'AA'",
+        [replacement],
+    )?;
+    status_index::record(&original, None, directory.path(), &connection)?;
+    let indexed: u32 =
+        connection.query_row("SELECT count(*) FROM project_status_index", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(indexed, 0);
+    let current =
+        list_viewer_projects::get_project(&"AA".try_into()?, directory.path(), &connection)?
+            .unwrap();
+    status_index::record(&current, None, directory.path(), &connection)?;
+    let indexed: u32 =
+        connection.query_row("SELECT count(*) FROM project_status_index", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(indexed, 1);
     Ok(())
 }

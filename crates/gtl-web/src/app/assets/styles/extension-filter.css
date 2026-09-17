@@ -1,0 +1,20 @@
+@layer components {
+  #diff-extension-filters.popover-surface {
+    @apply w-[min(22rem,calc(100vw-1rem))] max-h-[calc(100dvh-1rem)];
+  }
+  .extension-filter { @apply flex min-w-0 flex-col gap-3 p-4; }
+  .extension-exclusions-input { @apply flex min-w-0 flex-col gap-3; }
+  .extension-filter-trigger { @apply inline-flex w-40 min-w-0 items-center gap-2 mobile:w-auto; }
+  .extension-filter-chips { @apply flex min-w-0 flex-wrap gap-2; }
+  .extension-filter-chip { @apply max-w-full border border-acc-line bg-acc-soft text-acc hover:bg-acc/20; }
+  .extension-filter-search { @apply relative min-w-0; }
+  .extension-filter-search-icon { @apply pointer-events-none absolute top-2.5 left-3 z-10 text-ink-3; }
+  .extension-filter-search-clear { @apply absolute top-1.5 right-1.5; }
+  .extension-filter-results { @apply grid min-w-0 grid-cols-2 gap-2; }
+  .extension-filter-group { @apply col-span-2 text-xs text-ink-3; }
+  .extension-filter-option { @apply min-w-0 justify-between px-3 text-left; }
+  .extension-filter-option[aria-selected="true"] { @apply border-acc-line bg-acc-soft text-acc; }
+  .extension-filter-option[data-active="true"], .extension-filter-create[data-active="true"] { @apply border-acc; }
+  .extension-filter-footer { @apply border-t border-line pt-3 text-ink-3; }
+  .extension-filter-error { @apply grid gap-1 text-sm text-del; }
+}

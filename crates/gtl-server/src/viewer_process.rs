@@ -15,14 +15,14 @@ pub(crate) enum OpenViewerError {
     Start(#[source] std::io::Error),
 }
 
-/// Starts the viewer or asks its existing single-instance process to focus its window.
-pub(crate) fn open() -> Result<(), OpenViewerError> {
+/// Starts the viewer or forwards the activation preference to its existing process.
+pub(crate) fn open(focus_window: bool) -> Result<(), OpenViewerError> {
     #[cfg(feature = "benchmark-support")]
     if std::env::var_os("GTL_BENCHMARK_DISABLE_VIEWER_LAUNCH").is_some() {
         return Err(OpenViewerError::NotInstalled);
     }
     let executable = resolve_viewer_bin().ok_or(OpenViewerError::NotInstalled)?;
-    platform_spawn(&executable).map_err(OpenViewerError::Start)
+    platform_spawn(&executable, focus_window).map_err(OpenViewerError::Start)
 }
 
 fn resolve_viewer_bin() -> Option<PathBuf> {
@@ -43,17 +43,17 @@ fn resolve_viewer_bin() -> Option<PathBuf> {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn platform_spawn(program: &std::path::Path) -> std::io::Result<()> {
-    unix::spawn(program)
+fn platform_spawn(program: &std::path::Path, focus_window: bool) -> std::io::Result<()> {
+    unix::spawn(program, focus_window)
 }
 
 #[cfg(windows)]
-fn platform_spawn(program: &std::path::Path) -> std::io::Result<()> {
-    windows::spawn(program)
+fn platform_spawn(program: &std::path::Path, focus_window: bool) -> std::io::Result<()> {
+    windows::spawn(program, focus_window)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn platform_spawn(_program: &std::path::Path) -> std::io::Result<()> {
+fn platform_spawn(_program: &std::path::Path, _focus_window: bool) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "desktop viewer startup is not implemented for this OS",

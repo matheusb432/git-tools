@@ -237,8 +237,9 @@ async fn apply_viewer_route(
 
 #[component]
 fn Projects() -> Element {
+    use_effect(move || browser::focus_element("projects-heading".into()));
     rsx! {
-        crate::views::projects::ProjectsView {}
+        document::Title { "Projects - git-tools" }
     }
 }
 

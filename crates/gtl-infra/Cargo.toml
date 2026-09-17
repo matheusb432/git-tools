@@ -10,6 +10,7 @@ gtl-application.workspace = true
 directories.workspace = true
 gtl-models.workspace = true
 gix.workspace = true
+notify.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
 rusqlite_migration.workspace = true

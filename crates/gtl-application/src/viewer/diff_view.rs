@@ -24,22 +24,40 @@ struct ViewerDiffSnapshotContent {
     view: Arc<View>,
     compact: [u8; 32],
     full: [u8; 32],
+    files: Vec<([u8; 32], [u8; 32])>,
 }
 
 impl ViewerDiffSnapshot {
     #[must_use]
     pub fn new(view: Arc<View>) -> Self {
-        let compact = source_digest(&view, ViewerDiffDensity::Compact);
-        let full = if view.files.iter().all(|file| file.full_lines.is_none()) {
-            compact
+        let (compact, compact_files) = source_digests(&view, ViewerDiffDensity::Compact);
+        let (full, full_files) = if view.files.iter().all(|file| file.full_lines.is_none()) {
+            (compact, compact_files.clone())
         } else {
-            source_digest(&view, ViewerDiffDensity::Full)
+            source_digests(&view, ViewerDiffDensity::Full)
         };
         Self(Arc::new(ViewerDiffSnapshotContent {
             view,
             compact,
             full,
+            files: compact_files.into_iter().zip(full_files).collect(),
         }))
+    }
+
+    fn file_content_id(
+        &self,
+        index: usize,
+        options: ViewerRenderOptions,
+    ) -> Option<ViewerRowContentId> {
+        self.0.files.get(index).map(|(compact, full)| {
+            row_content_id(
+                match options.density {
+                    ViewerDiffDensity::Compact => *compact,
+                    ViewerDiffDensity::Full => *full,
+                },
+                options.layout,
+            )
+        })
     }
 
     #[must_use]
@@ -65,22 +83,32 @@ impl Deref for ViewerDiffSnapshot {
     }
 }
 
-fn source_digest(view: &View, density: ViewerDiffDensity) -> [u8; 32] {
+fn source_digests(view: &View, density: ViewerDiffDensity) -> ([u8; 32], Vec<[u8; 32]>) {
+    let files = view
+        .files
+        .iter()
+        .map(|file| {
+            let mut digest = Sha256::new();
+            digest.update(b"gtl.viewer.file-source.v1\0");
+            hash_frame(
+                &mut digest,
+                file.path.as_path().as_os_str().as_encoded_bytes(),
+            );
+            let lines = selected_lines(file, density);
+            digest.update((lines.len() as u64).to_be_bytes());
+            for line in lines {
+                hash_frame(&mut digest, line.as_bytes());
+            }
+            digest.finalize().into()
+        })
+        .collect::<Vec<[u8; 32]>>();
     let mut digest = Sha256::new();
-    digest.update(b"gtl.viewer.row-sources.v1\0");
-    digest.update((view.files.len() as u64).to_be_bytes());
-    for file in &view.files {
-        hash_frame(
-            &mut digest,
-            file.path.as_path().as_os_str().as_encoded_bytes(),
-        );
-        let lines = selected_lines(file, density);
-        digest.update((lines.len() as u64).to_be_bytes());
-        for line in lines {
-            hash_frame(&mut digest, line.as_bytes());
-        }
+    digest.update(b"gtl.viewer.row-sources.v2\0");
+    digest.update((files.len() as u64).to_be_bytes());
+    for file in &files {
+        digest.update(file);
     }
-    digest.finalize().into()
+    (digest.finalize().into(), files)
 }
 
 fn hash_frame(digest: &mut Sha256, bytes: &[u8]) {
@@ -93,7 +121,7 @@ fn row_content_id(
     layout: gtl_wire::viewer::ViewerDiffLayout,
 ) -> ViewerRowContentId {
     let mut digest = Sha256::new();
-    digest.update(b"gtl.viewer.rows.v1\0");
+    digest.update(b"gtl.viewer.rows.v3\0");
     digest.update([match layout {
         gtl_wire::viewer::ViewerDiffLayout::Unified => 0,
         gtl_wire::viewer::ViewerDiffLayout::Split => 1,
@@ -168,12 +196,15 @@ pub fn project_diff_view(
     identity: ViewerViewIdentity,
     commit_selection: ViewerCommitSelection,
 ) -> ViewerActiveView {
-    let content_id = row_content_id(
-        source_digest(view, identity.render_options.density),
-        identity.render_options.layout,
+    let snapshot = ViewerDiffSnapshot::new(Arc::new(view.clone()));
+    let content_id = snapshot.content_id(identity.render_options);
+    let mut projected = project_diff_view_with_content_id(
+        &snapshot,
+        range_view,
+        identity,
+        commit_selection,
+        content_id,
     );
-    let mut projected =
-        project_diff_view_with_content_id(view, range_view, identity, commit_selection, content_id);
     projected.commits = range_view
         .commits
         .iter()
@@ -189,7 +220,7 @@ pub fn project_diff_view(
 }
 
 pub(super) fn project_diff_view_with_content_id(
-    view: &View,
+    view: &ViewerDiffSnapshot,
     range_view: &View,
     identity: ViewerViewIdentity,
     commit_selection: ViewerCommitSelection,
@@ -213,7 +244,11 @@ pub(super) fn project_diff_view_with_content_id(
             .files
             .iter()
             .enumerate()
-            .map(|(index, file)| project_file(view, identity, index, file))
+            .map(|(index, file)| {
+                let mut summary = project_file(view, identity, index, file);
+                summary.source_id = view.file_content_id(index, identity.render_options);
+                summary
+            })
             .collect(),
         commits_label: range_view.commits_label.clone(),
         commit_count: range_view.commits.len(),
@@ -254,6 +289,7 @@ fn project_file(
 ) -> ViewerFileSummary {
     let status = file.status();
     ViewerFileSummary {
+        source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: file.path.clone(),
         absolute_path: view.repo_root.join(&file.path),
@@ -326,8 +362,27 @@ mod tests {
         }
     }
 
+    #[test]
+    fn file_sources_keep_their_identity_when_other_files_are_hidden() {
+        use std::sync::Arc;
+        let original = view();
+        for density in [ViewerDiffDensity::Compact, ViewerDiffDensity::Full] {
+            let options = identity(density).render_options;
+            let all = super::ViewerDiffSnapshot::new(Arc::new(original.clone()));
+            let mut filtered = original.clone();
+            filtered.files.remove(0);
+            let filtered = super::ViewerDiffSnapshot::new(Arc::new(filtered));
+            assert_ne!(all.content_id(options), filtered.content_id(options));
+            assert_eq!(
+                all.file_content_id(1, options),
+                filtered.file_content_id(0, options)
+            );
+        }
+    }
+
     fn view() -> View {
         View {
+            file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             repo_name: utils::project_name("git-tools"),
             commits: vec![utils::diffs::commit_with(
                 "0123456789abcdef0123456789abcdef01234567",

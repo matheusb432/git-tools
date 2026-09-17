@@ -1,3 +1,4 @@
+mod file_filters;
 mod live_views;
 mod projects;
 mod repositories;
@@ -386,6 +387,11 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
             wrap_lines: Some(BoolFieldUpdate {
                 operation: Some(bool_field_update::Operation::Update(true)),
             }),
+            projects_sort: Some(gtl_wire::v1::ProjectsSortFieldUpdate {
+                operation: Some(gtl_wire::v1::projects_sort_field_update::Operation::Update(
+                    gtl_wire::v1::ProjectsSort::Name as i32,
+                )),
+            }),
             projects_page_size: Some(gtl_wire::v1::ProjectsPageSizeFieldUpdate {
                 operation: Some(
                     gtl_wire::v1::projects_page_size_field_update::Operation::Update(30),
@@ -418,6 +424,10 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
         gtl_wire::v1::ProjectsViewMode::Table as i32
     );
     assert_eq!(settings.projects_page_size, 30);
+    assert_eq!(
+        settings.projects_sort,
+        gtl_wire::v1::ProjectsSort::Name as i32
+    );
     assert!(
         settings
             .render_options
@@ -467,6 +477,40 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
         15
     );
 
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn viewer_edit_settings_rejects_a_stale_document_revision_over_a_real_listener() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("config.toml");
+    let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
+    let mut viewer =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let revision = viewer
+        .get_viewer_settings(GetViewerSettingsRequest {})
+        .await?
+        .into_inner()
+        .revision;
+    let concurrent_contents = "theme = \"hearth\"\n";
+    std::fs::write(&settings_path, concurrent_contents)?;
+
+    let error = viewer
+        .edit_settings(EditSettingsRequest {
+            expected_revision: Some(revision),
+            wrap_lines: Some(BoolFieldUpdate {
+                operation: Some(bool_field_update::Operation::Update(true)),
+            }),
+            ..Default::default()
+        })
+        .await
+        .err()
+        .ok_or("stale settings revision was accepted")?;
+
+    assert_eq!(error.code(), tonic::Code::Aborted);
+    assert_eq!(std::fs::read_to_string(settings_path)?, concurrent_contents);
     server.stop().await?;
     Ok(())
 }

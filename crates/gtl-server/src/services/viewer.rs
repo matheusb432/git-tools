@@ -1,9 +1,11 @@
 mod cancellation;
 mod commits;
 mod errors;
+mod file_filters;
 mod files;
 mod history;
 mod live_watch;
+mod project_watch;
 mod projects;
 mod row_session;
 mod rows;
@@ -51,6 +53,34 @@ type WatchStream = Pin<Box<dyn Stream<Item = Result<v1::WatchViewerResponse, Sta
 
 #[tonic::async_trait]
 impl ViewerService for ViewerGrpcService {
+    async fn get_viewer_file_filters(
+        &self,
+        request: Request<v1::GetViewerFileFiltersRequest>,
+    ) -> Result<Response<v1::GetViewerFileFiltersResponse>, Status> {
+        file_filters::get(&self.state, request).await
+    }
+
+    async fn set_viewer_file_filters(
+        &self,
+        request: Request<v1::SetViewerFileFiltersRequest>,
+    ) -> Result<Response<v1::SetViewerFileFiltersResponse>, Status> {
+        file_filters::set(&self.state, request).await
+    }
+
+    async fn update_diff_exclusions(
+        &self,
+        request: Request<v1::UpdateDiffExclusionsRequest>,
+    ) -> Result<Response<v1::UpdateDiffExclusionsResponse>, Status> {
+        file_filters::defaults(&self.state, request).await
+    }
+
+    async fn get_viewer_project_status(
+        &self,
+        request: Request<v1::GetViewerProjectStatusRequest>,
+    ) -> Result<Response<v1::GetViewerProjectStatusResponse>, Status> {
+        projects::get_viewer_project_status(&self.state, request).await
+    }
+
     async fn list_viewer_projects(
         &self,
         _request: Request<v1::ListViewerProjectsRequest>,
@@ -87,9 +117,21 @@ impl ViewerService for ViewerGrpcService {
         &self,
         request: Request<v1::WatchViewerRequest>,
     ) -> Result<Response<Self::WatchViewerStream>, Status> {
-        let live_tab_id = request.into_inner().live_tab_id.map(tab_id).transpose()?;
+        let request = request.into_inner();
+        let projects = request
+            .project_ids
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| Status::invalid_argument("invalid project ID"))?;
+        let projects = gtl_wire::viewer::projects::ViewerProjectSelection::try_from(projects)
+            .map_err(Status::invalid_argument)?;
+        let live_tab_id = request.live_tab_id.map(tab_id).transpose()?;
         let mut versions = self.state.viewer.subscribe();
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
+        if !projects.ids().is_empty() {
+            project_watch::spawn(self.state.clone(), projects, sender.clone())?;
+        }
         if let Some(tab_id) = live_tab_id {
             live_watch::spawn(self.state.clone(), tab_id, sender.clone());
         }
@@ -100,6 +142,7 @@ impl ViewerService for ViewerGrpcService {
                     .send(Ok(v1::WatchViewerResponse {
                         version,
                         live_check: None,
+                        project_status: None,
                     }))
                     .await
                     .is_err()

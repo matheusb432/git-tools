@@ -4,8 +4,20 @@ use crate::paths::{ProjectName, RepositoryRelativePath};
 
 /// Lowercase, dotless, sorted, unique extensions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
+#[serde(from = "Vec<String>", into = "Vec<String>")]
 pub struct ExcludedExtensions(Vec<String>);
+
+impl From<Vec<String>> for ExcludedExtensions {
+    fn from(raw: Vec<String>) -> Self {
+        Self::new(raw)
+    }
+}
+
+impl From<ExcludedExtensions> for Vec<String> {
+    fn from(value: ExcludedExtensions) -> Self {
+        value.0
+    }
+}
 
 impl ExcludedExtensions {
     pub fn new<I, S>(raw: I) -> Self
@@ -144,6 +156,14 @@ mod tests {
     fn new_normalizes_case_dots_whitespace_and_duplicates() {
         let excluded = ExcludedExtensions::new([" .MD ", "md", "Lock", ""]);
         assert_eq!(excluded.extensions(), ["lock", "md"]);
+    }
+
+    #[test]
+    fn deserialization_preserves_normalized_matching() {
+        let excluded: ExcludedExtensions =
+            serde_json::from_str(r#"[".MD", "lock", "md"]"#).unwrap();
+        assert_eq!(excluded.extensions(), ["lock", "md"]);
+        assert!(excluded.matches(&path("Cargo.lock")));
     }
 
     #[test]

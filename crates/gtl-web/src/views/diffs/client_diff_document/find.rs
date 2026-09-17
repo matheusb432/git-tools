@@ -354,6 +354,7 @@ mod tests {
             identity: identity(layout)?,
             files: vec![ClientDiffFile {
                 summary: ViewerFileSummary {
+                    source_id: None,
                     id: ViewerDiffFileId::for_index(0),
                     path: repository_relative_path("src/main.rs")?,
                     absolute_path: absolute_file_path("/repo/src/main.rs")?,

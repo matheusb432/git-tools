@@ -44,12 +44,7 @@ fn UnifiedRows(
     if artifact_enhancement {
         return rsx! {
             for (index, row) in rows.iter().enumerate() {
-                UnifiedDiffRow {
-                    key: "{index}",
-                    row,
-                    artifact_enhancement,
-                    row_index: first_row + index,
-                }
+                UnifiedDiffRow { key: "{index}", row }
             }
         };
     }
@@ -58,11 +53,7 @@ fn UnifiedRows(
             div {
                 key: "{index}",
                 "data-row-index": (first_row + index).to_string(),
-                UnifiedDiffRow {
-                    row,
-                    artifact_enhancement,
-                    row_index: first_row + index,
-                }
+                UnifiedDiffRow { row }
             }
         }
     }
@@ -75,15 +66,7 @@ enum UnifiedRowPresentation {
 }
 
 #[component]
-fn UnifiedDiffRow(
-    row: ReadStore<ViewerUnifiedRow>,
-    artifact_enhancement: bool,
-    row_index: usize,
-) -> Element {
-    #[cfg(feature = "desktop")]
-    crate::views::diffs::presentation::use_diff_row(row_index);
-    #[cfg(not(feature = "desktop"))]
-    let _ = row_index;
+fn UnifiedDiffRow(row: ReadStore<ViewerUnifiedRow>) -> Element {
     let presentation = {
         let row = row.read();
         match &*row {
@@ -110,7 +93,7 @@ fn UnifiedDiffRow(
             UnifiedHeaderRow { tone, text }
         },
         UnifiedRowPresentation::Source(tone) => rsx! {
-            UnifiedSourceRow { row, tone, artifact_enhancement }
+            UnifiedSourceRow { row, tone }
         },
     }
 }
@@ -127,11 +110,7 @@ fn UnifiedHeaderRow(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn UnifiedSourceRow(
-    row: ReadStore<ViewerUnifiedRow>,
-    tone: UnifiedSourceTone,
-    artifact_enhancement: bool,
-) -> Element {
+fn UnifiedSourceRow(row: ReadStore<ViewerUnifiedRow>, tone: UnifiedSourceTone) -> Element {
     let line_numbers = {
         let row = row.read();
         match &*row {
@@ -161,11 +140,7 @@ fn UnifiedSourceRow(
         UnifiedSourceRowShell { tone, copy_line_number,
             UnifiedGutter { number: old_line_number, tone: old_gutter_tone }
             UnifiedGutter { number: new_line_number, tone: new_gutter_tone }
-            UnifiedCodeCell {
-                row,
-                artifact_enhancement,
-                copy_text: copy_line_number.is_some(),
-            }
+            UnifiedCodeCell { row, copy_text: copy_line_number.is_some() }
         }
     }
 }
@@ -239,18 +214,14 @@ fn UnifiedHeaderCode(text: String) -> Element {
 }
 
 #[component]
-fn UnifiedCodeCell(
-    row: ReadStore<ViewerUnifiedRow>,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
+fn UnifiedCodeCell(row: ReadStore<ViewerUnifiedRow>, copy_text: bool) -> Element {
     rsx! {
         code { class: "diff-row-unified-code min-w-0 py-0 pr-1 pl-3 text-sm diff-row-code",
             CodeCellContent {
                 source: CodeLineSource::Unified(row),
                 marker: None,
                 changed_text_tone: ChangedTextTone::None,
-                artifact_enhancement,
+
                 copy_text,
             }
         }
@@ -271,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_typed_line_numbers_absent_gutters_and_long_line_counts() {
+    fn renders_typed_line_numbers_absent_gutters_and_omission_counts() {
         let rows = vec![
             ViewerUnifiedRow::Hunk("@@ -9999 +10000 @@".to_owned()),
             ViewerUnifiedRow::Removed(unified_source_row("abcd", Some(9999), None, Some(4))),
@@ -284,9 +255,9 @@ mod tests {
         assert!(html.contains(">9999</span>"));
         assert!(html.contains(">10000</span>"));
         assert_eq!(html.matches("class=\"hidden").count(), 4);
-        assert_eq!(html.matches("4 chars").count(), 2);
+        assert_eq!(html.matches("(+4 characters omitted)").count(), 2);
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
-        assert!(html.contains(r#"data-gtl-copy-text="">abce</span>"#));
+        assert!(html.contains(r#"class="diff-truncated-text">abce</span>"#));
     }
 
     #[test]
@@ -307,16 +278,12 @@ mod tests {
             assert!(html.contains(&format!(r#"data-gtl-new-line="{line_number}""#)));
         }
         for text in ["keep", "newx", "abcdefgh"] {
-            assert!(html.contains(&format!(r#"data-gtl-copy-text="">{text}</span>"#)));
+            assert!(html.contains(&format!(r#"class="diff-truncated-text">{text}</span>"#)));
         }
         assert!(!html.contains(r#"data-gtl-copy-text="">oldx</span>"#));
         assert!(!html.contains(r#"data-gtl-copy-text="">+newx</span>"#));
-        assert!(html.contains(r#"data-gtl-long-line="""#));
-        assert!(html.contains(r#"data-gtl-expanded="false""#));
-        assert!(html.contains(r#"data-gtl-action="toggle-long-line""#));
-        assert!(html.contains(r#"data-gtl-long-line-text="""#));
-        assert!(html.contains(r#"class="diff-long-line-text""#));
-        assert!(!html.contains("data-gtl-expanded-classes"));
-        assert!(!html.contains("data-gtl-collapsed-classes"));
+        assert!(html.contains("(+8 characters omitted)"));
+        assert!(!html.contains("toggle-long-line"));
+        assert!(!html.contains("aria-expanded"));
     }
 }

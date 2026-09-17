@@ -348,6 +348,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             trail: String::new(),
         },
         files: vec![ViewerFileSummary {
+            source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/main.rs")?,
             absolute_path: absolute_file_path("/repo/src/main.rs")?,
@@ -368,4 +369,51 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
         },
         exclusions: None,
     })
+}
+
+#[test]
+fn extension_changes_reuse_unchanged_file_windows_after_indices_move() -> TestResult {
+    let mut original = view(1)?;
+    original.files[0].source_id = Some(ViewerRowContentId::from_digest([11; 32]));
+    let mut expanded = original.clone();
+    expanded.content_id = ViewerRowContentId::from_digest([2; 32]);
+    let mut revealed = original.files[0].clone();
+    revealed.path = repository_relative_path("Cargo.lock")?;
+    revealed.source_id = Some(ViewerRowContentId::from_digest([22; 32]));
+    expanded.files.insert(0, revealed);
+    expanded.files[1].id = ViewerDiffFileId::for_index(1);
+    let owner = VirtualDom::new(VNode::empty);
+    owner.in_scope(ScopeId::ROOT, || {
+        let cache = cache();
+        complete(cache, &original);
+        let selected = cache.select(Some("server-a".to_owned()), &expanded);
+        let workspace = selected.peek();
+        assert!(workspace.files[0].rows.unified[0].is_empty());
+        assert_eq!(
+            workspace.files[1].rows.unified[0],
+            vec![ViewerUnifiedRow::Meta("cached".to_owned())]
+        );
+        assert_eq!(workspace.files[1].state, ClientDiffFileState::Complete);
+        assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
+    });
+    Ok(())
+}
+
+#[test]
+fn same_path_and_counts_do_not_reuse_changed_file_sources() -> TestResult {
+    let mut original = view(1)?;
+    original.files[0].source_id = Some(ViewerRowContentId::from_digest([11; 32]));
+    let mut changed = original.clone();
+    changed.content_id = ViewerRowContentId::from_digest([2; 32]);
+    changed.files[0].source_id = Some(ViewerRowContentId::from_digest([22; 32]));
+    let owner = VirtualDom::new(VNode::empty);
+    owner.in_scope(ScopeId::ROOT, || {
+        let cache = cache();
+        complete(cache, &original);
+        assert_loading(
+            cache.select(Some("server-a".to_owned()), &changed),
+            &changed,
+        );
+    });
+    Ok(())
 }

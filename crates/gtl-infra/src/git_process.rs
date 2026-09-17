@@ -50,6 +50,9 @@ pub(crate) fn run_with_index(
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
+    if let Some(cancellation) = crate::git_client::status_context::cancellation() {
+        return run_status_command(command, &cancellation);
+    }
     let output = command
         .output()
         .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
@@ -58,6 +61,65 @@ pub(crate) fn run_with_index(
         stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         exit_code: output.status.code().unwrap_or(1),
+    })
+}
+
+fn run_status_command(
+    mut command: Command,
+    cancellation: &std::sync::atomic::AtomicBool,
+) -> anyhow::Result<GitProcessOutput> {
+    use std::{
+        io::{Read as _, Seek as _},
+        process::Stdio,
+        sync::atomic::Ordering,
+        time::{Duration, Instant},
+    };
+    anyhow::ensure!(!cancellation.load(Ordering::Relaxed), "status cancelled");
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    let mut child = command
+        .stdout(Stdio::from(stdout.try_clone()?))
+        .stderr(Stdio::from(stderr.try_clone()?))
+        .spawn()?;
+    let started = Instant::now();
+    let exit = loop {
+        if cancellation.load(Ordering::Relaxed)
+            || started.elapsed() > Duration::from_secs(10)
+            || stdout
+                .metadata()
+                .map_or(true, |metadata| metadata.len() > 128 * 1024)
+            || stderr
+                .metadata()
+                .map_or(true, |metadata| metadata.len() > 128 * 1024)
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("status command cancelled or timed out");
+        }
+        match child.try_wait() {
+            Ok(Some(exit)) => break exit,
+            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.into());
+            }
+        }
+    };
+    let read = |file: &mut std::fs::File| -> anyhow::Result<String> {
+        anyhow::ensure!(
+            file.metadata()?.len() <= 128 * 1024,
+            "status command output exceeds limit"
+        );
+        file.rewind()?;
+        let mut text = String::new();
+        file.read_to_string(&mut text)?;
+        Ok(text)
+    };
+    Ok(GitProcessOutput {
+        stdout: read(&mut stdout)?,
+        stderr: read(&mut stderr)?,
+        exit_code: exit.code().unwrap_or(1),
     })
 }
 

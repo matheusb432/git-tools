@@ -125,6 +125,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let shell = viewer.shell();
     let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
     let tab_rail_overflow = use_viewer_tab_rail_overflow();
+    let mut overflow_menu_open = use_signal(|| false);
     let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
     let mut move_tab = use_action(move |request: MoveViewerTab| async move {
         match viewer_server::move_tab(request).await {
@@ -170,13 +171,25 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let displayed_tabs = tabs_in_order(tabs, pending_order.as_deref());
     let displayed_tab_ids = displayed_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
     let active_tab_id = route.tab_id();
-    let overflow_active_tab = active_tab_id.and_then(|tab_id| {
-        displayed_tabs
-            .iter()
-            .find(|tab| tab.id == tab_id)
-            .map(|tab| (*tab).clone())
-    });
-    let tab_rail_collapsed = (tab_rail_overflow.overflowing)() && overflow_active_tab.is_some();
+    let overflow_active_tab = active_tab_id
+        .and_then(|tab_id| {
+            displayed_tabs
+                .iter()
+                .find(|tab| tab.id == tab_id)
+                .map(|tab| (*tab).clone())
+        })
+        .or_else(|| match &*shell_state {
+            ViewerShellLoad::Ready(shell) if overflow_menu_open() => {
+                let tab_id = super::application_router::active_tab_id(&shell.active)?;
+                displayed_tabs
+                    .iter()
+                    .find(|tab| tab.id == tab_id)
+                    .map(|tab| (*tab).clone())
+            }
+            _ => None,
+        });
+    let tab_rail_collapsed = overflow_menu_open()
+        || ((tab_rail_overflow.overflowing)() && overflow_active_tab.is_some());
     let overflow_tabs = if tab_rail_collapsed {
         displayed_tabs
             .iter()
@@ -186,7 +199,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
         Vec::new()
     };
     let projects_active = matches!(route, Route::Projects {});
-    let overflow_close_tabs = displayed_tab_ids.clone();
     let overflow_drop_tabs = displayed_tab_ids.clone();
     let pinned_tab_ids = displayed_tabs
         .iter()
@@ -330,7 +342,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         }
                     }
                 }
-                if tab_rail_collapsed && let Some(active_tab) = overflow_active_tab {
+                if tab_rail_collapsed {
                     WindowDragExcluded {
                         div { class: "viewer-navigation-overflow h-9 min-w-0",
                             ViewerTabOverflowMenu {
@@ -338,7 +350,8 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                 tabs: overflow_tabs,
                                 onpin: pin_tab,
                                 oncloseothers: close_others,
-                                active_tab,
+                                active_tab: overflow_active_tab,
+                                onopenchange: move |open| overflow_menu_open.set(open),
                                 diff_rows_loading_tab_id,
                                 reorderable,
                                 onactivate: move |tab_id| {
@@ -349,19 +362,10 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         });
                                 },
                                 onclose: move |tab_id| {
-                                    let focus_overflow_trigger = close_focus_target(&overflow_close_tabs, tab_id)
-                                        .is_some();
-                                    browser::hide_popover(VIEWER_TAB_OVERFLOW_MENU_ID);
                                     spawn(async move {
                                         match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
                                             Ok(shell) => {
                                                 viewer.replace_shell(shell);
-                                                let focus_id = if focus_overflow_trigger {
-                                                    format!("{VIEWER_TAB_OVERFLOW_MENU_ID}-trigger")
-                                                } else {
-                                                    "workspace-heading".to_owned()
-                                                };
-                                                browser::focus_element(focus_id);
                                             }
                                             Err(error) => toast.error(error.message()),
                                         }

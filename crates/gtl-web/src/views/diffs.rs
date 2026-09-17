@@ -3,6 +3,8 @@ mod client_diff_document;
 mod diff_history;
 mod diff_rows;
 pub(crate) mod diff_workspace;
+#[cfg(feature = "desktop")]
+pub(crate) mod file_filter_changes;
 mod file_status;
 mod line_changes;
 #[cfg(feature = "desktop")]

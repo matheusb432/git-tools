@@ -278,3 +278,93 @@ fn initial_working_tree_diff_handles_staged_and_untracked_files() {
         index_before
     );
 }
+
+#[test]
+fn revealing_extensions_preserves_loaded_sources_and_reuses_hidden_contents() {
+    use std::sync::Arc;
+
+    use gtl_application::diffs::set_diff_file_exclusions::{self, SetDiffFileExclusions};
+    use gtl_models::{diffs::ExcludedExtensions, git::GitRevision};
+
+    for density in [
+        gtl_models::viewer::DiffDensity::Compact,
+        gtl_models::viewer::DiffDensity::Full,
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["config", "user.email", "t@t"]);
+        git(root, &["config", "user.name", "t"]);
+        for path in ["code.rs", "Cargo.lock", "docs plan.MD"] {
+            std::fs::write(root.join(path), "base\n").unwrap();
+        }
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "base"]);
+        std::fs::write(root.join("code.rs"), "reviewed source\n").unwrap();
+        std::fs::write(root.join("Cargo.lock"), "initial lock\n").unwrap();
+        std::fs::write(root.join("docs plan.MD"), "hidden docs\n").unwrap();
+        let settings = FixedUserSettingsStore::new(UserSettings::new(
+            None,
+            RenderOptions::new(gtl_models::viewer::DiffLayout::Unified, density),
+            gtl_models::viewer::ViewerKeybindings::default(),
+            true,
+            DiffExclusions::new([], Some(vec!["lock", "md"])),
+            PushAllExclusions::default(),
+        ));
+        let original = compute_diff::execute(
+            ComputeDiff {
+                repo_root: repository_root(root),
+                target: DiffTarget::Base(GitRevision::head()),
+            },
+            &settings,
+            &HybridGitClient,
+            &gtl_application::utils::ProjectComparisons::default(),
+        )
+        .unwrap()
+        .view;
+        assert_eq!(original.files.len(), 1);
+        let reviewed = original.files[0].clone();
+        std::fs::write(root.join("code.rs"), "later source\n").unwrap();
+        std::fs::write(root.join("Cargo.lock"), "revealed lock\n").unwrap();
+        let filter = |view, extensions: &[&str]| {
+            set_diff_file_exclusions::execute(
+                SetDiffFileExclusions {
+                    view: Arc::new(view),
+                    excluded: ExcludedExtensions::new(extensions.iter().copied()),
+                },
+                &HybridGitClient,
+            )
+            .unwrap()
+        };
+        let revealed = filter(original, &["md"]);
+        assert_eq!(revealed.files.len(), 2);
+        assert_eq!(
+            revealed
+                .files
+                .iter()
+                .find(|file| file.path.as_path() == Path::new("code.rs"))
+                .unwrap(),
+            &reviewed
+        );
+        let lock = revealed
+            .files
+            .iter()
+            .find(|file| file.path.as_path() == Path::new("Cargo.lock"))
+            .unwrap()
+            .clone();
+        assert!(lock.lines.iter().any(|line| line.contains("revealed lock")));
+        let hidden = filter(revealed, &["lock", "rs", "md"]);
+        assert!(hidden.files.is_empty());
+        assert!(
+            hidden.has_diff_content(),
+            "a fully excluded diff must remain available"
+        );
+        std::fs::write(root.join("Cargo.lock"), "later lock\n").unwrap();
+        let restored = filter(hidden, &["md"]);
+        assert_eq!(restored.files, vec![lock, reviewed]);
+        assert_eq!(
+            restored.exclusions.unwrap().hidden_paths,
+            vec![RepositoryRelativePath::try_new("docs plan.MD".into()).unwrap()]
+        );
+    }
+}

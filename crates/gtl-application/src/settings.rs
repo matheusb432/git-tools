@@ -10,8 +10,8 @@ pub mod set_setting_key;
 mod user_settings_patch;
 
 pub use user_settings_patch::{
-    DuplicateProjectSettingsNameError, ProjectSettingsUpdate, ProjectSettingsUpdates,
-    UserSettingsFieldUpdate, UserSettingsPatch,
+    DiffExclusionsUpdate, DuplicateProjectSettingsNameError, ProjectSettingsUpdate,
+    ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

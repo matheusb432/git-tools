@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use gtl_models::{
     diffs::ExcludedExtensions,
     paths::ProjectName,
-    settings::{SettingKey, SettingKeyValue},
+    settings::{SettingKey, SettingKeyValue, UserSettingsRevision},
     viewer::{DiffDensity, DiffLayout, Theme},
 };
 use thiserror::Error;
@@ -83,10 +83,15 @@ impl IntoIterator for ProjectSettingsUpdates {
 /// A complete typed mutation accepted by the user-settings editor port.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UserSettingsPatch {
+    /// Rejects the edit when the serialized document changed after it was loaded.
+    pub expected_revision: Option<UserSettingsRevision>,
+    pub diff_exclusions: Option<DiffExclusionsUpdate>,
+    pub focus_window_on_diff: UserSettingsFieldUpdate<bool>,
     pub files_sidebar_visible: UserSettingsFieldUpdate<bool>,
     pub commits_sidebar_visible: UserSettingsFieldUpdate<bool>,
     pub wrap_lines: UserSettingsFieldUpdate<bool>,
     pub projects_view: UserSettingsFieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub projects_sort: UserSettingsFieldUpdate<gtl_models::settings::ProjectsSort>,
     pub projects_page_size: UserSettingsFieldUpdate<gtl_models::settings::ProjectsPageSize>,
     /// Changes the configured viewer theme.
     pub theme: UserSettingsFieldUpdate<Theme>,
@@ -118,12 +123,14 @@ impl UserSettingsPatch {
     pub(crate) const fn changes_viewer_rows(&self) -> bool {
         !matches!(self.layout, UserSettingsFieldUpdate::Unchanged)
             || !matches!(self.density, UserSettingsFieldUpdate::Unchanged)
-            || !matches!(
-                self.default_diff_exclusions,
-                UserSettingsFieldUpdate::Unchanged
-            )
-            || !matches!(self.projects, UserSettingsFieldUpdate::Unchanged)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffExclusionsUpdate {
+    pub project: Option<ProjectName>,
+    pub extensions: UserSettingsFieldUpdate<ExcludedExtensions>,
+    pub expected: Option<ExcludedExtensions>,
 }
 
 impl From<SettingKeyValue> for UserSettingsPatch {

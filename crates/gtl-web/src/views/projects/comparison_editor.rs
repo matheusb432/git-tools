@@ -46,6 +46,13 @@ fn use_project_comparison_edit(project: &ViewerProject, popover_id: &str) -> Pro
     let mut draft = use_signal(|| None::<String>);
     let mut validation_error = use_signal(|| None::<String>);
     let popover_id = popover_id.to_owned();
+    use_effect(use_reactive((&popover_id,), move |(popover_id,)| {
+        if !(projects.active)() {
+            browser::hide_popover(&popover_id);
+            draft.set(None);
+            validation_error.set(None);
+        }
+    }));
     let mut action = use_action(move |request: UpdateViewerProject| {
         let popover_id = popover_id.clone();
         async move {

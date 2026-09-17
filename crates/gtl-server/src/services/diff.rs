@@ -24,6 +24,7 @@ use gtl_application::{
         build_recipes::BuildRepositoryRecipes,
         find_repository_roots::{self, FindRepositoryRoots},
     },
+    settings::get_user_settings::{self, GetUserSettings, GetUserSettingsError},
 };
 use gtl_models::{
     git::GitRevision, paths::ProjectName, recipes::RecipeBatchId,
@@ -452,7 +453,13 @@ fn present_snapshot(
             outcome: Some(v1::diff_presentation::Outcome::Empty(v1::Empty {})),
         }));
     }
-    if let Err(error) = viewer_process::open() {
+    let settings =
+        get_user_settings::execute(GetUserSettings, &state.user_settings).map_err(|error| {
+            match error {
+                GetUserSettingsError::Settings(error) => super::user_settings_load_error(error),
+            }
+        })?;
+    if let Err(error) = viewer_process::open(settings.focus_window_on_diff()) {
         tracing::warn!(error = ?error, "desktop viewer could not be opened");
         return Ok(SnapshotPresentation::ViewerUnavailable(error));
     }

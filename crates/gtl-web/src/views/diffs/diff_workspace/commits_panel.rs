@@ -9,7 +9,7 @@ use crate::shared::{
     browser,
     ui::{
         Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
-        EmptyNotice, HoverPopover, ScrollArea, use_hover_popover,
+        EmptyNotice, HoverPopover, LoadingSpinner, ScrollArea, use_hover_popover,
     },
 };
 
@@ -223,7 +223,11 @@ fn CommitCard(
                     onclick: move |_| onselect.call(id.clone()),
                 }
             }
-            CommitCardContent { commit, selectable }
+            CommitCardContent {
+                commit,
+                selectable,
+                loading: selected && selection_pending,
+            }
             CommitDetailsPopover {
                 commit,
                 id: popover_id.clone(),
@@ -235,7 +239,11 @@ fn CommitCard(
 }
 
 #[component]
-fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selectable: bool) -> Element {
+fn CommitCardContent(
+    commit: ReadStore<ViewerCommitSummary>,
+    selectable: bool,
+    loading: bool,
+) -> Element {
     let commit = commit.read();
     rsx! {
         span {
@@ -246,6 +254,9 @@ fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selectable: bool) -
             }
             span { class: "flex min-w-0 items-center gap-1.5",
                 CommitIdButton { id: commit.id.clone() }
+                if loading {
+                    span { role: "status", aria_label: "Loading commit", LoadingSpinner {} }
+                }
                 if commit.is_merge {
                     Badge { variant: BadgeVariant::Neutral, "merge" }
                 }

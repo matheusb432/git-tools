@@ -47,6 +47,7 @@ impl ButtonLayout {
 pub(crate) enum ButtonVariant {
     #[default]
     Primary,
+    #[cfg(feature = "interactive-ui")]
     Secondary,
     #[cfg(feature = "interactive-ui")]
     Destructive,
@@ -61,6 +62,7 @@ impl ButtonVariant {
     pub(crate) const fn classes(self) -> &'static str {
         match self {
             Self::Primary => "control-button-variant-primary",
+            #[cfg(feature = "interactive-ui")]
             Self::Secondary => "control-button-variant-secondary",
             #[cfg(feature = "interactive-ui")]
             Self::Destructive => "control-button-variant-destructive",
@@ -76,6 +78,7 @@ impl ButtonVariant {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonSize {
     Content,
+    #[cfg(feature = "component-preview")]
     Inline,
     Small,
     #[default]
@@ -92,6 +95,7 @@ impl ButtonSize {
     const fn classes(self) -> &'static str {
         match self {
             Self::Content => "",
+            #[cfg(feature = "component-preview")]
             Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-xs",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",

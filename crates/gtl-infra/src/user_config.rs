@@ -3,7 +3,10 @@
 mod document;
 mod file_editor;
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use gtl_application::{
@@ -15,9 +18,10 @@ use gtl_application::{
 };
 use gtl_models::{
     diffs::DiffExclusions,
-    settings::{ProjectsPageSize, ProjectsViewMode, PushAllExclusions, UserSettings},
+    settings::{ProjectsPreferences, PushAllExclusions, UserSettings, UserSettingsRevision},
     viewer::{RenderOptions, ViewerKeybindings},
 };
+use parking_lot::Mutex;
 
 use self::document::UserSettingsDocument;
 
@@ -41,38 +45,36 @@ fn settings_document(
     })
 }
 
-fn load_document(
-    path: Option<&Path>,
-) -> Result<Option<UserSettingsDocument>, UserSettingsLoadError> {
-    let Some(path) = path else {
-        return Ok(None);
-    };
-    match std::fs::read(path) {
-        Ok(bytes) => settings_document(path, bytes)
-            .map(Some)
-            .map_err(UserSettingsLoadError::from),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(anyhow::Error::new(error)
-            .context(format!("read user settings {}", path.display()))
-            .into()),
+#[derive(Debug)]
+struct UserSettingsCache {
+    bytes: Vec<u8>,
+    viewer_settings: (UserSettings, ProjectsPreferences),
+}
+
+impl Default for UserSettingsCache {
+    fn default() -> Self {
+        Self {
+            bytes: Vec::new(),
+            viewer_settings: (default_settings(), ProjectsPreferences::default()),
+        }
     }
 }
 
-fn load_from(path: Option<&Path>) -> Result<UserSettings, UserSettingsLoadError> {
-    Ok(load_document(path)?.map_or_else(default_settings, UserSettingsDocument::into_settings))
-}
-
-/// TOML-backed user settings for one resolved configuration path.
+/// TOML-backed user settings with a parsed cache shared by every clone.
 #[derive(Debug, Clone)]
 pub struct TomlSettingsStore {
     path: Option<PathBuf>,
+    cache: Arc<Mutex<UserSettingsCache>>,
 }
 
 impl TomlSettingsStore {
     /// Creates a store for an explicit path, or an unresolved production path.
     #[must_use]
-    pub const fn new(path: Option<PathBuf>) -> Self {
-        Self { path }
+    pub fn new(path: Option<PathBuf>) -> Self {
+        Self {
+            path,
+            cache: Arc::new(Mutex::new(UserSettingsCache::default())),
+        }
     }
 
     /// Resolves the production configuration path from the process environment.
@@ -87,18 +89,33 @@ impl TomlSettingsStore {
         self.path.as_deref()
     }
 
+    /// Rereads the file on every call and reuses settings when its bytes match the cache.
     pub fn load_viewer_settings(
         &self,
-    ) -> Result<(UserSettings, ProjectsViewMode, ProjectsPageSize), UserSettingsLoadError> {
-        Ok(load_document(self.path.as_deref())?.map_or_else(
-            || {
-                (
-                    default_settings(),
-                    ProjectsViewMode::default(),
-                    ProjectsPageSize::default(),
-                )
-            },
-            UserSettingsDocument::into_viewer_settings,
+    ) -> Result<(UserSettings, ProjectsPreferences), UserSettingsLoadError> {
+        Ok(self.load_viewer_settings_with_revision()?.0)
+    }
+
+    /// Loads the viewer settings and the exact serialized document revision they came from.
+    pub fn load_viewer_settings_with_revision(
+        &self,
+    ) -> Result<((UserSettings, ProjectsPreferences), UserSettingsRevision), UserSettingsLoadError>
+    {
+        let mut cache = self.cache.lock();
+        if let Some(path) = self.path() {
+            let bytes = file_editor::read_document_bytes(path)?;
+            if cache.bytes != bytes {
+                let viewer_settings =
+                    settings_document(path, bytes.clone())?.into_viewer_settings();
+                *cache = UserSettingsCache {
+                    bytes,
+                    viewer_settings,
+                };
+            }
+        }
+        Ok((
+            cache.viewer_settings.clone(),
+            file_editor::revision(&cache.bytes),
         ))
     }
 
@@ -111,7 +128,7 @@ impl TomlSettingsStore {
 
 impl UserSettingsReader for TomlSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
-        load_from(self.path.as_deref())
+        Ok(self.load_viewer_settings()?.0)
     }
 }
 
@@ -154,7 +171,7 @@ impl gtl_application::ports::UserSettingsRecovery for TomlSettingsStore {
     ) -> Result<gtl_application::ports::UserSettingsRecoveryState, UserSettingsLoadError> {
         let path = self.required_path()?;
         let bytes = file_editor::read_document_bytes(path)?;
-        let revision = file_editor::revision(&bytes);
+        let revision = file_editor::revision(&bytes).to_string();
         let diagnostic = UserSettingsDocument::parse(bytes)
             .err()
             .map(|error| error.to_string());
@@ -184,6 +201,7 @@ mod tests {
     };
     use gtl_models::{
         paths::{ProjectName, RepositoryRelativePath},
+        settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode},
         viewer::{DiffDensity, DiffLayout, Theme, ViewerKeybinding, ViewerKeybindingAction},
     };
     use tempfile::NamedTempFile;
@@ -194,31 +212,36 @@ mod tests {
         path: &Path,
         raw: &str,
     ) -> Result<UserSettings, UserSettingsConfigurationError> {
-        settings_document(path, raw.as_bytes().to_vec()).map(UserSettingsDocument::into_settings)
+        settings_document(path, raw.as_bytes().to_vec())
+            .map(|document| document.into_viewer_settings().0)
     }
 
     #[test]
-    fn load_from_reads_theme_from_file() {
+    fn load_reads_theme_from_file() {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "theme = \"light\"").unwrap();
         assert_eq!(
-            load_from(Some(file.path())).unwrap().theme(),
+            TomlSettingsStore::new(Some(file.path().to_path_buf()))
+                .load()
+                .unwrap()
+                .theme(),
             Some(Theme::Light)
         );
     }
 
     #[test]
-    fn load_from_none_is_default() {
-        let settings = load_from(None).unwrap();
+    fn load_none_is_default() {
+        let settings = TomlSettingsStore::new(None).load().unwrap();
 
         assert_eq!(settings.theme(), None);
         assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
     }
 
     #[test]
-    fn load_from_nonexistent_path_is_default() {
+    fn load_nonexistent_path_is_default() {
         assert_eq!(
-            load_from(Some(Path::new("/no/such/git-tools/config.toml")))
+            TomlSettingsStore::new(Some(PathBuf::from("/no/such/git-tools/config.toml")))
+                .load()
                 .unwrap()
                 .theme(),
             None
@@ -226,17 +249,17 @@ mod tests {
     }
 
     #[test]
-    fn load_from_unreadable_path_is_an_error() {
+    fn load_unreadable_path_is_an_error() {
         let directory = tempfile::tempdir().unwrap();
 
         assert!(matches!(
-            load_from(Some(directory.path())),
+            TomlSettingsStore::new(Some(directory.path().to_path_buf())).load(),
             Err(UserSettingsLoadError::Adapter(_))
         ));
     }
 
     #[test]
-    fn load_from_malformed_or_invalid_settings_is_an_error() {
+    fn load_malformed_or_invalid_settings_is_an_error() {
         let file = NamedTempFile::new().unwrap();
         for raw in [
             "theme = {{{\n",
@@ -251,7 +274,7 @@ mod tests {
         ] {
             std::fs::write(file.path(), raw).unwrap();
             assert!(matches!(
-                load_from(Some(file.path())),
+                TomlSettingsStore::new(Some(file.path().to_path_buf())).load(),
                 Err(UserSettingsLoadError::InvalidConfiguration(_))
             ));
         }
@@ -391,12 +414,12 @@ excluded_from_push_all = true
     }
 
     #[test]
-    fn load_from_non_utf8_settings_is_an_invalid_configuration_error() {
+    fn load_non_utf8_settings_is_an_invalid_configuration_error() {
         let file = NamedTempFile::new().unwrap();
         std::fs::write(file.path(), [0xff, 0xfe]).unwrap();
 
         assert!(matches!(
-            load_from(Some(file.path())),
+            TomlSettingsStore::new(Some(file.path().to_path_buf())).load(),
             Err(UserSettingsLoadError::InvalidConfiguration(configuration))
                 if configuration.path() == file.path()
         ));
@@ -490,10 +513,14 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let settings_patch = UserSettingsPatch {
+            expected_revision: None,
+            diff_exclusions: None,
+            focus_window_on_diff: UserSettingsFieldUpdate::Update(false),
             files_sidebar_visible: UserSettingsFieldUpdate::Update(false),
             commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
             wrap_lines: UserSettingsFieldUpdate::Update(false),
             projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
+            projects_sort: UserSettingsFieldUpdate::Update(ProjectsSort::Name),
             projects_page_size: UserSettingsFieldUpdate::Update(ProjectsPageSize::default()),
             theme: UserSettingsFieldUpdate::Clear,
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
@@ -536,6 +563,40 @@ excluded_from_push_all = true
                 .push_all_exclusions()
                 .contains(&ProjectName::try_from("git-tools").unwrap())
         );
+    }
+
+    #[test]
+    fn diff_window_focus_defaults_on_and_round_trips_false_and_clear() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert!(store.load().unwrap().focus_window_on_diff());
+        for (update, expected) in [
+            (UserSettingsFieldUpdate::Update(false), false),
+            (UserSettingsFieldUpdate::Unchanged, false),
+            (UserSettingsFieldUpdate::Update(true), true),
+            (UserSettingsFieldUpdate::Update(false), false),
+            (UserSettingsFieldUpdate::Clear, true),
+        ] {
+            store
+                .edit(UserSettingsPatch {
+                    focus_window_on_diff: update,
+                    ..UserSettingsPatch::default()
+                })
+                .unwrap();
+            assert_eq!(store.load().unwrap().focus_window_on_diff(), expected);
+            assert_eq!(store.load().unwrap().theme(), Some(Theme::Dark));
+            assert!(
+                std::fs::read_to_string(&path)
+                    .unwrap()
+                    .contains("# retained")
+            );
+        }
+        for invalid in ["\"false\"", "0", "[]"] {
+            std::fs::write(&path, format!("focus_window_on_diff = {invalid}\n")).unwrap();
+            assert!(store.load().is_err());
+        }
     }
 
     #[test]
@@ -632,7 +693,15 @@ excluded_from_push_all = true
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
-        assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), 15);
+        assert_eq!(
+            store
+                .load_viewer_settings()
+                .unwrap()
+                .1
+                .page_size
+                .into_inner(),
+            15
+        );
         for raw in [
             "0",
             "-1",
@@ -651,7 +720,12 @@ excluded_from_push_all = true
             )
             .unwrap();
             assert_eq!(
-                store.load_viewer_settings().unwrap().2.into_inner(),
+                store
+                    .load_viewer_settings()
+                    .unwrap()
+                    .1
+                    .page_size
+                    .into_inner(),
                 15,
                 "{raw}"
             );
@@ -669,7 +743,15 @@ excluded_from_push_all = true
                     ..Default::default()
                 })
                 .unwrap();
-            assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), value);
+            assert_eq!(
+                store
+                    .load_viewer_settings()
+                    .unwrap()
+                    .1
+                    .page_size
+                    .into_inner(),
+                value
+            );
             let saved = std::fs::read_to_string(&path).unwrap();
             assert!(saved.contains(&format!("projects_page_size = {value}")));
             assert!(saved.contains("# retained"));
@@ -684,7 +766,15 @@ excluded_from_push_all = true
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(store.load_viewer_settings().unwrap().2.into_inner(), 15);
+        assert_eq!(
+            store
+                .load_viewer_settings()
+                .unwrap()
+                .1
+                .page_size
+                .into_inner(),
+            15
+        );
         assert!(
             !std::fs::read_to_string(path)
                 .unwrap()
@@ -699,7 +789,7 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"hearth\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         assert_eq!(
-            store.load_viewer_settings().unwrap().1,
+            store.load_viewer_settings().unwrap().1.view,
             ProjectsViewMode::Grid
         );
         let application_settings = store.load().unwrap();
@@ -710,7 +800,7 @@ excluded_from_push_all = true
             })
             .unwrap();
         assert_eq!(
-            store.load_viewer_settings().unwrap().1,
+            store.load_viewer_settings().unwrap().1.view,
             ProjectsViewMode::Table
         );
         assert_eq!(store.load().unwrap(), application_settings);
@@ -726,7 +816,7 @@ excluded_from_push_all = true
             })
             .unwrap();
         assert_eq!(
-            store.load_viewer_settings().unwrap().1,
+            store.load_viewer_settings().unwrap().1.view,
             ProjectsViewMode::Grid
         );
         std::fs::write(&path, "projects_view = \"unknown\"\n").unwrap();

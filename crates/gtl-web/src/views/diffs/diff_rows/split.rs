@@ -43,12 +43,7 @@ fn SplitRows(
     if artifact_enhancement {
         return rsx! {
             for (index, row) in rows.iter().enumerate() {
-                SplitDiffRowView {
-                    key: "{index}",
-                    row,
-                    artifact_enhancement,
-                    row_index: first_row + index,
-                }
+                SplitDiffRowView { key: "{index}", row }
             }
         };
     }
@@ -57,11 +52,7 @@ fn SplitRows(
             div {
                 key: "{index}",
                 "data-row-index": (first_row + index).to_string(),
-                SplitDiffRowView {
-                    row,
-                    artifact_enhancement,
-                    row_index: first_row + index,
-                }
+                SplitDiffRowView { row }
             }
         }
     }
@@ -84,15 +75,7 @@ enum SplitRowPresentation {
 }
 
 #[component]
-fn SplitDiffRowView(
-    row: ReadStore<ViewerSplitRow>,
-    artifact_enhancement: bool,
-    row_index: usize,
-) -> Element {
-    #[cfg(feature = "desktop")]
-    crate::views::diffs::presentation::use_diff_row(row_index);
-    #[cfg(not(feature = "desktop"))]
-    let _ = row_index;
+fn SplitDiffRowView(row: ReadStore<ViewerSplitRow>) -> Element {
     let presentation = {
         let row = row.read();
         match &*row {
@@ -132,14 +115,14 @@ fn SplitDiffRowView(
                     row,
                     side: SplitSide::Old,
                     line_number: old_line_number,
-                    artifact_enhancement,
+
                     copy_line_number: None,
                 }
                 SplitContextCell {
                     row,
                     side: SplitSide::New,
                     line_number: new_line_number,
-                    artifact_enhancement,
+
                     copy_line_number: Some(new_line_number),
                 }
             }
@@ -153,14 +136,14 @@ fn SplitDiffRowView(
                     row,
                     line_number: old_line_number,
                     side: SplitSide::Old,
-                    artifact_enhancement,
+
                     copy_line_number: None,
                 }
                 SplitCell {
                     row,
                     line_number: new_line_number,
                     side: SplitSide::New,
-                    artifact_enhancement,
+
                     copy_line_number: new_line_number,
                 }
             }
@@ -196,7 +179,6 @@ fn SplitContextCell(
     row: ReadStore<ViewerSplitRow>,
     side: SplitSide,
     line_number: u32,
-    artifact_enhancement: bool,
     copy_line_number: Option<u32>,
 ) -> Element {
     rsx! {
@@ -207,7 +189,7 @@ fn SplitContextCell(
                 SplitSide::New => SplitCellPresentation::NewContext,
             },
             source: CodeLineSource::SplitContext(row),
-            artifact_enhancement,
+
             copy_line_number,
         }
     }
@@ -218,7 +200,6 @@ fn SplitCell(
     row: ReadStore<ViewerSplitRow>,
     line_number: Option<u32>,
     side: SplitSide,
-    artifact_enhancement: bool,
     copy_line_number: Option<u32>,
 ) -> Element {
     let presentation = match side {
@@ -231,7 +212,7 @@ fn SplitCell(
             SplitCodeCell {
                 presentation,
                 source: CodeLineSource::SplitOld(row),
-                artifact_enhancement,
+
                 copy_line_number,
             }
         },
@@ -240,7 +221,7 @@ fn SplitCell(
             SplitCodeCell {
                 presentation,
                 source: CodeLineSource::SplitNew(row),
-                artifact_enhancement,
+
                 copy_line_number,
             }
         },
@@ -266,7 +247,6 @@ fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
 fn SplitCodeCell(
     presentation: SplitCellPresentation,
     source: CodeLineSource,
-    artifact_enhancement: bool,
     copy_line_number: Option<u32>,
 ) -> Element {
     let marker = Some(match presentation {
@@ -300,7 +280,7 @@ fn SplitCodeCell(
                 source,
                 marker,
                 changed_text_tone,
-                artifact_enhancement,
+
                 copy_text: copy_line_number.is_some(),
             }
         }
@@ -338,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_typed_line_numbers_long_lines_and_an_absent_split_cell() {
+    fn renders_typed_line_numbers_truncated_lines_and_an_absent_split_cell() {
         let rows = vec![
             ViewerSplitRow::Hunk("@@ -9999,2 +10000 @@".to_owned()),
             ViewerSplitRow::Pair {
@@ -368,11 +348,11 @@ mod tests {
 
         assert!(html.contains(">9999</span>"));
         assert!(html.contains(">10000</span>"));
-        assert_eq!(html.matches("4 chars").count(), 3);
+        assert_eq!(html.matches("(+4 characters omitted)").count(), 3);
         assert!(html.contains(r#"data-diff-cell="pad-new""#));
         assert!(absent_gutter.ends_with("></span>"));
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
-        assert!(html.contains(r#"data-gtl-copy-text="">abce</span>"#));
+        assert!(html.contains(r#"class="diff-truncated-text">abce</span>"#));
     }
 
     #[test]
@@ -411,7 +391,7 @@ mod tests {
             assert!(html.contains(&format!(r#"data-gtl-new-line="{line_number}""#)));
         }
         for text in ["keep", "newx", "abcdefgh"] {
-            assert!(html.contains(&format!(r#"data-gtl-copy-text="">{text}</span>"#)));
+            assert!(html.contains(&format!(r#"class="diff-truncated-text">{text}</span>"#)));
         }
         assert!(!html.contains(r#"data-gtl-copy-text="">oldx</span>"#));
         assert!(!html.contains(r#"data-gtl-copy-text="">+newx</span>"#));

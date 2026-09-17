@@ -41,6 +41,9 @@ pub enum UserSettingsLoadError {
 /// A settings edit conflicted with another writer.
 #[derive(Debug, thiserror::Error)]
 pub enum UserSettingsEditConflict {
+    /// The caller based its edit on an older serialized settings document.
+    #[error("user settings at {} changed after they were loaded", path.display())]
+    StaleRevision { path: PathBuf },
     /// Another editor held the settings lease for the complete wait budget.
     #[error("user-settings lock {} was not acquired within {wait_seconds} seconds", path.display())]
     LockTimeout { path: PathBuf, wait_seconds: u64 },

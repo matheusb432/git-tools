@@ -4,7 +4,7 @@ use anyhow::{Context, Result, ensure};
 use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::json;
-use thirtyfour::{By, WebDriver};
+use thirtyfour::{By, WebDriver, prelude::ElementQueryable as _};
 
 pub mod catalogue;
 pub mod evidence;
@@ -28,9 +28,8 @@ pub async fn copy_selected_diff_line(
         .execute(
             r#"
                 const [path, marker] = arguments;
-                const file = document.querySelector(
-                    `[data-gtl-diff-file][data-path='${path}']`,
-                );
+                const file = [...document.querySelectorAll('[data-gtl-diff-file]')]
+                    .find(element => element.dataset.path === path);
                 const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
                     .find((element) => element.textContent.includes(marker));
                 const range = document.createRange();
@@ -39,6 +38,12 @@ pub async fn copy_selected_diff_line(
                 selection.removeAllRanges();
                 selection.addRange(range);
 
+                window.__gtlCopiedLine = null;
+                window.__gtlClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+                Object.defineProperty(navigator, 'clipboard', {
+                    configurable: true,
+                    value: { writeText: async text => { window.__gtlCopiedLine = text; } },
+                });
                 const clipboard = new DataTransfer();
                 const event = new ClipboardEvent("copy", {
                     bubbles: true,
@@ -63,7 +68,26 @@ pub async fn copy_selected_diff_line(
         observation.prevented,
         "the desktop viewer did not intercept native copy"
     );
-    Ok(observation.text)
+    let text = if observation.text.is_empty() {
+        wait::until(
+            "complete copied source",
+            wait::ASSERTION_TIMEOUT,
+            || async {
+                Ok(driver
+                    .execute("return window.__gtlCopiedLine;", Vec::new())
+                    .await?
+                    .convert::<Option<String>>()?)
+            },
+        )
+        .await?
+    } else {
+        observation.text
+    };
+    driver.execute(
+        "if (window.__gtlClipboardDescriptor) Object.defineProperty(navigator, 'clipboard', window.__gtlClipboardDescriptor); else delete navigator.clipboard;",
+        Vec::new(),
+    ).await?;
+    Ok(text)
 }
 
 pub async fn wait_for_active_diff(
@@ -116,7 +140,11 @@ async fn probe_active_diff(
         return Ok(None);
     }
 
-    let main = driver.find(By::Css("main")).await?;
+    let main = driver
+        .query(By::Css("main"))
+        .and_displayed()
+        .first()
+        .await?;
     if main.is_displayed().await? && main.text().await?.contains(marker) {
         return Ok(Some(()));
     }

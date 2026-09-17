@@ -31,6 +31,10 @@ harness = false
 name = "story_set_registry"
 harness = false
 
+[[bench]]
+name = "user_settings"
+harness = false
+
 [[bin]]
 name = "server-highlighting-driver"
 path = "src/bin/server_highlighting_driver/main.rs"

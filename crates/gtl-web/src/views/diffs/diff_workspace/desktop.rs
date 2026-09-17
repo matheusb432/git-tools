@@ -313,6 +313,9 @@ fn ReadyWorkspace(
         files_folded.set(presentation.all_folded(tab));
     });
     let onselect_commit = use_callback(move |id: CommitId| {
+        if commit_selection.pending() {
+            return;
+        }
         let current_selection = view.peek().commit_selection.clone();
         let action = make_commit_selection_action(&current_selection, tab_id, id);
         match action {

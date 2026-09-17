@@ -25,7 +25,7 @@ fn binary_frames_preserve_rows_offsets_identity_and_terminal_events() {
                             code: Some(v1::ViewerCodeLine {
                                 text: "λ\0\t\n\"quoted\"".to_owned(),
                                 spans: Vec::new(),
-                                long_line_character_count: None,
+                                omitted_character_count: None,
                             }),
                         },
                     )),

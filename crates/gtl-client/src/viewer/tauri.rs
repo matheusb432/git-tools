@@ -7,7 +7,10 @@ use gtl_wire::viewer::{
     StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
+    projects::{
+        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
+        UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+    },
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
@@ -106,11 +109,9 @@ impl ViewerClient {
         invoke_without_arguments("viewer_get_shell").await
     }
 
-    pub async fn list_projects(&mut self) -> Result<Vec<ViewerProject>, ViewerClientError> {
-        invoke_without_arguments("viewer_list_projects").await
-    }
-
     viewer_unary_methods! {
+        list_projects(ListViewerProjects) -> ViewerProjectPage => "viewer_list_projects";
+        get_project_status(GetViewerProjectStatus) -> ViewerProjectStatus => "viewer_get_project_status";
         update_project(UpdateViewerProject) -> () => "viewer_update_project";
         open_project(OpenViewerProject) -> OpenViewerProjectOk => "viewer_open_project";
         activate_tab(ViewerTabRequest) -> ViewerShell => "viewer_activate_tab";
@@ -132,6 +133,9 @@ impl ViewerClient {
         get_history_copy(GetViewerHistoryCopy) -> ViewerHistoryCopyPayload => "viewer_get_history_copy";
         reset_settings(gtl_wire::viewer::ResetSettings) -> gtl_wire::viewer::ResetSettingsOk => "viewer_reset_settings";
         edit_settings(EditSettingsRequest) -> () => "viewer_edit_settings";
+        get_file_filters(gtl_wire::viewer::ViewerTabRequest) -> gtl_wire::viewer::file_filters::ViewerFileFilters => "viewer_get_file_filters";
+        set_file_filters(gtl_wire::viewer::file_filters::SetViewerFileFilters) -> () => "viewer_set_file_filters";
+        update_diff_exclusions(gtl_wire::viewer::file_filters::UpdateDiffExclusions) -> () => "viewer_update_diff_exclusions";
         open_diff_file(OpenViewerDiffFile) -> () => "viewer_open_diff_file";
     }
 

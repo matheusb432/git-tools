@@ -41,7 +41,7 @@ async fn recover_settings(session: &mut support::session::TestSession) -> Result
     reset.send_keys(Key::Enter).await?;
     session
         .driver()
-        .query(By::Css("button[aria-label='Refresh projects']"))
+        .query(By::Id("projects-heading"))
         .first()
         .await?;
     let backups = std::fs::read_dir(session.data_root())?
@@ -76,7 +76,7 @@ async fn recover_settings(session: &mut support::session::TestSession) -> Result
         .await?;
     session
         .driver()
-        .query(By::Css("button[aria-label='Refresh projects']"))
+        .query(By::Id("projects-heading"))
         .first()
         .await?;
     ensure!(
@@ -96,7 +96,7 @@ async fn settings_page_recovers_when_the_file_becomes_invalid_after_startup() ->
 async fn recover_settings_page(session: &mut support::session::TestSession) -> Result<()> {
     session
         .driver()
-        .query(By::Css("button[aria-label='Refresh projects']"))
+        .query(By::Id("projects-heading"))
         .first()
         .await?;
     session.write_user_config("theme = 7")?;

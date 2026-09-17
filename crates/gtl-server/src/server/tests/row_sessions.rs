@@ -30,12 +30,19 @@ async fn fixture() -> TestResult<(tempfile::TempDir, ServerHarness, Client, View
 async fn fixture_tabs(
     tabs: usize,
 ) -> TestResult<(tempfile::TempDir, ServerHarness, Client, ViewerActiveView)> {
-    let directory = tempfile::tempdir()?;
-    let database = SqliteAppState::open(directory.path())?;
     let mut source = String::new();
     for row in 0..2_000 {
         writeln!(&mut source, "row {row}")?;
     }
+    fixture_source(tabs, &source).await
+}
+
+async fn fixture_source(
+    tabs: usize,
+    source: &str,
+) -> TestResult<(tempfile::TempDir, ServerHarness, Client, ViewerActiveView)> {
+    let directory = tempfile::tempdir()?;
+    let database = SqliteAppState::open(directory.path())?;
     for tab in 0..tabs {
         let repository = directory.path().join(format!("repo-{tab}"));
         std::fs::create_dir(&repository)?;
@@ -48,7 +55,7 @@ async fn fixture_tabs(
         std::fs::write(repository.join("work.txt"), "base\n")?;
         git(&repository, &["add", "."])?;
         git(&repository, &["commit", "-qm", "base"])?;
-        std::fs::write(repository.join("work.txt"), &source)?;
+        std::fs::write(repository.join("work.txt"), source)?;
         save_live_view::execute(
             SaveLiveView {
                 path: repository,
@@ -138,6 +145,61 @@ async fn collect(
         Err("row session ended before completion".into())
     })
     .await?
+}
+
+#[tokio::test]
+async fn long_lines_cross_grpc_as_previews_but_copy_reads_complete_source() -> TestResult {
+    use gtl_wire::viewer::{ReadViewerDiffText, ViewerUnifiedRow};
+    use prost::Message as _;
+
+    let source = "a".repeat(94_718);
+    let (_directory, server, mut client, view) = fixture_source(1, &format!("{source}\n")).await?;
+    let mut stream = client
+        .stream_viewer_rows(v1::StreamViewerRowsRequest {
+            identity: Some(proto::viewer::encode_viewer_view_identity(view.identity)),
+            file_id: Some(view.files[0].id.as_str().to_owned()),
+            row_range: None,
+        })
+        .await?
+        .into_inner();
+    let mut received = Vec::new();
+    let mut row_count = 0;
+    while let Some(response) = stream.message().await? {
+        assert!(response.encoded_len() < 2_000);
+        match proto::viewer::decode_stream_viewer_rows_response(response)?.event {
+            ViewerRowEvent::FileStarted {
+                row_count: count, ..
+            } => row_count = count,
+            ViewerRowEvent::UnifiedRows { rows, .. } => received.extend(rows),
+            ViewerRowEvent::FileFinished { .. } => {}
+            event => return Err(format!("unexpected row event: {event:?}").into()),
+        }
+    }
+    let added = received
+        .into_iter()
+        .filter_map(|row| match row {
+            ViewerUnifiedRow::Added(row) => Some(row.code),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(added.len(), 1);
+    assert_eq!(added[0].text, "a".repeat(500));
+    assert_eq!(added[0].omitted_character_count, Some(94_218));
+    let request = ReadViewerDiffText {
+        identity: view.identity,
+        file: view.files[0].id.clone(),
+        row_range: ViewerRowRange::try_new(0, row_count)?,
+        old_side: false,
+    };
+    let response = client
+        .read_viewer_diff_text(proto::viewer::text::encode_request(&request))
+        .await?
+        .into_inner();
+    let lines = proto::viewer::text::decode_response(response)?;
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].text, source);
+    server.stop().await?;
+    Ok(())
 }
 
 #[tokio::test]

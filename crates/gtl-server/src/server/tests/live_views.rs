@@ -97,6 +97,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     let tab_id = initial.tabs[0].id;
     let request = v1::WatchViewerRequest {
         live_tab_id: Some(tab_id.into()),
+        project_ids: Vec::new(),
     };
     let mut stream = client.watch_viewer(request).await?.into_inner();
     assert!(next_check(&mut stream).await?.error.is_none());
@@ -138,6 +139,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     let mut stream = client
         .watch_viewer(v1::WatchViewerRequest {
             live_tab_id: Some(tab_id.into()),
+            project_ids: Vec::new(),
         })
         .await?
         .into_inner();

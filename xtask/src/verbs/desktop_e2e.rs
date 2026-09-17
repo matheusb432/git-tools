@@ -18,6 +18,7 @@ use command_group::{CommandGroup, GroupChild};
 use super::{build, status_notifier::StatusNotifierWatcher};
 use crate::cli::BuildTarget;
 
+mod native;
 mod playwright;
 mod stable_runner;
 
@@ -418,7 +419,7 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
         sandbox,
         sandbox.environment(&sandbox.native_data),
         |environment| {
-            run_native_phase(sandbox, environment).and_then(|()| {
+            native::run(sandbox, environment).and_then(|()| {
                 let mut dom_environment = environment.clone();
                 dom_environment.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
                 dom_environment.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
@@ -542,59 +543,6 @@ fn start_private_dbus(
     env.set("DBUS_SESSION_BUS_ADDRESS", address);
     let watcher = StatusNotifierWatcher::start(address)?;
     Ok((child, watcher))
-}
-
-fn run_native_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
-    let viewer = release_binary("gtl-viewer")?;
-    let cli = release_binary("git-tools")?;
-    let _server = start_server(
-        sandbox,
-        env,
-        &sandbox.native_data,
-        "native gtl-server",
-        "native-server.log",
-    )?;
-    let _viewer = ManagedChild::spawn(
-        "native viewer",
-        viewer.to_string_lossy().as_ref(),
-        &[],
-        env,
-        &sandbox.root,
-        &sandbox.logs.join("native-viewer.log"),
-    )?;
-    let window = retry_value("cold viewer map", READY_TIMEOUT, || {
-        find_window(env, WINDOW_TITLE_PATTERN).ok()
-    })?;
-
-    command_checked(
-        env,
-        "xdotool",
-        &["windowactivate", "--sync", &window, "key", "alt+F4"],
-        &sandbox.root,
-    )?;
-    retry("close-to-hide", READY_TIMEOUT, || {
-        find_window(env, WINDOW_TITLE_PATTERN).is_err()
-    })?;
-
-    let repo_path = create_native_fixture(sandbox, env)?;
-    command_checked(
-        env,
-        cli.to_string_lossy().as_ref(),
-        &["diff", "--name", "warm forwarding"],
-        &repo_path,
-    )?;
-    let forwarded_window = retry_value("warm forwarding remap", READY_TIMEOUT, || {
-        find_window(env, WINDOW_TITLE_PATTERN).ok()
-    })?;
-    retry("warm forwarding focus", READY_TIMEOUT, || {
-        output(env, "xdotool", &["getactivewindow"], &sandbox.root)
-            .ok()
-            .filter(|result| result.status.success())
-            .is_some_and(|result| {
-                String::from_utf8_lossy(&result.stdout).trim() == forwarded_window
-            })
-    })?;
-    Ok(())
 }
 
 fn run_dom_phase(

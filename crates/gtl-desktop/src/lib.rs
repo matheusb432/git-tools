@@ -1,10 +1,12 @@
 //! Tauri shell for the server-owned git-tools viewer.
 
+use viewer_ipc::{viewer_get_file_filters, viewer_set_file_filters, viewer_update_diff_exclusions};
 mod viewer_ipc;
 mod window_activation;
 mod window_controls;
 #[cfg(target_os = "linux")]
 mod window_frame;
+mod window_launch;
 
 use std::sync::{
     Arc,
@@ -19,14 +21,16 @@ use tauri::{
 use viewer_ipc::{
     ViewerIpcState, viewer_activate_tab, viewer_clear_commit_selection, viewer_close_other_tabs,
     viewer_close_tab, viewer_connect, viewer_edit_settings, viewer_find_diff,
-    viewer_get_history_copy, viewer_get_settings, viewer_get_settings_recovery, viewer_get_shell,
-    viewer_list_commits, viewer_list_history, viewer_list_projects, viewer_move_tab,
-    viewer_open_diff_file, viewer_open_history, viewer_open_project, viewer_read_diff_text,
-    viewer_refresh_tab, viewer_reset_settings, viewer_search_files, viewer_select_commit,
-    viewer_set_modified_files, viewer_set_preference, viewer_set_tab_pinned,
-    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
-    viewer_update_project, viewer_watch_cancel, viewer_watch_next_batch, viewer_watch_start,
+    viewer_get_history_copy, viewer_get_project_status, viewer_get_settings,
+    viewer_get_settings_recovery, viewer_get_shell, viewer_list_commits, viewer_list_history,
+    viewer_list_projects, viewer_move_tab, viewer_open_diff_file, viewer_open_history,
+    viewer_open_project, viewer_read_diff_text, viewer_refresh_tab, viewer_reset_settings,
+    viewer_search_files, viewer_select_commit, viewer_set_modified_files, viewer_set_preference,
+    viewer_set_tab_pinned, viewer_stream_rows_cancel, viewer_stream_rows_next_batch,
+    viewer_stream_rows_start, viewer_update_project, viewer_watch_cancel, viewer_watch_next_batch,
+    viewer_watch_start,
 };
+use window_launch::WindowLaunch;
 
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
@@ -82,6 +86,11 @@ fn focus_main(window: &tauri::WebviewWindow) {
     let app_handle = window.app_handle();
     let lifecycle = app_handle.state::<MainWindowLifecycle>();
     let was_hidden_by_close = lifecycle.take_hidden_by_close();
+    #[cfg(target_os = "linux")]
+    restore_window_step(
+        window_activation::remap_unfocused_wayland_window(window),
+        "remap Wayland window",
+    );
     let unminimized = restore_window_step(window.unminimize(), "unminimize");
     let shown = restore_window_step(window.show(), "show");
     let focused = restore_window_step(window.set_focus(), "focus");
@@ -171,8 +180,8 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
             gtk::glib::set_prgname(Some(&app.config().identifier));
         }
     }
-    let focus_diff = std::env::args_os().any(|argument| argument == "--focus-diff");
-    let window = WebviewWindowBuilder::new(app, "main", main_window_url(focus_diff))
+    let launch = WindowLaunch::from_arguments(std::env::args_os());
+    let window = WebviewWindowBuilder::new(app, "main", main_window_url(launch.opens_diff()))
         .title(MAIN_WINDOW_TITLE)
         .decorations(!cfg!(target_os = "windows"))
         .resizable(true)
@@ -184,7 +193,9 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
         .build()?;
     #[cfg(target_os = "linux")]
     window_frame::configure(&window)?;
-    window.show()?;
+    if launch.focuses_window() {
+        focus_main(&window);
+    }
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -222,6 +233,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_connect,
             viewer_get_shell,
             viewer_list_projects,
+            viewer_get_project_status,
             viewer_open_project,
             viewer_update_project,
             viewer_activate_tab,
@@ -245,6 +257,9 @@ pub fn run() -> anyhow::Result<()> {
             viewer_reset_settings,
             viewer_get_settings,
             viewer_edit_settings,
+            viewer_get_file_filters,
+            viewer_set_file_filters,
+            viewer_update_diff_exclusions,
             viewer_open_diff_file,
             viewer_stream_rows_start,
             viewer_stream_rows_next_batch,
@@ -253,8 +268,10 @@ pub fn run() -> anyhow::Result<()> {
             viewer_watch_next_batch,
             viewer_watch_cancel,
         ])
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if WindowLaunch::from_arguments(argv).focuses_window()
+                && let Some(window) = app.get_webview_window("main")
+            {
                 focus_main(&window);
             }
         }))

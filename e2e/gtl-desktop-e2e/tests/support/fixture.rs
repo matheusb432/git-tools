@@ -64,6 +64,45 @@ impl OneShotFixture {
             .context("forward one-shot diff")
     }
 
+    pub fn create_with_long_lines(data_root: &Path) -> Result<Self> {
+        let fixture = Self::create_named(data_root, "long-lines")?;
+        for (path, characters) in [("a.css", 94_718), ("b.css", 90_015)] {
+            fs::write(
+                fixture.repository.join(path),
+                format!("{}\n", "x".repeat(characters)),
+            )?;
+        }
+        git(&fixture.repository, ["add", "."])?;
+        git(
+            &fixture.repository,
+            ["commit", "-q", "-m", "Add generated CSS"],
+        )?;
+        Ok(fixture)
+    }
+
+    pub fn create_with_excluded_files(data_root: &Path, name: &str) -> Result<Self> {
+        let mut fixture = Self::create_named(data_root, name)?;
+        let root = required_environment_path("HOME")?.join("extension-fixtures");
+        fs::create_dir_all(&root)?;
+        let repository = root.join(name);
+        fs::rename(&fixture.repository, &repository)?;
+        fixture.repository = repository;
+        fs::write(
+            fixture.repository.join("Cargo.lock"),
+            "excluded-lock-marker\n",
+        )?;
+        git(&fixture.repository, ["add", "Cargo.lock"])?;
+        git(
+            &fixture.repository,
+            ["commit", "--amend", "--no-edit", "-q"],
+        )?;
+        Ok(fixture)
+    }
+
+    pub fn repository(&self) -> &Path {
+        &self.repository
+    }
+
     pub fn create_with_panel_history(data_root: &Path, name: &str) -> Result<Self> {
         let fixture = Self::create_named(data_root, name)?;
         for index in 0..48 {

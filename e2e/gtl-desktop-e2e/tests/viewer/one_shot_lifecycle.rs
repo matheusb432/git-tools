@@ -782,7 +782,11 @@ async fn wait_for_projects_home(driver: &thirtyfour::WebDriver) -> Result<()> {
             if !driver.find_all(By::Css("[role='tab']")).await?.is_empty() {
                 return Ok(None);
             }
-            let main = driver.find(By::Css("main")).await?;
+            let main = driver
+                .query(By::Css("main"))
+                .and_displayed()
+                .first()
+                .await?;
             Ok(main.text().await?.contains("Projects").then_some(()))
         },
     )

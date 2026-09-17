@@ -11,6 +11,8 @@ pub(crate) mod data_table;
 mod dialog;
 mod empty_notice;
 #[cfg(feature = "interactive-ui")]
+mod extension_exclusions;
+#[cfg(feature = "interactive-ui")]
 mod field_error;
 #[cfg(feature = "interactive-ui")]
 mod field_label;
@@ -55,6 +57,8 @@ pub(crate) use button::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVar
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use count_badge::CountBadge;
 pub(crate) use empty_notice::EmptyNotice;
+#[cfg(feature = "interactive-ui")]
+pub(crate) use extension_exclusions::{ExtensionExclusionsAction, ExtensionExclusionsInput};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use field_error::FieldError;
 #[cfg(feature = "interactive-ui")]

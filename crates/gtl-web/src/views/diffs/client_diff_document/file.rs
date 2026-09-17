@@ -258,6 +258,7 @@ mod tests {
     pub(super) fn test_file() -> TestResult<ClientDiffFile> {
         Ok(ClientDiffFile {
             summary: ViewerFileSummary {
+                source_id: None,
                 id: ViewerDiffFileId::for_index(0),
                 path: repository_relative_path("scripts/run.SH")?,
                 absolute_path: absolute_file_path("/repo/scripts/run.SH")?,

@@ -285,7 +285,7 @@ fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
 pub(crate) fn ViewerTabOverflowMenu(
     id: String,
     tabs: Vec<ViewerTab>,
-    active_tab: ViewerTab,
+    active_tab: Option<ViewerTab>,
     #[props(default)] diff_rows_loading_tab_id: Option<ViewerTabId>,
     #[props(default = true)] reorderable: bool,
     onactivate: EventHandler<ViewerTabId>,
@@ -293,16 +293,21 @@ pub(crate) fn ViewerTabOverflowMenu(
     onmove: EventHandler<MoveViewerTab>,
     #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
+    #[props(default)] onopenchange: Option<EventHandler<bool>>,
 ) -> Element {
-    let active_tab_state = tab_presentation_state(
-        &active_tab.state,
-        diff_rows_loading_tab_id == Some(active_tab.id),
-    );
+    let active_tab_state = active_tab
+        .as_ref()
+        .map(|tab| tab_presentation_state(&tab.state, diff_rows_loading_tab_id == Some(tab.id)));
+    let active_tab_id = active_tab.as_ref().map(|tab| tab.id);
+    let active_tab_label = active_tab
+        .as_ref()
+        .map_or("Open diffs", |tab| tab.label.as_str());
+    let popover_id = id.clone();
     let trigger_id = format!("{id}-trigger");
     let title_id = format!("{id}-title");
     let trigger_label = format!(
         "Choose open diff. Current: {}. {} open diffs.",
-        active_tab.label,
+        active_tab_label,
         tabs.len()
     );
 
@@ -315,13 +320,17 @@ pub(crate) fn ViewerTabOverflowMenu(
                 popovertarget: id.clone(),
                 popovertargetaction: "toggle",
                 aria_label: trigger_label.clone(),
-                aria_busy: active_tab_state.is_loading().to_string(),
+                aria_busy: active_tab_state.is_some_and(TabPresentationState::is_loading).to_string(),
                 aria_controls: id.clone(),
                 title: trigger_label,
                 "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_TRIGGER.value(),
-                ViewerTabKindIndicator { kind: active_tab.kind }
-                span { class: "min-w-0 flex-1 truncate font-medium", "{active_tab.label}" }
-                TabStateMarker { state: active_tab_state }
+                if let Some(tab) = &active_tab {
+                    ViewerTabKindIndicator { kind: tab.kind }
+                }
+                span { class: "min-w-0 flex-1 truncate font-medium", "{active_tab_label}" }
+                if let Some(state) = active_tab_state {
+                    TabStateMarker { state }
+                }
                 CountBadge { count: tabs.len(), aria_hidden: "true" }
                 span {
                     class: "viewer-tab-overflow-chevron",
@@ -336,6 +345,11 @@ pub(crate) fn ViewerTabOverflowMenu(
                 class: "viewer-tab-overflow-panel m-0 mt-1 mb-2 p-0",
                 style: "height: fit-content;",
                 popover: "auto",
+                ontoggle: move |_| {
+                    if let Some(onopenchange) = onopenchange {
+                        onopenchange.call(browser::popover_is_open(&popover_id));
+                    }
+                },
                 role: "group",
                 aria_labelledby: title_id.clone(),
                 "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_MENU.value(),
@@ -354,11 +368,14 @@ pub(crate) fn ViewerTabOverflowMenu(
                     }
                 }
                 ScrollArea { class: "min-h-0 overscroll-contain overflow-y-auto p-1.5",
+                    if tabs.is_empty() {
+                        p { class: "px-3 py-2 text-xs text-ink-3", "No open diffs" }
+                    }
                     ul { class: "grid gap-px", role: "list",
                         for tab in &tabs {
                             {
                                 let tab_id = tab.id;
-                                let active = active_tab.id == tab_id;
+                                let active = active_tab_id == Some(tab_id);
                                 let presentation_state = tab_presentation_state(
                                     &tab.state,
                                     diff_rows_loading_tab_id == Some(tab_id),
@@ -813,11 +830,12 @@ mod tests {
         };
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabOverflowMenuProps {
+            onopenchange: None,
             onpin: None,
             oncloseothers: None,
             id: "viewer-tab-overflow-test".to_owned(),
             tabs: vec![active_tab.clone(), pending_tab],
-            active_tab,
+            active_tab: Some(active_tab),
             diff_rows_loading_tab_id: None,
             reorderable: true,
             onactivate: EventHandler::new(|_| {}),

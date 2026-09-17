@@ -4,10 +4,14 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub(super) fn spawn(program: &Path) -> std::io::Result<()> {
+pub(super) fn spawn(program: &Path, focus_window: bool) -> std::io::Result<()> {
     let mut command = Command::new(program);
     command
-        .arg("--focus-diff")
+        .arg(if focus_window {
+            "--focus-diff"
+        } else {
+            "--background-diff"
+        })
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

@@ -37,3 +37,8 @@ pub use state::{ViewerState, ViewerStateError};
 pub mod set_modified_files;
 
 pub mod pinned_tabs;
+
+pub mod file_filters;
+pub mod get_viewer_file_filters;
+pub mod set_viewer_file_filters;
+pub mod update_diff_exclusions;

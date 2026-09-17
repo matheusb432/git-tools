@@ -34,6 +34,7 @@ pub(crate) fn commit_with(id: &str, subject: &str, parents: &[&str]) -> Commit {
 
 pub(crate) fn view() -> View {
     View {
+        file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
         repo_name: crate::utils::project_name("repo"),
         repo_root: crate::utils::repository_root("/repo"),
         branch: GitHead::Branch(crate::utils::branch_name("feature")),

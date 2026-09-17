@@ -183,8 +183,50 @@ fn history_cursor_rejects_zero_during_wire_deserialization() {
 
 #[test]
 fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
+    let shell = semantic_shell()?;
+
+    let value = serde_json::to_value(&shell).unwrap();
+
+    assert_eq!(value["focus_request_version"], 20);
+    assert_eq!(value["active"]["state"], "ready");
+    assert_eq!(
+        value["active"]["view"]["files"][0]["anchor_id"],
+        "file-src-lib-rs"
+    );
+    assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
+    assert_eq!(value["active"]["view"]["commits"][0]["id"], COMMIT_ID);
+    assert_eq!(
+        value["active"]["view"]["commits"][0]["date"],
+        "2026-08-09 10:00"
+    );
+    assert_eq!(
+        value["active"]["view"]["commits"][0]["iso"],
+        "2026-08-09T10:00:00Z"
+    );
+    assert!(value.pointer("/active/view/commits/0/sha").is_none());
+    assert!(
+        value
+            .pointer("/active/view/commits/0/abbreviated_sha")
+            .is_none()
+    );
+    assert!(value.pointer("/active/view/files/0/lines").is_none());
+    assert!(value.pointer("/active/view/repository_root").is_none());
+    assert_eq!(
+        value["preferences"]["keybindings"]["search_files"],
+        "ctrl+p"
+    );
+    assert_eq!(
+        value["preferences"]["keybindings"]["search_text_in_all_files"],
+        "ctrl+f"
+    );
+    assert_eq!(serde_json::from_value::<ViewerShell>(value).unwrap(), shell);
+
+    Ok(())
+}
+
+fn semantic_shell() -> TestResult<ViewerShell> {
     let identity = identity()?;
-    let shell = ViewerShell {
+    Ok(ViewerShell {
         version: ViewerVersion::new(23),
         focus_request_version: Some(ViewerVersion::new(20)),
         tabs: vec![ViewerTab {
@@ -210,6 +252,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
                     trail: String::new(),
                 },
                 files: vec![ViewerFileSummary {
+                    source_id: None,
                     id: ViewerDiffFileId::for_index(0),
                     path: relative_path("src/lib.rs")?,
                     absolute_path: absolute_file_path("/repos/git-tools/src/lib.rs")?,
@@ -247,44 +290,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
             keybindings: gtl_models::viewer::ViewerKeybindings::default(),
         },
         feedback: None,
-    };
-
-    let value = serde_json::to_value(&shell).unwrap();
-    assert_eq!(value["focus_request_version"], 20);
-    assert_eq!(value["active"]["state"], "ready");
-    assert_eq!(
-        value["active"]["view"]["files"][0]["anchor_id"],
-        "file-src-lib-rs"
-    );
-    assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
-    assert_eq!(value["active"]["view"]["commits"][0]["id"], COMMIT_ID);
-    assert_eq!(
-        value["active"]["view"]["commits"][0]["date"],
-        "2026-08-09 10:00"
-    );
-    assert_eq!(
-        value["active"]["view"]["commits"][0]["iso"],
-        "2026-08-09T10:00:00Z"
-    );
-    assert!(value.pointer("/active/view/commits/0/sha").is_none());
-    assert!(
-        value
-            .pointer("/active/view/commits/0/abbreviated_sha")
-            .is_none()
-    );
-    assert!(value.pointer("/active/view/files/0/lines").is_none());
-    assert!(value.pointer("/active/view/repository_root").is_none());
-    assert_eq!(
-        value["preferences"]["keybindings"]["search_files"],
-        "ctrl+p"
-    );
-    assert_eq!(
-        value["preferences"]["keybindings"]["search_text_in_all_files"],
-        "ctrl+f"
-    );
-    assert_eq!(serde_json::from_value::<ViewerShell>(value).unwrap(), shell);
-
-    Ok(())
+    })
 }
 
 #[test]
@@ -354,11 +360,14 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         has_older: false,
     };
     let settings = ViewerUserSettings {
+        revision: gtl_models::settings::UserSettingsRevision::from_digest([0x11; 32]),
+        focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,
         },
         projects_view: gtl_models::settings::ProjectsViewMode::Table,
+        projects_sort: gtl_models::settings::ProjectsSort::Branch,
         projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/user/.config/git-tools/config.toml".into()),
         configured_theme: None,
@@ -372,6 +381,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         diff_exclusions: ViewerDiffExclusions {
             default_extensions: ExcludedExtensions::new(["md"]),
             projects: vec![ViewerProjectDiffExclusions {
+                configured: true,
                 project_name: project_name("git-tools")?,
                 extensions: ExcludedExtensions::new(["js"]),
                 excluded_from_push_all: false,

@@ -12,4 +12,5 @@ pub enum WindowAction {
 pub struct WindowState {
     pub custom_titlebar: bool,
     pub maximized: bool,
+    pub visible: bool,
 }

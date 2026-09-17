@@ -4,7 +4,9 @@ use lucide_dioxus::ArrowUp;
 
 use crate::shared::ui::{
     Button, ButtonSize, ButtonVariant,
-    data_table::{DataTable, DataTableRow, TableColumn, TableHeading},
+    data_table::{
+        DataTable, DataTableRow, TableColumn, TableHeading, TableSortDirection, TableSortHeading,
+    },
 };
 
 #[story(name = "Catalog thumbnail")]
@@ -128,5 +130,35 @@ fn missing_values() -> Element {
     }
 }
 
+/// Sortable headers preserve the table's density and expose direction to assistive technology.
+#[story(name = "Column sorting")]
+fn column_sorting() -> Element {
+    let mut ascending = use_signal(|| true);
+    let names = if ascending() {
+        ["Atlas", "Beacon", "Cedar"]
+    } else {
+        ["Cedar", "Beacon", "Atlas"]
+    };
+    rsx! {
+        DataTable {
+            caption: "Sortable projects",
+            header: rsx! {
+                TableSortHeading {
+                    label: "Project",
+                    direction: if ascending() { TableSortDirection::Ascending } else { TableSortDirection::Descending },
+                    onsort: move |()| ascending.toggle(),
+                }
+                TableSortHeading { label: "Changes", disabled: true, onsort: |()| {} }
+            },
+            for name in names {
+                DataTableRow { key: "{name}",
+                    TableColumn { "{name}" }
+                    TableColumn { "Loading status" }
+                }
+            }
+        }
+    }
+}
+
 #[stories(id = "data-table", name = "DataTable", thumbnail = thumbnail)]
-const DATA_TABLE_STORIES: () = &[interactive, empty, missing_values];
+const DATA_TABLE_STORIES: () = &[interactive, empty, missing_values, column_sorting];

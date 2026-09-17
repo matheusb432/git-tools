@@ -42,7 +42,9 @@ pub fn execute(
             rev: gtl_models::git::GitRevision::head(),
         },
     };
-    let view = compute_recipe::execute(recipe, settings, git, comparisons)?;
+    let excluded = state.inspect(|session| session.file_exclusions(request.tab_id))?;
+    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
+    let view = compute_recipe::execute(recipe, &settings, git, comparisons)?;
     let snapshot = state.prepare_snapshot(Arc::new(view))?;
     match state.update(|session| session.publish_modified_files(ticket, snapshot))? {
         PublishOutcome::Published => Ok(()),

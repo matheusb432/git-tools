@@ -55,6 +55,10 @@ pub(super) fn build(
     } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), excluded)?;
 
     let view = View {
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(
+            io_ranges.diff.clone(),
+            excluded.clone(),
+        ),
         repo_name,
         repo_root: top.clone(),
         branch,

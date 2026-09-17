@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context as _, anyhow};
-use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
+use gtl_application::ports::{GitDiffFormat, GitDiffPaths, GitDiffRequest};
 use gtl_models::{
     diffs::{Commit, CommitId},
     git::{GitDiffSpec, GitRange, GitRevision},
@@ -41,6 +41,9 @@ pub(crate) fn diff(
     request: &GitDiffRequest,
 ) -> anyhow::Result<String> {
     let repo_path = repo_path.as_ref();
+    if matches!(&request.paths, GitDiffPaths::Including(paths) if paths.is_empty()) {
+        return Ok(String::new());
+    }
     let temporary_index = match &request.spec {
         GitDiffSpec::AgainstWorkingTree(_) => Some(working_tree_index(repo_path)?),
         GitDiffSpec::Range(_) => None,
@@ -67,13 +70,16 @@ pub(crate) fn diff(
         _ => request.spec.to_string(),
     };
     args.push(base);
-    if !request.excluded_paths.is_empty() {
+    let (paths, magic) = match &request.paths {
+        GitDiffPaths::Excluding(paths) => (paths, ":(exclude,literal)"),
+        GitDiffPaths::Including(paths) => (paths, ":(literal)"),
+    };
+    if !paths.is_empty() {
         args.push("--".to_string());
         args.extend(
-            request
-                .excluded_paths
+            paths
                 .iter()
-                .map(|path| format!(":(exclude,literal){}", path.display())),
+                .map(|path| format!("{magic}{}", path.display())),
         );
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();

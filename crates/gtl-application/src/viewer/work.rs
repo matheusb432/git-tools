@@ -29,6 +29,7 @@ const COMMIT_FAILED_MESSAGE: &str =
 
 #[derive(Debug)]
 pub struct ReservedRecipeWork {
+    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
     recipe: Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
@@ -43,6 +44,7 @@ impl ReservedRecipeWork {
 
 #[derive(Debug)]
 pub struct ReservedCommitWork {
+    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
     repo_root: gtl_models::paths::RepositoryRoot,
     commit: gtl_models::diffs::Commit,
     ticket: CommitPatchTicket,
@@ -125,6 +127,7 @@ pub fn reserve_open(
             .ok_or(ReserveRecipeError::UnknownTab)?;
         session.request_focus();
         Ok(ReservedRecipeWork {
+            excluded: session.file_exclusions(ticket.tab_id),
             recipe,
             kind,
             ticket,
@@ -251,6 +254,7 @@ fn reserve_refresh_in_session(
         .refresh(tab_id)
         .ok_or(ReserveRecipeError::UnknownTab)?;
     Ok(ReservedRecipeWork {
+        excluded: session.file_exclusions(ticket.tab_id),
         recipe,
         kind,
         ticket,
@@ -264,10 +268,12 @@ pub fn compute_recipe(
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
+        excluded,
         recipe,
         kind,
         ticket,
     } = work;
+    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
     let head_before = (kind == ViewerTabKind::Live)
         .then(|| super::refresh_live_view::inspect_recipe(&recipe, git, comparisons).ok())
         .flatten();
@@ -276,7 +282,7 @@ pub fn compute_recipe(
             recipe: recipe.clone(),
             kind,
         },
-        settings,
+        &settings,
         git,
         comparisons,
     );
@@ -366,6 +372,7 @@ pub fn reserve_selected_commit_reload(
         };
         let (ticket, repo_root, commit) = session.begin_commit_selection(tab_id, &commit_id)?;
         Ok(Some(ReservedCommitWork {
+            excluded: session.file_exclusions(ticket.tab_id),
             repo_root,
             commit,
             ticket,
@@ -381,6 +388,7 @@ pub fn reserve_commit(
     state.update(|session| {
         let (ticket, repo_root, commit) = session.begin_commit_selection(tab_id, commit_id)?;
         Ok(ReservedCommitWork {
+            excluded: session.file_exclusions(ticket.tab_id),
             repo_root,
             commit,
             ticket,
@@ -394,12 +402,14 @@ pub fn compute_commit(
     git: &impl GitClient,
 ) -> ComputedCommitWork {
     let ReservedCommitWork {
+        excluded,
         repo_root,
         commit,
         ticket,
     } = work;
+    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
     let result =
-        compute_commit_patch::execute(ComputeCommitPatch { repo_root, commit }, settings, git);
+        compute_commit_patch::execute(ComputeCommitPatch { repo_root, commit }, &settings, git);
     ComputedCommitWork { ticket, result }
 }
 

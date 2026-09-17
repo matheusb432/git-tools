@@ -61,7 +61,7 @@ fn row_stream_events_carry_identity_sequence_file_and_typed_rows() {
                             code: Some(ViewerCodeLine {
                                 text: "let answer = 42;".to_owned(),
                                 spans: Vec::new(),
-                                long_line_character_count: None,
+                                omitted_character_count: None,
                             }),
                         },
                     )),
@@ -284,7 +284,7 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
                     changed: true,
                 },
             ],
-            long_line_character_count: None,
+            omitted_character_count: None,
         },
     });
     let encoded = encode_viewer_unified_row(row.clone()).unwrap();
@@ -409,7 +409,7 @@ fn streamed_row_codec_rejects_invalid_handwritten_span_ranges() {
             code: viewer::ViewerCodeLine {
                 text: "café".into(),
                 spans,
-                long_line_character_count: None,
+                omitted_character_count: None,
             },
         });
 
@@ -484,11 +484,14 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 #[test]
 fn settings_codec_round_trips_exclusions_and_effective_values() {
     let settings = ViewerUserSettings {
+        revision: gtl_models::settings::UserSettingsRevision::from_digest([0x22; 32]),
+        focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,
         },
         projects_view: gtl_models::settings::ProjectsViewMode::Table,
+        projects_sort: gtl_models::settings::ProjectsSort::BranchDescending,
         projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
         configured_theme: Some(ViewerTheme::Hearth),
@@ -502,6 +505,7 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
         diff_exclusions: ViewerDiffExclusions {
             default_extensions: ExcludedExtensions::new(["lock"]),
             projects: vec![ViewerProjectDiffExclusions {
+                configured: true,
                 project_name: ProjectName::try_new("git-tools").unwrap(),
                 extensions: ExcludedExtensions::new(["snap"]),
                 excluded_from_push_all: true,
@@ -509,19 +513,35 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
         },
     };
 
-    let encoded = encode_get_viewer_settings_response(settings.clone());
-    let decoded = decode_get_viewer_settings_response(encoded).unwrap();
+    for focus_window_on_diff in [true, false] {
+        let settings = ViewerUserSettings {
+            focus_window_on_diff,
+            ..settings.clone()
+        };
+        let mut encoded = encode_get_viewer_settings_response(settings.clone());
+        let decoded = decode_get_viewer_settings_response(encoded.clone()).unwrap();
+        assert_eq!(decoded, settings);
+        encoded.focus_window_on_diff = None;
+        assert!(decode_get_viewer_settings_response(encoded).is_err());
+    }
 
-    assert_eq!(decoded, settings);
+    let mut malformed_revision = encode_get_viewer_settings_response(settings);
+    malformed_revision.revision = "AA".repeat(32);
+    assert!(decode_get_viewer_settings_response(malformed_revision).is_err());
 }
 
 #[test]
 fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
     let request = EditSettingsRequest {
+        expected_revision: Some(gtl_models::settings::UserSettingsRevision::from_digest(
+            [0x33; 32],
+        )),
+        focus_window_on_diff: FieldUpdate::Update(false),
         files_sidebar_visible: FieldUpdate::Update(false),
         commits_sidebar_visible: FieldUpdate::Clear,
         wrap_lines: FieldUpdate::Update(true),
         projects_view: FieldUpdate::Update(gtl_models::settings::ProjectsViewMode::Table),
+        projects_sort: FieldUpdate::Update(gtl_models::settings::ProjectsSort::NameDescending),
         projects_page_size: FieldUpdate::Update(
             gtl_models::settings::ProjectsPageSize::try_new(30).unwrap(),
         ),
@@ -544,6 +564,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         FieldUpdate::Update(true),
     ] {
         let request = EditSettingsRequest {
+            focus_window_on_diff: wrap_lines.clone(),
             files_sidebar_visible: wrap_lines.clone(),
             commits_sidebar_visible: wrap_lines.clone(),
             wrap_lines,
@@ -554,29 +575,34 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             request
         );
     }
+
+    let mut malformed_revision = encode_edit_settings_request(request);
+    malformed_revision.expected_revision = Some("not-a-revision".to_owned());
+    assert!(decode_edit_settings_request(malformed_revision).is_err());
 }
 
 #[test]
 fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
-    use gtl_models::{paths::RepositoryRoot, repository::status::RepositoryStatus};
+    use gtl_models::paths::RepositoryRoot;
     use gtl_wire::{
         proto::viewer::projects,
-        viewer::projects::{OpenViewerProject, ViewerProject, ViewerProjectBranchComparison},
+        viewer::projects::{OpenViewerProject, ViewerProject, ViewerProjectPage},
     };
     let project = ViewerProject {
         comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
-        branch_comparison: ViewerProjectBranchComparison::Upstream,
+        id: "ALP".try_into().unwrap(),
         path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
         name: ProjectName::try_new("Alpha").unwrap(),
-        status: RepositoryStatus::Absent,
         last_rendered_at: Some("2026-09-06T10:00:00Z".try_into().unwrap()),
     };
     let response = v1::ListViewerProjectsResponse {
-        projects: vec![projects::encode_project(project.clone())],
+        projects: vec![projects::encode_project(&project)],
+        total: 1,
+        count_before: 0,
     };
     assert_eq!(
         projects::decode_projects(response).unwrap(),
-        vec![project.clone()]
+        ViewerProjectPage::try_new(vec![project.clone()], 1, 0).unwrap()
     );
     for mode in [
         gtl_wire::viewer::projects::ViewerProjectDiffMode::Snapshot,
@@ -604,11 +630,13 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
         projects::decode_projects(v1::ListViewerProjectsResponse {
             projects: vec![v1::ViewerProject {
                 comparison_branch: "main".to_owned(),
-                branch_comparison: None,
+                id: "invalid".into(),
+                name: "Alpha".into(),
                 path: "/repos/alpha".into(),
-                status: None,
                 last_rendered_at: None
-            }]
+            }],
+            total: 1,
+            count_before: 0,
         })
         .is_err()
     );
@@ -617,16 +645,13 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
 
 #[test]
 fn project_statuses_round_trip_through_grpc_and_desktop_json() {
-    use gtl_models::{
-        paths::RepositoryRoot,
-        repository::{
-            PathCount,
-            status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
-        },
+    use gtl_models::repository::{
+        PathCount,
+        status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
     };
     use gtl_wire::{
         proto::viewer::projects,
-        viewer::projects::{ViewerProject, ViewerProjectBranchComparison},
+        viewer::projects::{ViewerProjectBranchComparison, ViewerProjectStatus},
     };
     for status in [
         RepositoryStatus::Absent,
@@ -656,23 +681,110 @@ fn project_statuses_round_trip_through_grpc_and_desktop_json() {
             changes: StatusChanges::Clean,
         },
     ] {
-        let project = ViewerProject {
+        let project = ViewerProjectStatus {
             comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
             branch_comparison: ViewerProjectBranchComparison::Upstream,
-            path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
-            name: ProjectName::try_new("Alpha").unwrap(),
+            project_id: "ALP".try_into().unwrap(),
             status,
-            last_rendered_at: None,
         };
-        let decoded = projects::decode_projects(v1::ListViewerProjectsResponse {
-            projects: vec![projects::encode_project(project.clone())],
-        })
-        .unwrap();
-        assert_eq!(decoded, vec![project.clone()]);
+        let decoded =
+            projects::decode_project_status(projects::encode_project_status(project.clone()))
+                .unwrap();
+        assert_eq!(decoded, project);
         assert_eq!(
-            serde_json::from_str::<ViewerProject>(&serde_json::to_string(&project).unwrap())
+            serde_json::from_str::<ViewerProjectStatus>(&serde_json::to_string(&project).unwrap())
                 .unwrap(),
             project
         );
     }
+}
+
+#[test]
+fn project_page_bounds_survive_grpc_and_desktop_json() {
+    use gtl_wire::{
+        proto::viewer::projects,
+        viewer::projects::{
+            ListViewerProjects, ViewerProjectPage, ViewerProjectsCursor, ViewerProjectsPageSize,
+        },
+    };
+    for cursor in [
+        ViewerProjectsCursor::First,
+        ViewerProjectsCursor::After("GTL".try_into().unwrap()),
+        ViewerProjectsCursor::Before("GTL".try_into().unwrap()),
+        ViewerProjectsCursor::Last,
+    ] {
+        let request = ListViewerProjects {
+            sort: Some(gtl_models::settings::ProjectsSort::ChangesAscending),
+            cursor,
+            page_size: ViewerProjectsPageSize::try_new(100).unwrap(),
+        };
+        assert_eq!(
+            projects::decode_list(projects::encode_list(request.clone())).unwrap(),
+            request
+        );
+        assert_eq!(
+            serde_json::from_str::<ListViewerProjects>(&serde_json::to_string(&request).unwrap())
+                .unwrap(),
+            request
+        );
+    }
+    for size in [0, 101, u32::MAX] {
+        assert!(ViewerProjectsPageSize::try_new(size).is_err());
+        assert!(serde_json::from_value::<ViewerProjectsPageSize>(serde_json::json!(size)).is_err());
+    }
+    assert!(
+        serde_json::from_value::<ListViewerProjects>(
+            serde_json::json!({"cursor": {"After": "invalid"}, "page_size": 15})
+        )
+        .is_err()
+    );
+    assert!(ViewerProjectPage::try_new(vec![], 0, 1).is_none());
+    assert!(
+        serde_json::from_value::<ViewerProjectPage>(
+            serde_json::json!({"projects": [], "total": 0, "count_before": 1})
+        )
+        .is_err()
+    );
+    assert!(
+        projects::decode_project_status(v1::GetViewerProjectStatusResponse::default()).is_err()
+    );
+}
+
+#[test]
+fn exclusion_updates_preserve_presence_and_normalize_the_client_boundary() {
+    use gtl_wire::{proto::viewer::file_filters, viewer::file_filters::UpdateDiffExclusions};
+    for extensions in [
+        FieldUpdate::Unchanged,
+        FieldUpdate::Clear,
+        FieldUpdate::Update(ExcludedExtensions::default()),
+    ] {
+        for expected in [None, Some(ExcludedExtensions::default())] {
+            let request = UpdateDiffExclusions {
+                project: Some(ProjectName::try_new("git-tools").unwrap()),
+                extensions: extensions.clone(),
+                expected,
+            };
+            assert_eq!(
+                file_filters::decode_defaults(file_filters::encode_defaults(request.clone()))
+                    .unwrap(),
+                request
+            );
+        }
+    }
+    let decoded = file_filters::decode_defaults(v1::UpdateDiffExclusionsRequest {
+        project: None,
+        expected: None,
+        extensions: Some(v1::ExtensionsFieldUpdate {
+            operation: Some(v1::extensions_field_update::Operation::Update(
+                v1::ExtensionsValue {
+                    extensions: vec![" .MD ".into(), "lock".into(), "md".into()],
+                },
+            )),
+        }),
+    })
+    .unwrap();
+    assert_eq!(
+        decoded.extensions,
+        FieldUpdate::Update(ExcludedExtensions::new(["lock", "md"]))
+    );
 }

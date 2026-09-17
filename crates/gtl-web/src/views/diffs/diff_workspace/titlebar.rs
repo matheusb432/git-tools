@@ -33,10 +33,9 @@ pub(super) fn ViewTitlebar(
                     upstream: view.upstream.clone(),
                 }
             }
-            if let Some(exclusions) = &view.exclusions {
-                div { class: "mobile:hidden",
-                    ExclusionsBadge { exclusions: exclusions.clone() }
-                }
+            ExtensionsControl {
+                artifact: artifact_view_id.is_some(),
+                exclusions: view.exclusions.clone(),
             }
             div { class: "flex-1 mobile:hidden" }
             if let Some(live_actions) = live_actions {
@@ -233,4 +232,22 @@ fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions) -> String {
         tooltip.push_str(path.to_string_lossy().as_ref());
     }
     tooltip
+}
+
+#[component]
+fn ExtensionsControl(artifact: bool, exclusions: Option<ViewerAppliedExclusions>) -> Element {
+    #[cfg(feature = "desktop")]
+    if !artifact {
+        return rsx! {
+            super::extension_filters::desktop::ExtensionFilters {}
+        };
+    }
+    let _ = artifact;
+    rsx! {
+        if let Some(exclusions) = exclusions {
+            div { class: "mobile:hidden",
+                ExclusionsBadge { exclusions }
+            }
+        }
+    }
 }

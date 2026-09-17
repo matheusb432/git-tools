@@ -217,6 +217,19 @@ fn view_weight(view: &View) -> ViewCacheWeight {
             .map(commit_weight)
             .sum::<ViewCacheWeight>()
         + view.files.iter().map(file_weight).sum::<ViewCacheWeight>()
+        + view
+            .file_filter
+            .hidden_files()
+            .iter()
+            .map(file_weight)
+            .sum::<ViewCacheWeight>()
+        + view
+            .file_filter
+            .excluded()
+            .extensions()
+            .iter()
+            .map(string_weight)
+            .sum::<ViewCacheWeight>()
         + string_weight(&view.title)
         + string_weight(&view.cmd.lead)
         + string_weight(&view.cmd.range)
@@ -316,6 +329,7 @@ mod tests {
 
     fn cached(title: &str) -> CachedView {
         CachedView::new(Arc::new(View {
+            file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             exclusions: None,
             repo_name: project_name("repo"),
             repo_root: repository_root("/repo"),
@@ -412,6 +426,7 @@ mod tests {
             .chain((1..LINE_COUNT).map(|line| format!(" line {line:05}: cache churn payload")))
             .collect::<Vec<_>>();
         let view = Arc::new(View {
+            file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             exclusions: None,
             repo_name: project_name("benchmark"),
             repo_root: repository_root("/fixtures/benchmark"),

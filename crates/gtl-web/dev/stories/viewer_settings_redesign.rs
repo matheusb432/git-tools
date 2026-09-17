@@ -363,6 +363,7 @@ fn preview_file(
     initially_expanded: bool,
 ) -> PreviewResult<ViewerFileSummary> {
     Ok(ViewerFileSummary {
+        source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: RepositoryRelativePath::try_new(PathBuf::from(path))?,
         absolute_path: AbsoluteFilePath::try_new(PathBuf::from(format!("/repo/{path}")))?,
@@ -474,7 +475,7 @@ fn source_row(
                 syntax_class: None,
                 changed: false,
             }],
-            long_line_character_count: None,
+            omitted_character_count: None,
         },
     }
 }
@@ -489,13 +490,15 @@ fn SettingsMock() -> Element {
                 header { class: "border-b border-line pb-4",
                     div { class: "flex items-center gap-2 text-acc",
                         Settings { size: 16 }
-                        p { class: "font-semibold tracking-widest uppercase", "Viewer preferences" }
+                        p { class: "font-semibold tracking-widest uppercase",
+                            "Application preferences"
+                        }
                     }
                     h1 { class: "mt-1 text-lg font-semibold tracking-tight text-ink",
                         "User settings"
                     }
                     p { class: "mt-1 max-w-2xl leading-5 text-ink-2",
-                        "Choose viewer defaults, then submit to save them."
+                        "Choose viewer defaults and command safeguards, then submit to save them."
                     }
                 }
                 SettingsFormPreview {}
@@ -515,6 +518,8 @@ fn SettingsFormPreview() -> Element {
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Compact,
         },
+        true,
+        true,
     );
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
@@ -529,7 +534,10 @@ fn SettingsFormPreview() -> Element {
             initial,
             pending: pending(),
             saved: saved(),
+            save_error: None,
+            reload_available: false,
             onmodified: move |()| saved.set(false),
+            onreload: move |()| {},
             onsubmit: move |_| {
                 saved.set(false);
                 pending.set(true);
@@ -553,8 +561,6 @@ fn SettingsResolved() -> Element {
                     value: "~/.config/git-tools/config.toml",
                 }
                 SettingsRow { term: "Effective theme", value: "Mirage" }
-                SettingsRow { term: "Push confirmation", value: "Required" }
-                SettingsRow { term: "Default diff exclusions", value: "*.lock, *.snap" }
             }
         }
     }

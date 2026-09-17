@@ -5,6 +5,8 @@
   .control-data-table { @apply overflow-x-auto rounded-panel border border-line bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc; }
   .control-data-table-table { @apply min-w-[44rem] border-collapse text-left; }
   .control-data-table-head { @apply border-b border-line-2 bg-sunk whitespace-nowrap text-ink-3; }
+  .control-table-sort { @apply -mx-2 inline-flex h-9 min-w-11 cursor-pointer items-center gap-1.5 rounded-sm px-2 text-left font-medium text-ink-3 outline-none enabled:hover:bg-surface-2 enabled:hover:text-ink enabled:active:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc disabled:cursor-default disabled:opacity-50; }
+  th[aria-sort] .control-table-sort { @apply text-acc; }
   .control-table-column { @apply align-middle whitespace-nowrap; }
   .control-data-table-row { @apply border-b border-line text-ink-2 last:border-b-0 even:bg-sunk/30 hover:bg-surface-2 focus-within:bg-surface-2; }
   .control-field-error { @apply mt-1 h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none; }

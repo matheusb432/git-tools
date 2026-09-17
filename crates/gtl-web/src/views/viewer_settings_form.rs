@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 #[cfg(feature = "desktop")]
+use gtl_models::settings::UserSettingsRevision;
+#[cfg(feature = "desktop")]
 use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerTheme};
 use lucide_dioxus::Check;
@@ -11,6 +13,8 @@ use crate::shared::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewerSettingsSelection {
+    pub(crate) focus_window_on_diff: bool,
+    pub(crate) push_confirmation_required: bool,
     pub(crate) theme: Option<ViewerTheme>,
     pub(crate) render_options: ViewerRenderOptions,
 }
@@ -19,8 +23,12 @@ impl ViewerSettingsSelection {
     pub(crate) const fn new(
         theme: Option<ViewerTheme>,
         render_options: ViewerRenderOptions,
+        focus_window_on_diff: bool,
+        push_confirmation_required: bool,
     ) -> Self {
         Self {
+            focus_window_on_diff,
+            push_confirmation_required,
             theme,
             render_options,
         }
@@ -32,9 +40,14 @@ pub(crate) fn ViewerSettingsForm(
     initial: ViewerSettingsSelection,
     pending: bool,
     saved: bool,
+    save_error: Option<String>,
+    reload_available: bool,
     onsubmit: EventHandler<ViewerSettingsSelection>,
     onmodified: EventHandler<()>,
+    onreload: EventHandler<()>,
 ) -> Element {
+    let mut focus_window_on_diff = use_signal(|| initial.focus_window_on_diff);
+    let mut push_confirmation_required = use_signal(|| initial.push_confirmation_required);
     let mut theme = use_signal(|| initial.theme);
     let mut layout = use_signal(|| initial.render_options.layout);
     let mut density = use_signal(|| initial.render_options.density);
@@ -49,6 +62,8 @@ pub(crate) fn ViewerSettingsForm(
                 }
                 onsubmit
                     .call(ViewerSettingsSelection {
+                        focus_window_on_diff: focus_window_on_diff(),
+                        push_confirmation_required: push_confirmation_required(),
                         theme: theme(),
                         render_options: ViewerRenderOptions {
                             wrap_lines: wrap_lines(),
@@ -59,11 +74,11 @@ pub(crate) fn ViewerSettingsForm(
             },
             section {
                 class: "settings-card",
-                aria_label: "Editable viewer settings",
+                aria_label: "Editable application settings",
                 header { class: "settings-card-header px-4 py-3",
-                    h2 { class: "font-semibold text-ink", "Diff display" }
+                    h2 { class: "font-semibold text-ink", "Viewer and command preferences" }
                     p { class: "mt-0.5 text-xs leading-5 text-ink-3",
-                        "These defaults apply to viewer sessions and raw artifacts."
+                        "Choose how diffs appear, when the desktop window comes forward, and whether pushes need confirmation."
                     }
                 }
                 div { class: "settings-form-grid gap-4 p-4",
@@ -165,23 +180,84 @@ pub(crate) fn ViewerSettingsForm(
                             },
                         }
                     }
+                    div { class: "settings-form-field min-w-0 gap-1.5",
+                        FieldLabel {
+                            for_id: "settings-focus-window-on-diff",
+                            label: "Focus window when opening a diff",
+                            hint: "Bring the desktop window forward when a command opens a diff.",
+                        }
+                        Select {
+                            id: "settings-focus-window-on-diff",
+                            name: "focus_window_on_diff",
+                            aria_label: "Focus window when opening a diff",
+                            value: if focus_window_on_diff() { "true" } else { "false" },
+                            options: vec![SelectOption::new("false", "Off"), SelectOption::new("true", "On")],
+                            error: None,
+                            disabled: pending,
+                            onchange: move |event: FormEvent| {
+                                if let Ok(selected) = event.value().parse::<bool>() {
+                                    focus_window_on_diff.set(selected);
+                                    onmodified.call(());
+                                }
+                            },
+                        }
+                    }
+                    div { class: "settings-form-field min-w-0 gap-1.5",
+                        FieldLabel {
+                            for_id: "settings-push-confirmation",
+                            label: "Confirm before push",
+                            hint: "Require confirmation before pushing the current repository.",
+                        }
+                        Select {
+                            id: "settings-push-confirmation",
+                            name: "push_confirmation_required",
+                            aria_label: "Confirm before push",
+                            value: if push_confirmation_required() { "true" } else { "false" },
+                            options: vec![
+                                SelectOption::new("true", "Required"),
+                                SelectOption::new("false", "Not required"),
+                            ],
+                            error: None,
+                            disabled: pending,
+                            onchange: move |event: FormEvent| {
+                                if let Ok(selected) = event.value().parse::<bool>() {
+                                    push_confirmation_required.set(selected);
+                                    onmodified.call(());
+                                }
+                            },
+                        }
+                    }
                 }
-                footer { class: "settings-form-footer min-h-16 gap-3 px-4 py-3",
-                    p {
-                        class: "text-xs text-add",
-                        role: "status",
-                        aria_live: "polite",
-                        if saved {
-                            span { class: "inline-flex items-center gap-1.5",
-                                Check { size: 14 }
-                                "Settings saved"
+                footer { class: "settings-form-footer min-h-16 flex-wrap gap-3 px-4 py-3",
+                    div { class: "min-w-0 flex-1",
+                        if let Some(message) = save_error {
+                            p { class: "text-sm text-del", role: "alert", "{message}" }
+                        } else if saved {
+                            p {
+                                class: "text-xs text-add",
+                                role: "status",
+                                aria_live: "polite",
+                                span { class: "inline-flex items-center gap-1.5",
+                                    Check { size: 14 }
+                                    "Settings saved"
+                                }
                             }
                         }
                     }
-                    Button {
-                        button_type: ButtonType::Submit,
-                        state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
-                        "Save settings"
+                    div { class: "flex items-center gap-2",
+                        if reload_available {
+                            Button {
+                                variant: crate::shared::ui::ButtonVariant::Outline,
+                                disabled: pending,
+                                onclick: move |_| onreload.call(()),
+                                "Reload settings"
+                            }
+                        }
+                        Button {
+                            button_type: ButtonType::Submit,
+                            state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
+                            "Save settings"
+                        }
                     }
                 }
             }
@@ -193,8 +269,14 @@ pub(crate) fn ViewerSettingsForm(
 pub(super) fn viewer_settings_patch(
     current: ViewerSettingsSelection,
     selected: ViewerSettingsSelection,
+    expected_revision: UserSettingsRevision,
 ) -> EditSettingsRequest {
     EditSettingsRequest {
+        expected_revision: Some(expected_revision),
+        focus_window_on_diff: changed_field(
+            &current.focus_window_on_diff,
+            selected.focus_window_on_diff,
+        ),
         wrap_lines: changed_field(
             &current.render_options.wrap_lines,
             selected.render_options.wrap_lines,
@@ -207,6 +289,10 @@ pub(super) fn viewer_settings_patch(
         density: changed_field(
             &current.render_options.density,
             selected.render_options.density,
+        ),
+        push_confirmation_required: changed_field(
+            &current.push_confirmation_required,
+            selected.push_confirmation_required,
         ),
         ..EditSettingsRequest::default()
     }
@@ -283,6 +369,7 @@ mod tests {
         theme: Option<gtl_wire::viewer::ViewerTheme>,
         layout: ViewerDiffLayout,
         density: ViewerDiffDensity,
+        push_confirmation_required: bool,
     ) -> ViewerSettingsSelection {
         ViewerSettingsSelection::new(
             theme,
@@ -291,6 +378,8 @@ mod tests {
                 layout,
                 density,
             },
+            true,
+            push_confirmation_required,
         )
     }
 
@@ -301,12 +390,29 @@ mod tests {
                 Some(gtl_wire::viewer::ViewerTheme::Dark),
                 ViewerDiffLayout::Unified,
                 ViewerDiffDensity::Compact,
+                true,
             ),
-            selection(None, ViewerDiffLayout::Split, ViewerDiffDensity::Compact),
+            selection(
+                None,
+                ViewerDiffLayout::Split,
+                ViewerDiffDensity::Compact,
+                false,
+            ),
+            gtl_models::settings::UserSettingsRevision::from_digest([0x44; 32]),
         );
 
+        assert_eq!(
+            request.expected_revision,
+            Some(gtl_models::settings::UserSettingsRevision::from_digest(
+                [0x44; 32]
+            ))
+        );
         assert_eq!(request.theme, FieldUpdate::Clear);
         assert_eq!(request.layout, FieldUpdate::Update(ViewerDiffLayout::Split));
         assert_eq!(request.density, FieldUpdate::Unchanged);
+        assert_eq!(
+            request.push_confirmation_required,
+            FieldUpdate::Update(false)
+        );
     }
 }

@@ -21,7 +21,7 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
         assert_sidebar_toggles(page).await?;
         assert_path_filter_popup(page).await?;
         assert_sticky_horizontal_scrollbar(page, &files).await?;
-        assert_large_line_interaction(page, &files).await?;
+        assert_truncated_line_copy(page, &files).await?;
         assert_collapsed_file_navigation(page, &files).await?;
         assert_mobile_file_navigation(page, &files).await?;
         ensure!(
@@ -301,10 +301,7 @@ async fn assert_commit_details_hover_popover(page: &Page) -> anyhow::Result<()> 
         .context("hide raw commit details after hover leaves")
 }
 
-async fn assert_large_line_interaction(
-    page: &Page,
-    files: &RawArtifactFiles,
-) -> anyhow::Result<()> {
+async fn assert_truncated_line_copy(page: &Page, files: &RawArtifactFiles) -> anyhow::Result<()> {
     support::click(
         &page
             .locator(test_ids::CHANGED_FILES_PANEL.selector())
@@ -316,20 +313,19 @@ async fn assert_large_line_interaction(
         .to_have_count(1)
         .await
         .context("open the giant-line raw artifact file")?;
-    let long_line_control = files.large.locator("[data-gtl-action='toggle-long-line']");
-    expect(long_line_control.clone())
-        .to_have_count(1)
+    let preview = files.large.locator("[data-gtl-copy-text]");
+    expect(preview.clone())
+        .to_contain_text("(+249513 characters omitted)")
         .await
-        .context("bound the giant source line behind a static control")?;
-    expect(long_line_control.clone())
-        .to_have_attribute("aria-expanded", "false")
-        .await
-        .context("collapse the giant source line initially")?;
-    support::click(&long_line_control, "expand the giant raw artifact line").await?;
-    expect(long_line_control)
-        .to_have_attribute("aria-expanded", "true")
-        .await
-        .context("expand the giant source line with local glue")
+        .context("show the omitted source count")?;
+    let text = preview.text_content().await?.unwrap_or_default();
+    ensure!(text.chars().count() < 600, "giant source reached the DOM");
+    let copied = copy_selected_source(page, "large.txt", "large-marker-").await?;
+    ensure!(
+        copied.ends_with(&text),
+        "artifact copy lost the omission label"
+    );
+    Ok(())
 }
 
 async fn assert_collapsed_file_navigation(
@@ -431,14 +427,13 @@ async fn assert_mobile_file_navigation(
         .context("open the mobile-selected raw file")
 }
 
-async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {
-    page.evaluate::<(), ()>(
-        r#"() => {
-            const file = document.querySelector(
-                "[data-gtl-diff-file][data-path='src/alpha.rs']",
-            );
+async fn copy_selected_source(page: &Page, path: &str, marker: &str) -> anyhow::Result<String> {
+    page.evaluate::<(&str, &str), ()>(
+        r#"([path, marker]) => {
+            const file = [...document.querySelectorAll("[data-gtl-diff-file]")]
+                .find(element => element.dataset.path === path);
             const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
-                .find((element) => element.textContent.includes("alpha-marker"));
+                .find((element) => element.textContent.includes(marker));
             const range = document.createRange();
             range.selectNodeContents(source);
             const selection = window.getSelection();
@@ -453,7 +448,7 @@ async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {
                 ];
             }, { once: true });
         }"#,
-        None,
+        Some(&(path, marker)),
     )
     .await
     .context("select one added source line")?;
@@ -467,6 +462,11 @@ async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {
         .context("observe the native copy event")?;
 
     ensure!(prevented, "the raw artifact did not intercept native copy");
+    Ok(text)
+}
+
+async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {
+    let text = copy_selected_source(page, "src/alpha.rs", "alpha-marker").await?;
     ensure!(
         text == "// * src/alpha.rs, lines: 5\nfn alpha_5() { println!(\"alpha-marker\"); }",
         "the raw artifact copied an unexpected source payload: {text:?}"

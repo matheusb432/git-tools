@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
@@ -19,38 +16,6 @@ pub(super) struct ScrollAnchor {
     pub(super) offset: f64,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum LineSide {
-    Old,
-    New,
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub(super) struct ExpandedLine {
-    pub(super) content: ViewerRowContentId,
-    pub(super) file: String,
-    pub(super) row: usize,
-    pub(super) side: LineSide,
-}
-
-#[derive(Clone)]
-pub(super) struct DiffRowBatch {
-    pub(super) tab: ViewerTabId,
-    pub(super) content: ViewerRowContentId,
-    pub(super) file: Rc<str>,
-}
-
-#[derive(Clone)]
-pub(super) struct DiffRowPresentation {
-    pub(super) batch: DiffRowBatch,
-    pub(super) row: usize,
-}
-
-pub(super) fn use_diff_row(row: usize) {
-    let batch = try_use_context::<DiffRowBatch>();
-    use_context_provider(move || batch.map(|batch| DiffRowPresentation { batch, row }));
-}
-
 #[derive(Default)]
 struct TabPresentation {
     anchor: Option<ScrollAnchor>,
@@ -58,7 +23,6 @@ struct TabPresentation {
     commits_scroll: PanelScrollPosition,
     default_expanded: Option<bool>,
     files: HashMap<String, bool>,
-    expanded_lines: HashSet<ExpandedLine>,
     geometry: Option<RetainedGeometry>,
 }
 
@@ -203,30 +167,6 @@ impl DiffPresentation {
                 width,
                 geometry,
             });
-        }
-    }
-
-    pub(super) fn line_expanded(self, tab: ViewerTabId, line: &ExpandedLine) -> bool {
-        self.tabs
-            .peek()
-            .get(&tab)
-            .is_some_and(|tab| tab.expanded_lines.contains(line))
-    }
-
-    pub(super) fn set_line_expanded(
-        mut self,
-        tab: ViewerTabId,
-        line: ExpandedLine,
-        expanded: bool,
-    ) {
-        let mut tabs = self.tabs.write();
-        let Some(tab) = tabs.get_mut(&tab) else {
-            return;
-        };
-        if expanded {
-            tab.expanded_lines.insert(line);
-        } else {
-            tab.expanded_lines.remove(&line);
         }
     }
 }

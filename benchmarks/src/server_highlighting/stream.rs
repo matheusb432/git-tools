@@ -416,7 +416,7 @@ mod tests {
                                         syntax_class: 0,
                                         changed: true,
                                     }],
-                                    long_line_character_count: None,
+                                    omitted_character_count: None,
                                 }),
                             })),
                         }],

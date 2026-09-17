@@ -1,3 +1,4 @@
+mod reuse;
 mod weight;
 
 use std::collections::{HashMap, VecDeque};
@@ -147,6 +148,7 @@ impl ClientDiffCache {
                 key.clone(),
                 ClientDiffWorkspace::loading(view.identity, view.files.clone()),
             );
+            reuse::file_windows(self, &key, view);
         }
         let workspace: Store<ClientDiffWorkspace> =
             self.workspaces.get_unchecked(key.clone()).into();

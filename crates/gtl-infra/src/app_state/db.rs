@@ -234,6 +234,9 @@ const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(include_str!(
         "../../db/migrations/0010_pinned_viewer_tabs.sql"
     )),
+    M::up(include_str!(
+        "../../db/migrations/0011_project_status_index.sql"
+    )),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -443,7 +446,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 10);
+        assert_eq!(user_version, 11);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -678,7 +681,7 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 10);
+        assert_eq!(user_version, 11);
     }
 
     /// Two processes can open a fresh database concurrently; both

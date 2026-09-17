@@ -12,6 +12,7 @@ mod git_process;
 mod history_projects;
 mod project_comparison_reader;
 pub mod project_repository_client;
+pub mod project_status_watch;
 pub mod store;
 #[cfg(test)]
 mod testing;

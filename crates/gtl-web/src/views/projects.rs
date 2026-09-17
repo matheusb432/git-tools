@@ -1,21 +1,21 @@
+pub(crate) mod cache;
 mod card;
 mod comparison_action;
 mod comparison_editor;
 mod loading;
-mod motion;
 mod presentation;
 mod status;
 mod table;
 mod view_mode;
 
 use dioxus::prelude::*;
-use gtl_models::settings::{ProjectsPageSize, ProjectsViewMode};
-use gtl_wire::viewer::ViewerHistoryFilter;
-use lucide_dioxus::{History, RefreshCw};
+use gtl_models::settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode};
+use gtl_wire::viewer::{ViewerHistoryFilter, projects::ViewerProjectsCursor};
+use lucide_dioxus::History;
 
 use self::{
     card::ProjectCard,
-    loading::use_projects,
+    loading::{ProjectsActivity, use_projects, use_projects_active},
     table::ProjectTable,
     view_mode::{ProjectsViewToggle, use_projects_presentation},
 };
@@ -24,9 +24,9 @@ use crate::{
     shared::{
         browser,
         ui::{
-            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, PanelDialog, ScrollArea,
-            Select, SelectOption, Skeleton,
-            pagination::{PagePosition, Pagination},
+            Button, ButtonSize, ButtonVariant, PageNotice, PanelDialog, ScrollArea, Select,
+            SelectOption, Skeleton,
+            pagination::{PageNavigation, PagePosition, Pagination},
             select::SelectVariant,
         },
     },
@@ -35,14 +35,29 @@ use crate::{
 const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
-pub(crate) fn ProjectsView() -> Element {
-    let mut page_number = use_signal(|| 1);
+pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
+    let mut selection =
+        use_signal(|| None::<(ProjectsPageSize, ProjectsSort, ViewerProjectsCursor)>);
     let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
     let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
     use_context_provider(|| OpenSnapshots(open_snapshots));
-    let projects = use_projects();
+    let active = use_projects_active(route_active);
+    let presentation = use_projects_presentation(active);
+    let cursor = use_memo(move || {
+        selection()
+            .filter(|(size, sort, _)| {
+                *size == (presentation.page_size)() && *sort == (presentation.sort)()
+            })
+            .map_or(ViewerProjectsCursor::First, |(_, _, cursor)| cursor)
+    });
+    let projects = use_projects(
+        cursor,
+        presentation.page_size,
+        presentation.sort,
+        active,
+        presentation.ready,
+    );
     use_context_provider(|| projects);
-    let presentation = use_projects_presentation();
     let viewer = use_context::<ViewerContext>();
     let try_again = use_callback(move |()| {
         if (presentation.error)().is_some() {
@@ -51,20 +66,46 @@ pub(crate) fn ProjectsView() -> Element {
             (projects.refresh)(());
         }
     });
-    use_effect(move || browser::focus_element("projects-heading".into()));
-    let load = projects.load.read();
+    let sort_projects = use_callback(move |sort| {
+        selection.set(None);
+        (presentation.select_sort)(sort);
+        browser::scroll_element_to_start("projects-content");
+    });
+    use_effect(move || {
+        if !route_active() && snapshots.peek().is_some() {
+            snapshots.set(None);
+        }
+    });
+    let page = projects.page.read();
+    let result = page
+        .as_ref()
+        .filter(|load| load.instance_id == viewer.server_instance_id())
+        .map(|load| &load.result);
+    let items = result.and_then(|result| result.as_ref().ok());
+    let error = result.and_then(|result| result.as_ref().err()).copied();
+    let loading_page = (projects.loading_page)();
     let mode = (presentation.mode)();
     let disabled = !viewer.actions_enabled();
     let page_size = (presentation.page_size)();
-    let total = load.projects.as_ref().map_or(0, Vec::len);
+    let sort = (presentation.sort)();
+    let total = items.map_or(0, |page| page.total() as usize);
     let position = PagePosition::new(
-        page_number(),
+        items.map_or(1, |page| {
+            page.count_before() as usize / page_size.into_inner() as usize + 1
+        }),
         total.div_ceil(page_size.into_inner() as usize),
     );
-    let page_start = (position.number() - 1) * page_size.into_inner() as usize;
+    let first = items
+        .and_then(|page| page.projects().first())
+        .map(|project| project.id.clone());
+    let last = items
+        .and_then(|page| page.projects().last())
+        .map(|project| project.id.clone());
 
     rsx! {
-        document::Title { "Projects - git-tools" }
+        if active() {
+            ProjectsActivity {}
+        }
         main {
             class: "projects-shell h-full min-h-0",
             "data-testid": "projects-view",
@@ -78,16 +119,6 @@ pub(crate) fn ProjectsView() -> Element {
                 div { class: "projects-header-actions ml-auto gap-3",
                     SnapshotHistoryButton {}
                     ProjectsViewToggle { presentation }
-                    Button {
-                        variant: ButtonVariant::Outline,
-                        state: if load.refreshing { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
-                        onclick: move |_| (projects.refresh)(()),
-                        aria_label: "Refresh projects",
-                        icon: rsx! {
-                            RefreshCw { size: 14 }
-                        },
-                        span { class: "hidden sm:inline", "Refresh" }
-                    }
                 }
             }
             if let Some((filter, trigger)) = snapshots() {
@@ -106,16 +137,11 @@ pub(crate) fn ProjectsView() -> Element {
                 "data-testid": "projects-content",
                 id: "projects-content",
                 div { class: "mx-auto max-w-7xl",
-                    if let Some(error) = load.error.or((presentation.error)()) {
+                    if let Some(error) = error.or((presentation.error)()) {
                         div {
                             class: "projects-error mb-4 gap-3 px-3 py-2",
                             role: "alert",
-                            span { class: "min-w-0",
-                                "{error.message()} "
-                                if load.projects.is_some() {
-                                    "Showing the last known status."
-                                }
-                            }
+                            span { class: "min-w-0", "{error.message()} " }
                             Button {
                                 variant: ButtonVariant::Ghost,
                                 size: ButtonSize::Small,
@@ -125,12 +151,12 @@ pub(crate) fn ProjectsView() -> Element {
                             }
                         }
                     }
-                    match &load.projects {
-                        None if load.error.is_some() => rsx! {
+                    match items.map(gtl_wire::viewer::projects::ViewerProjectPage::projects) {
+                        None if error.is_some() => rsx! {
                             PageNotice {
                                 class: "min-h-64",
                                 title: "Projects unavailable",
-                                message: "Check the project catalogue and try Refresh.",
+                                message: "Check the project catalogue and try again.",
                             }
                         },
                         None => rsx! {
@@ -140,7 +166,7 @@ pub(crate) fn ProjectsView() -> Element {
                                 }
                             }
                         },
-                        Some(items) if items.is_empty() => rsx! {
+                        Some([]) => rsx! {
                             PageNotice {
                                 class: "min-h-64",
                                 title: "No managed projects",
@@ -149,19 +175,17 @@ pub(crate) fn ProjectsView() -> Element {
                         },
                         Some(items) if mode == ProjectsViewMode::Table => rsx! {
                             ProjectTable {
-                                projects: items
-                                    .iter()
-                                    .skip(page_start)
-                                    .take(page_size.into_inner() as usize)
-                                    .cloned()
-                                    .collect(),
+                                projects: items.to_vec(),
                                 disabled,
+                                sort,
+                                sorting_disabled: (presentation.pending)() || loading_page,
+                                onsort: sort_projects,
                             }
                         },
                         Some(items) => rsx! {
                             div { class: PROJECT_GRID_CLASSES, aria_label: "Managed projects",
-                                for project in items.iter().skip(page_start).take(page_size.into_inner() as usize) {
-                                    ProjectCard { key: "{project.path}", project: project.clone(), disabled }
+                                for project in items.iter() {
+                                    ProjectCard { key: "{project.id}", project: project.clone(), disabled }
                                 }
                             }
                         },
@@ -172,8 +196,25 @@ pub(crate) fn ProjectsView() -> Element {
                 Pagination {
                     position,
                     label: "Projects",
+                    disabled: loading_page || disabled,
                     onselect: move |navigation| {
-                        page_number.set(position.select(navigation));
+                        let cursor = match navigation {
+                            PageNavigation::First => ViewerProjectsCursor::First,
+                            PageNavigation::Previous => {
+                                match first.clone() {
+                                    Some(id) => ViewerProjectsCursor::Before(id),
+                                    None => return,
+                                }
+                            }
+                            PageNavigation::Next => {
+                                match last.clone() {
+                                    Some(id) => ViewerProjectsCursor::After(id),
+                                    None => return,
+                                }
+                            }
+                            PageNavigation::Last => ViewerProjectsCursor::Last,
+                        };
+                        selection.set(Some((page_size, sort, cursor)));
                         browser::scroll_element_to_start("projects-content");
                     },
                     div { class: "flex items-center gap-2",
@@ -195,7 +236,7 @@ pub(crate) fn ProjectsView() -> Element {
                                         .ok()
                                         .and_then(|size| ProjectsPageSize::try_new(size).ok())
                                     {
-                                        page_number.set(1);
+                                        selection.set(None);
                                         (presentation.select_page_size)(size);
                                     }
                                 },

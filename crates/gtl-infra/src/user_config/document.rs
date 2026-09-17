@@ -6,7 +6,10 @@ use gtl_application::settings::{
 use gtl_models::{
     diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
-    settings::{ProjectsPageSize, ProjectsViewMode, PushAllExclusions, UserSettings},
+    settings::{
+        ProjectsPageSize, ProjectsPreferences, ProjectsSort, ProjectsViewMode, PushAllExclusions,
+        UserSettings,
+    },
     tags::{
         TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
         TagTemplate, TagTemplateError,
@@ -23,10 +26,14 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub(super) enum UserSettingsDocumentKey {
+    #[strum(to_string = "focus_window_on_diff")]
+    FocusWindowOnDiff,
     #[strum(to_string = "wrap_lines")]
     WrapLines,
     #[strum(to_string = "projects_view")]
     ProjectsView,
+    #[strum(to_string = "projects_sort")]
+    ProjectsSort,
     #[strum(to_string = "projects_page_size")]
     ProjectsPageSize,
     #[strum(to_string = "files_sidebar_visible")]
@@ -76,9 +83,11 @@ pub(super) enum UserSettingsDocumentKey {
 impl UserSettingsDocumentKey {
     const fn root(self) -> &'static str {
         match self {
+            Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
@@ -105,9 +114,11 @@ impl UserSettingsDocumentKey {
 
     const fn leaf(self) -> &'static str {
         match self {
+            Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
@@ -130,9 +141,11 @@ impl UserSettingsDocumentKey {
 
     const fn container(self) -> &'static str {
         match self {
+            Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
             Self::ProjectsView => "projects_view",
+            Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
@@ -248,8 +261,7 @@ pub(super) struct UserSettingsDocument {
     raw: String,
     editable: DocumentMut,
     settings: UserSettings,
-    projects_view: ProjectsViewMode,
-    projects_page_size: ProjectsPageSize,
+    projects_preferences: ProjectsPreferences,
 }
 
 impl UserSettingsDocument {
@@ -258,22 +270,28 @@ impl UserSettingsDocument {
         let editable = raw
             .parse::<DocumentMut>()
             .map_err(UserSettingsDocumentError::TomlSyntax)?;
-        let (settings, projects_view, projects_page_size) = parse_settings(&raw)?;
+        let (settings, projects_preferences) = parse_settings(&raw)?;
         Ok(Self {
             raw,
             editable,
             settings,
-            projects_view,
-            projects_page_size,
+            projects_preferences,
         })
     }
 
-    pub(super) fn into_settings(self) -> UserSettings {
-        self.settings
+    pub(super) fn into_viewer_settings(self) -> (UserSettings, ProjectsPreferences) {
+        (self.settings, self.projects_preferences)
     }
 
-    pub(super) fn into_viewer_settings(self) -> (UserSettings, ProjectsViewMode, ProjectsPageSize) {
-        (self.settings, self.projects_view, self.projects_page_size)
+    pub(super) fn exclusions_match(
+        &self,
+        update: &gtl_application::settings::DiffExclusionsUpdate,
+    ) -> bool {
+        let configured = match &update.project {
+            Some(project) => self.settings.diff_exclusions().for_project(project),
+            None => Some(self.settings.diff_exclusions().default_exclusions()),
+        };
+        configured == update.expected.as_ref()
     }
 
     pub(super) fn apply(mut self, patch: UserSettingsPatch) -> UserSettingsDocumentEdit {
@@ -297,12 +315,15 @@ type RawSettingValue = toml::Value;
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawUserSettingsDocument {
+    focus_window_on_diff: Option<RawSettingValue>,
     files_sidebar_visible: Option<RawSettingValue>,
     commits_sidebar_visible: Option<RawSettingValue>,
     #[serde(default)]
     wrap_lines: Option<RawSettingValue>,
     #[serde(default)]
     projects_view: ProjectsViewMode,
+    #[serde(default)]
+    projects_sort: ProjectsSort,
     projects_page_size: Option<RawSettingValue>,
     #[serde(default)]
     theme: Option<RawSettingValue>,
@@ -447,7 +468,7 @@ fn tag_pattern_name(
 
 fn parse_settings(
     raw: &str,
-) -> Result<(UserSettings, ProjectsViewMode, ProjectsPageSize), UserSettingsDocumentError> {
+) -> Result<(UserSettings, ProjectsPreferences), UserSettingsDocumentError> {
     let document = toml::from_str::<RawUserSettingsDocument>(raw)
         .map_err(UserSettingsDocumentError::TomlSchema)?;
     let theme = optional_string(UserSettingsDocumentKey::Theme, document.theme)?
@@ -463,6 +484,11 @@ fn parse_settings(
         .unwrap_or(DiffDensity::Compact);
     let wrap_lines =
         optional_bool(UserSettingsDocumentKey::WrapLines, document.wrap_lines)?.unwrap_or(false);
+    let focus_window_on_diff = optional_bool(
+        UserSettingsDocumentKey::FocusWindowOnDiff,
+        document.focus_window_on_diff,
+    )?
+    .unwrap_or(true);
     let sidebars = gtl_models::viewer::ViewerSidebarVisibility {
         files: optional_bool(
             UserSettingsDocumentKey::FilesSidebarVisible,
@@ -500,18 +526,22 @@ fn parse_settings(
             DiffExclusions::new(projects.diff_exclusions, diff_exclusions_default),
             projects.push_all_exclusions,
         )
+        .with_focus_window_on_diff(focus_window_on_diff)
         .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
             tag_patterns_default,
             projects.tag_patterns,
         )),
-        document.projects_view,
-        document
-            .projects_page_size
-            .and_then(|value| value.as_integer())
-            .and_then(|value| u32::try_from(value).ok())
-            .and_then(|value| ProjectsPageSize::try_new(value).ok())
-            .unwrap_or_default(),
+        ProjectsPreferences {
+            view: document.projects_view,
+            sort: document.projects_sort,
+            page_size: document
+                .projects_page_size
+                .and_then(|value| value.as_integer())
+                .and_then(|value| u32::try_from(value).ok())
+                .and_then(|value| ProjectsPageSize::try_new(value).ok())
+                .unwrap_or_default(),
+        },
     ))
 }
 
@@ -719,6 +749,10 @@ fn project_settings(
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     for (key, update) in [
         (
+            UserSettingsDocumentKey::FocusWindowOnDiff,
+            patch.focus_window_on_diff,
+        ),
+        (
             UserSettingsDocumentKey::FilesSidebarVisible,
             patch.files_sidebar_visible,
         ),
@@ -762,6 +796,11 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         UserSettingsDocumentKey::ProjectsView,
         patch.projects_view,
     );
+    apply_root_string(
+        document,
+        UserSettingsDocumentKey::ProjectsSort,
+        patch.projects_sort,
+    );
     apply_root_string(document, UserSettingsDocumentKey::Theme, patch.theme);
     apply_root_string(document, UserSettingsDocumentKey::Layout, patch.layout);
     apply_root_string(document, UserSettingsDocumentKey::Density, patch.density);
@@ -776,6 +815,9 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         patch.default_diff_exclusions,
     );
     apply_projects(document, patch.projects);
+    if let Some(update) = patch.diff_exclusions {
+        apply_diff_exclusions(document, update);
+    }
 }
 
 fn apply_root_string<T: ToString>(
@@ -922,6 +964,66 @@ fn remove_nested(document: &mut DocumentMut, key: UserSettingsDocumentKey) {
     }
 }
 
+fn apply_diff_exclusions(
+    document: &mut DocumentMut,
+    update: gtl_application::settings::DiffExclusionsUpdate,
+) {
+    let Some(project) = update.project else {
+        apply_nested_exclusions(
+            document,
+            UserSettingsDocumentKey::DefaultDiffExclusions,
+            update.extensions,
+        );
+        return;
+    };
+    if matches!(update.extensions, UserSettingsFieldUpdate::Unchanged) {
+        return;
+    }
+    let root = UserSettingsDocumentKey::Projects.root();
+    if document.get(root).is_none() {
+        if matches!(update.extensions, UserSettingsFieldUpdate::Clear) {
+            return;
+        }
+        document[root] = Item::ArrayOfTables(ArrayOfTables::new());
+    }
+    let Some(projects) = document[root].as_array_of_tables_mut() else {
+        return;
+    };
+    if let Some(table) = projects
+        .iter_mut()
+        .find(|table| table.get("name").and_then(Item::as_str) == Some(project.as_str()))
+    {
+        apply_project_diff_exclusions(table, update.extensions);
+        return;
+    }
+    if let UserSettingsFieldUpdate::Update(extensions) = update.extensions {
+        let mut table = Table::new();
+        table["name"] = toml_edit::value(project.to_string());
+        apply_project_diff_exclusions(&mut table, UserSettingsFieldUpdate::Update(extensions));
+        projects.push(table);
+    }
+}
+
+fn apply_project_diff_exclusions(
+    table: &mut Table,
+    update: UserSettingsFieldUpdate<ExcludedExtensions>,
+) {
+    match update {
+        UserSettingsFieldUpdate::Update(extensions) => {
+            set_value(
+                &mut table["diff"]["exclude"],
+                Value::Array(extension_array(&extensions)),
+            );
+        }
+        UserSettingsFieldUpdate::Clear => {
+            if let Some(diff) = table.get_mut("diff").and_then(Item::as_table_like_mut) {
+                diff.remove("exclude");
+            }
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gtl_application::settings::{
@@ -985,7 +1087,7 @@ diff = { exclude = ["js"] }
             .to_vec(),
         )
         .unwrap();
-        let settings = document.into_settings();
+        let settings = document.into_viewer_settings().0;
 
         assert_eq!(settings.theme(), Some(Theme::Light));
         assert_eq!(
@@ -1113,7 +1215,7 @@ release = "release-{major}.{minor}.{patch}"
             .to_vec(),
         )
         .unwrap();
-        let settings = document.into_settings();
+        let settings = document.into_viewer_settings().0;
         let tag_patterns = settings.tag_patterns();
 
         let (name, template) = tag_patterns
@@ -1241,7 +1343,8 @@ patterns = { dev = "{n}" }
         };
         let reparsed = UserSettingsDocument::parse(raw.into_bytes())
             .unwrap()
-            .into_settings();
+            .into_viewer_settings()
+            .0;
         let selected_default = |project: &str| {
             reparsed
                 .tag_patterns()

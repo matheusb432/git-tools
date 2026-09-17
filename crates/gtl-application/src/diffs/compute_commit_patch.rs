@@ -70,6 +70,7 @@ pub fn execute(
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);
     let view = View {
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(diff_spec, excluded.clone()),
         repo_name,
         repo_root: repo_path.clone(),
         branch: git.current_branch(&repo_path)?,

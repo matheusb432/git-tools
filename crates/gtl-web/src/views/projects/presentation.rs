@@ -5,13 +5,17 @@ use gtl_models::{
     repository::status::{RepositoryStatus, StatusChanges, StatusHead},
     timestamps::MachineTimestamp,
 };
-use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectBranchComparison};
+use gtl_wire::viewer::projects::{
+    ViewerProject, ViewerProjectBranchComparison, ViewerProjectStatus,
+};
 
 use super::status::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus};
+use crate::shared::{ui::LoadingSpinner, viewer_client::ViewerClientError};
 
 impl ProjectIssue {
     pub(super) fn description(&self) -> &str {
         match self {
+            Self::RequestFailed => "Git status unavailable",
             Self::RepositoryAbsent => "Repository not found",
             Self::HeadUnavailable => "Branch status unavailable",
             Self::WorkingTreeUnavailable => "Working-tree status unavailable",
@@ -29,6 +33,7 @@ impl ProjectSignal {
                 StatusChanges::from_counts(*tracked, *untracked).symbols()
             ),
             Self::Ahead { count, .. } => format!("↑{}", count.into_inner()),
+            Self::Loading => String::new(),
             Self::Unavailable(_) => "-".to_owned(),
         }
     }
@@ -39,7 +44,7 @@ impl ProjectSignal {
                 "text-acc"
             }
             Self::Ahead { count, .. } if count.into_inner() > 0 => "text-acc",
-            Self::Local { .. } | Self::Ahead { .. } => "text-ink-3",
+            Self::Loading | Self::Local { .. } | Self::Ahead { .. } => "text-ink-3",
             Self::Unavailable(_) => "text-warn",
         }
     }
@@ -62,6 +67,7 @@ impl ProjectSignal {
                 (1, Some(base)) => format!("1 commit ahead of {base}").into(),
                 (count, Some(base)) => format!("{count} commits ahead of {base}").into(),
             },
+            Self::Loading => "Loading Git status".into(),
             Self::Unavailable(issue) => issue.description().into(),
         }
     }
@@ -78,9 +84,41 @@ pub(super) struct ProjectPresentation<'a> {
     pub(super) rendered: Option<String>,
 }
 
-pub(super) fn project_presentation(project: &ViewerProject) -> ProjectPresentation<'_> {
-    let status = ProjectStatus::from_project(project);
-    let branch = match &project.status {
+pub(super) fn project_presentation<'a>(
+    project: &ViewerProject,
+    result: Option<Result<&'a ViewerProjectStatus, ViewerClientError>>,
+) -> ProjectPresentation<'a> {
+    let rendered = project
+        .last_rendered_at
+        .as_ref()
+        .map(MachineTimestamp::display_minute);
+    let project_status = match result {
+        Some(Ok(status)) => status,
+        pending_or_error => {
+            let failed = pending_or_error.is_some();
+            let signal = if failed {
+                ProjectSignal::Unavailable(ProjectIssue::RequestFailed)
+            } else {
+                ProjectSignal::Loading
+            };
+            return ProjectPresentation {
+                branch: None,
+                comparison_base: None,
+                review: if failed {
+                    ProjectReview::StatusUnavailable
+                } else {
+                    ProjectReview::Loading
+                },
+                local: signal.clone(),
+                ahead: signal,
+                ahead_label: "Branch changes",
+                issue: failed.then(|| "Git status unavailable".to_owned()),
+                rendered,
+            };
+        }
+    };
+    let status = ProjectStatus::from_project(project_status);
+    let branch = match &project_status.status {
         RepositoryStatus::Present {
             head: StatusHead::Branch { name, .. },
             ..
@@ -96,10 +134,12 @@ pub(super) fn project_presentation(project: &ViewerProject) -> ProjectPresentati
         | RepositoryStatus::Absent => None,
     };
     let comparison_base = match &status.ahead {
-        ProjectSignal::Ahead { base: Some(_), .. } => Some(project.comparison_branch.as_ref()),
+        ProjectSignal::Ahead { base: Some(_), .. } => {
+            Some(project_status.comparison_branch.as_ref())
+        }
         _ => None,
     };
-    let ahead_label = match project.branch_comparison {
+    let ahead_label = match project_status.branch_comparison {
         ViewerProjectBranchComparison::Upstream => "Unpushed commits",
         ViewerProjectBranchComparison::Branch { .. }
         | ViewerProjectBranchComparison::Unavailable { .. } => "Branch changes",
@@ -113,28 +153,40 @@ pub(super) fn project_presentation(project: &ViewerProject) -> ProjectPresentati
         ahead: status.ahead,
         ahead_label,
         issue,
-        rendered: project
-            .last_rendered_at
-            .as_ref()
-            .map(MachineTimestamp::display_minute),
+        rendered,
     }
 }
 
 #[component]
-pub(super) fn ReviewStatusDot(review: ProjectReview) -> Element {
+pub(super) fn ReviewStatusDot(review: ProjectReview, #[props(default)] stale: bool) -> Element {
     let (label, classes) = match review {
         ProjectReview::Pending => ("Changes to review", "bg-acc"),
         ProjectReview::Clean => ("Up to date", "bg-add"),
         ProjectReview::ComparisonUnavailable => ("Comparison unavailable", "bg-warn"),
+        ProjectReview::Loading => ("Loading Git status", "bg-ink-3"),
         ProjectReview::StatusUnavailable => ("Status unavailable", "bg-warn"),
         ProjectReview::Absent => ("Repository not found", "bg-warn"),
     };
+    let (label, classes) = if stale {
+        (
+            "Git status is stale. Last successful values are shown. Retry Git status.",
+            "bg-warn",
+        )
+    } else {
+        (label, classes)
+    };
     rsx! {
-        span {
-            class: "project-review-dot size-2 {classes}",
-            role: "img",
-            title: label,
-            aria_label: label,
+        span { class: "inline-flex size-3 shrink-0 items-center justify-center",
+            if review == ProjectReview::Loading {
+                span { role: "status", aria_label: "Loading Git status", ProjectStatusSpinner {} }
+            } else {
+                span {
+                    class: "project-review-dot size-2 {classes}",
+                    role: "img",
+                    title: label,
+                    aria_label: label,
+                }
+            }
         }
     }
 }
@@ -143,11 +195,59 @@ pub(super) fn ReviewStatusDot(review: ProjectReview) -> Element {
 pub(super) fn ProjectSignalGlyph(signal: ProjectSignal) -> Element {
     rsx! {
         span {
-            class: "font-medium tabular-nums {signal.text_classes()}",
+            class: "inline-flex min-w-6 items-center font-medium tabular-nums {signal.text_classes()}",
             role: "img",
             title: signal.description().into_owned(),
             aria_label: signal.description().into_owned(),
-            "{signal.glyph()}"
+            if signal == ProjectSignal::Loading {
+                ProjectStatusSpinner {}
+            } else {
+                "{signal.glyph()}"
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_and_failed_statuses_never_offer_diffs_or_imply_a_clean_repository() {
+        let project = ViewerProject {
+            id: "GTL".try_into().unwrap(),
+            name: "Git Tools".try_into().unwrap(),
+            path: gtl_models::paths::RepositoryRoot::try_new("/repos/git-tools".into()).unwrap(),
+            comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
+            last_rendered_at: Some("2026-09-06T13:00:00Z".try_into().unwrap()),
+        };
+        let loading = project_presentation(&project, None);
+        assert_eq!(loading.review, ProjectReview::Loading);
+        assert_eq!(loading.local, ProjectSignal::Loading);
+        assert!(!loading.local.is_available());
+        assert!(!loading.ahead.has_changes());
+        assert!(loading.issue.is_none());
+        assert!(loading.rendered.is_some());
+        let failed = project_presentation(&project, Some(Err(ViewerClientError::Internal)));
+        assert_eq!(failed.review, ProjectReview::StatusUnavailable);
+        assert!(!failed.local.is_available());
+        assert!(!failed.ahead.has_changes());
+        assert_eq!(failed.issue.as_deref(), Some("Git status unavailable"));
+        assert_eq!(failed.rendered, loading.rendered);
+    }
+}
+
+#[component]
+fn ProjectStatusSpinner() -> Element {
+    let ready = use_resource(|| async {
+        dioxus_sdk_time::sleep(std::time::Duration::from_millis(150)).await;
+        true
+    });
+    rsx! {
+        span { class: "inline-flex size-3 items-center justify-center",
+            if ready.read().as_ref() == Some(&true) {
+                LoadingSpinner {}
+            }
         }
     }
 }

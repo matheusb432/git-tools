@@ -17,19 +17,6 @@ impl PagePosition {
             count,
         }
     }
-
-    pub(crate) const fn number(self) -> usize {
-        self.number
-    }
-
-    pub(crate) fn select(self, navigation: PageNavigation) -> usize {
-        match navigation {
-            PageNavigation::First => 1,
-            PageNavigation::Previous => self.number.saturating_sub(1).max(1),
-            PageNavigation::Next => self.number.saturating_add(1).min(self.count),
-            PageNavigation::Last => self.count,
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -118,11 +105,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn navigation_clamps_to_the_available_pages() {
-        let page = PagePosition::new(3, 3);
-        assert_eq!(page.select(PageNavigation::Next), 3);
-        assert_eq!(PagePosition::new(page.number(), 1).number(), 1);
-        assert_eq!(PagePosition::new(0, 0).select(PageNavigation::Previous), 1);
-        assert_eq!(PagePosition::new(3, 2).number(), 2);
+    fn position_clamps_to_the_available_pages() {
+        assert_eq!(
+            PagePosition::new(0, 0),
+            PagePosition {
+                number: 1,
+                count: 1
+            }
+        );
+        assert_eq!(
+            PagePosition::new(3, 2),
+            PagePosition {
+                number: 2,
+                count: 2
+            }
+        );
     }
 }

@@ -25,8 +25,8 @@ pub use file_system_client::{
     FileSystemClient, FileSystemClientError, FileSystemClientErrorKind, FileSystemEntryKind,
 };
 pub use git_client::{
-    GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt,
-    GitRepositoryState, GitStatusSnapshot, GitStatusUpstream, GitWorkingTree,
+    GitClient, GitCommitReceipt, GitDiffFormat, GitDiffPaths, GitDiffRequest, GitEffect,
+    GitPushReceipt, GitRepositoryState, GitStatusSnapshot, GitStatusUpstream, GitWorkingTree,
     GitWorkingTreeSummary,
 };
 pub use html_renderer::HtmlRenderer;

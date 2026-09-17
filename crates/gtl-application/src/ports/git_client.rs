@@ -26,7 +26,13 @@ pub enum GitDiffFormat {
 pub struct GitDiffRequest {
     pub spec: GitDiffSpec,
     pub format: GitDiffFormat,
-    pub excluded_paths: Vec<RepositoryRelativePath>,
+    pub paths: GitDiffPaths,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitDiffPaths {
+    Excluding(Vec<RepositoryRelativePath>),
+    Including(Vec<RepositoryRelativePath>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -32,6 +32,10 @@ macro_rules! define_test_id {
 }
 
 define_test_id!(CHANGED_FILES_PANEL, "changed-files-panel");
+define_test_id!(
+    DIFF_EXTENSION_FILTERS_TRIGGER,
+    "diff-extension-filters-trigger"
+);
 define_test_id!(COMMITS_PANEL, "commits-panel");
 define_test_id!(HOVER_POPOVER_CONTENT, "hover-popover-content");
 define_test_id!(HISTORY_ENTRY_OPEN, "history-entry-open");

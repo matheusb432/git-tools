@@ -24,12 +24,139 @@ pub enum ProjectsViewMode {
     Table,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ProjectsSort {
+    #[default]
+    Changes,
+    Name,
+    Branch,
+    ChangesAscending,
+    NameDescending,
+    BranchDescending,
+}
+
 #[nutype::nutype(
     validate(predicate = |value| matches!(value, 10 | 15 | 30)),
     default = 15,
     derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, Serialize, Deserialize)
 )]
 pub struct ProjectsPageSize(u32);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProjectsPreferences {
+    pub view: ProjectsViewMode,
+    pub page_size: ProjectsPageSize,
+    pub sort: ProjectsSort,
+}
+
+/// SHA-256 identity of one exact serialized user-settings document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UserSettingsRevision([u8; 32]);
+
+impl UserSettingsRevision {
+    /// Creates a revision from the settings document digest.
+    #[must_use]
+    pub const fn from_digest(digest: [u8; 32]) -> Self {
+        Self(digest)
+    }
+
+    /// Returns the underlying SHA-256 digest.
+    #[must_use]
+    pub const fn into_digest(self) -> [u8; 32] {
+        self.0
+    }
+}
+
+impl std::fmt::Display for UserSettingsRevision {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::str::FromStr for UserSettingsRevision {
+    type Err = UserSettingsRevisionError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.len() != 64 {
+            return Err(UserSettingsRevisionError);
+        }
+        let mut digest = [0; 32];
+        let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+        if !remainder.is_empty() {
+            return Err(UserSettingsRevisionError);
+        }
+        for (output, pair) in digest.iter_mut().zip(pairs) {
+            let high = lowercase_hexadecimal_nibble(pair[0]).ok_or(UserSettingsRevisionError)?;
+            let low = lowercase_hexadecimal_nibble(pair[1]).ok_or(UserSettingsRevisionError)?;
+            *output = (high << 4) | low;
+        }
+        Ok(Self(digest))
+    }
+}
+
+impl TryFrom<String> for UserSettingsRevision {
+    type Error = UserSettingsRevisionError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl serde::Serialize for UserSettingsRevision {
+    fn serialize<SerializerType>(
+        &self,
+        serializer: SerializerType,
+    ) -> Result<SerializerType::Ok, SerializerType::Error>
+    where
+        SerializerType: serde::Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for UserSettingsRevision {
+    fn deserialize<DeserializerType>(
+        deserializer: DeserializerType,
+    ) -> Result<Self, DeserializerType::Error>
+    where
+        DeserializerType: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(DeserializerType::Error::custom)
+    }
+}
+
+const fn lowercase_hexadecimal_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+/// Reports a malformed serialized user-settings revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("user-settings revision must contain exactly 64 lowercase hexadecimal characters")]
+pub struct UserSettingsRevisionError;
 
 /// Exact, case-sensitive project names omitted from `project push --all` before Git inspection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -60,6 +187,7 @@ impl PushAllExclusions {
 // TODO: remove Clone once a store-owned smart pointer is added.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSettings {
+    focus_window_on_diff: bool,
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
     viewer_keybindings: ViewerKeybindings,
@@ -84,6 +212,7 @@ impl UserSettings {
         push_all_exclusions: PushAllExclusions,
     ) -> Self {
         Self {
+            focus_window_on_diff: true,
             theme,
             viewer_render_options,
             viewer_keybindings,
@@ -93,6 +222,27 @@ impl UserSettings {
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_diff_exclusions(self, diff_exclusions: DiffExclusions) -> Self {
+        Self {
+            diff_exclusions,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn with_focus_window_on_diff(self, focus_window_on_diff: bool) -> Self {
+        Self {
+            focus_window_on_diff,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn focus_window_on_diff(&self) -> bool {
+        self.focus_window_on_diff
     }
 
     #[must_use]
@@ -163,7 +313,7 @@ impl UserSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::{PushAllExclusions, UserSettings};
+    use super::{PushAllExclusions, UserSettings, UserSettingsRevision};
     use crate::{
         diffs::DiffExclusions,
         paths::{ProjectName, RepositoryRelativePath},
@@ -190,6 +340,26 @@ mod tests {
             );
         }
         assert!(serde_json::from_str::<super::ProjectsPageSize>("\"15\"").is_err());
+    }
+
+    #[test]
+    fn user_settings_revision_round_trips_canonical_sha256_hexadecimal() {
+        let revision = UserSettingsRevision::from_digest([0xab; 32]);
+        let encoded = revision.to_string();
+
+        assert_eq!(encoded, "ab".repeat(32));
+        assert_eq!(encoded.parse(), Ok(revision));
+        assert_eq!(
+            serde_json::to_string(&revision).unwrap(),
+            format!("\"{encoded}\"")
+        );
+        assert_eq!(
+            serde_json::from_str::<UserSettingsRevision>(&format!("\"{encoded}\"")).unwrap(),
+            revision
+        );
+        for invalid in ["", "ab", &"AB".repeat(32), &"gg".repeat(32)] {
+            assert!(invalid.parse::<UserSettingsRevision>().is_err());
+        }
     }
 
     fn project(value: &str) -> ProjectName {

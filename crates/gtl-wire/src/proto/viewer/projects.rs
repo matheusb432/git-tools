@@ -10,72 +10,160 @@ use super::{ViewerCodecError, required};
 use crate::{
     v1,
     viewer::projects::{
-        OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, VIEWER_PROJECTS_MAX,
-        ViewerProject, ViewerProjectBranchComparison, ViewerProjectDiffMode,
+        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
+        UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison, ViewerProjectDiffMode,
+        ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor, ViewerProjectsPageSize,
     },
 };
 
 #[must_use]
-pub fn encode_project(project: ViewerProject) -> v1::ViewerProject {
-    let status = match project.status {
-        RepositoryStatus::Absent => StatusResult::absent(project.name),
-        RepositoryStatus::Present { head, changes } => {
-            StatusResult::present(project.name, head, changes)
-        }
-    };
+pub fn encode_list(request: ListViewerProjects) -> v1::ListViewerProjectsRequest {
+    use v1::list_viewer_projects_request::Cursor;
+    v1::ListViewerProjectsRequest {
+        sort: request
+            .sort
+            .map(|sort| super::encode_projects_sort(sort) as i32),
+        page_size: request.page_size.into_inner(),
+        cursor: Some(match request.cursor {
+            ViewerProjectsCursor::First => Cursor::First(v1::Empty {}),
+            ViewerProjectsCursor::After(id) => Cursor::AfterProjectId(id.to_string()),
+            ViewerProjectsCursor::Before(id) => Cursor::BeforeProjectId(id.to_string()),
+            ViewerProjectsCursor::Last => Cursor::Last(v1::Empty {}),
+        }),
+    }
+}
+
+pub fn decode_list(
+    request: v1::ListViewerProjectsRequest,
+) -> Result<ListViewerProjects, ViewerCodecError> {
+    use v1::list_viewer_projects_request::Cursor;
+    Ok(ListViewerProjects {
+        sort: request.sort.map(super::decode_projects_sort).transpose()?,
+        page_size: ViewerProjectsPageSize::try_new(request.page_size)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        cursor: match required(request.cursor)? {
+            Cursor::First(_) => ViewerProjectsCursor::First,
+            Cursor::Last(_) => ViewerProjectsCursor::Last,
+            Cursor::AfterProjectId(id) => ViewerProjectsCursor::After(
+                id.try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+            ),
+            Cursor::BeforeProjectId(id) => ViewerProjectsCursor::Before(
+                id.try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+            ),
+        },
+    })
+}
+
+#[must_use]
+pub fn encode_project(project: &ViewerProject) -> v1::ViewerProject {
     v1::ViewerProject {
+        id: project.id.to_string(),
+        name: project.name.to_string(),
         comparison_branch: project.comparison_branch.to_string(),
-        branch_comparison: Some(encode_branch_comparison(project.branch_comparison)),
         path: project.path.to_string(),
-        status: Some(encode_status_result(&status)),
-        last_rendered_at: project
-            .last_rendered_at
-            .map(|timestamp| timestamp.to_string()),
+        last_rendered_at: project.last_rendered_at.as_ref().map(ToString::to_string),
+    }
+}
+
+#[must_use]
+pub fn encode_page(page: &ViewerProjectPage) -> v1::ListViewerProjectsResponse {
+    v1::ListViewerProjectsResponse {
+        projects: page.projects().iter().map(encode_project).collect(),
+        total: page.total(),
+        count_before: page.count_before(),
     }
 }
 
 pub fn decode_projects(
     response: v1::ListViewerProjectsResponse,
-) -> Result<Vec<ViewerProject>, ViewerCodecError> {
-    if response.projects.len() > VIEWER_PROJECTS_MAX {
+) -> Result<ViewerProjectPage, ViewerCodecError> {
+    if response.projects.len() > 100 {
         return Err(ViewerCodecError::InvalidMessage);
     }
-    response
+    let projects = response
         .projects
         .into_iter()
         .map(|project| {
-            let status = required(project.status)?;
-            let name = status
-                .project_name
-                .try_into()
-                .map_err(|_| ViewerCodecError::InvalidMessage)?;
-            let status = match required(status.state)? {
-                v1::repository_status_result::State::Absent(_) => RepositoryStatus::Absent,
-                v1::repository_status_result::State::Present(present) => {
-                    RepositoryStatus::Present {
-                        head: decode_head(required(present.head)?)?,
-                        changes: decode_changes(required(present.changes)?)?,
-                    }
-                }
+            let decode = || -> Result<ViewerProject, Box<dyn std::error::Error>> {
+                Ok(ViewerProject {
+                    id: project.id.try_into()?,
+                    name: project.name.try_into()?,
+                    comparison_branch: project.comparison_branch.try_into()?,
+                    path: gtl_models::paths::RepositoryRoot::try_new(project.path.into())?,
+                    last_rendered_at: project
+                        .last_rendered_at
+                        .map(TryInto::try_into)
+                        .transpose()?,
+                })
             };
-            Ok(ViewerProject {
-                comparison_branch: project
-                    .comparison_branch
-                    .try_into()
-                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                branch_comparison: decode_branch_comparison(required(project.branch_comparison)?)?,
-                path: gtl_models::paths::RepositoryRoot::try_new(project.path.into())
-                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                name,
-                status,
-                last_rendered_at: project
-                    .last_rendered_at
-                    .map(TryInto::try_into)
-                    .transpose()
-                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
-            })
+            decode().map_err(|_| ViewerCodecError::InvalidMessage)
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    ViewerProjectPage::try_new(projects, response.total, response.count_before)
+        .ok_or(ViewerCodecError::InvalidMessage)
+}
+
+#[must_use]
+pub fn encode_get_status(request: GetViewerProjectStatus) -> v1::GetViewerProjectStatusRequest {
+    v1::GetViewerProjectStatusRequest {
+        project_id: request.project_id.into_inner(),
+    }
+}
+
+pub fn decode_get_status(
+    request: v1::GetViewerProjectStatusRequest,
+) -> Result<GetViewerProjectStatus, ViewerCodecError> {
+    Ok(GetViewerProjectStatus {
+        project_id: request
+            .project_id
+            .try_into()
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+    })
+}
+
+#[must_use]
+pub fn encode_project_status(project: ViewerProjectStatus) -> v1::GetViewerProjectStatusResponse {
+    use v1::get_viewer_project_status_response::Status;
+    v1::GetViewerProjectStatusResponse {
+        project_id: project.project_id.to_string(),
+        comparison_branch: project.comparison_branch.to_string(),
+        branch_comparison: Some(encode_branch_comparison(project.branch_comparison)),
+        status: Some(match project.status {
+            RepositoryStatus::Absent => Status::Absent(v1::RepositoryAbsentStatus {}),
+            RepositoryStatus::Present { head, changes } => {
+                Status::Present(v1::RepositoryPresentStatus {
+                    head: Some(status_head(&head)),
+                    changes: Some(status_changes(changes)),
+                })
+            }
+        }),
+    }
+}
+
+pub fn decode_project_status(
+    response: v1::GetViewerProjectStatusResponse,
+) -> Result<ViewerProjectStatus, ViewerCodecError> {
+    use v1::get_viewer_project_status_response::Status;
+    Ok(ViewerProjectStatus {
+        project_id: response
+            .project_id
+            .try_into()
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        comparison_branch: response
+            .comparison_branch
+            .try_into()
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        branch_comparison: decode_branch_comparison(required(response.branch_comparison)?)?,
+        status: match required(response.status)? {
+            Status::Absent(_) => RepositoryStatus::Absent,
+            Status::Present(present) => RepositoryStatus::Present {
+                head: decode_head(required(present.head)?)?,
+                changes: decode_changes(required(present.changes)?)?,
+            },
+        },
+    })
 }
 
 fn decode_head(head: v1::RepositoryStatusHead) -> Result<StatusHead, ViewerCodecError> {
@@ -296,4 +384,47 @@ pub fn decode_update(
             },
         },
     })
+}
+
+pub fn decode_status_update(
+    update: v1::ViewerProjectStatusUpdate,
+) -> Result<crate::viewer::projects::ViewerProjectStatusUpdate, ViewerCodecError> {
+    use crate::viewer::projects::ViewerProjectStatusUpdate;
+    let id = update
+        .project_id
+        .try_into()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    match required(update.result)? {
+        v1::viewer_project_status_update::Result::Status(status) => {
+            let status = decode_project_status(status)?;
+            if status.project_id != id {
+                return Err(ViewerCodecError::InvalidMessage);
+            }
+            Ok(ViewerProjectStatusUpdate::Status(status))
+        }
+        v1::viewer_project_status_update::Result::Unavailable(_) => {
+            Ok(ViewerProjectStatusUpdate::Unavailable(id))
+        }
+    }
+}
+
+#[must_use]
+pub fn encode_status_update(
+    update: crate::viewer::projects::ViewerProjectStatusUpdate,
+) -> v1::ViewerProjectStatusUpdate {
+    use crate::viewer::projects::ViewerProjectStatusUpdate;
+    match update {
+        ViewerProjectStatusUpdate::Status(status) => v1::ViewerProjectStatusUpdate {
+            project_id: status.project_id.to_string(),
+            result: Some(v1::viewer_project_status_update::Result::Status(
+                encode_project_status(status),
+            )),
+        },
+        ViewerProjectStatusUpdate::Unavailable(id) => v1::ViewerProjectStatusUpdate {
+            project_id: id.to_string(),
+            result: Some(v1::viewer_project_status_update::Result::Unavailable(
+                v1::Empty {},
+            )),
+        },
+    }
 }

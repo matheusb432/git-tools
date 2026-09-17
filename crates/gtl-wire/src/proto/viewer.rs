@@ -249,6 +249,7 @@ fn encode_viewer_active_view(
             .into_iter()
             .map(|file| {
                 Ok(v1::ViewerFileSummary {
+                    source_id: file.source_id.map(|value| value.into_digest().to_vec()),
                     id: file.id.as_str().to_owned(),
                     path: file.path.to_string_lossy().into_owned(),
                     absolute_path: file.absolute_path.as_path().to_string_lossy().into_owned(),
@@ -485,7 +486,7 @@ pub fn decode_list_viewer_history_response(
         None if entries.is_empty() => HistoryPagePosition::Empty,
         None => return Err(ViewerCodecError::InvalidMessage),
     };
-    if response.projects.len() > crate::viewer::projects::VIEWER_PROJECTS_MAX {
+    if response.projects.len() > usize::from(gtl_models::projects::catalogue::PROJECTS_MAX) {
         return Err(ViewerCodecError::InvalidMessage);
     }
     Ok(ViewerHistoryPage {
@@ -575,8 +576,14 @@ pub fn decode_get_viewer_settings_response(
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     let exclusions = required(response.diff_exclusions)?;
     Ok(ViewerUserSettings {
+        revision: response
+            .revision
+            .parse()
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        focus_window_on_diff: required(response.focus_window_on_diff)?,
         sidebars: decode_sidebar_visibility(required(response.sidebars)?),
         projects_view: decode_projects_view(response.projects_view)?,
+        projects_sort: decode_projects_sort(response.projects_sort)?,
         projects_page_size: gtl_models::settings::ProjectsPageSize::try_new(
             response.projects_page_size,
         )
@@ -596,6 +603,7 @@ pub fn decode_get_viewer_settings_response(
                 .into_iter()
                 .map(|project| {
                     Ok(ViewerProjectDiffExclusions {
+                        configured: project.configured,
                         project_name: ProjectName::try_new(project.project_name)
                             .map_err(|_| ViewerCodecError::InvalidMessage)?,
                         extensions: ExcludedExtensions::new(project.extensions),
@@ -613,8 +621,11 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        revision: settings.revision.to_string(),
+        focus_window_on_diff: Some(settings.focus_window_on_diff),
         sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
         projects_view: encode_projects_view(settings.projects_view) as i32,
+        projects_sort: encode_projects_sort(settings.projects_sort) as i32,
         projects_page_size: settings.projects_page_size.into_inner(),
         configuration_path: settings.configuration_path,
         configured_theme: settings
@@ -634,6 +645,7 @@ pub fn encode_get_viewer_settings_response(
                 .projects
                 .into_iter()
                 .map(|project| v1::ViewerProjectDiffExclusions {
+                    configured: project.configured,
                     project_name: project.project_name.to_string(),
                     extensions: project.extensions.extensions().to_vec(),
                     excluded_from_push_all: project.excluded_from_push_all,
@@ -722,10 +734,15 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
         }),
     };
     v1::EditSettingsRequest {
+        expected_revision: request
+            .expected_revision
+            .map(|revision| revision.to_string()),
+        focus_window_on_diff: encode_bool_field_update(&request.focus_window_on_diff),
         files_sidebar_visible: encode_bool_field_update(&request.files_sidebar_visible),
         commits_sidebar_visible: encode_bool_field_update(&request.commits_sidebar_visible),
         wrap_lines,
         projects_view: encode_projects_view_update(&request.projects_view),
+        projects_sort: encode_projects_sort_update(&request.projects_sort),
         projects_page_size: encode_projects_page_size_update(&request.projects_page_size),
         theme,
         layout,
@@ -755,17 +772,17 @@ pub fn decode_edit_settings_request(
         project_settings_field_update, theme_field_update,
     };
     Ok(EditSettingsRequest {
+        expected_revision: decode_user_settings_revision(request.expected_revision)?,
+        focus_window_on_diff: decode_bool_field_update(request.focus_window_on_diff)?,
         files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)?,
         commits_sidebar_visible: decode_bool_field_update(request.commits_sidebar_visible)?,
-        projects_page_size: match request.projects_page_size {
+        projects_page_size: decode_projects_page_size_update(request.projects_page_size)?,
+        projects_sort: match request.projects_sort {
             None => FieldUpdate::Unchanged,
-            Some(value) => match required(value.operation)? {
-                v1::projects_page_size_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                v1::projects_page_size_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(
-                        gtl_models::settings::ProjectsPageSize::try_new(value)
-                            .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                    )
+            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
+                v1::projects_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+                v1::projects_sort_field_update::Operation::Update(value) => {
+                    FieldUpdate::Update(decode_projects_sort(value)?)
                 }
             },
         },
@@ -848,6 +865,30 @@ pub fn decode_edit_settings_request(
                 ),
             },
         },
+    })
+}
+
+fn decode_user_settings_revision(
+    revision: Option<String>,
+) -> Result<Option<gtl_models::settings::UserSettingsRevision>, ViewerCodecError> {
+    revision
+        .map(|value| value.parse())
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)
+}
+
+fn decode_projects_page_size_update(
+    update: Option<v1::ProjectsPageSizeFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ProjectsPageSize>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::projects_page_size_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::projects_page_size_field_update::Operation::Update(value) => FieldUpdate::Update(
+            gtl_models::settings::ProjectsPageSize::try_new(value)
+                .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        ),
     })
 }
 
@@ -1034,6 +1075,10 @@ pub fn decode_watch_viewer_response(
 ) -> Result<ViewerStateChanged, ViewerCodecError> {
     Ok(ViewerStateChanged {
         version: ViewerVersion::new(response.version),
+        project_status: response
+            .project_status
+            .map(projects::decode_status_update)
+            .transpose()?,
         live_check: response
             .live_check
             .map(|check| {
@@ -1253,6 +1298,15 @@ fn decode_viewer_file_summary(
     file: v1::ViewerFileSummary,
 ) -> Result<ViewerFileSummary, ViewerCodecError> {
     Ok(ViewerFileSummary {
+        source_id: file
+            .source_id
+            .map(|value| {
+                value
+                    .try_into()
+                    .map(crate::viewer::ViewerRowContentId::from_digest)
+                    .map_err(|_| ViewerCodecError::InvalidMessage)
+            })
+            .transpose()?,
         id: file
             .id
             .try_into()
@@ -1657,8 +1711,8 @@ fn encode_viewer_code_line(line: ViewerCodeLine) -> Result<v1::ViewerCodeLine, V
     Ok(v1::ViewerCodeLine {
         text: line.text,
         spans,
-        long_line_character_count: line
-            .long_line_character_count
+        omitted_character_count: line
+            .omitted_character_count
             .map(u32::try_from)
             .transpose()
             .map_err(|_| ViewerCodecError::Unrepresentable)?,
@@ -1773,8 +1827,8 @@ fn decode_viewer_code_line(line: v1::ViewerCodeLine) -> Result<ViewerCodeLine, V
     Ok(ViewerCodeLine {
         text: line.text,
         spans,
-        long_line_character_count: line
-            .long_line_character_count
+        omitted_character_count: line
+            .omitted_character_count
             .map(usize::try_from)
             .transpose()
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
@@ -1940,6 +1994,54 @@ fn encode_projects_page_size_update(
         }
     };
     Some(v1::ProjectsPageSizeFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+pub mod file_filters;
+
+fn decode_projects_sort(
+    value: i32,
+) -> Result<gtl_models::settings::ProjectsSort, ViewerCodecError> {
+    match v1::ProjectsSort::try_from(value) {
+        Ok(v1::ProjectsSort::Changes) => Ok(gtl_models::settings::ProjectsSort::Changes),
+        Ok(v1::ProjectsSort::Name) => Ok(gtl_models::settings::ProjectsSort::Name),
+        Ok(v1::ProjectsSort::Branch) => Ok(gtl_models::settings::ProjectsSort::Branch),
+        Ok(v1::ProjectsSort::ChangesAscending) => {
+            Ok(gtl_models::settings::ProjectsSort::ChangesAscending)
+        }
+        Ok(v1::ProjectsSort::NameDescending) => {
+            Ok(gtl_models::settings::ProjectsSort::NameDescending)
+        }
+        Ok(v1::ProjectsSort::BranchDescending) => {
+            Ok(gtl_models::settings::ProjectsSort::BranchDescending)
+        }
+        _ => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+const fn encode_projects_sort(value: gtl_models::settings::ProjectsSort) -> v1::ProjectsSort {
+    match value {
+        gtl_models::settings::ProjectsSort::Changes => v1::ProjectsSort::Changes,
+        gtl_models::settings::ProjectsSort::Name => v1::ProjectsSort::Name,
+        gtl_models::settings::ProjectsSort::Branch => v1::ProjectsSort::Branch,
+        gtl_models::settings::ProjectsSort::ChangesAscending => v1::ProjectsSort::ChangesAscending,
+        gtl_models::settings::ProjectsSort::NameDescending => v1::ProjectsSort::NameDescending,
+        gtl_models::settings::ProjectsSort::BranchDescending => v1::ProjectsSort::BranchDescending,
+    }
+}
+
+fn encode_projects_sort_update(
+    update: &FieldUpdate<gtl_models::settings::ProjectsSort>,
+) -> Option<v1::ProjectsSortFieldUpdate> {
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => v1::projects_sort_field_update::Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(value) => {
+            v1::projects_sort_field_update::Operation::Update(encode_projects_sort(*value) as i32)
+        }
+    };
+    Some(v1::ProjectsSortFieldUpdate {
         operation: Some(operation),
     })
 }

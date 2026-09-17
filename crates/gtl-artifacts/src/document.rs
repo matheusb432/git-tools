@@ -234,7 +234,12 @@ mod tests {
         assert!(split.contains("data-wrap-lines=\"true\""));
         assert!(unified.contains("data-layout=\"unified\""));
         assert!(unified.contains("text-[var(--sy-kw)]"));
-        assert!(unified.contains("⋯ 2001 chars"));
+        for html in [&unified, &split] {
+            assert!(html.contains("(+1501 characters omitted)"));
+            assert!(html.contains(&"x".repeat(500)));
+            assert!(!html.contains(&long_body));
+            assert!(!html.contains("toggle-long-line"));
+        }
         assert!(split.contains("data-layout=\"split\""));
         assert!(split.contains("class=\"diff-row-split\""));
         assert!(split.contains("grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));

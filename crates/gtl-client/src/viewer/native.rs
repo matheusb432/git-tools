@@ -12,7 +12,10 @@ use gtl_wire::{
         ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
-        projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
+        projects::{
+            GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
+            UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+        },
     },
 };
 
@@ -69,6 +72,47 @@ pub struct ViewerClient {
 }
 
 impl ViewerClient {
+    pub async fn get_file_filters(
+        &mut self,
+        request: gtl_wire::viewer::ViewerTabRequest,
+    ) -> Result<gtl_wire::viewer::file_filters::ViewerFileFilters, ViewerClientError> {
+        let response = self
+            .client
+            .get_viewer_file_filters(proto::viewer::file_filters::encode_get(request.tab_id))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        proto::viewer::file_filters::decode_filters(response).map_err(Into::into)
+    }
+
+    pub async fn set_file_filters(
+        &mut self,
+        request: gtl_wire::viewer::file_filters::SetViewerFileFilters,
+    ) -> Result<(), ViewerClientError> {
+        let response = self
+            .client
+            .set_viewer_file_filters(proto::viewer::file_filters::encode_set(request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        let _ = response;
+        Ok(())
+    }
+
+    pub async fn update_diff_exclusions(
+        &mut self,
+        request: gtl_wire::viewer::file_filters::UpdateDiffExclusions,
+    ) -> Result<(), ViewerClientError> {
+        let response = self
+            .client
+            .update_diff_exclusions(proto::viewer::file_filters::encode_defaults(request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        let _ = response;
+        Ok(())
+    }
+
     pub async fn close_other_tabs(
         &mut self,
         request: ViewerTabRequest,
@@ -106,10 +150,13 @@ impl ViewerClient {
         Ok(())
     }
 
-    pub async fn list_projects(&mut self) -> Result<Vec<ViewerProject>, ViewerClientError> {
+    pub async fn list_projects(
+        &mut self,
+        request: ListViewerProjects,
+    ) -> Result<ViewerProjectPage, ViewerClientError> {
         let response = self
             .client
-            .list_viewer_projects(v1::ListViewerProjectsRequest {})
+            .list_viewer_projects(proto::viewer::projects::encode_list(request))
             .await
             .map(tonic::Response::into_inner)
             .map_err(|status| {
@@ -120,6 +167,19 @@ impl ViewerClient {
                 }
             })?;
         proto::viewer::projects::decode_projects(response).map_err(Into::into)
+    }
+
+    pub async fn get_project_status(
+        &mut self,
+        request: GetViewerProjectStatus,
+    ) -> Result<ViewerProjectStatus, ViewerClientError> {
+        let response = self
+            .client
+            .get_viewer_project_status(proto::viewer::projects::encode_get_status(request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        proto::viewer::projects::decode_project_status(response).map_err(Into::into)
     }
 
     pub async fn update_project(
@@ -342,6 +402,12 @@ impl ViewerClient {
             .client
             .watch_viewer(v1::WatchViewerRequest {
                 live_tab_id: request.live_tab_id.map(Into::into),
+                project_ids: request
+                    .projects
+                    .ids()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             })
             .await
             .map(tonic::Response::into_inner)
@@ -454,6 +520,14 @@ mod tests {
                 "user settings are invalid"
             )),
             ViewerClientError::InvalidRequest
+        );
+    }
+
+    #[test]
+    fn aborted_edits_are_reported_as_conflicts() {
+        assert_eq!(
+            decode_status(&tonic::Status::aborted("stale settings revision")),
+            ViewerClientError::Conflict
         );
     }
 }

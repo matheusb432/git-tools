@@ -2,9 +2,9 @@
 
 use gtl_models::paths::RepositoryRelativePath;
 use gtl_parser::{
-    CharacterCount, DiffParser, DiffParserStream, DiffRow, DiffRowKind, DiffSide,
-    SemanticTextChange, SemanticTextSpan, SourceLineNumber, SplitDiffCell, SplitDiffRow,
-    SplitDiffStream, SyntaxDiagnostic, SyntaxLanguage, SyntaxTokenClass, diff_line_body,
+    DiffParser, DiffParserStream, DiffRow, DiffRowKind, DiffSide, SemanticTextChange,
+    SemanticTextSpan, SourceLineNumber, SplitDiffCell, SplitDiffRow, SplitDiffStream,
+    SyntaxDiagnostic, SyntaxLanguage, SyntaxTokenClass, diff_line_body,
 };
 use gtl_wire::viewer::{
     VIEWER_ROW_BATCH_MAX_ROWS, ViewerCodeLine, ViewerCodeSpan, ViewerDiffLayout, ViewerFileRows,
@@ -254,12 +254,7 @@ fn project_source_row(row: &DiffRow) -> ViewerUnifiedSourceRow {
     ViewerUnifiedSourceRow {
         old_line_number: row.old_line_number().map(SourceLineNumber::into_inner),
         new_line_number: row.new_line_number().map(SourceLineNumber::into_inner),
-        code: project_code_line(
-            row.body(),
-            row.semantic_spans(),
-            row.long_line_character_count()
-                .map(CharacterCount::into_inner),
-        ),
+        code: project_code_line(row.body(), row.semantic_spans()),
     }
 }
 
@@ -272,16 +267,11 @@ fn project_split_row(row: &SplitDiffRow) -> ViewerSplitRow {
             new_line_number,
             text,
             semantic_spans,
-            long_line_character_count,
             ..
         } => ViewerSplitRow::Context {
             old_line_number: old_line_number.into_inner(),
             new_line_number: new_line_number.into_inner(),
-            code: project_code_line(
-                diff_line_body(text),
-                semantic_spans,
-                long_line_character_count.map(CharacterCount::into_inner),
-            ),
+            code: project_code_line(diff_line_body(text), semantic_spans),
         },
         SplitDiffRow::Pair { old, new } => ViewerSplitRow::Pair {
             old: old.as_ref().map(project_split_cell),
@@ -293,32 +283,32 @@ fn project_split_row(row: &SplitDiffRow) -> ViewerSplitRow {
 fn project_split_cell(cell: &SplitDiffCell) -> ViewerSplitCell {
     ViewerSplitCell {
         line_number: cell.line_number().into_inner(),
-        code: project_code_line(
-            cell.body(),
-            cell.semantic_spans(),
-            cell.long_line_character_count()
-                .map(CharacterCount::into_inner),
-        ),
+        code: project_code_line(cell.body(), cell.semantic_spans()),
     }
 }
 
-fn project_code_line(
-    text: &str,
-    spans: &[SemanticTextSpan],
-    long_line_character_count: Option<usize>,
-) -> ViewerCodeLine {
+/// Maximum Unicode scalar values transmitted or embedded per source line.
+const VIEWER_LINE_CHARACTERS_MAX: usize = 500;
+
+fn project_code_line(text: &str, spans: &[SemanticTextSpan]) -> ViewerCodeLine {
+    let (text, omitted_character_count) = match text.char_indices().nth(VIEWER_LINE_CHARACTERS_MAX)
+    {
+        Some((end, _)) => (&text[..end], Some(text[end..].chars().count())),
+        None => (text, None),
+    };
     ViewerCodeLine {
         text: text.to_owned(),
         spans: spans
             .iter()
+            .take_while(|span| span.byte_start() < text.len())
             .map(|span| ViewerCodeSpan {
                 byte_start: span.byte_start(),
-                byte_end: span.byte_end(),
+                byte_end: span.byte_end().min(text.len()),
                 syntax_class: span.syntax_class().map(project_syntax_class),
                 changed: span.change() == SemanticTextChange::Changed,
             })
             .collect(),
-        long_line_character_count,
+        omitted_character_count,
     }
 }
 
@@ -383,6 +373,80 @@ mod tests {
                 append_rows(&mut rows, window.rows);
             }
             assert_eq!(rows, expected.rows);
+        }
+    }
+
+    #[test]
+    fn source_previews_are_bounded_for_both_layouts_and_delivery_paths() {
+        let path = repository_relative_path("generated.css");
+        let cases = [0, 499, 500, 501, 2_001, 94_718]
+            .into_iter()
+            .flat_map(|characters| {
+                [ViewerDiffLayout::Unified, ViewerDiffLayout::Split]
+                    .map(|layout| (characters, layout))
+            });
+        for (characters, layout) in cases {
+            let body = "é🦀".chars().cycle().take(characters).collect::<String>();
+            let source = [
+                "@@ -1,2 +1,2 @@".to_owned(),
+                format!(" {body}"),
+                format!("-{body}"),
+                format!("+{body}"),
+            ]
+            .into_iter()
+            .collect::<crate::diffs::source_lines::DiffSourceLines>();
+            let parsed = parse_viewer_diff_file(&path, &source, layout).file;
+            let mut parser = ViewerRowWindowParser::new(&path, &source, layout);
+            let window = parser
+                .parse(
+                    0..viewer_file_row_count(&source, layout),
+                    &ViewerWorkCancellation::default(),
+                )
+                .unwrap();
+            assert_eq!(window.rows, parsed.rows);
+            assert_source_previews(&parsed.rows, &body, characters);
+            assert_eq!(source.line(3), format!("+{body}"));
+        }
+    }
+
+    fn assert_source_previews(rows: &ViewerRows, body: &str, characters: usize) {
+        let codes = match rows {
+            ViewerRows::Unified(rows) => rows
+                .iter()
+                .filter_map(|row| match row {
+                    ViewerUnifiedRow::Context(row)
+                    | ViewerUnifiedRow::Added(row)
+                    | ViewerUnifiedRow::Removed(row) => Some(&row.code),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ViewerRows::Split(rows) => rows
+                .iter()
+                .flat_map(|row| match row {
+                    ViewerSplitRow::Context { code, .. } => vec![code],
+                    ViewerSplitRow::Pair { old, new } => old
+                        .iter()
+                        .chain(new.iter())
+                        .map(|cell| &cell.code)
+                        .collect(),
+                    _ => vec![],
+                })
+                .collect(),
+        };
+        assert_eq!(codes.len(), 3);
+        for code in codes {
+            assert_eq!(code.text, body.chars().take(500).collect::<String>());
+            assert_eq!(
+                code.omitted_character_count,
+                (characters > 500).then(|| characters - 500)
+            );
+            assert_eq!(
+                code.spans
+                    .iter()
+                    .map(|span| span.text(&code.text).unwrap())
+                    .collect::<String>(),
+                code.text
+            );
         }
     }
 

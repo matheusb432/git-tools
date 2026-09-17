@@ -56,9 +56,7 @@ fn has_nested_submodules(repository: &gix::Repository) -> anyhow::Result<bool> {
 }
 
 fn read_builtin(repository: &gix::Repository) -> anyhow::Result<GitWorkingTree> {
-    let changes = repository
-        .status(gix::progress::Discard)
-        .context("configure Git status")?
+    let changes = status_platform(repository)?
         .untracked_files(gix::status::UntrackedFiles::Files)
         .into_iter(Vec::<gix::bstr::BString>::new())
         .context("start Git status")?;
@@ -81,9 +79,7 @@ fn read_with_explicit_submodules(
     untracked: UntrackedMode,
     known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
 ) -> anyhow::Result<GitWorkingTree> {
-    let changes = repository
-        .status(gix::progress::Discard)
-        .context("configure Git status")?
+    let changes = status_platform(repository)?
         .index_worktree_submodules(None::<gix::status::Submodule>)
         .untracked_files(untracked.gix_mode())
         .into_iter(Vec::<gix::bstr::BString>::new())
@@ -356,4 +352,14 @@ impl StatusUpdate {
             }
         }
     }
+}
+
+fn status_platform(
+    repository: &gix::Repository,
+) -> anyhow::Result<gix::status::Platform<'_, gix::progress::Discard>> {
+    let status = repository.status(gix::progress::Discard)?;
+    Ok(match super::status_context::cancellation() {
+        Some(flag) => status.should_interrupt_owned(flag),
+        None => status,
+    })
 }

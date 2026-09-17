@@ -8,7 +8,10 @@ use gtl_wire::viewer::{
     StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
     ViewerUserSettings,
-    projects::{OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject, ViewerProject},
+    projects::{
+        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
+        UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+    },
 };
 use serde::Serialize;
 use tauri::State;
@@ -727,7 +730,18 @@ mod tests {
     }
 }
 
-viewer_query_command!(viewer_list_projects, Vec<ViewerProject>, list_projects);
+viewer_request_command!(
+    viewer_list_projects,
+    ListViewerProjects,
+    ViewerProjectPage,
+    list_projects
+);
+viewer_request_command!(
+    viewer_get_project_status,
+    GetViewerProjectStatus,
+    ViewerProjectStatus,
+    get_project_status
+);
 viewer_request_command!(
     viewer_open_project,
     OpenViewerProject,
@@ -760,4 +774,24 @@ viewer_request_command!(
     ViewerTabRequest,
     (),
     close_other_tabs
+);
+
+viewer_request_command!(
+    viewer_get_file_filters,
+    gtl_wire::viewer::ViewerTabRequest,
+    gtl_wire::viewer::file_filters::ViewerFileFilters,
+    get_file_filters
+);
+viewer_request_command!(
+    viewer_set_file_filters,
+    gtl_wire::viewer::file_filters::SetViewerFileFilters,
+    (),
+    set_file_filters
+);
+
+viewer_request_command!(
+    viewer_update_diff_exclusions,
+    gtl_wire::viewer::file_filters::UpdateDiffExclusions,
+    (),
+    update_diff_exclusions
 );

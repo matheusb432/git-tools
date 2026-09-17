@@ -33,7 +33,7 @@ const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(250);
 pub struct ServerHarness {
     #[cfg(feature = "benchmark-support")]
     auth: LocalAuth,
-    #[cfg(feature = "benchmark-support")]
+    #[cfg(any(test, feature = "benchmark-support"))]
     state: AppState,
     published_endpoint: PublishedEndpoint,
     published_viewer: PublishedViewerBootstrap,
@@ -79,7 +79,7 @@ impl ServerHarness {
         Ok(Self {
             #[cfg(feature = "benchmark-support")]
             auth,
-            #[cfg(feature = "benchmark-support")]
+            #[cfg(any(test, feature = "benchmark-support"))]
             state,
             published_endpoint,
             published_viewer,
@@ -106,6 +106,20 @@ impl ServerHarness {
         crate::viewer_runtime::open_recipe_batch(&self.state, batch).map_err(anyhow::Error::from)
     }
 
+    #[cfg(any(test, feature = "benchmark-support"))]
+    #[must_use]
+    pub fn project_status_observations(&self) -> (u64, usize) {
+        use std::sync::atomic::Ordering;
+        (
+            self.state
+                .viewer_project_status_checks
+                .load(Ordering::Relaxed),
+            self.state
+                .viewer_project_watch_registrations
+                .load(Ordering::Relaxed),
+        )
+    }
+
     pub fn begin_shutdown(&mut self) -> anyhow::Result<()> {
         self.shutdown
             .take()
@@ -124,6 +138,11 @@ impl ServerHarness {
     pub async fn stop(mut self) -> anyhow::Result<()> {
         self.begin_shutdown()?;
         self.wait().await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn project_status_workers(&self) -> std::sync::Arc<tokio::sync::Semaphore> {
+        self.state.viewer_project_status_workers.clone()
     }
 
     #[cfg(test)]

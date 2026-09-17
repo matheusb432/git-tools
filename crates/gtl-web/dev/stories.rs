@@ -3,6 +3,7 @@ mod badge;
 mod button;
 mod data_table;
 mod empty_notice;
+mod extension_filter;
 mod icon_popover;
 mod loading_spinner;
 mod page_notice;

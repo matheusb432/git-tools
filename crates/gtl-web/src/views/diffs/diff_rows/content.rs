@@ -1,16 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::{
-    entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow},
-    shared::ui::{
-        Button, ButtonSize, ButtonVariant,
-        scroll_area::{
-            ScrollAreaVariant,
-            browser::use_scrollbars,
-            scrollbar::{ScrollbarPlacement, ScrollbarRails},
-        },
-    },
-};
+use crate::entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChangedTextTone {
@@ -85,25 +75,29 @@ pub(super) fn CodeCellContent(
     source: CodeLineSource,
     marker: Option<char>,
     changed_text_tone: ChangedTextTone,
-    artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
     source.with(|code| {
         let Some(code) = code else {
             return rsx! {};
         };
-        if let Some(character_count) = code.long_line_character_count {
+        if let Some(omitted) = code.omitted_character_count {
+            let copy_text = copy_text.then_some("");
+            let text = code.text.as_str();
             return rsx! {
-                LongLine {
-                    source,
-                    marker,
-                    character_count,
-                    artifact_enhancement,
-                    copy_text,
+                span { class: "diff-truncated-line",
+                    if let Some(marker) = marker {
+                        span { "{marker}" }
+                    }
+                    span {
+                        class: "diff-truncated-source",
+                        "data-gtl-copy-text": copy_text,
+                        span { class: "diff-truncated-text", "{text}" }
+                        span { class: "diff-line-omission", " ... (+{omitted} characters omitted)" }
+                    }
                 }
             };
         }
-
         rsx! {
             if let Some(marker) = marker {
                 span { "{marker}" }
@@ -111,142 +105,6 @@ pub(super) fn CodeCellContent(
             SemanticText { source, changed_text_tone, copy_text }
         }
     })
-}
-
-#[component]
-pub(super) fn LongLine(
-    source: CodeLineSource,
-    marker: Option<char>,
-    character_count: usize,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
-    #[cfg(feature = "desktop")]
-    let retained = retained_line(copy_text);
-    #[cfg(feature = "desktop")]
-    let initial = retained
-        .as_ref()
-        .is_some_and(|(presentation, tab, line)| presentation.line_expanded(*tab, line));
-    #[cfg(not(feature = "desktop"))]
-    let initial = false;
-    let mut expanded = use_signal(move || initial);
-    let is_expanded = expanded();
-    let toggle = use_callback(move |()| {
-        let next = !*expanded.peek();
-        expanded.set(next);
-        #[cfg(feature = "desktop")]
-        if let Some((presentation, tab, line)) = &retained {
-            presentation.set_line_expanded(*tab, line.clone(), next);
-        }
-    });
-    let artifact_long_line = artifact_enhancement.then_some("");
-    let artifact_expanded = is_expanded.to_string();
-    rsx! {
-        span {
-            class: "diff-long-line",
-            "data-gtl-long-line": artifact_long_line,
-            "data-gtl-expanded": artifact_expanded,
-            LongLineText {
-                source,
-                marker,
-                artifact_enhancement,
-                copy_text,
-            }
-            LongLineControl {
-                character_count,
-                expanded: is_expanded,
-                artifact_enhancement,
-                on_toggle: toggle,
-            }
-        }
-    }
-}
-
-#[cfg(feature = "desktop")]
-fn retained_line(
-    copy_text: bool,
-) -> Option<(
-    crate::views::diffs::presentation::DiffPresentation,
-    gtl_models::viewer::ViewerTabId,
-    crate::views::diffs::presentation::ExpandedLine,
-)> {
-    use crate::views::diffs::presentation::{
-        DiffPresentation, DiffRowPresentation, ExpandedLine, LineSide,
-    };
-    let presentation = try_use_context::<DiffPresentation>();
-    let row = try_use_context::<Option<DiffRowPresentation>>().flatten();
-    let (presentation, row) = presentation.zip(row)?;
-    Some((
-        presentation,
-        row.batch.tab,
-        ExpandedLine {
-            content: row.batch.content,
-            file: row.batch.file.to_string(),
-            row: row.row,
-            side: if copy_text {
-                LineSide::New
-            } else {
-                LineSide::Old
-            },
-        },
-    ))
-}
-
-#[component]
-fn LongLineText(
-    source: CodeLineSource,
-    marker: Option<char>,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
-    let scrollbars = use_scrollbars();
-    let marker = marker.map(|value| value.to_string());
-    let artifact_long_line_text = artifact_enhancement.then_some("");
-    source.with(|code| {
-        let Some(code) = code else {
-            return rsx! {};
-        };
-        let text = code.text.as_str();
-        rsx! {
-            span {
-                class: "diff-long-line-text",
-                onresize: move |_| scrollbars.measure(),
-                onscroll: move |_| scrollbars.refresh(),
-                "data-gtl-long-line-text": artifact_long_line_text,
-                ScrollbarRails {
-                    controller: scrollbars,
-                    placement: ScrollbarPlacement::Viewport(ScrollAreaVariant::Rail),
-                }
-                {marker}
-                if copy_text {
-                    span { "data-gtl-copy-text": "", "{text}" }
-                } else {
-                    "{text}"
-                }
-            }
-        }
-    })
-}
-
-#[component]
-fn LongLineControl(
-    character_count: usize,
-    expanded: bool,
-    artifact_enhancement: bool,
-    on_toggle: EventHandler<()>,
-) -> Element {
-    let artifact_action = artifact_enhancement.then_some("toggle-long-line");
-    rsx! {
-        Button {
-            class: "flex-none select-none [font:inherit]",
-            size: ButtonSize::Inline,
-            variant: ButtonVariant::Secondary,
-            aria_expanded: expanded.to_string(),
-            "data-gtl-action": artifact_action,
-            onclick: move |_| on_toggle.call(()),
-            "\u{22ef} {character_count} chars"
-        }
-    }
 }
 
 #[component]
@@ -340,7 +198,7 @@ mod tests {
                 code: ViewerCodeLine {
                     text: String::new(),
                     spans: Vec::new(),
-                    long_line_character_count: None,
+                    omitted_character_count: None,
                 },
             })
         });

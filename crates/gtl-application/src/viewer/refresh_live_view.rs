@@ -88,6 +88,8 @@ pub fn prepare(
     let Some(request) = state.inspect(|session| session.live_refresh_request(tab_id))? else {
         return Ok(LiveViewCheck::Inactive);
     };
+    let excluded = state.inspect(|session| session.file_exclusions(tab_id))?;
+    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
     let head = inspect_recipe(&request.recipe, git, comparisons)?;
     if request.head.as_ref() == Some(&head) {
         return Ok(LiveViewCheck::Unchanged);
@@ -97,7 +99,7 @@ pub fn prepare(
             recipe: request.recipe.clone(),
             kind: ViewerTabKind::Live,
         },
-        settings,
+        &settings,
         git,
         comparisons,
     )?;

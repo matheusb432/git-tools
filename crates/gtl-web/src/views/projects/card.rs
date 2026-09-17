@@ -13,6 +13,15 @@ use crate::shared::ui::no_data::NoData;
 
 #[component]
 pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
+    let status = super::loading::use_project_status(&project);
+    let load = (status.state)();
+    let loading = load.status.is_none() && !load.failed;
+    let failed = load.failed;
+    let result = load.status.as_ref().map(Ok).or_else(|| {
+        failed.then_some(Err(
+            crate::shared::viewer_client::ViewerClientError::Internal,
+        ))
+    });
     let ProjectPresentation {
         branch,
         comparison_base,
@@ -22,14 +31,15 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
         ahead_label,
         issue,
         rendered,
-    } = project_presentation(&project);
+    } = project_presentation(&project, result);
     rsx! {
         article {
             class: "project-card min-w-0 gap-3 p-4",
             "data-project-card": "{project.path}",
             aria_label: "{project.name}",
+            aria_busy: loading.to_string(),
             div { class: "project-card-header h-8 min-w-0 gap-2.5",
-                ReviewStatusDot { review }
+                ReviewStatusDot { review, stale: failed && load.status.is_some() }
                 h2 {
                     class: "project-card-title min-w-0 text-base font-semibold tracking-tight",
                     title: "{project.path}",
@@ -38,12 +48,24 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                 div { class: "ml-auto",
                     super::SnapshotHistoryButton { project: project.name.clone() }
                     ProjectComparisonEditor { project: project.clone(), disabled }
+                    if failed {
+                        crate::shared::ui::Button {
+                            variant: crate::shared::ui::ButtonVariant::Ghost,
+                            size: crate::shared::ui::ButtonSize::IconSmall,
+                            aria_label: "Retry Git status for {project.name}",
+                            title: "Retry Git status",
+                            onclick: move |_| (status.retry)(()),
+                            lucide_dioxus::RefreshCw { size: 14 }
+                        }
+                    }
                 }
             }
-            p { class: "project-card-meta min-w-0 gap-1.5 text-xs",
+            p { class: "project-card-meta h-4 min-w-0 gap-1.5 text-xs",
                 if let Some(branch) = branch {
                     GitBranch { size: 13, class: "shrink-0 text-ink-3" }
                     span { class: "truncate", title: branch, "{branch}" }
+                } else if loading {
+                    crate::shared::ui::Skeleton { class: "h-3 w-20" }
                 } else {
                     NoData {}
                 }
@@ -52,7 +74,7 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                     span { class: "truncate", title: "Comparison branch", "{base}" }
                 }
             }
-            div { class: "flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2",
+            div { class: "flex min-h-4 flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2",
                 span { class: "flex items-center gap-2",
                     ProjectSignalGlyph { signal: local.clone() }
                     "Local changes"
@@ -63,6 +85,12 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             div { class: "flex items-center gap-2 border-t border-line pt-3",
+                ProjectComparisonAction {
+                    path: project.path.clone(),
+                    mode: ViewerProjectDiffMode::Live,
+                    shape: ProjectActionShape::Labeled,
+                    disabled: disabled || !local.is_available(),
+                }
                 if ahead.has_changes() {
                     ProjectComparisonAction {
                         path: project.path.clone(),
@@ -70,12 +98,6 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                         shape: ProjectActionShape::Labeled,
                         disabled,
                     }
-                }
-                ProjectComparisonAction {
-                    path: project.path.clone(),
-                    mode: ViewerProjectDiffMode::Live,
-                    shape: ProjectActionShape::Labeled,
-                    disabled: disabled || !local.is_available(),
                 }
             }
             if let Some(issue) = issue {

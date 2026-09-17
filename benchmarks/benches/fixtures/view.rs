@@ -16,6 +16,7 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
     );
 
     View {
+        file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
         exclusions: None,
         repo_name: require(
             gtl_models::paths::ProjectName::try_from("benchmark"),

@@ -1,29 +1,20 @@
-use std::path::PathBuf;
-
 use gtl_models::{
     git::{BranchName, CommitCount, GitRefName},
-    paths::RepositoryRoot,
     projects::comparison::ComparisonBranch,
     repository::status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
 };
-use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectBranchComparison};
+use gtl_wire::viewer::projects::{ViewerProjectBranchComparison, ViewerProjectStatus};
 
 use super::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus};
-use crate::test_support::{TestResult, project_name};
-
-fn repository_root(path: &str) -> TestResult<RepositoryRoot> {
-    Ok(RepositoryRoot::try_new(PathBuf::from(path))?)
-}
+use crate::test_support::TestResult;
 
 fn viewer_project(
     status: RepositoryStatus,
     comparison: ViewerProjectBranchComparison,
-) -> TestResult<ViewerProject> {
-    Ok(ViewerProject {
-        path: repository_root("/home/dev/tools/git-tools")?,
-        name: project_name("git-tools")?,
+) -> TestResult<ViewerProjectStatus> {
+    Ok(ViewerProjectStatus {
+        project_id: "GTL".try_into()?,
         status,
-        last_rendered_at: None,
         comparison_branch: ComparisonBranch::default(),
         branch_comparison: comparison,
     })

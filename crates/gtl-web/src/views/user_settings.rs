@@ -1,4 +1,4 @@
-pub mod ui;
+mod exclusion_editor;
 
 use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerRenderOptions, ViewerTheme, ViewerUserSettings};
@@ -9,13 +9,11 @@ use crate::{
     shared::{
         browser,
         ui::{Button, ButtonVariant, PageNotice, ScrollArea, Skeleton, use_toast},
+        viewer_client::ViewerClientError,
         viewer_theme::viewer_theme_label,
     },
-    views::{
-        user_settings::ui::DiffExtensionExclusions,
-        viewer_settings_form::{
-            ViewerSettingsForm, ViewerSettingsSelection, viewer_settings_patch,
-        },
+    views::viewer_settings_form::{
+        ViewerSettingsForm, ViewerSettingsSelection, viewer_settings_patch,
     },
 };
 
@@ -40,7 +38,7 @@ pub(crate) fn UserSettingsView() -> Element {
                                 Settings { size: 16 }
                             }
                             p { class: "font-semibold tracking-widest uppercase",
-                                "Viewer preferences"
+                                "Application preferences"
                             }
                         }
                         h1 {
@@ -50,21 +48,21 @@ pub(crate) fn UserSettingsView() -> Element {
                             "User settings"
                         }
                         p { class: "settings-page-description mt-1 leading-5",
-                            "Choose viewer defaults, then submit to save them."
+                            "Choose viewer defaults and command safeguards, then submit to save them."
                         }
                     }
 
                     match (pending, &*load) {
-                        (true, _) | (false, None) => rsx! {
+                        (_, None) => rsx! {
                             SettingsLoading {}
                         },
                         (
-                            false,
+                            _,
                             Some(Err(crate::shared::viewer_client::ViewerClientError::InvalidSettings)),
                         ) => rsx! {
                             crate::views::settings_recovery::SettingsRecovery { onretry: move |()| settings.restart() }
                         },
-                        (false, Some(Err(error))) => {
+                        (_, Some(Err(error))) => {
                             let message = error.message();
                             rsx! {
                                 PageNotice {
@@ -81,8 +79,8 @@ pub(crate) fn UserSettingsView() -> Element {
                                 }
                             }
                         }
-                        (false, Some(Ok(settings))) => rsx! {
-                            SettingsContent { settings: settings.clone() }
+                        (_, Some(Ok(value))) => rsx! {
+                            SettingsContent { settings: value.clone(), onchanged: move |()| settings.restart() }
                         },
                     }
                 }
@@ -110,23 +108,19 @@ fn SettingsLoading() -> Element {
 }
 
 #[component]
-fn SettingsContent(settings: ViewerUserSettings) -> Element {
-    let mut projects = settings.diff_exclusions.projects.clone();
-    projects.sort_by(|left, right| left.project_name.cmp(&right.project_name));
+fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) -> Element {
     let configuration_path = settings
         .configuration_path
         .as_deref()
         .unwrap_or("Built-in defaults");
-    let push_confirmation_text = if settings.push_confirmation_required {
-        "Required"
-    } else {
-        "Not required"
-    };
-
     rsx! {
         SettingsEditableForm {
+            revision: settings.revision,
+            focus_window_on_diff: settings.focus_window_on_diff,
+            push_confirmation_required: settings.push_confirmation_required,
             configured_theme: settings.configured_theme,
             render_options: settings.render_options,
+            onchanged,
         }
 
         section { class: "settings-card", aria_label: "Resolved viewer settings",
@@ -140,23 +134,16 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
             dl { class: "settings-rows",
                 SettingsRow { term: "Configuration file", "{configuration_path}" }
                 SettingsRow { term: "Effective theme", "{viewer_theme_label(settings.effective_theme)}" }
-                SettingsRow { term: "Push confirmation", "{push_confirmation_text}" }
-                SettingsRow { term: "Default diff exclusions",
-                    DiffExtensionExclusions { file_extensions: settings.diff_exclusions.default_extensions }
-                }
             }
         }
 
-        section { class: "settings-card", aria_label: "Project diff exclusions",
-            SettingsTableHeader { subtitle: "Repository-specific extension filters.", "Project exclusions" }
-            if projects.is_empty() {
-                p { class: "px-4 py-5 text-ink-3", "No project-specific exclusions." }
-            } else {
-                for project in projects {
-                    SettingsRow { term: project.project_name,
-                        DiffExtensionExclusions { file_extensions: project.extensions }
-                    }
-                }
+        section { class: "settings-card", aria_label: "Default diff exclusions",
+            SettingsTableHeader { subtitle: "Used when a project has no project-specific exclusion list.",
+                "Default diff exclusions"
+            }
+            exclusion_editor::ExclusionEditor {
+                configured: settings.diff_exclusions.default_extensions.clone(),
+                onchanged,
             }
         }
     }
@@ -164,42 +151,91 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
 
 #[component]
 fn SettingsEditableForm(
+    revision: gtl_models::settings::UserSettingsRevision,
+    focus_window_on_diff: bool,
+    push_confirmation_required: bool,
     configured_theme: Option<ViewerTheme>,
     render_options: ViewerRenderOptions,
+    onchanged: EventHandler<()>,
 ) -> Element {
     let toast = use_toast();
-    let initial = ViewerSettingsSelection::new(configured_theme, render_options);
-    let mut persisted = use_signal(|| initial);
+    let initial = ViewerSettingsSelection::new(
+        configured_theme,
+        render_options,
+        focus_window_on_diff,
+        push_confirmation_required,
+    );
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
+    let mut failure = use_signal(|| None::<ViewerClientError>);
+    let save_error = failure().map(|error| settings_edit_error_message(error).to_owned());
+    let reload_available = failure().is_some_and(settings_edit_reload_available);
 
     rsx! {
         ViewerSettingsForm {
             initial,
             pending: pending(),
             saved: saved(),
-            onmodified: move |()| saved.set(false),
+            save_error,
+            reload_available,
+            onmodified: move |()| {
+                saved.set(false);
+                failure.set(None);
+            },
+            onreload: move |()| {
+                saved.set(false);
+                failure.set(None);
+                onchanged.call(());
+            },
             onsubmit: move |selected| {
                 if pending() {
                     return;
                 }
                 saved.set(false);
-                let request = viewer_settings_patch(persisted(), selected);
+                failure.set(None);
+                let request = viewer_settings_patch(initial, selected, revision);
                 pending.set(true);
                 spawn(async move {
                     match viewer_server::edit_settings(request).await {
                         Ok(()) => {
-                            persisted.set(selected);
                             saved.set(true);
                             toast.ok("Settings saved");
+                            onchanged.call(());
                         }
-                        Err(error) => toast.error(error.message()),
+                        Err(error) => {
+                            failure.set(Some(error));
+                            toast.error(settings_edit_error_message(error));
+                        }
                     }
                     pending.set(false);
                 });
             },
         }
     }
+}
+
+pub(super) const fn settings_edit_error_message(error: ViewerClientError) -> &'static str {
+    match error {
+        ViewerClientError::Conflict => {
+            "Settings changed since this page loaded. Reload them before saving again."
+        }
+        ViewerClientError::InvalidRequest => {
+            "One or more settings were rejected. Reload the saved values and try again."
+        }
+        ViewerClientError::InvalidSettings => {
+            "The settings file became invalid. Reload it to repair or reset it."
+        }
+        _ => error.message(),
+    }
+}
+
+const fn settings_edit_reload_available(error: ViewerClientError) -> bool {
+    matches!(
+        error,
+        ViewerClientError::Conflict
+            | ViewerClientError::InvalidRequest
+            | ViewerClientError::InvalidSettings
+    )
 }
 
 #[component]

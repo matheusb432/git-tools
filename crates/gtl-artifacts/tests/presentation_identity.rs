@@ -31,6 +31,7 @@ fn pinned_range() -> PinnedRange {
 
 fn view(repo_root: &RepositoryRoot) -> View {
     View {
+        file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
         repo_name: ProjectName::try_from("git-tools").unwrap(),
         repo_root: repo_root.clone(),
         branch: GitHead::Branch(BranchName::try_new("feature").unwrap()),

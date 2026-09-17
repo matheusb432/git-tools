@@ -4,6 +4,7 @@ use gtl_models::{
     diffs::{CommitId, DiffLineCount, ExcludedExtensions},
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
+    settings::UserSettingsRevision,
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPageNumber, HistoryPagePosition, HistoryRenderCount, RenderHistoryId,
@@ -16,7 +17,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 21;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 30;
+
+pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -219,6 +222,7 @@ impl TryFrom<String> for ViewerDiffFileId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerFileSummary {
+    pub source_id: Option<ViewerRowContentId>,
     pub id: ViewerDiffFileId,
     pub path: RepositoryRelativePath,
     pub absolute_path: AbsoluteFilePath,
@@ -562,6 +566,7 @@ pub struct ViewerHistoryPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerProjectDiffExclusions {
+    pub configured: bool,
     pub project_name: ProjectName,
     pub extensions: ExcludedExtensions,
     pub excluded_from_push_all: bool,
@@ -575,8 +580,11 @@ pub struct ViewerDiffExclusions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
+    pub revision: UserSettingsRevision,
+    pub focus_window_on_diff: bool,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub projects_view: gtl_models::settings::ProjectsViewMode,
+    pub projects_sort: gtl_models::settings::ProjectsSort,
     pub projects_page_size: gtl_models::settings::ProjectsPageSize,
     pub configuration_path: Option<String>,
     pub configured_theme: Option<ViewerTheme>,
@@ -603,10 +611,13 @@ pub struct ViewerProjectSettingsUpdate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EditSettingsRequest {
+    pub expected_revision: Option<UserSettingsRevision>,
+    pub focus_window_on_diff: FieldUpdate<bool>,
     pub files_sidebar_visible: FieldUpdate<bool>,
     pub commits_sidebar_visible: FieldUpdate<bool>,
     pub wrap_lines: FieldUpdate<bool>,
     pub projects_view: FieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub projects_sort: FieldUpdate<gtl_models::settings::ProjectsSort>,
     pub projects_page_size: FieldUpdate<gtl_models::settings::ProjectsPageSize>,
     pub theme: FieldUpdate<ViewerTheme>,
     pub layout: FieldUpdate<ViewerDiffLayout>,
@@ -684,7 +695,8 @@ impl ViewerCodeSpan {
 pub struct ViewerCodeLine {
     pub text: String,
     pub spans: Vec<ViewerCodeSpan>,
-    pub long_line_character_count: Option<usize>,
+    /// Characters omitted from the source after the transmitted prefix; absent for complete lines.
+    pub omitted_character_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -918,9 +930,10 @@ pub enum SetViewerPreference {
     Theme(ViewerTheme),
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WatchViewer {
     pub live_tab_id: Option<ViewerTabId>,
+    pub projects: projects::ViewerProjectSelection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -934,6 +947,7 @@ pub struct ViewerLiveCheck {
 pub struct ViewerStateChanged {
     pub version: ViewerVersion,
     pub live_check: Option<ViewerLiveCheck>,
+    pub project_status: Option<projects::ViewerProjectStatusUpdate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

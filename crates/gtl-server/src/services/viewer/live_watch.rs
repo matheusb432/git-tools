@@ -58,6 +58,7 @@ pub(super) fn spawn(
             if sender
                 .send(Ok(v1::WatchViewerResponse {
                     version: version.value(),
+                    project_status: None,
                     live_check: Some(v1::ViewerLiveCheck {
                         tab_id: tab_id.into(),
                         error,

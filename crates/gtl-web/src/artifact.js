@@ -405,14 +405,6 @@
     dialog.querySelector("[data-dialog-initial-focus]")?.focus();
   }
 
-  function resetLongLine(container) {
-    container.dataset.gtlExpanded = "false";
-    const control = container.querySelector(
-      "[data-gtl-action='toggle-long-line']",
-    );
-    if (control !== null) control.setAttribute("aria-expanded", "false");
-  }
-
   function resetPanel(panel) {
     setFilesFolded(panel, false);
     setCopyContext(panel, true);
@@ -427,11 +419,6 @@
       ) {
         file.open = file.dataset.gtlInitialOpen !== "false";
       }
-    }
-    for (
-      const longLine of panel.querySelectorAll("[data-gtl-long-line]")
-    ) {
-      resetLongLine(longLine);
     }
     for (const dialog of panel.querySelectorAll("dialog[open]")) {
       closeDialog(dialog, false);
@@ -628,14 +615,6 @@
     if (feedback) showCopyFeedback(action, copied);
   }
 
-  function toggleLongLine(action) {
-    const container = action.closest("[data-gtl-long-line]");
-    if (container === null) return;
-    const expanded = container.dataset.gtlExpanded !== "true";
-    container.dataset.gtlExpanded = String(expanded);
-    action.setAttribute("aria-expanded", String(expanded));
-  }
-
   root.addEventListener("mouseover", (event) => {
     const target = hoverPopoverTarget(event.target);
     if (target === null || target.contains(event.relatedTarget)) return;
@@ -742,10 +721,6 @@
         event.stopPropagation();
         action.dataset.gtlCopy = "commit";
         void copy(action, false);
-        break;
-      case "toggle-long-line":
-        event.preventDefault();
-        toggleLongLine(action);
         break;
     }
   });

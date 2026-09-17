@@ -28,7 +28,7 @@ pub enum ViewerClientError {
     ResourceExhausted,
     #[error("The desktop viewer is temporarily unavailable.")]
     Unavailable,
-    #[error("The project catalogue is unavailable. Check the GTL server and try Refresh.")]
+    #[error("The project catalogue is unavailable. Check the GTL server and try again.")]
     ProjectsUnavailable,
     #[error("The viewer could not complete this action.")]
     Internal,
@@ -54,7 +54,7 @@ impl ViewerClientError {
             }
             Self::Unavailable => "The desktop viewer is temporarily unavailable.",
             Self::ProjectsUnavailable => {
-                "The project catalogue is unavailable. Check the GTL server and try Refresh."
+                "The project catalogue is unavailable. Check the GTL server and try again."
             }
             Self::Internal => "The viewer could not complete this action.",
         }

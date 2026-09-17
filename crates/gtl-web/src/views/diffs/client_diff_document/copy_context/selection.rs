@@ -130,11 +130,11 @@ fn handle_copy(
     let Some(selection) = selection(&workspace.peek()) else {
         return;
     };
-    if selection.old_side && fully_mounted(selection) {
-        return;
-    }
     match cached_text(&workspace.peek(), selection) {
         Ok(Some(text)) => {
+            if selection.old_side && fully_mounted(selection) {
+                return;
+            }
             if event
                 .clipboard_data()
                 .is_some_and(|data| data.set_data("text/plain", &text.text).is_ok())

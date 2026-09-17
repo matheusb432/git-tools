@@ -4,6 +4,154 @@ use serial_test::serial;
 
 use super::{ServerHarness, TestResult};
 
+#[tokio::test]
+#[serial(server_tracing)]
+async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_disconnect()
+-> TestResult {
+    use std::{process::Command, time::Duration};
+
+    use gtl_wire::{
+        proto::viewer::projects::decode_status_update, viewer::projects::ViewerProjectStatusUpdate,
+    };
+    async fn next(
+        stream: &mut tonic::Streaming<v1::WatchViewerResponse>,
+    ) -> Result<ViewerProjectStatusUpdate, Box<dyn std::error::Error>> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let event = stream.message().await?.ok_or("watch ended")?;
+                if let Some(update) = event.project_status {
+                    return Ok(decode_status_update(update)?);
+                }
+            }
+        })
+        .await?
+    }
+    let home = directories::BaseDirs::new().ok_or("home unavailable")?;
+    let repo = tempfile::Builder::new()
+        .prefix(".gtl-watch-")
+        .tempdir_in(home.home_dir())?;
+    let git = |args: &[&str]| -> TestResult {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(args)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    git(&["init", "-q", "-b", "main"])?;
+    std::fs::write(repo.path().join(".gitignore"), "/target/\n")?;
+    std::fs::write(repo.path().join("file"), "initial\n")?;
+    git(&["add", "."])?;
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.test",
+        "commit",
+        "-qm",
+        "initial",
+    ])?;
+    std::fs::create_dir_all(repo.path().join("target/debug/deps"))?;
+    let data = tempfile::tempdir()?;
+    let server = ServerHarness::start(data.path(), None).await?;
+    let mut projects =
+        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut create = creation("TST", "Status watch");
+    create.project.as_mut().unwrap().source = Some(v1::ProjectSource {
+        source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
+            path: format!("~/{}", repo.path().strip_prefix(home.home_dir())?.display()),
+        })),
+    });
+    projects.create_project(create).await?;
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
+        server.native_channel(),
+        server.authorization(),
+    );
+    for ids in [
+        vec!["TST".into(), "TST".into()],
+        vec!["bad".into()],
+        vec!["TST".into(); 101],
+    ] {
+        assert_eq!(
+            viewer
+                .watch_viewer(v1::WatchViewerRequest {
+                    live_tab_id: None,
+                    project_ids: ids
+                })
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+    let request = v1::WatchViewerRequest {
+        live_tab_id: None,
+        project_ids: vec!["TST".into()],
+    };
+    let mut stream = viewer.watch_viewer(request.clone()).await?.into_inner();
+    let ViewerProjectStatusUpdate::Status(initial) = next(&mut stream).await? else {
+        return Err("initial status unavailable".into());
+    };
+    let before = server.project_status_observations();
+    assert_eq!(before.0, 1);
+    assert!(before.1 > 0);
+    for index in 0..500 {
+        std::fs::write(
+            repo.path().join(format!("target/debug/deps/{index}")),
+            "build",
+        )?;
+    }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(
+        server.project_status_observations().0,
+        before.0,
+        "ignored builds must not run status"
+    );
+    for index in 0..20 {
+        std::fs::write(repo.path().join("file"), format!("edit {index}\n"))?;
+    }
+    let ViewerProjectStatusUpdate::Status(changed) = next(&mut stream).await? else {
+        return Err("changed status unavailable".into());
+    };
+    assert_ne!(initial.status, changed.status);
+    assert_eq!(
+        server.project_status_observations().0,
+        before.0 + 1,
+        "save burst must coalesce"
+    );
+    git(&["checkout", "-qb", "feature"])?;
+    let ViewerProjectStatusUpdate::Status(branch) = next(&mut stream).await? else {
+        return Err("branch status unavailable".into());
+    };
+    assert!(
+        matches!(branch.status, gtl_models::repository::status::RepositoryStatus::Present { head: gtl_models::repository::status::StatusHead::Branch { name, .. }, .. } if name.as_str() == "feature")
+    );
+    drop(stream);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while server.project_status_observations().1 != 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await?;
+    std::fs::write(repo.path().join("untracked"), "new")?;
+    let mut stream = viewer.watch_viewer(request).await?.into_inner();
+    let _cached = next(&mut stream).await?;
+    let ViewerProjectStatusUpdate::Status(fresh) = next(&mut stream).await? else {
+        return Err("resumed status unavailable".into());
+    };
+    assert!(
+        matches!(fresh.status, gtl_models::repository::status::RepositoryStatus::Present { changes: gtl_models::repository::status::StatusChanges::Changed { untracked, .. }, .. } if !untracked.is_zero())
+    );
+    drop(stream);
+    server.stop().await?;
+    Ok(())
+}
+
 fn creation(id: &str, title: &str) -> v1::CreateProjectRequest {
     v1::CreateProjectRequest {
         project_id: id.into(),
@@ -39,7 +187,10 @@ async fn updates_project_comparison_with_validation_and_a_revision_precondition(
         server.authorization(),
     );
     let project = viewer
-        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .list_viewer_projects(page_request(
+            15,
+            v1::list_viewer_projects_request::Cursor::First(v1::Empty {}),
+        ))
         .await?
         .into_inner()
         .projects
@@ -72,7 +223,10 @@ async fn updates_project_comparison_with_validation_and_a_revision_precondition(
         tonic::Code::Aborted
     );
     let updated = viewer
-        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .list_viewer_projects(page_request(
+            15,
+            v1::list_viewer_projects_request::Cursor::First(v1::Empty {}),
+        ))
         .await?
         .into_inner()
         .projects
@@ -90,7 +244,10 @@ async fn updates_project_comparison_with_validation_and_a_revision_precondition(
         })
         .await?;
     let updated = viewer
-        .list_viewer_projects(v1::ListViewerProjectsRequest {})
+        .list_viewer_projects(page_request(
+            15,
+            v1::list_viewer_projects_request::Cursor::First(v1::Empty {}),
+        ))
         .await?
         .into_inner()
         .projects
@@ -445,6 +602,241 @@ async fn resolves_managed_project_sources_including_paused_projects() -> TestRes
             .code(),
         tonic::Code::InvalidArgument
     );
+    server.stop().await?;
+    Ok(())
+}
+
+fn page_request(
+    page_size: u32,
+    cursor: v1::list_viewer_projects_request::Cursor,
+) -> v1::ListViewerProjectsRequest {
+    v1::ListViewerProjectsRequest {
+        sort: None,
+        page_size,
+        cursor: Some(cursor),
+    }
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> TestResult {
+    use v1::list_viewer_projects_request::Cursor;
+
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut projects =
+        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
+        server.native_channel(),
+        server.authorization(),
+    );
+    let first = || page_request(2, Cursor::First(v1::Empty {}));
+    let empty = viewer.list_viewer_projects(first()).await?.into_inner();
+    assert!(empty.projects.is_empty());
+    assert_eq!(empty.total, 0);
+    for (id, name) in [
+        ("EE", "First title"),
+        ("AA", "Last title"),
+        ("DD", "Fourth"),
+        ("BB", "Second"),
+        ("CC", "Third"),
+    ] {
+        projects.create_project(creation(id, name)).await?;
+    }
+    let ids = |page: &v1::ListViewerProjectsResponse| {
+        page.projects
+            .iter()
+            .map(|project| project.id.clone())
+            .collect::<Vec<_>>()
+    };
+    let page = viewer.list_viewer_projects(first()).await?.into_inner();
+    assert_eq!(ids(&page), ["AA", "BB"]);
+    assert_eq!((page.total, page.count_before), (5, 0));
+    let named = viewer
+        .list_viewer_projects(v1::ListViewerProjectsRequest {
+            sort: Some(v1::ProjectsSort::Name as i32),
+            ..first()
+        })
+        .await?
+        .into_inner();
+    assert_eq!(ids(&named), ["EE", "DD"]);
+    let named_next = viewer
+        .list_viewer_projects(v1::ListViewerProjectsRequest {
+            sort: Some(v1::ProjectsSort::Name as i32),
+            ..page_request(2, Cursor::AfterProjectId("DD".into()))
+        })
+        .await?
+        .into_inner();
+    assert_eq!(ids(&named_next), ["AA", "BB"]);
+    assert_eq!(named_next.count_before, 2);
+    let page = viewer
+        .list_viewer_projects(page_request(2, Cursor::AfterProjectId("BB".into())))
+        .await?
+        .into_inner();
+    assert_eq!(ids(&page), ["CC", "DD"]);
+    assert_eq!(page.count_before, 2);
+    let last = viewer
+        .list_viewer_projects(page_request(2, Cursor::Last(v1::Empty {})))
+        .await?
+        .into_inner();
+    assert_eq!(ids(&last), ["EE"]);
+    assert_eq!(last.count_before, 4);
+    let previous = viewer
+        .list_viewer_projects(page_request(2, Cursor::BeforeProjectId("EE".into())))
+        .await?
+        .into_inner();
+    assert_eq!(ids(&previous), ["CC", "DD"]);
+    let previous = viewer
+        .list_viewer_projects(page_request(2, Cursor::BeforeProjectId("CC".into())))
+        .await?
+        .into_inner();
+    assert_eq!(ids(&previous), ["AA", "BB"]);
+    assert!(
+        viewer
+            .list_viewer_projects(page_request(2, Cursor::AfterProjectId("EE".into())))
+            .await?
+            .into_inner()
+            .projects
+            .is_empty()
+    );
+    for request in [
+        page_request(0, Cursor::First(v1::Empty {})),
+        page_request(101, Cursor::First(v1::Empty {})),
+        page_request(u32::MAX, Cursor::First(v1::Empty {})),
+        page_request(2, Cursor::AfterProjectId(String::new())),
+        page_request(2, Cursor::BeforeProjectId("invalid".into())),
+        v1::ListViewerProjectsRequest {
+            sort: None,
+            page_size: 2,
+            cursor: None,
+        },
+    ] {
+        assert_eq!(
+            viewer
+                .list_viewer_projects(request)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::InvalidArgument
+        );
+    }
+    let workers = server
+        .project_status_workers()
+        .acquire_many_owned(4)
+        .await?;
+    let mut status_client = viewer.clone();
+    let mut pending = tokio::spawn(async move {
+        status_client
+            .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+                project_id: "AA".into(),
+            })
+            .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut pending)
+            .await
+            .is_err()
+    );
+    let page = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        viewer.list_viewer_projects(first()),
+    )
+    .await??
+    .into_inner();
+    assert_eq!(ids(&page), ["AA", "BB"]);
+    drop(workers);
+    assert_eq!(pending.await??.into_inner().project_id, "AA");
+    let status = viewer
+        .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+            project_id: "AA".into(),
+        })
+        .await?
+        .into_inner();
+    assert_eq!(status.project_id, "AA");
+    assert!(matches!(
+        status.status,
+        Some(v1::get_viewer_project_status_response::Status::Absent(_))
+    ));
+    for (id, code) in [
+        ("invalid", tonic::Code::InvalidArgument),
+        ("ZZ", tonic::Code::NotFound),
+    ] {
+        assert_eq!(
+            viewer
+                .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+                    project_id: id.into()
+                })
+                .await
+                .unwrap_err()
+                .code(),
+            code
+        );
+    }
+    projects
+        .pause_project(v1::PauseProjectRequest {
+            project_id: "CC".into(),
+            mode: v1::ProjectOperationMode::Apply.into(),
+        })
+        .await?;
+    projects
+        .unmanage_projects(v1::UnmanageProjectsRequest {
+            project_ids: vec!["BB".into()],
+            mode: v1::ProjectOperationMode::Apply.into(),
+        })
+        .await?;
+    let page = viewer
+        .list_viewer_projects(page_request(2, Cursor::AfterProjectId("BB".into())))
+        .await?
+        .into_inner();
+    assert_eq!(ids(&page), ["DD", "EE"]);
+    assert_eq!(page.total, 3);
+    for id in ["BB", "CC"] {
+        assert_eq!(
+            viewer
+                .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+                    project_id: id.into()
+                })
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::NotFound
+        );
+    }
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn project_status_watch_bounds_waiting_pages_and_cancels_the_previous_page() -> TestResult {
+    let data = tempfile::tempdir()?;
+    let server = ServerHarness::start(data.path(), None).await?;
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
+        server.native_channel(),
+        server.authorization(),
+    );
+    let request = v1::WatchViewerRequest {
+        live_tab_id: None,
+        project_ids: vec!["TST".into()],
+    };
+    let first = viewer.watch_viewer(request.clone()).await?.into_inner();
+    let mut waiting = viewer.watch_viewer(request.clone()).await?.into_inner();
+    assert_eq!(
+        viewer.watch_viewer(request).await.unwrap_err().code(),
+        tonic::Code::ResourceExhausted
+    );
+    drop(first);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let event = waiting.message().await?.ok_or("watch ended")?;
+            if let Some(update) = event.project_status {
+                assert_eq!(update.project_id, "TST");
+                return Ok::<_, Box<dyn std::error::Error>>(());
+            }
+        }
+    })
+    .await??;
+    drop(waiting);
     server.stop().await?;
     Ok(())
 }

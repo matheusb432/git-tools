@@ -14,6 +14,7 @@ use gtl_infra::{
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) viewer_file_filter_requests: Arc<tokio::sync::Semaphore>,
     pub(crate) git: HybridGitClient,
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: ArtifactRenderer,
@@ -28,6 +29,15 @@ pub(crate) struct AppState {
     pub(crate) viewer_row_sessions: Arc<tokio::sync::Semaphore>,
     pub(crate) viewer_row_workers: Arc<tokio::sync::Semaphore>,
     pub(crate) viewer_searches: ViewerWorkRequests,
+    pub(crate) viewer_project_status_requests: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_project_status_workers: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_project_index_requests: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_project_status_checks: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) viewer_project_watch_registrations: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) viewer_project_watch_requests: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_project_watch_workers: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_project_status_cache:
+        Arc<Mutex<gtl_application::projects::status_cache::ProjectStatusCache>>,
     pub(crate) live_refresh_permits: Arc<tokio::sync::Semaphore>,
 }
 
@@ -43,6 +53,7 @@ impl AppState {
         let database = SqliteAppState::open(data_root)
             .with_context(|| format!("opening application state at {}", data_root.display()))?;
         Ok(Self {
+            viewer_file_filter_requests: Arc::new(tokio::sync::Semaphore::new(1)),
             git: HybridGitClient,
             artifacts: StoreArtifacts,
             renderer: ArtifactRenderer,
@@ -61,6 +72,14 @@ impl AppState {
                 gtl_wire::viewer::VIEWER_ROW_SESSIONS_MAX,
             )),
             viewer_searches: ViewerWorkRequests::default(),
+            viewer_project_status_requests: Arc::new(tokio::sync::Semaphore::new(100)),
+            viewer_project_status_workers: Arc::new(tokio::sync::Semaphore::new(4)),
+            viewer_project_index_requests: Arc::new(tokio::sync::Semaphore::new(1)),
+            viewer_project_status_checks: Arc::default(),
+            viewer_project_watch_registrations: Arc::default(),
+            viewer_project_watch_requests: Arc::new(tokio::sync::Semaphore::new(2)),
+            viewer_project_watch_workers: Arc::new(tokio::sync::Semaphore::new(1)),
+            viewer_project_status_cache: Arc::default(),
             live_refresh_permits: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
