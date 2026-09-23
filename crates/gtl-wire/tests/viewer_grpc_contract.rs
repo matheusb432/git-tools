@@ -90,6 +90,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
         version: ViewerVersion::new(4),
         focus_request_version: Some(ViewerVersion::new(3)),
         tabs: vec![ViewerTab {
+            custom_name: None,
             pinned: false,
             id: ViewerTabId::try_new(7).unwrap(),
             label: "git-tools".into(),
@@ -98,8 +99,9 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
         }],
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            accessibility: gtl_models::settings::ViewerAccessibility::default(),
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
-            theme: ViewerTheme::Graphite,
+            theme: ViewerTheme::Dark,
             render_options: gtl_wire::viewer::ViewerRenderOptions {
                 wrap_lines: true,
                 layout: ViewerDiffLayout::Split,
@@ -157,6 +159,7 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
         tabs: Vec::new(),
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            accessibility: gtl_models::settings::ViewerAccessibility::default(),
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: viewer_identity().unwrap().render_options,
@@ -223,6 +226,10 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                     state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
                 }),
                 preferences: Some(v1::ViewerPreferences {
+                    accessibility: Some(v1::ViewerAccessibility {
+                        ui_scale_percent: 100,
+                        reduce_motion: false,
+                    }),
                     sidebars: Some(v1::ViewerSidebarVisibility {
                         files: true,
                         commits: true,
@@ -484,6 +491,10 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 #[test]
 fn settings_codec_round_trips_exclusions_and_effective_values() {
     let settings = ViewerUserSettings {
+        accessibility: gtl_models::settings::ViewerAccessibility {
+            ui_scale_percent: gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
+            reduce_motion: true,
+        },
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x22; 32]),
         focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
@@ -494,8 +505,8 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
         projects_sort: gtl_models::settings::ProjectsSort::BranchDescending,
         projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
-        configured_theme: Some(ViewerTheme::Hearth),
-        effective_theme: ViewerTheme::Hearth,
+        configured_theme: Some(ViewerTheme::Carbon),
+        effective_theme: ViewerTheme::Carbon,
         render_options: gtl_wire::viewer::ViewerRenderOptions {
             wrap_lines: false,
             layout: ViewerDiffLayout::Split,
@@ -533,6 +544,10 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
 #[test]
 fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
     let request = EditSettingsRequest {
+        ui_scale_percent: FieldUpdate::Update(
+            gtl_models::settings::ViewerScalePercent::try_new(300).unwrap(),
+        ),
+        reduce_motion: FieldUpdate::Update(true),
         expected_revision: Some(gtl_models::settings::UserSettingsRevision::from_digest(
             [0x33; 32],
         )),
@@ -564,6 +579,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         FieldUpdate::Update(true),
     ] {
         let request = EditSettingsRequest {
+            reduce_motion: wrap_lines.clone(),
             focus_window_on_diff: wrap_lines.clone(),
             files_sidebar_visible: wrap_lines.clone(),
             commits_sidebar_visible: wrap_lines.clone(),
@@ -787,4 +803,31 @@ fn exclusion_updates_preserve_presence_and_normalize_the_client_boundary() {
         decoded.extensions,
         FieldUpdate::Update(ExcludedExtensions::new(["lock", "md"]))
     );
+}
+
+#[test]
+fn accessibility_patch_preserves_clear_and_rejects_invalid_scale() {
+    for update in [
+        FieldUpdate::Unchanged,
+        FieldUpdate::Clear,
+        FieldUpdate::Update(gtl_models::settings::ViewerScalePercent::try_new(125).unwrap()),
+    ] {
+        let request = EditSettingsRequest {
+            ui_scale_percent: update,
+            ..Default::default()
+        };
+        assert_eq!(
+            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            request
+        );
+    }
+    for value in [0, 99, 126, 301, u32::MAX] {
+        let request = v1::EditSettingsRequest {
+            ui_scale_percent: Some(v1::ViewerScaleFieldUpdate {
+                operation: Some(v1::viewer_scale_field_update::Operation::Update(value)),
+            }),
+            ..Default::default()
+        };
+        assert!(decode_edit_settings_request(request).is_err());
+    }
 }

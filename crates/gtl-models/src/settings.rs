@@ -62,6 +62,20 @@ pub struct ProjectsPreferences {
     pub sort: ProjectsSort,
 }
 
+#[nutype::nutype(
+    validate(predicate = |value| (100..=300).contains(value) && value.is_multiple_of(25)),
+    default = 100,
+    derive(Debug, Clone, Copy, Default, PartialEq, Eq, Display, Serialize, Deserialize)
+)]
+pub struct ViewerScalePercent(u32);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ViewerAccessibility {
+    pub ui_scale_percent: ViewerScalePercent,
+    /// Also honors the system preference when false.
+    pub reduce_motion: bool,
+}
+
 /// SHA-256 identity of one exact serialized user-settings document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UserSettingsRevision([u8; 32]);
@@ -187,6 +201,7 @@ impl PushAllExclusions {
 // TODO: remove Clone once a store-owned smart pointer is added.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSettings {
+    accessibility: ViewerAccessibility,
     focus_window_on_diff: bool,
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
@@ -212,6 +227,7 @@ impl UserSettings {
         push_all_exclusions: PushAllExclusions,
     ) -> Self {
         Self {
+            accessibility: ViewerAccessibility::default(),
             focus_window_on_diff: true,
             theme,
             viewer_render_options,
@@ -222,6 +238,19 @@ impl UserSettings {
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
         }
+    }
+
+    #[must_use]
+    pub fn with_accessibility(self, accessibility: ViewerAccessibility) -> Self {
+        Self {
+            accessibility,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn accessibility(&self) -> ViewerAccessibility {
+        self.accessibility
     }
 
     #[must_use]
@@ -373,7 +402,7 @@ mod tests {
     #[test]
     fn accessors_expose_the_complete_immutable_snapshot() {
         let settings = UserSettings::new(
-            Some(Theme::Hearth),
+            Some(Theme::Mirage),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             ViewerKeybindings::default(),
             false,
@@ -381,7 +410,7 @@ mod tests {
             PushAllExclusions::new([project("sample_project")]),
         );
 
-        assert_eq!(settings.theme(), Some(Theme::Hearth));
+        assert_eq!(settings.theme(), Some(Theme::Mirage));
         assert_eq!(
             settings.viewer_render_options(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)

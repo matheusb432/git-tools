@@ -348,6 +348,135 @@ pub struct ProjectsFixture {
     pub missing: PathBuf,
 }
 
+pub struct PushFixture {
+    pub repository: PathBuf,
+    remote: PathBuf,
+    pub first: String,
+    pub latest: String,
+}
+
+pub struct PushGate {
+    gate: PathBuf,
+    entered: PathBuf,
+}
+
+impl PushGate {
+    pub fn entered(&self) -> &Path {
+        &self.entered
+    }
+
+    pub fn release(&self) -> Result<()> {
+        fs::remove_file(&self.gate).context("release fixture push gate")
+    }
+}
+
+impl Drop for PushGate {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.gate);
+    }
+}
+
+impl PushFixture {
+    pub fn create(root: &Path) -> Result<Self> {
+        let repository =
+            create_changed_repository(root, "push-review", "push-first-marker", "push first")?;
+        let remote = root.join("push-remote.git");
+        git(
+            root,
+            [
+                "clone",
+                "--bare",
+                "--quiet",
+                path_as_str(&repository)?,
+                path_as_str(&remote)?,
+            ],
+        )?;
+        git(
+            &repository,
+            ["remote", "add", "origin", path_as_str(&remote)?],
+        )?;
+        git(&repository, ["fetch", "-q", "origin"])?;
+        git(&repository, ["branch", "--set-upstream-to=origin/main"])?;
+        let first = Self::revision(&repository, "HEAD")?;
+        fs::write(
+            repository.join("work.txt"),
+            "base\npush-first-marker\npush-latest-marker\n",
+        )?;
+        git(&repository, ["add", "work.txt"])?;
+        git(&repository, ["commit", "-qm", "push latest"])?;
+        let latest = Self::revision(&repository, "HEAD")?;
+        fs::write(repository.join("untracked.txt"), "keep local\n")?;
+        Ok(Self {
+            repository,
+            remote,
+            first,
+            latest,
+        })
+    }
+
+    fn revision(path: &Path, revision: &str) -> Result<String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["rev-parse", revision])
+            .output()?;
+        anyhow::ensure!(output.status.success(), "read fixture revision");
+        Ok(String::from_utf8(output.stdout)?.trim().into())
+    }
+
+    pub fn remote_head(&self) -> Result<String> {
+        Self::revision(&self.remote, "main")
+    }
+
+    pub fn hold_remote_push(&self) -> Result<PushGate> {
+        let hooks = self.remote.join("hooks");
+        let gate = hooks.join("push-gate");
+        let entered = hooks.join("push-entered");
+        fs::write(&gate, "")?;
+        let hook = hooks.join("pre-receive");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nhook_dir=\"$(dirname \"$0\")\"\ntouch \"$hook_dir/push-entered\"\nattempt=0\nwhile [ -e \"$hook_dir/push-gate\" ] && [ \"$attempt\" -lt 300 ]; do\n  sleep 0.1\n  attempt=$((attempt + 1))\ndone\n[ ! -e \"$hook_dir/push-gate\" ]\n",
+        )?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(PushGate { gate, entered })
+    }
+
+    pub fn add_newer(&self) -> Result<()> {
+        fs::write(
+            self.repository.join("work.txt"),
+            "base\npush-first-marker\npush-latest-marker\npush-newer-marker\n",
+        )?;
+        git(&self.repository, ["add", "work.txt"])?;
+        git(&self.repository, ["commit", "-qm", "push newer"])
+    }
+
+    pub fn append_commit(&self, name: &str) -> Result<String> {
+        let path = self.repository.join("work.txt");
+        let mut content = fs::read_to_string(&path)?;
+        content.push_str(name);
+        content.push('\n');
+        fs::write(path, content)?;
+        git(&self.repository, ["add", "work.txt"])?;
+        git(&self.repository, ["commit", "-qm", name])?;
+        Self::revision(&self.repository, "HEAD")
+    }
+
+    pub fn rewrite(&self) -> Result<()> {
+        git(&self.repository, ["reset", "--soft", "origin/main"])?;
+        git(&self.repository, ["commit", "-qm", "push rewritten"])
+    }
+
+    pub fn soft_reset(&self, commit: &str) -> Result<()> {
+        git(&self.repository, ["reset", "--soft", commit])
+    }
+}
+
 impl ProjectsFixture {
     pub fn use_local_comparison(&self) -> Result<()> {
         git(&self.alpha, ["branch", "review-base", "main"])?;

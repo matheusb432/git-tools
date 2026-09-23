@@ -274,6 +274,9 @@ pub enum RecentRenderRowError {
 pub(super) fn store_test() -> Connection {
     let connection = Connection::open_in_memory().unwrap();
     connection
+        .pragma_update(None, "foreign_keys", true)
+        .unwrap();
+    connection
         .execute_batch(
             "CREATE TABLE project_render_recency (source_value TEXT PRIMARY KEY, rendered_at TEXT NOT NULL) STRICT;
         CREATE TABLE render_sources (
@@ -309,6 +312,8 @@ pub(super) fn store_test() -> Connection {
           repo_name    TEXT NOT NULL,
           range_label  TEXT NOT NULL,
           rendered_at  TEXT NOT NULL,
+          render_status TEXT NOT NULL DEFAULT 'success'
+            CHECK (render_status IN ('pending', 'success', 'error')),
           CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
           CHECK ((operation_id = 1) = (target_id IS NOT NULL))
         ) STRICT;
@@ -318,11 +323,27 @@ pub(super) fn store_test() -> Connection {
           repo_name,
           coalesce(pinned_base, X''),
           coalesce(pinned_head, X'')
-        );
+        ) WHERE render_status = 'success';
         CREATE INDEX recent_renders_repo_name_idx
         ON recent_renders (repo_name);
         CREATE INDEX render_sources_value_idx
-        ON render_sources (value);",
+        ON render_sources (value);
+        CREATE TABLE render_errors (
+          id INTEGER PRIMARY KEY,
+          recent_render_id INTEGER NOT NULL
+            REFERENCES recent_renders (id) ON DELETE CASCADE,
+          error_code TEXT NOT NULL
+            CHECK (error_code IN (
+              'repository_directory_not_found',
+              'repository_directory_not_git_repository',
+              'source_unavailable',
+              'render_failed',
+              'publication_failed'
+            )),
+          error_detail TEXT NOT NULL CHECK (length(error_detail) > 0)
+        ) STRICT;
+        CREATE INDEX render_errors_recent_render_id_idx
+        ON render_errors (recent_render_id, id);",
         )
         .unwrap();
     connection.execute_batch(

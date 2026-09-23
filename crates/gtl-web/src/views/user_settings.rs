@@ -8,7 +8,10 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
-        ui::{Button, ButtonVariant, PageNotice, ScrollArea, Skeleton, use_toast},
+        ui::{
+            Button, ButtonVariant, PageNotice, ScrollArea, SectionedSurface, SectionedSurfaceBody,
+            SectionedSurfaceHeader, Skeleton, use_toast,
+        },
         viewer_client::ViewerClientError,
         viewer_theme::viewer_theme_label,
     },
@@ -116,6 +119,7 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
     rsx! {
         SettingsEditableForm {
             revision: settings.revision,
+            accessibility: settings.accessibility,
             focus_window_on_diff: settings.focus_window_on_diff,
             push_confirmation_required: settings.push_confirmation_required,
             configured_theme: settings.configured_theme,
@@ -123,27 +127,35 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
             onchanged,
         }
 
-        section { class: "settings-card", aria_label: "Resolved viewer settings",
-            SettingsTableHeader {
-                icon: rsx! {
-                    FileCog {}
-                },
-                subtitle: "Current sources and effective values.",
-                "Resolved configuration"
+        SectionedSurface { aria_label: "Resolved viewer settings",
+            SectionedSurfaceHeader { class: "px-4 py-3",
+                SettingsCardHeading {
+                    icon: rsx! {
+                        FileCog {}
+                    },
+                    subtitle: "Current sources and effective values.",
+                    "Resolved configuration"
+                }
             }
-            dl { class: "settings-rows",
-                SettingsRow { term: "Configuration file", "{configuration_path}" }
-                SettingsRow { term: "Effective theme", "{viewer_theme_label(settings.effective_theme)}" }
+            SectionedSurfaceBody {
+                dl { class: "settings-rows",
+                    SettingsRow { term: "Configuration file", "{configuration_path}" }
+                    SettingsRow { term: "Effective theme", "{viewer_theme_label(settings.effective_theme)}" }
+                }
             }
         }
 
-        section { class: "settings-card", aria_label: "Default diff exclusions",
-            SettingsTableHeader { subtitle: "Used when a project has no project-specific exclusion list.",
-                "Default diff exclusions"
+        SectionedSurface { aria_label: "Default diff exclusions",
+            SectionedSurfaceHeader { class: "px-4 py-3",
+                SettingsCardHeading { subtitle: "Used when a project has no project-specific exclusion list.",
+                    "Default diff exclusions"
+                }
             }
-            exclusion_editor::ExclusionEditor {
-                configured: settings.diff_exclusions.default_extensions.clone(),
-                onchanged,
+            SectionedSurfaceBody {
+                exclusion_editor::ExclusionEditor {
+                    configured: settings.diff_exclusions.default_extensions.clone(),
+                    onchanged,
+                }
             }
         }
     }
@@ -152,6 +164,7 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
 #[component]
 fn SettingsEditableForm(
     revision: gtl_models::settings::UserSettingsRevision,
+    accessibility: gtl_models::settings::ViewerAccessibility,
     focus_window_on_diff: bool,
     push_confirmation_required: bool,
     configured_theme: Option<ViewerTheme>,
@@ -164,6 +177,7 @@ fn SettingsEditableForm(
         render_options,
         focus_window_on_diff,
         push_confirmation_required,
+        accessibility,
     );
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
@@ -239,13 +253,13 @@ const fn settings_edit_reload_available(error: ViewerClientError) -> bool {
 }
 
 #[component]
-fn SettingsTableHeader(
+fn SettingsCardHeading(
     icon: Option<Element>,
     subtitle: Option<String>,
     children: Element,
 ) -> Element {
     rsx! {
-        header { class: "settings-card-header px-4 py-3",
+        div {
             div { class: "flex items-center",
                 if let Some(icon) = icon {
                     span { class: "mr-2 text-acc", aria_hidden: "true", {icon} }

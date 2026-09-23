@@ -552,7 +552,7 @@ mod tests {
 
         assert!(lookup_by_range(tmp.path(), "repo0000", &dark_key).is_some());
         let light_key = ArtifactRangeKey {
-            theme: Some(Theme::Light),
+            theme: Some(Theme::Glacier),
             ..dark_key
         };
         assert!(lookup_by_range(tmp.path(), "repo0000", &light_key).is_none());

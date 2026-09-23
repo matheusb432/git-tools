@@ -24,7 +24,7 @@ pub(crate) use repository::RepositoryGrpcService;
 pub(crate) use settings::SettingsGrpcService;
 pub(crate) use tag::TagGrpcService;
 use tonic::{Code, Status};
-pub(crate) use viewer::ViewerGrpcService;
+pub(crate) use viewer::{ViewerGrpcService, ViewerServerInfo};
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {
     notes
@@ -72,9 +72,6 @@ pub(crate) fn required<T>(value: Option<T>, field: &'static str) -> Result<T, St
 
 pub(crate) fn project_client_error(error: &ProjectClientError) -> Status {
     match error {
-        ProjectClientError::InvalidConfiguration(_) => {
-            project_client_warning(error, Code::FailedPrecondition)
-        }
         ProjectClientError::Unavailable(_) => project_client_warning(error, Code::Unavailable),
         ProjectClientError::InvalidData(_) => project_client_failure(error, Code::DataLoss),
     }
@@ -147,8 +144,7 @@ mod tests {
     use std::io;
 
     use gtl_application::ports::{
-        ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
-        ProjectCatalogueUnavailableError, ProjectClientError,
+        ProjectCatalogueDataError, ProjectCatalogueUnavailableError, ProjectClientError,
     };
     use tonic::Code;
 
@@ -156,12 +152,7 @@ mod tests {
 
     #[test]
     fn maps_project_catalogue_failures_by_caller_relevant_semantics() {
-        let cases: [(ProjectClientError, Code, &str); 3] = [
-            (
-                ProjectCatalogueConfigurationError::HomeDirectoryUnavailable.into(),
-                Code::FailedPrecondition,
-                "project catalogue home directory is unavailable",
-            ),
+        let cases: [(ProjectClientError, Code, &str); 2] = [
             (
                 ProjectCatalogueUnavailableError::Dependency(anyhow::Error::new(io::Error::new(
                     io::ErrorKind::TimedOut,

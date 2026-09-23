@@ -1,14 +1,137 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
-use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp};
-use rusqlite::{Connection, params};
+use std::error::Error;
+
+use anyhow::Context as _;
+use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp, viewer::RenderHistoryId};
+use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use crate::{
     history::persistence::RecipeColumns, ports::Clock, projects::record_project_render,
-    recipes::Recipe,
+    recipes::Recipe, viewer::initial_recipe_label,
 };
 
 const RECENT_RENDERS_CAP: usize = 500;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderStatus {
+    Pending,
+    Success,
+    Error,
+}
+
+impl RenderStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Success => "success",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl TryFrom<String> for RenderStatus {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self, anyhow::Error> {
+        match value.as_str() {
+            "pending" => Ok(Self::Pending),
+            "success" => Ok(Self::Success),
+            "error" => Ok(Self::Error),
+            _ => anyhow::bail!("unknown render status '{value}'"),
+        }
+    }
+}
+
+/// Classifies persisted render diagnostics without parsing their detail text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderErrorCode {
+    RepositoryDirectoryNotFound,
+    RepositoryDirectoryNotGitRepository,
+    SourceUnavailable,
+    RenderFailed,
+    PublicationFailed,
+}
+
+impl RenderErrorCode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::RepositoryDirectoryNotFound => "repository_directory_not_found",
+            Self::RepositoryDirectoryNotGitRepository => "repository_directory_not_git_repository",
+            Self::SourceUnavailable => "source_unavailable",
+            Self::RenderFailed => "render_failed",
+            Self::PublicationFailed => "publication_failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderError {
+    code: RenderErrorCode,
+    detail: String,
+}
+
+/// A non-empty collection of detailed errors for one failed render attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderFailure {
+    primary: RenderError,
+    related: Vec<RenderError>,
+}
+
+impl RenderFailure {
+    /// Creates a failure with one classified diagnostic.
+    #[must_use]
+    pub fn new(code: RenderErrorCode, detail: impl Into<String>) -> Self {
+        Self {
+            primary: RenderError {
+                code,
+                detail: error_detail(detail.into()),
+            },
+            related: Vec::new(),
+        }
+    }
+
+    /// Creates a failure from an error and each source in its causal chain.
+    #[must_use]
+    pub fn from_error(code: RenderErrorCode, error: &(dyn Error + 'static)) -> Self {
+        let mut failure = Self::new(code, error.to_string());
+        let mut source = error.source();
+        while let Some(error) = source {
+            failure.related.push(RenderError {
+                code,
+                detail: error_detail(error.to_string()),
+            });
+            source = error.source();
+        }
+        failure
+    }
+
+    fn errors(&self) -> impl Iterator<Item = &RenderError> {
+        std::iter::once(&self.primary).chain(&self.related)
+    }
+}
+
+fn error_detail(detail: String) -> String {
+    if detail.is_empty() {
+        "no additional error detail".to_owned()
+    } else {
+        detail
+    }
+}
+
+/// Starts a render attempt before its background computation begins.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartRender {
+    recipe: Recipe,
+}
+
+impl StartRender {
+    /// Creates a request for a new pending attempt.
+    #[must_use]
+    pub fn new(recipe: Recipe) -> Self {
+        Self { recipe }
+    }
+}
 
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,27 +149,79 @@ pub enum RecordRenderError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Records a render through the application database connection.
-pub fn execute(
-    req: &RecordRender,
-    connection: &mut Connection,
-    clock: &impl Clock,
-) -> Result<(), RecordRenderError> {
-    let rendered_at = clock.now().map_err(anyhow::Error::from)?;
-    record_render(connection, req, &rendered_at)?;
-    Ok(())
+impl From<rusqlite::Error> for RecordRenderError {
+    fn from(error: rusqlite::Error) -> Self {
+        Self::Unexpected(error.into())
+    }
 }
 
-fn record_render(
+/// Creates a pending render attempt through the application database connection.
+///
+/// # Errors
+///
+/// Returns an error when the clock, database write, or generated identity fails.
+pub fn start(
+    request: &StartRender,
     connection: &mut Connection,
-    request: &RecordRender,
+    clock: &impl Clock,
+) -> Result<RenderHistoryId, RecordRenderError> {
+    let rendered_at = clock.now().map_err(anyhow::Error::from)?;
+    start_render(connection, request, &rendered_at).map_err(Into::into)
+}
+
+fn start_render(
+    connection: &mut Connection,
+    request: &StartRender,
     rendered_at: &MachineTimestamp,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RenderHistoryId> {
     let columns = RecipeColumns::from_recipe(&request.recipe);
     let transaction = connection.transaction()?;
+    let source_id = touch_render_source(&transaction, &columns, rendered_at)?;
+    let title = initial_recipe_label::execute(&request.recipe);
+    let repo_name = request.recipe.cwd().project_name();
+    let render_id: i64 = transaction
+        .prepare_cached(
+            "INSERT INTO recent_renders
+               (source_id, operation_id, target_id, argument,
+                pinned_base, pinned_head, recipe_name,
+                title, repo_name, range_label, rendered_at, render_status)
+             VALUES
+               (?1,
+                (SELECT id FROM render_operations WHERE name = ?2),
+                (SELECT id FROM render_targets WHERE name = ?3),
+                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             RETURNING id",
+        )?
+        .query_row(
+            params![
+                source_id,
+                columns.operation,
+                columns.target,
+                columns.argument,
+                columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
+                columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
+                columns.recipe_name.as_ref().map(|name| name.as_str()),
+                title,
+                repo_name.as_str(),
+                pending_range_label(&request.recipe),
+                rendered_at.as_ref(),
+                RenderStatus::Pending.as_str(),
+            ],
+            |row| row.get(0),
+        )?;
+    prune_recent_renders(&transaction)?;
+    transaction.commit()?;
+    RenderHistoryId::try_new(render_id).map_err(anyhow::Error::from)
+}
+
+fn touch_render_source(
+    transaction: &Transaction<'_>,
+    columns: &RecipeColumns,
+    rendered_at: &MachineTimestamp,
+) -> anyhow::Result<i64> {
     // The upsert touches updated_at so a source row tracks when a render last
     // used it; created_at keeps the first sighting.
-    let source_id: i64 = transaction
+    transaction
         .prepare_cached(
             "INSERT INTO render_sources (kind, value, created_at)
              VALUES (?1, ?2, ?3)
@@ -60,49 +235,117 @@ fn record_render(
                 rendered_at.as_ref()
             ],
             |row| row.get(0),
-        )?;
-    {
-        let mut statement = transaction.prepare_cached(
-            "INSERT INTO recent_renders
-               (source_id, operation_id, target_id, argument,
-                pinned_base, pinned_head, recipe_name,
-                title, repo_name, range_label, rendered_at)
-             VALUES
-               (?1,
-                (SELECT id FROM render_operations WHERE name = ?2),
-                (SELECT id FROM render_targets WHERE name = ?3),
-                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT DO NOTHING",
-        )?;
-        statement.execute(params![
-            source_id,
-            columns.operation,
-            columns.target,
-            columns.argument,
-            columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
-            columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
-            columns.recipe_name.as_ref().map(|name| name.as_str()),
-            request.title,
-            request.repo_name.as_str(),
-            request.range_label,
-            rendered_at.as_ref(),
-        ])?;
+        )
+        .map_err(Into::into)
+}
+
+fn prune_recent_renders(transaction: &Transaction<'_>) -> anyhow::Result<()> {
+    transaction.execute(
+        "DELETE FROM recent_renders WHERE id NOT IN
+         (SELECT id FROM recent_renders ORDER BY id DESC LIMIT ?1)",
+        params![i64::try_from(RECENT_RENDERS_CAP)?],
+    )?;
+    // Pruning can orphan a source; collect it in the same transaction so
+    // render_sources never grows past what recent_renders references.
+    collect_orphaned_render_sources(transaction)?;
+    Ok(())
+}
+
+fn collect_orphaned_render_sources(transaction: &Transaction<'_>) -> anyhow::Result<()> {
+    transaction.execute(
+        "DELETE FROM render_sources WHERE id NOT IN
+         (SELECT source_id FROM recent_renders)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn pending_range_label(recipe: &Recipe) -> String {
+    match &recipe.op {
+        crate::recipes::RecipeOp::Diff { target } => match target {
+            crate::recipes::RecipeTarget::Unpushed { .. } => "unpushed".to_owned(),
+            crate::recipes::RecipeTarget::Base { rev } => format!("{rev}->working"),
+            crate::recipes::RecipeTarget::Range { range, .. } => range.to_string(),
+            crate::recipes::RecipeTarget::Merge { base, .. } => format!("{base}->HEAD"),
+            crate::recipes::RecipeTarget::Last { count, .. } => format!("last {count}"),
+        },
+        crate::recipes::RecipeOp::MergeDiff { base, .. } => base
+            .as_ref()
+            .map_or_else(|| "main->HEAD".to_owned(), |base| format!("{base}->HEAD")),
     }
-    {
-        let mut statement = transaction.prepare_cached(
-            "DELETE FROM recent_renders WHERE id NOT IN
-             (SELECT id FROM recent_renders ORDER BY id DESC LIMIT ?1)",
+}
+
+/// Changes a pending attempt to success and writes its computed metadata.
+///
+/// # Errors
+///
+/// Returns an error when the attempt is absent, no longer pending, or cannot be persisted.
+pub fn succeed(
+    render_id: RenderHistoryId,
+    request: &RecordRender,
+    connection: &mut Connection,
+) -> Result<RenderHistoryId, RecordRenderError> {
+    let columns = RecipeColumns::from_recipe(&request.recipe);
+    let transaction = connection.transaction()?;
+    let rendered_at = pending_rendered_at(&transaction, render_id)?;
+    let source_id = touch_render_source(&transaction, &columns, &rendered_at)?;
+    let duplicate_id = transaction
+        .query_row(
+            "SELECT id FROM recent_renders
+             WHERE id != ?1
+               AND render_status = 'success'
+               AND source_id = ?2
+               AND repo_name = ?3
+               AND pinned_base IS ?4
+               AND pinned_head IS ?5",
+            params![
+                i64::from(render_id),
+                source_id,
+                request.repo_name.as_str(),
+                columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
+                columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
+            ],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    if duplicate_id.is_some() {
+        transaction.execute(
+            "DELETE FROM recent_renders WHERE id = ?1 AND render_status = 'pending'",
+            [i64::from(render_id)],
         )?;
-        statement.execute(params![i64::try_from(RECENT_RENDERS_CAP)?])?;
-    }
-    {
-        // Pruning can orphan a source; collect it in the same transaction so
-        // render_sources never grows past what recent_renders references.
-        let mut statement = transaction.prepare_cached(
-            "DELETE FROM render_sources WHERE id NOT IN
-             (SELECT source_id FROM recent_renders)",
+    } else {
+        let updated = transaction.execute(
+            "UPDATE recent_renders
+             SET source_id = ?2,
+                 operation_id = (SELECT id FROM render_operations WHERE name = ?3),
+                 target_id = (SELECT id FROM render_targets WHERE name = ?4),
+                 argument = ?5,
+                 pinned_base = ?6,
+                 pinned_head = ?7,
+                 recipe_name = ?8,
+                 title = ?9,
+                 repo_name = ?10,
+                 range_label = ?11,
+                 render_status = ?12
+             WHERE id = ?1 AND render_status = 'pending'",
+            params![
+                i64::from(render_id),
+                source_id,
+                columns.operation,
+                columns.target,
+                columns.argument,
+                columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
+                columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
+                columns.recipe_name.as_ref().map(|name| name.as_str()),
+                request.title,
+                request.repo_name.as_str(),
+                request.range_label,
+                RenderStatus::Success.as_str(),
+            ],
         )?;
-        statement.execute([])?;
+        if updated != 1 {
+            return Err(anyhow::anyhow!("pending render {render_id} was not updated").into());
+        }
     }
     let crate::recipes::RecipeSource::LocalRepo(path) = &request.recipe.source;
     record_project_render::execute(
@@ -113,7 +356,102 @@ fn record_render(
         &transaction,
     )?;
     transaction.commit()?;
+    duplicate_id.map_or(Ok(render_id), |id| {
+        RenderHistoryId::try_new(id).map_err(|error| RecordRenderError::Unexpected(error.into()))
+    })
+}
+
+fn pending_rendered_at(
+    transaction: &Transaction<'_>,
+    render_id: RenderHistoryId,
+) -> anyhow::Result<MachineTimestamp> {
+    let row = transaction
+        .query_row(
+            "SELECT render_status, rendered_at FROM recent_renders WHERE id = ?1",
+            [i64::from(render_id)],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .with_context(|| format!("recent render {render_id} is unavailable"))?;
+    let status = RenderStatus::try_from(row.0)?;
+    anyhow::ensure!(
+        status == RenderStatus::Pending,
+        "recent render {render_id} is {} instead of pending",
+        status.as_str()
+    );
+    MachineTimestamp::try_from(row.1).map_err(anyhow::Error::from)
+}
+
+/// Changes a pending attempt to error and stores its non-empty diagnostic chain.
+///
+/// # Errors
+///
+/// Returns an error when the attempt is absent, no longer pending, or cannot be persisted.
+pub fn fail(
+    render_id: RenderHistoryId,
+    failure: &RenderFailure,
+    connection: &mut Connection,
+) -> Result<(), RecordRenderError> {
+    let transaction = connection.transaction()?;
+    pending_rendered_at(&transaction, render_id)?;
+    let updated = transaction.execute(
+        "UPDATE recent_renders SET render_status = ?2
+         WHERE id = ?1 AND render_status = 'pending'",
+        params![i64::from(render_id), RenderStatus::Error.as_str()],
+    )?;
+    if updated != 1 {
+        return Err(anyhow::anyhow!("pending render {render_id} was not updated").into());
+    }
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO render_errors (recent_render_id, error_code, error_detail)
+         VALUES (?1, ?2, ?3)",
+    )?;
+    for error in failure.errors() {
+        statement.execute(params![
+            i64::from(render_id),
+            error.code.as_str(),
+            &error.detail,
+        ])?;
+    }
+    drop(statement);
+    transaction.commit()?;
     Ok(())
+}
+
+/// Removes a pending attempt that became stale or intentionally produced no render.
+///
+/// # Errors
+///
+/// Returns an error when the attempt is absent, no longer pending, or cannot be removed.
+pub fn discard(
+    render_id: RenderHistoryId,
+    connection: &mut Connection,
+) -> Result<(), RecordRenderError> {
+    let transaction = connection.transaction()?;
+    let deleted = transaction.execute(
+        "DELETE FROM recent_renders WHERE id = ?1 AND render_status = 'pending'",
+        [i64::from(render_id)],
+    )?;
+    if deleted != 1 {
+        return Err(anyhow::anyhow!("pending render {render_id} was not removed").into());
+    }
+    collect_orphaned_render_sources(&transaction)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Records an already-computed successful render through the full lifecycle.
+///
+/// # Errors
+///
+/// Returns an error when starting or completing the render attempt fails.
+pub fn execute(
+    request: &RecordRender,
+    connection: &mut Connection,
+    clock: &impl Clock,
+) -> Result<(), RecordRenderError> {
+    let render_id = start(&StartRender::new(request.recipe.clone()), connection, clock)?;
+    succeed(render_id, request, connection).map(|_| ())
 }
 
 #[cfg(test)]
@@ -187,6 +525,112 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap()
+    }
+
+    fn render_status(connection: &Connection, id: RenderHistoryId) -> String {
+        connection
+            .query_row(
+                "SELECT render_status FROM recent_renders WHERE id = ?1",
+                [i64::from(id)],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn pending_render_transitions_to_success_without_changing_identity() {
+        let mut connection = store_test();
+        let command = command("computed title");
+        let render_id = record_render::start(
+            &StartRender::new(command.recipe.clone()),
+            &mut connection,
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+        )
+        .unwrap();
+
+        assert_eq!(render_status(&connection, render_id), "pending");
+        assert!(list_recent(&connection).is_empty());
+
+        record_render::succeed(render_id, &command, &mut connection).unwrap();
+
+        assert_eq!(render_status(&connection, render_id), "success");
+        let renders = list_recent(&connection);
+        assert_eq!(renders.len(), 1);
+        assert_eq!(renders[0].id, render_id);
+        assert_eq!(renders[0].title, "computed title");
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("render preparation failed")]
+    struct RenderTestError {
+        #[source]
+        source: std::io::Error,
+    }
+
+    #[test]
+    fn pending_render_transitions_to_error_with_classified_source_details() {
+        let mut connection = store_test();
+        let render_id = record_render::start(
+            &StartRender::new(recipe("/repos/gt")),
+            &mut connection,
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+        )
+        .unwrap();
+        let error = RenderTestError {
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "repository disappeared"),
+        };
+        let failure = RenderFailure::from_error(RenderErrorCode::RenderFailed, &error);
+
+        record_render::fail(render_id, &failure, &mut connection).unwrap();
+
+        assert_eq!(render_status(&connection, render_id), "error");
+        let errors = connection
+            .prepare(
+                "SELECT error_code, error_detail FROM render_errors
+                 WHERE recent_render_id = ?1 ORDER BY id",
+            )
+            .unwrap()
+            .query_map([i64::from(render_id)], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            errors,
+            [
+                (
+                    "render_failed".to_owned(),
+                    "render preparation failed".to_owned()
+                ),
+                (
+                    "render_failed".to_owned(),
+                    "repository disappeared".to_owned()
+                ),
+            ]
+        );
+        assert!(list_recent(&connection).is_empty());
+    }
+
+    #[test]
+    fn discarding_pending_render_collects_its_orphaned_source() {
+        let mut connection = store_test();
+        let render_id = record_render::start(
+            &StartRender::new(recipe("/repos/abandoned")),
+            &mut connection,
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+        )
+        .unwrap();
+
+        record_render::discard(render_id, &mut connection).unwrap();
+
+        let render_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
+            .unwrap();
+        let source_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM render_sources", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!((render_count, source_count), (0, 0));
     }
 
     #[test]

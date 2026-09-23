@@ -16,8 +16,8 @@ use crate::{
     shared::ui::{
         HoverPopover, HoverPopoverPlacement,
         data_table::{
-            DataTable, DataTableRow, TableColumn, TableHeading, TableSortDirection,
-            TableSortHeading,
+            DataTable, DataTableActions, DataTableRow, TableColumn, TableHeading,
+            TableSortDirection, TableSortHeading,
         },
         no_data::NoData,
         use_hover_popover,
@@ -71,7 +71,7 @@ pub(super) fn ProjectTable(
                         }
                     }
                 }
-                TableHeading { class: "text-right", "Open diff" }
+                TableHeading { class: "text-right", "Actions" }
             },
             for project in projects {
                 ProjectTableRow { key: "{project.id}", project, disabled }
@@ -155,7 +155,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn { class: "text-right",
-                div { class: "flex justify-end gap-1",
+                DataTableActions {
                     span { class: "inline-flex w-8 shrink-0",
                         if ahead.has_changes() {
                             ProjectComparisonAction {
@@ -183,6 +183,14 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                             onclick: move |_| (status.retry)(()),
                             lucide_dioxus::RefreshCw { size: 14 }
                         }
+                    }
+                    crate::views::push::PushButton {
+                        id: format!("project-push-table-{}", project.id),
+                        source: gtl_wire::viewer::push::CreateViewerPush::Project {
+                            path: project.path.clone(),
+                        },
+                        disabled: disabled || failed || !ahead.has_unpushed_commits(),
+                        icon_only: true,
                     }
                 }
             }

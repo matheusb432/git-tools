@@ -80,6 +80,190 @@ async fn tab_rail_collapses_only_while_its_tabs_overflow() -> Result<()> {
     .await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn tab_actions_work_after_right_click_release_and_from_shortcuts() -> Result<()> {
+    support::run_test("viewer-tab-actions", |session| {
+        Box::pin(run_tab_actions(session))
+    })
+    .await
+}
+
+async fn run_tab_actions(session: &mut support::session::TestSession) -> Result<()> {
+    let driver = session.driver();
+    driver
+        .set_window_rect(20, 20, DESKTOP_WIDTH, WINDOW_HEIGHT)
+        .await?;
+    for name in [
+        "tab-actions-first",
+        "tab-actions-second",
+        "tab-actions-third",
+    ] {
+        support::fixture::OneShotFixture::create_named(session.data_root(), name)?.forward()?;
+    }
+    support::wait_for_active_diff(driver, "tab-actions-third", "alpha-one-shot-marker").await?;
+    let active_url = driver.current_url().await?;
+    let inactive = driver
+        .find(By::Css("[role='tab'][aria-selected='false']"))
+        .await?;
+    support::context_click_element(driver, &inactive).await?;
+    let menu = tab_actions_menu(driver).await?;
+    support::evidence::capture(driver, "viewer-tab-actions-menu", true).await?;
+    menu.find(By::Css("[aria-keyshortcuts='Alt+p']"))
+        .await?
+        .click()
+        .await?;
+    wait_for_pin_count(driver, 1).await?;
+    ensure!(
+        driver.current_url().await? == active_url,
+        "pinning an inactive tab activated it"
+    );
+
+    press_tab_shortcut(driver, Key::Alt, "p").await?;
+    wait_for_pin_count(driver, 2).await?;
+    press_tab_shortcut(driver, Key::Alt, "p").await?;
+    wait_for_pin_count(driver, 1).await?;
+    press_tab_shortcut(driver, Key::Alt, "o").await?;
+    wait_for_tab_count(driver, 2).await?;
+    wait_for_pin_count(driver, 1).await?;
+    press_tab_shortcut(driver, Key::Control, "w").await?;
+    wait_for_tab_count(driver, 1).await?;
+    wait_for_pin_count(driver, 1).await?;
+
+    close_last_pinned_tab(driver).await
+}
+
+async fn close_last_pinned_tab(driver: &WebDriver) -> Result<()> {
+    let active = driver
+        .find(By::Css("[role='tab'][aria-selected='true']"))
+        .await?;
+    support::context_click_element(driver, &active).await?;
+    let menu = tab_actions_menu(driver).await?;
+    ensure!(
+        !menu
+            .find(By::Css("[aria-keyshortcuts='Control+w']"))
+            .await?
+            .is_enabled()
+            .await?,
+        "pinned tab offered Close tab"
+    );
+    driver
+        .action_chain()
+        .send_keys(Key::Escape)
+        .perform()
+        .await?;
+    menu.wait_until().not_displayed().await?;
+    driver
+        .action_chain()
+        .key_down(Key::Shift)
+        .send_keys(Key::F10)
+        .key_up(Key::Shift)
+        .perform()
+        .await?;
+    tab_actions_menu(driver).await?;
+    driver.action_chain().send_keys(Key::Down).perform().await?;
+    ensure!(
+        driver
+            .active_element()
+            .await?
+            .attr("aria-keyshortcuts")
+            .await?
+            .as_deref()
+            == Some("Alt+o"),
+        "menu keyboard navigation did not skip disabled Close tab"
+    );
+    driver
+        .action_chain()
+        .send_keys(Key::Escape)
+        .perform()
+        .await?;
+    support::context_click_element(driver, &active).await?;
+    let menu = tab_actions_menu(driver).await?;
+    driver
+        .find(By::Css("a[aria-label='Projects']"))
+        .await?
+        .click()
+        .await?;
+    menu.wait_until().not_displayed().await?;
+
+    active.click().await?;
+    close_last_overflow_tab(driver).await
+}
+
+async fn close_last_overflow_tab(driver: &WebDriver) -> Result<()> {
+    driver.set_window_rect(20, 20, 300, WINDOW_HEIGHT).await?;
+    let overflow = wait_for_overflow_trigger(driver).await?;
+    overflow.click().await?;
+    let tab = driver
+        .find(By::Css(
+            "#viewer-tab-overflow-menu [aria-controls='viewer-active-view']",
+        ))
+        .await?;
+    support::context_click_element(driver, &tab).await?;
+    tab_actions_menu(driver).await?;
+    support::evidence::capture(driver, "viewer-tab-actions-overflow", true).await?;
+    press_tab_shortcut(driver, Key::Alt, "p").await?;
+    wait_for_pin_count(driver, 0).await?;
+    support::context_click_element(driver, &tab).await?;
+    tab_actions_menu(driver)
+        .await?
+        .find(By::Css("[aria-keyshortcuts='Control+w']"))
+        .await?
+        .click()
+        .await?;
+    driver
+        .query(By::Id("projects-heading"))
+        .and_displayed()
+        .first()
+        .await?;
+    driver
+        .query(By::Css("#viewer-tab-overflow-menu"))
+        .with_text(thirtyfour::stringmatch::StringMatch::new("No open diffs").partial())
+        .first()
+        .await?;
+    Ok(())
+}
+
+async fn tab_actions_menu(driver: &WebDriver) -> Result<WebElement> {
+    Ok(driver
+        .query(By::Css(
+            "[role='menu'][aria-label='Tab actions']:popover-open",
+        ))
+        .and_displayed()
+        .wait(wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await?)
+}
+
+async fn press_tab_shortcut(driver: &WebDriver, modifier: Key, key: &str) -> Result<()> {
+    driver
+        .action_chain()
+        .key_down(modifier.clone())
+        .send_keys(key)
+        .key_up(modifier)
+        .perform()
+        .await?;
+    Ok(())
+}
+
+async fn wait_for_pin_count(driver: &WebDriver, count: usize) -> Result<()> {
+    wait::until("expected pinned tabs", wait::ASSERTION_TIMEOUT, || async {
+        Ok((driver
+            .find_all(By::Css("button[aria-label^='Unpin ']"))
+            .await?
+            .len()
+            == count)
+            .then_some(()))
+    })
+    .await
+}
+
+async fn wait_for_tab_count(driver: &WebDriver, count: usize) -> Result<()> {
+    wait::until("expected open tabs", wait::ASSERTION_TIMEOUT, || async {
+        Ok((driver.find_all(By::Css("[role='tab']")).await?.len() == count).then_some(()))
+    })
+    .await
+}
+
 async fn run_tab_overflow(session: &mut support::session::TestSession) -> Result<()> {
     let fixture = TabOverflowFixture::create(session.data_root())?;
     verify_rail_responsiveness(session.driver(), &fixture).await?;
@@ -918,4 +1102,142 @@ async fn wait_for_collapsed_active_diff(
         },
     )
     .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_rename_edits_in_place_and_survives_reopen_and_restart() -> Result<()> {
+    support::run_test("viewer-snapshot-rename", |session| {
+        Box::pin(run_snapshot_rename(session))
+    })
+    .await
+}
+
+async fn snapshot_name_editor(driver: &WebDriver, target: &WebElement) -> Result<WebElement> {
+    support::context_click_element(driver, target).await?;
+    tab_actions_menu(driver)
+        .await?
+        .find(By::XPath(".//button[normalize-space(.)='Rename snapshot']"))
+        .await?
+        .click()
+        .await?;
+    Ok(driver
+        .query(By::Css("input[aria-label='Snapshot name']"))
+        .and_displayed()
+        .first()
+        .await?)
+}
+
+async fn wait_for_snapshot_name(driver: &WebDriver, name: &str) -> Result<WebElement> {
+    Ok(driver
+        .query(By::Css(format!("[role='tab'][title='{name}']")))
+        .and_displayed()
+        .first()
+        .await?)
+}
+
+async fn run_snapshot_rename(session: &mut support::session::TestSession) -> Result<()> {
+    let fixture =
+        support::fixture::OneShotFixture::create_named(session.data_root(), "rename-snapshot")?;
+    fixture.forward()?;
+    let driver = session.driver();
+    driver
+        .set_window_rect(20, 20, DESKTOP_WIDTH, WINDOW_HEIGHT)
+        .await?;
+    support::wait_for_active_diff(driver, "rename-snapshot", "alpha-one-shot-marker").await?;
+    let tab = driver
+        .find(By::Css("[role='tab'][aria-selected='true']"))
+        .await?;
+    let title = tab.attr("title").await?.context("original title")?;
+    let original_rect = tab.rect().await?;
+    let editor = snapshot_name_editor(driver, &tab).await?;
+    ensure!(
+        editor.value().await?.as_deref() == Some(""),
+        "generated name was prefilled"
+    );
+    ensure!(
+        driver.active_element().await?.element_id() == editor.element_id(),
+        "editor did not receive focus"
+    );
+    let editor_rect = editor.rect().await?;
+    ensure!(
+        (editor_rect.y - original_rect.y).abs() < 10.0,
+        "editor moved outside the tab title"
+    );
+    editor.send_keys("Discard this").await?;
+    editor.send_keys(Key::Escape).await?;
+    let tab = wait_for_snapshot_name(driver, &title).await?;
+    let editor = snapshot_name_editor(driver, &tab).await?;
+    ensure!(
+        editor.value().await?.as_deref() == Some(""),
+        "cancel retained a draft"
+    );
+    editor.send_keys("Auth review").await?;
+    support::evidence::capture(driver, "viewer-snapshot-rename-inline", true).await?;
+    editor.send_keys(Key::Enter).await?;
+    let tab = wait_for_snapshot_name(driver, "Auth review").await?;
+    let editor = snapshot_name_editor(driver, &tab).await?;
+    ensure!(
+        editor.value().await?.as_deref() == Some("Auth review"),
+        "custom name was not prefilled"
+    );
+    editor.send_keys(Key::Escape).await?;
+    support::selectors::by_test_id(driver, test_ids::VIEWER_TAB_CLOSE)
+        .await?
+        .click()
+        .await?;
+    support::selectors::by_test_id(driver, test_ids::VIEWER_HISTORY_OPEN)
+        .await?
+        .click()
+        .await?;
+    support::selectors::by_test_id(driver, test_ids::HISTORY_ENTRY_OPEN)
+        .await?
+        .click()
+        .await?;
+    let tab = wait_for_snapshot_name(driver, "Auth review").await?;
+    support::context_click_element(driver, &tab).await?;
+    tab_actions_menu(driver)
+        .await?
+        .find(By::Css("[aria-keyshortcuts='Alt+p']"))
+        .await?
+        .click()
+        .await?;
+    wait_for_pin_count(driver, 1).await?;
+    rename_snapshot_from_overflow(driver).await?;
+    session.restart_server().await?;
+    session
+        .driver()
+        .set_window_rect(20, 20, DESKTOP_WIDTH, WINDOW_HEIGHT)
+        .await?;
+    wait_for_snapshot_name(session.driver(), "Release review").await?;
+    Ok(())
+}
+
+async fn rename_snapshot_from_overflow(driver: &WebDriver) -> Result<()> {
+    driver.set_window_rect(20, 20, 300, WINDOW_HEIGHT).await?;
+    wait_for_overflow_trigger(driver).await?.click().await?;
+    let tab = driver
+        .find(By::Css(
+            "#viewer-tab-overflow-menu .viewer-tab-menu-trigger",
+        ))
+        .await?;
+    let editor = snapshot_name_editor(driver, &tab).await?;
+    driver
+        .action_chain()
+        .key_down(Key::Control)
+        .send_keys("a")
+        .key_up(Key::Control)
+        .send_keys("Release review")
+        .perform()
+        .await?;
+    support::evidence::capture(driver, "viewer-snapshot-rename-overflow", true).await?;
+    editor
+        .send_keys(Key::Enter)
+        .await
+        .context("save the name from the overflow editor")?;
+    driver
+        .query(By::Css("input[aria-label='Snapshot name']"))
+        .not_exists()
+        .await?;
+    wait_for_overflow_trigger(driver).await?.click().await?;
+    Ok(())
 }

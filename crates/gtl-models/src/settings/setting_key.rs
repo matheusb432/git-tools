@@ -101,8 +101,8 @@ mod tests {
     #[test]
     fn raw_pairs_cross_into_typed_mutations_once() {
         assert_eq!(
-            SettingKeyValue::parse("theme", "hearth").unwrap(),
-            SettingKeyValue::Theme(Theme::Hearth)
+            SettingKeyValue::parse("theme", "mirage").unwrap(),
+            SettingKeyValue::Theme(Theme::Mirage)
         );
         assert_eq!(
             SettingKeyValue::parse("layout", "split").unwrap(),
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn mutation_exposes_its_matching_key() {
-        let mutation = SettingKeyValue::Theme(Theme::Light);
+        let mutation = SettingKeyValue::Theme(Theme::Glacier);
 
         assert_eq!(mutation.key(), SettingKey::Theme);
     }

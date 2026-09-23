@@ -1,4 +1,4 @@
-//! Authenticated local gRPC client for `gtl-server`.
+//! Private local gRPC client for `gtl-server`.
 
 mod viewer;
 pub mod window;
@@ -7,24 +7,22 @@ pub mod window;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use gtl_local_auth::{CapabilityToken, LocalAuth, LocalAuthError, ServerEndpoint};
+use gtl_local_transport::LocalEndpoint;
 #[cfg(not(target_arch = "wasm32"))]
 use gtl_wire::v1::{
     self, diff_service_client::DiffServiceClient, live_view_service_client::LiveViewServiceClient,
     project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, tag_service_client::TagServiceClient,
+    viewer_service_client::ViewerServiceClient,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use tonic::{
-    Request, Status,
-    metadata::{Ascii, MetadataValue},
-    service::{Interceptor, interceptor::InterceptedService},
-    transport::{Channel, Endpoint},
-};
+use tonic::{Request, Status, transport::Channel};
 #[cfg(not(target_arch = "wasm32"))]
 use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
 pub use viewer::ViewerClientError;
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub use viewer::pick_project_folder;
 #[cfg(any(not(target_arch = "wasm32"), feature = "viewer-ipc"))]
 pub use viewer::{ViewerClient, ViewerRowStream, ViewerVersionStream};
 
@@ -39,22 +37,10 @@ const MAX_REQUEST_MESSAGE_SIZE: usize = 64 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
-const AUTHORIZATION_METADATA_KEY: &str = "authorization";
-
-#[cfg(not(target_arch = "wasm32"))]
-type AuthenticatedChannel = InterceptedService<Channel, RequestPolicy>;
-
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    #[error(transparent)]
-    LocalBootstrap(#[from] LocalAuthError),
-    #[error("local gtl-server endpoint is not a valid URI")]
-    InvalidEndpoint(#[source] tonic::transport::Error),
-    #[error("local capability token cannot be encoded as gRPC metadata")]
-    AuthorizationMetadata(#[source] tonic::metadata::errors::InvalidMetadataValue),
     #[error("could not connect to local gtl-server")]
-    Transport(#[source] tonic::transport::Error),
+    Transport(#[from] gtl_local_transport::ConnectError),
     #[error("local gtl-server health check failed")]
     Health(#[source] Status),
 }
@@ -66,10 +52,7 @@ impl ConnectError {
     pub const fn status(&self) -> Option<&Status> {
         match self {
             Self::Health(status) => Some(status),
-            Self::LocalBootstrap(_)
-            | Self::InvalidEndpoint(_)
-            | Self::AuthorizationMetadata(_)
-            | Self::Transport(_) => None,
+            Self::Transport(_) => None,
         }
     }
 }
@@ -79,6 +62,52 @@ impl ConnectError {
 pub enum ClientError {
     #[error("{}", .0.message())]
     Rpc(#[from] Status),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, thiserror::Error)]
+pub enum ViewerServerInfoError {
+    #[error("{}", .0.message())]
+    Rpc(#[from] Status),
+    #[error("gtl-server returned an invalid instance ID")]
+    InvalidInstanceId,
+    #[error("gtl-server returned an invalid viewer protocol version")]
+    InvalidProtocolVersion,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewerServerInfo {
+    server_instance_id: String,
+    protocol_version: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ViewerServerInfo {
+    fn try_from_response(
+        response: &v1::GetViewerServerInfoResponse,
+    ) -> Result<Self, ViewerServerInfoError> {
+        let server_instance_id = uuid::Uuid::parse_str(&response.server_instance_id)
+            .map_err(|_| ViewerServerInfoError::InvalidInstanceId)?
+            .to_string();
+        if response.protocol_version == 0 {
+            return Err(ViewerServerInfoError::InvalidProtocolVersion);
+        }
+        Ok(Self {
+            server_instance_id,
+            protocol_version: response.protocol_version,
+        })
+    }
+
+    #[must_use]
+    pub fn server_instance_id(&self) -> &str {
+        &self.server_instance_id
+    }
+
+    #[must_use]
+    pub const fn protocol_version(&self) -> u32 {
+        self.protocol_version
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -96,23 +125,28 @@ impl ClientError {
 #[derive(Debug, Clone)]
 pub struct GtlClient {
     channel: Channel,
-    request_policy: RequestPolicy,
-    endpoint: ServerEndpoint,
+    endpoint: LocalEndpoint,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl GtlClient {
-    /// Discovers and authenticates the OS-managed local server.
+    /// Resolves and connects to the OS-managed local server.
     pub async fn connect_local() -> Result<Self, ConnectError> {
-        let auth = LocalAuth::from_environment()?;
-        Self::connect(&auth).await
+        let endpoint =
+            LocalEndpoint::from_environment().map_err(gtl_local_transport::ConnectError::from)?;
+        Self::connect(&endpoint).await
     }
 
-    /// Discovers and authenticates the server published in `auth`'s data root.
-    pub async fn connect(auth: &LocalAuth) -> Result<Self, ConnectError> {
-        let endpoint = auth.load_endpoint()?;
-        let token = auth.load_client_token()?;
-        let client = Self::connect_endpoint(&endpoint, &token).await?;
+    /// Connects to an explicitly resolved local endpoint.
+    pub async fn connect(endpoint: &LocalEndpoint) -> Result<Self, ConnectError> {
+        let channel = endpoint
+            .connect(CONNECT_TIMEOUT, OPERATION_TIMEOUT)
+            .await
+            .map_err(ConnectError::Transport)?;
+        let client = Self {
+            channel,
+            endpoint: endpoint.clone(),
+        };
         client
             .check_health_inner()
             .await
@@ -453,18 +487,30 @@ impl GtlClient {
     }
 
     #[must_use]
-    pub const fn endpoint(&self) -> &ServerEndpoint {
+    pub const fn endpoint(&self) -> &LocalEndpoint {
         &self.endpoint
     }
 
-    fn diff_client(&self) -> DiffServiceClient<AuthenticatedChannel> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    pub async fn get_viewer_server_info(&self) -> Result<ViewerServerInfo, ViewerServerInfoError> {
+        let mut request = Request::new(v1::GetViewerServerInfoRequest {});
+        request.set_timeout(HEALTH_TIMEOUT);
+        let response = ViewerServiceClient::new(self.channel.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+            .get_viewer_server_info(request)
+            .await?
+            .into_inner();
+        ViewerServerInfo::try_from_response(&response)
+    }
+
+    fn diff_client(&self) -> DiffServiceClient<Channel> {
+        DiffServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
-    fn live_view_client(&self) -> LiveViewServiceClient<AuthenticatedChannel> {
-        LiveViewServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn live_view_client(&self) -> LiveViewServiceClient<Channel> {
+        LiveViewServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
@@ -546,58 +592,34 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    fn project_client(&self) -> ProjectServiceClient<AuthenticatedChannel> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn project_client(&self) -> ProjectServiceClient<Channel> {
+        ProjectServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
-    fn repository_client(&self) -> RepositoryServiceClient<AuthenticatedChannel> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn repository_client(&self) -> RepositoryServiceClient<Channel> {
+        RepositoryServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
-    fn settings_client(&self) -> SettingsServiceClient<AuthenticatedChannel> {
-        SettingsServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn settings_client(&self) -> SettingsServiceClient<Channel> {
+        SettingsServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
-    fn tag_client(&self) -> TagServiceClient<AuthenticatedChannel> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn tag_client(&self) -> TagServiceClient<Channel> {
+        TagServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
-    fn health_client(&self) -> HealthClient<AuthenticatedChannel> {
-        HealthClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+    fn health_client(&self) -> HealthClient<Channel> {
+        HealthClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-    }
-
-    async fn connect_endpoint(
-        endpoint: &ServerEndpoint,
-        token: &CapabilityToken,
-    ) -> Result<Self, ConnectError> {
-        #[cfg(unix)]
-        let target = format!("unix://{}", endpoint.uds_path().to_string_lossy());
-        #[cfg(windows)]
-        let target = format!("http://{}", endpoint.tcp_address());
-        let channel_endpoint = Endpoint::from_shared(target)
-            .map_err(ConnectError::InvalidEndpoint)?
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(OPERATION_TIMEOUT);
-        let channel = channel_endpoint
-            .connect()
-            .await
-            .map_err(ConnectError::Transport)?;
-        let request_policy = RequestPolicy::try_new(token)?;
-        Ok(Self {
-            channel,
-            request_policy,
-            endpoint: endpoint.clone(),
-        })
     }
 
     async fn check_health_inner(&self) -> Result<(), Status> {
@@ -614,47 +636,11 @@ impl GtlClient {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone)]
-struct RequestPolicy {
-    value: MetadataValue<Ascii>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl std::fmt::Debug for RequestPolicy {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RequestPolicy(REDACTED)")
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl RequestPolicy {
-    fn try_new(token: &CapabilityToken) -> Result<Self, ConnectError> {
-        let value = format!("Bearer {}", token.expose_secret())
-            .parse()
-            .map_err(ConnectError::AuthorizationMetadata)?;
-        Ok(Self { value })
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Interceptor for RequestPolicy {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        request
-            .metadata_mut()
-            .insert(AUTHORIZATION_METADATA_KEY, self.value.clone());
-        if request.metadata().get("grpc-timeout").is_none() {
-            request.set_timeout(OPERATION_TIMEOUT);
-        }
-        Ok(request)
-    }
-}
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use std::{error::Error, time::Duration};
 
-    use gtl_local_auth::{ServerEndpoint, ServerInstanceId};
+    use gtl_local_transport::{LocalEndpoint, LocalListener};
     use gtl_wire::v1::{
         DiffTarget, Empty, PresentDiffRequest, PresentDiffResponse, PresentMergeDiffRequest,
         PresentMergeDiffResponse, PresentProjectRepositoryDiffsRequest,
@@ -667,11 +653,7 @@ mod tests {
         diff_target, render_diff_response,
     };
     use tokio::sync::oneshot;
-    #[cfg(unix)]
-    use tokio_stream::wrappers::UnixListenerStream;
-    #[cfg(windows)]
-    use tonic::transport::server::TcpIncoming;
-    use tonic::{Response, service::InterceptorLayer, transport::Server};
+    use tonic::{Response, transport::Server};
 
     use super::*;
 
@@ -696,46 +678,35 @@ mod tests {
     }
 
     #[test]
-    fn request_policy_adds_authentication_and_a_default_deadline() -> TestResult {
-        let capability = CapabilityToken::generate()?;
-        let mut policy = RequestPolicy::try_new(&capability)?;
-        let request = policy.call(Request::new(()))?;
+    fn viewer_server_info_rejects_invalid_wire_values() {
+        let invalid_instance =
+            ViewerServerInfo::try_from_response(&v1::GetViewerServerInfoResponse {
+                server_instance_id: "not-a-uuid".to_owned(),
+                protocol_version: 1,
+            })
+            .unwrap_err();
+        assert!(matches!(
+            invalid_instance,
+            ViewerServerInfoError::InvalidInstanceId
+        ));
 
-        let candidate = request
-            .metadata()
-            .get(AUTHORIZATION_METADATA_KEY)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .ok_or("request policy omitted bearer authentication")?;
-        assert!(capability.authenticates(candidate));
-
-        let mut expected = Request::new(());
-        expected.set_timeout(OPERATION_TIMEOUT);
-        assert_eq!(
-            request.metadata().get("grpc-timeout"),
-            expected.metadata().get("grpc-timeout")
-        );
-
-        let mut health_request = Request::new(());
-        health_request.set_timeout(HEALTH_TIMEOUT);
-        let expected_health_timeout = health_request
-            .metadata()
-            .get("grpc-timeout")
-            .cloned()
-            .ok_or("health request omitted its explicit deadline")?;
-        let health_request = policy.call(health_request)?;
-        assert_eq!(
-            health_request.metadata().get("grpc-timeout"),
-            Some(&expected_health_timeout)
-        );
-        Ok(())
+        let invalid_protocol =
+            ViewerServerInfo::try_from_response(&v1::GetViewerServerInfoResponse {
+                server_instance_id: uuid::Uuid::new_v4().to_string(),
+                protocol_version: 0,
+            })
+            .unwrap_err();
+        assert!(matches!(
+            invalid_protocol,
+            ViewerServerInfoError::InvalidProtocolVersion
+        ));
     }
 
     #[tokio::test]
-    async fn connects_through_private_discovery_and_authentication() -> TestResult {
-        let harness = TestHarness::start(true).await?;
+    async fn connects_through_the_private_local_transport() -> TestResult {
+        let harness = TestHarness::start().await?;
 
-        let client = GtlClient::connect(&harness.auth).await?;
+        let client = GtlClient::connect(&harness.endpoint).await?;
 
         client.check_health().await?;
         assert_eq!(client.endpoint(), &harness.endpoint);
@@ -744,23 +715,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_a_server_with_a_different_capability() -> TestResult {
-        let harness = TestHarness::start(false).await?;
-
-        let error = GtlClient::connect(&harness.auth).await.unwrap_err();
-
-        assert!(matches!(
-            error,
-            ConnectError::Health(status) if status.code() == tonic::Code::Unauthenticated
-        ));
-        harness.stop().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn sends_an_authenticated_application_request() -> TestResult {
-        let harness = TestHarness::start(true).await?;
-        let client = GtlClient::connect(&harness.auth).await?;
+    async fn sends_an_application_request_over_the_local_transport() -> TestResult {
+        let harness = TestHarness::start().await?;
+        let client = GtlClient::connect(&harness.endpoint).await?;
 
         let response = client
             .render_diff(RenderDiffRequest {
@@ -855,139 +812,45 @@ mod tests {
 
     struct TestHarness {
         _directory: tempfile::TempDir,
-        _published_endpoint: gtl_local_auth::PublishedEndpoint,
-        auth: LocalAuth,
-        endpoint: ServerEndpoint,
+        endpoint: LocalEndpoint,
         shutdown: oneshot::Sender<()>,
         task: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
     }
 
-    #[derive(Clone)]
-    struct TestAuthentication {
-        capability: CapabilityToken,
-    }
-
-    impl Interceptor for TestAuthentication {
-        fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
-            let authenticated = request
-                .metadata()
-                .get(AUTHORIZATION_METADATA_KEY)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.strip_prefix("Bearer "))
-                .is_some_and(|candidate| self.capability.authenticates(candidate));
-            authenticated
-                .then_some(request)
-                .ok_or_else(|| Status::unauthenticated("authentication required"))
-        }
-    }
-
-    fn select_server_capability(
-        matching_capability: bool,
-        stored_capability: CapabilityToken,
-    ) -> TestResult<CapabilityToken> {
-        if matching_capability {
-            Ok(stored_capability)
-        } else {
-            Ok(CapabilityToken::generate()?)
-        }
-    }
-
-    #[cfg(unix)]
-    fn bind_test_listener(
-        auth: &LocalAuth,
-        instance_id: ServerInstanceId,
-    ) -> TestResult<(ServerEndpoint, tokio::net::UnixListener)> {
-        let endpoint = auth.server_endpoint(instance_id)?;
-        let listener = tokio::net::UnixListener::bind(endpoint.uds_path())?;
-        Ok((endpoint, listener))
-    }
-
-    #[cfg(windows)]
-    async fn bind_test_listener(
-        _auth: &LocalAuth,
-        instance_id: ServerInstanceId,
-    ) -> TestResult<(ServerEndpoint, tokio::net::TcpListener)> {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let endpoint = ServerEndpoint::try_new(listener.local_addr()?, instance_id)?;
-        Ok((endpoint, listener))
-    }
-
-    #[cfg(unix)]
     async fn run_test_server(
-        listener: tokio::net::UnixListener,
-        authentication: TestAuthentication,
+        listener: LocalListener,
         shutdown_receiver: oneshot::Receiver<()>,
         ready: oneshot::Sender<()>,
     ) -> Result<(), tonic::transport::Error> {
+        let (incoming, _ownership) = listener.into_parts();
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
             .set_service_status("", tonic_health::ServingStatus::Serving)
             .await;
         let _ = ready.send(());
         Server::builder()
-            .layer(InterceptorLayer::new(authentication))
             .add_service(health_service)
             .add_service(DiffServiceServer::new(TestDiff))
-            .serve_with_incoming_shutdown(UnixListenerStream::new(listener), async move {
-                let _ = shutdown_receiver.await;
-            })
-            .await
-    }
-
-    #[cfg(windows)]
-    async fn run_test_server(
-        listener: tokio::net::TcpListener,
-        authentication: TestAuthentication,
-        shutdown_receiver: oneshot::Receiver<()>,
-        ready: oneshot::Sender<()>,
-    ) -> Result<(), tonic::transport::Error> {
-        let (health_reporter, health_service) = tonic_health::server::health_reporter();
-        health_reporter
-            .set_service_status("", tonic_health::ServingStatus::Serving)
-            .await;
-        let _ = ready.send(());
-        Server::builder()
-            .layer(InterceptorLayer::new(authentication))
-            .add_service(health_service)
-            .add_service(DiffServiceServer::new(TestDiff))
-            .serve_with_incoming_shutdown(TcpIncoming::from(listener), async move {
+            .serve_with_incoming_shutdown(incoming, async move {
                 let _ = shutdown_receiver.await;
             })
             .await
     }
 
     impl TestHarness {
-        async fn start(matching_capability: bool) -> TestResult<Self> {
+        async fn start() -> TestResult<Self> {
             let directory = tempfile::tempdir()?;
-            let auth = LocalAuth::from_data_root(directory.path())?;
-            let stored_capability = auth.load_or_create_server_token()?;
-            let server_capability =
-                select_server_capability(matching_capability, stored_capability)?;
-            let instance_id = ServerInstanceId::generate();
-            #[cfg(unix)]
-            let (endpoint, listener) = bind_test_listener(&auth, instance_id)?;
-            #[cfg(windows)]
-            let (endpoint, listener) = bind_test_listener(&auth, instance_id).await?;
-            let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
-            let authentication = TestAuthentication {
-                capability: server_capability,
-            };
+            let endpoint = LocalEndpoint::from_root(directory.path())?;
+            let listener = LocalListener::bind(&endpoint, Duration::from_secs(1)).await?;
             let (shutdown, shutdown_receiver) = oneshot::channel();
             let (ready, ready_receiver) = oneshot::channel();
-            let task = tokio::spawn(run_test_server(
-                listener,
-                authentication,
-                shutdown_receiver,
-                ready,
-            ));
+            let task = tokio::spawn(run_test_server(listener, shutdown_receiver, ready));
             ready_receiver
                 .await
                 .map_err(|_| "test server stopped before readiness")?;
 
             Ok(Self {
                 _directory: directory,
-                _published_endpoint: published_endpoint,
-                auth,
                 endpoint,
                 shutdown,
                 task,

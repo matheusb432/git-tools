@@ -1,18 +1,23 @@
 use dioxus::prelude::*;
 #[cfg(feature = "desktop")]
 use gtl_models::settings::UserSettingsRevision;
+use gtl_models::settings::{ViewerAccessibility, ViewerScalePercent};
 #[cfg(feature = "desktop")]
 use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerTheme};
 use lucide_dioxus::Check;
 
 use crate::shared::{
-    ui::{Button, ButtonState, ButtonType, FieldLabel, Select, SelectOption},
+    ui::{
+        Button, ButtonState, ButtonType, FieldLabel, SectionedSurface, SectionedSurfaceBody,
+        SectionedSurfaceFooter, SectionedSurfaceHeader, Select, SelectOption,
+    },
     viewer_theme::{VIEWER_THEME_OPTIONS, viewer_theme_from_value, viewer_theme_label},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewerSettingsSelection {
+    pub(crate) accessibility: ViewerAccessibility,
     pub(crate) focus_window_on_diff: bool,
     pub(crate) push_confirmation_required: bool,
     pub(crate) theme: Option<ViewerTheme>,
@@ -25,8 +30,10 @@ impl ViewerSettingsSelection {
         render_options: ViewerRenderOptions,
         focus_window_on_diff: bool,
         push_confirmation_required: bool,
+        accessibility: ViewerAccessibility,
     ) -> Self {
         Self {
+            accessibility,
             focus_window_on_diff,
             push_confirmation_required,
             theme,
@@ -46,6 +53,8 @@ pub(crate) fn ViewerSettingsForm(
     onmodified: EventHandler<()>,
     onreload: EventHandler<()>,
 ) -> Element {
+    let mut ui_scale_percent = use_signal(|| initial.accessibility.ui_scale_percent);
+    let mut reduce_motion = use_signal(|| initial.accessibility.reduce_motion);
     let mut focus_window_on_diff = use_signal(|| initial.focus_window_on_diff);
     let mut push_confirmation_required = use_signal(|| initial.push_confirmation_required);
     let mut theme = use_signal(|| initial.theme);
@@ -62,6 +71,10 @@ pub(crate) fn ViewerSettingsForm(
                 }
                 onsubmit
                     .call(ViewerSettingsSelection {
+                        accessibility: ViewerAccessibility {
+                            ui_scale_percent: ui_scale_percent(),
+                            reduce_motion: reduce_motion(),
+                        },
                         focus_window_on_diff: focus_window_on_diff(),
                         push_confirmation_required: push_confirmation_required(),
                         theme: theme(),
@@ -72,16 +85,69 @@ pub(crate) fn ViewerSettingsForm(
                         },
                     });
             },
-            section {
-                class: "settings-card",
-                aria_label: "Editable application settings",
-                header { class: "settings-card-header px-4 py-3",
+            SectionedSurface { aria_label: "Editable application settings",
+                SectionedSurfaceHeader { class: "px-4 py-3",
                     h2 { class: "font-semibold text-ink", "Viewer and command preferences" }
                     p { class: "mt-0.5 text-xs leading-5 text-ink-3",
                         "Choose how diffs appear, when the desktop window comes forward, and whether pushes need confirmation."
                     }
                 }
-                div { class: "settings-form-grid gap-4 p-4",
+                SectionedSurfaceBody { class: "settings-form-grid gap-4 p-4",
+                    div { class: "settings-form-field min-w-0 gap-1.5",
+                        FieldLabel {
+                            for_id: "settings-ui-scale",
+                            label: "Interface size",
+                            hint: "Enlarge text, icons, and controls together. Try 200% on a 4K display.",
+                        }
+                        Select {
+                            id: "settings-ui-scale",
+                            name: "ui_scale_percent",
+                            aria_label: "Interface size",
+                            value: ui_scale_percent().to_string(),
+                            options: (100..=300)
+                                .step_by(25)
+                                .map(|value| SelectOption::new(value.to_string(), format!("{value}%")))
+                                .collect(),
+                            error: None,
+                            disabled: pending,
+                            onchange: move |event: FormEvent| {
+                                if let Some(selected) = event
+                                    .value()
+                                    .parse()
+                                    .ok()
+                                    .and_then(|value| ViewerScalePercent::try_new(value).ok())
+                                {
+                                    ui_scale_percent.set(selected);
+                                    onmodified.call(());
+                                }
+                            },
+                        }
+                    }
+                    div { class: "settings-form-field min-w-0 gap-1.5",
+                        FieldLabel {
+                            for_id: "settings-reduce-motion",
+                            label: "Reduced motion",
+                            hint: "Disable animations and transitions. System follows your device's accessibility preference.",
+                        }
+                        Select {
+                            id: "settings-reduce-motion",
+                            name: "reduce_motion",
+                            aria_label: "Reduced motion",
+                            value: if reduce_motion() { "true" } else { "false" },
+                            options: vec![
+                                SelectOption::new("false", "System"),
+                                SelectOption::new("true", "Always reduce"),
+                            ],
+                            error: None,
+                            disabled: pending,
+                            onchange: move |event: FormEvent| {
+                                if let Ok(selected) = event.value().parse::<bool>() {
+                                    reduce_motion.set(selected);
+                                    onmodified.call(());
+                                }
+                            },
+                        }
+                    }
                     div { class: "settings-form-field min-w-0 gap-1.5",
                         FieldLabel {
                             for_id: "settings-theme",
@@ -205,13 +271,13 @@ pub(crate) fn ViewerSettingsForm(
                     div { class: "settings-form-field min-w-0 gap-1.5",
                         FieldLabel {
                             for_id: "settings-push-confirmation",
-                            label: "Confirm before push",
-                            hint: "Require confirmation before pushing the current repository.",
+                            label: "Confirm before CLI push",
+                            hint: "Control CLI push confirmation. Viewer pushes always require confirmation.",
                         }
                         Select {
                             id: "settings-push-confirmation",
                             name: "push_confirmation_required",
-                            aria_label: "Confirm before push",
+                            aria_label: "Confirm before CLI push",
                             value: if push_confirmation_required() { "true" } else { "false" },
                             options: vec![
                                 SelectOption::new("true", "Required"),
@@ -228,7 +294,7 @@ pub(crate) fn ViewerSettingsForm(
                         }
                     }
                 }
-                footer { class: "settings-form-footer min-h-16 flex-wrap gap-3 px-4 py-3",
+                SectionedSurfaceFooter { class: "settings-form-footer min-h-16 flex-wrap gap-3 px-4 py-3",
                     div { class: "min-w-0 flex-1",
                         if let Some(message) = save_error {
                             p { class: "text-sm text-del", role: "alert", "{message}" }
@@ -273,6 +339,14 @@ pub(super) fn viewer_settings_patch(
 ) -> EditSettingsRequest {
     EditSettingsRequest {
         expected_revision: Some(expected_revision),
+        ui_scale_percent: changed_field(
+            &current.accessibility.ui_scale_percent,
+            selected.accessibility.ui_scale_percent,
+        ),
+        reduce_motion: changed_field(
+            &current.accessibility.reduce_motion,
+            selected.accessibility.reduce_motion,
+        ),
         focus_window_on_diff: changed_field(
             &current.focus_window_on_diff,
             selected.focus_window_on_diff,
@@ -380,6 +454,7 @@ mod tests {
             },
             true,
             push_confirmation_required,
+            gtl_models::settings::ViewerAccessibility::default(),
         )
     }
 

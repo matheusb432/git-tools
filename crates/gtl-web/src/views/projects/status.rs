@@ -41,6 +41,10 @@ impl ProjectSignal {
         }
     }
 
+    pub(super) fn has_unpushed_commits(&self) -> bool {
+        matches!(self, Self::Ahead { count, base: None } if count.into_inner() > 0)
+    }
+
     pub(super) const fn is_available(&self) -> bool {
         !matches!(self, Self::Loading | Self::Unavailable(_))
     }

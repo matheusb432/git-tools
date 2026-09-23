@@ -210,22 +210,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let git = git();
         let (state, identity, _) = ready_state(deferred_view(&git));
-        let project = |density| {
-            state
-                .inspect(|session| {
-                    shell::project(
-                        session,
-                        RenderOptions::new(DiffLayout::Unified, density),
-                        super::super::Theme::Dark,
-                        gtl_models::viewer::ViewerKeybindings::default(),
-                        gtl_models::viewer::ViewerSidebarVisibility::default(),
-                        None,
-                    )
-                    .unwrap()
-                })
-                .unwrap()
-                .active
-        };
+        let project = |density| shell_for(&state, density).active;
         let compact_before = project(DiffDensity::Compact);
         assert!(matches!(
             project(DiffDensity::Full),
@@ -313,15 +298,16 @@ mod tests {
         Ok(())
     }
 
-    fn shell_for(state: &ViewerState) -> gtl_wire::viewer::ViewerShell {
+    fn shell_for(state: &ViewerState, density: DiffDensity) -> gtl_wire::viewer::ViewerShell {
         state
             .inspect(|session| {
                 shell::project(
                     session,
-                    RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+                    RenderOptions::new(DiffLayout::Unified, density),
                     super::super::Theme::Dark,
                     gtl_models::viewer::ViewerKeybindings::default(),
                     gtl_models::viewer::ViewerSidebarVisibility::default(),
+                    gtl_models::settings::ViewerAccessibility::default(),
                     None,
                 )
                 .unwrap()
@@ -338,7 +324,7 @@ mod tests {
         let mut watch = state.subscribe();
         let work = reserve(&state, options).unwrap().unwrap();
         assert!(reserve(&state, options).unwrap().is_none());
-        let before = shell_for(&state);
+        let before = shell_for(&state, DiffDensity::Full);
         let gtl_wire::viewer::ViewerActiveState::Ready { view: pending } = before.active else {
             return Err(
                 "file and commit metadata must be available during source preparation".into(),
@@ -357,7 +343,7 @@ mod tests {
         ));
         assert!(watch.has_changed().unwrap());
         let version = *watch.borrow_and_update();
-        let ready = shell_for(&state);
+        let ready = shell_for(&state, DiffDensity::Full);
         assert_eq!(ready.version, version);
         assert!(
             matches!(ready.active, gtl_wire::viewer::ViewerActiveState::Ready { view }
@@ -377,7 +363,7 @@ mod tests {
             ..Default::default()
         };
         assert!(execute_reserved(work, &state, &invalid).is_err());
-        let shell = shell_for(&state);
+        let shell = shell_for(&state, DiffDensity::Full);
         assert!(
             matches!(shell.active, gtl_wire::viewer::ViewerActiveState::Ready { view }
             if view.row_source == gtl_wire::viewer::ViewerRowSourceState::Failed

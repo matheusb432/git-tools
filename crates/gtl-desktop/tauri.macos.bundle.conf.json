@@ -3,6 +3,7 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
+    "icon": ["icons/icon-macos.png"],
     "externalBin": ["binaries/git-tools", "binaries/gtl-server"],
     "macOS": {
       "signingIdentity": "-"

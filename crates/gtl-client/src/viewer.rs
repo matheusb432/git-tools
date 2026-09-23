@@ -9,6 +9,8 @@ pub(crate) mod tauri;
 pub use native::{ViewerClient, ViewerRowStream, ViewerVersionStream};
 use serde::{Deserialize, Serialize};
 #[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub use tauri::pick_project_folder;
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
 pub use tauri::{ViewerClient, ViewerRowStream, ViewerVersionStream};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -30,6 +32,8 @@ pub enum ViewerClientError {
     Unavailable,
     #[error("The project catalogue is unavailable. Check the GTL server and try again.")]
     ProjectsUnavailable,
+    #[error("Could not scan this folder. Check that it exists and is readable.")]
+    ProjectScanFailed,
     #[error("The viewer could not complete this action.")]
     Internal,
 }
@@ -55,6 +59,9 @@ impl ViewerClientError {
             Self::Unavailable => "The desktop viewer is temporarily unavailable.",
             Self::ProjectsUnavailable => {
                 "The project catalogue is unavailable. Check the GTL server and try again."
+            }
+            Self::ProjectScanFailed => {
+                "Could not scan this folder. Check that it exists and is readable."
             }
             Self::Internal => "The viewer could not complete this action.",
         }
@@ -96,6 +103,7 @@ mod tests {
             ViewerClientError::ResourceExhausted,
             ViewerClientError::Unavailable,
             ViewerClientError::ProjectsUnavailable,
+            ViewerClientError::ProjectScanFailed,
             ViewerClientError::Internal,
         ] {
             let encoded = serde_json::to_string(&error).unwrap();

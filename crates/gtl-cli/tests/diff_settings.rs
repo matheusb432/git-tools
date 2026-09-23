@@ -14,16 +14,16 @@ fn diff_set_theme_updates_the_user_settings_document() -> Result<()> {
     let _server = common::ServerHarness::start(Some(&config), None)?;
 
     Command::new(env!("CARGO_BIN_EXE_git-tools"))
-        .args(["diff", "--set-theme", "hearth"])
+        .args(["diff", "--set-theme", "carbon"])
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()
         .success()
-        .stdout(contains("hearth"))
+        .stdout(contains("carbon"))
         .stdout(contains(config.display().to_string()));
 
     let raw = std::fs::read_to_string(config).context("read updated config")?;
     let document = toml::from_str::<toml::Value>(&raw).context("parse settings TOML")?;
-    assert_eq!(document["theme"].as_str(), Some("hearth"));
+    assert_eq!(document["theme"].as_str(), Some("carbon"));
     assert_eq!(document["layout"].as_str(), Some("split"));
     Ok(())
 }

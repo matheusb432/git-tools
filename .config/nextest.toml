@@ -4,6 +4,9 @@ final-status-level = "fail"
 failure-output = "immediate"
 success-output = "never"
 
+[profile.ci]
+fail-fast = false
+
 [test-groups.gtl-cli-process]
 max-threads = 1
 

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use dioxus::prelude::*;
 use lucide_dioxus::X;
 
@@ -22,7 +24,7 @@ pub(crate) fn PanelDialog(
     artifact_view_id: Option<String>,
     children: Element,
 ) -> Element {
-    use_dialog(&id, &trigger_id, open);
+    use_dialog(&id, &trigger_id, open, Duration::ZERO);
     let title_id = format!("{id}-title");
     let artifact_dialog = artifact_view_id.as_ref().map(|_| "");
     let artifact_close_action = artifact_view_id.as_ref().map(|_| "close-dialog");

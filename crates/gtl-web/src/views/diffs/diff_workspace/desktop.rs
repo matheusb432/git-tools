@@ -111,6 +111,7 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
             class: "diff-workspace-shell h-full min-h-0",
             role: "tabpanel",
             aria_label: "Active diff",
+            "data-viewer-state": active_view_dom_state(&shell_state.active),
             div { class: "diff-workspace-shell-content min-h-0",
                 match &shell_state.active {
                     ViewerActiveState::Empty => rsx! {
@@ -171,6 +172,15 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
     }
 }
 
+const fn active_view_dom_state(active: &ViewerActiveState) -> &'static str {
+    match active {
+        ViewerActiveState::Empty => "empty",
+        ViewerActiveState::Pending { .. } => "loading",
+        ViewerActiveState::Ready { .. } => "ready",
+        ViewerActiveState::Broken { .. } | ViewerActiveState::Error { .. } => "error",
+    }
+}
+
 // The mapped signal is created only for the parent branch that owns a ready active view.
 #[allow(clippy::unreachable)]
 fn ready_active_view(shell: &ViewerShellLoad) -> &ViewerActiveView {
@@ -181,6 +191,38 @@ fn ready_active_view(shell: &ViewerShellLoad) -> &ViewerActiveView {
         unreachable!("the ready workspace is mounted only for a ready active view");
     };
     view
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_wire::viewer::{ViewerActiveState, ViewerFailureCode};
+
+    use super::active_view_dom_state;
+    use crate::test_support::{TestResult, viewer_active_view, viewer_tab_id};
+
+    #[test]
+    fn active_render_states_map_to_dom_states() -> TestResult {
+        let tab_id = viewer_tab_id(7)?;
+        assert_eq!(
+            active_view_dom_state(&ViewerActiveState::Pending { tab_id }),
+            "loading"
+        );
+        assert_eq!(
+            active_view_dom_state(&ViewerActiveState::Ready {
+                view: Box::new(viewer_active_view(tab_id)?),
+            }),
+            "ready"
+        );
+        assert_eq!(
+            active_view_dom_state(&ViewerActiveState::Error {
+                tab_id,
+                code: ViewerFailureCode::RenderFailed,
+                message: "safe failure".to_owned(),
+            }),
+            "error"
+        );
+        Ok(())
+    }
 }
 
 #[component]
@@ -342,6 +384,9 @@ fn ReadyWorkspace(
     let (file_count, commit_count) = workspace
         .files
         .with(|files| (files.file_count(), files.commit_count()));
+    let commits_actions = rsx! {
+        ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+    };
     let mobile_navigation = rsx! {
         WorkspaceMobileNavigation {
             files_trigger_id: "mobile-files-trigger",
@@ -350,14 +395,21 @@ fn ReadyWorkspace(
             commits_panel_id: "mobile-commits-panel",
             file_count,
             commit_count,
+            commits_actions: commits_actions.clone(),
             files_open: mobile_panel() == Some(MobilePanel::Files),
             commits_open: mobile_panel() == Some(MobilePanel::Commits),
             onfiles: move |_| mobile_panel.set(Some(MobilePanel::Files)),
             oncommits: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
         }
     };
+    let push_disabled = view.read().modified_files
+        || view.read().commit_count == 0
+        || matches!(
+            view.read().commit_selection,
+            gtl_wire::viewer::ViewerCommitSelection::Pending { .. }
+        );
     let live_actions = Some(rsx! {
-        ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+        crate::views::push::ViewPushButton { identity, disabled: push_disabled }
         if is_live {
             LiveViewWarning { tab_id }
         }
@@ -382,6 +434,7 @@ fn ReadyWorkspace(
                 onnavigate,
                 mobile_navigation,
                 live_actions,
+                commits_actions,
                 onselect_commit,
                 commits_loading,
                 commits_error: commits_error.clone(),
@@ -503,9 +556,13 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
     });
     rsx! {
         Button {
-            size: ButtonSize::Small,
-            variant: ButtonVariant::Outline,
-            state: if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            size: ButtonSize::IconSmall,
+            variant: ButtonVariant::Accent,
+            class: "mobile:size-11",
+            state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            icon: rsx! {
+                lucide_dioxus::FilePenLine { size: 16 }
+            },
             aria_label: "Modified files",
             aria_pressed: visible.to_string(),
             title: "Inspect current staged, unstaged, and untracked changes against HEAD",
@@ -514,8 +571,6 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
                     action.call(!visible);
                 }
             },
-            lucide_dioxus::FilePenLine { size: 15 }
-            span { class: "mobile:hidden", "Modified files" }
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::{future::Future, time::Duration};
 
 use anyhow::{Context as _, bail};
-use gtl_local_auth::CapabilityToken;
+use gtl_local_transport::LocalListener;
 use gtl_wire::{
     FILE_DESCRIPTOR_SET,
     v1::{
@@ -13,14 +13,7 @@ use gtl_wire::{
     },
     viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
 };
-#[cfg(windows)]
-use tonic::transport::server::TcpIncoming;
-use tonic::{
-    Request, Status,
-    server::NamedService,
-    service::{Interceptor, InterceptorLayer, LayerExt as _},
-    transport::Server,
-};
+use tonic::{server::NamedService, transport::Server};
 use tonic_health::server::HealthReporter;
 use tower_http::{
     LatencyUnit,
@@ -30,12 +23,10 @@ use tower_http::{
     },
 };
 
-#[cfg(unix)]
-use crate::uds_listener::BoundUdsListener;
 use crate::{
     services::{
         DiffGrpcService, LiveViewGrpcService, ProjectGrpcService, RepositoryGrpcService,
-        SettingsGrpcService, TagGrpcService, ViewerGrpcService,
+        SettingsGrpcService, TagGrpcService, ViewerGrpcService, ViewerServerInfo,
     },
     state::AppState,
 };
@@ -45,8 +36,6 @@ const MAX_REQUEST_MESSAGE_SIZE: usize = 64 * 1024;
 const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
 const VIEWER_MAX_RESPONSE_MESSAGE_SIZE: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 64 * 1024;
 
-const AUTHORIZATION_METADATA_KEY: &str = "authorization";
-const AUTHORIZATION_SCHEME: &str = "Bearer ";
 const HEALTH_SERVICE_NAME: &str = "grpc.health.v1.Health";
 const REFLECTION_SERVICE_NAME: &str = "grpc.reflection.v1.ServerReflection";
 const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 7] = [
@@ -69,69 +58,14 @@ type GrpcTraceLayer = TraceLayer<
     DefaultOnFailure,
 >;
 
-#[cfg(unix)]
-pub(crate) struct ServerListeners {
-    native: BoundUdsListener,
-}
-
-#[cfg(unix)]
-impl ServerListeners {
-    pub(crate) const fn new(native: BoundUdsListener) -> Self {
-        Self { native }
-    }
-}
-
-#[cfg(windows)]
-pub(crate) struct ServerListeners {
-    combined: tokio::net::TcpListener,
-}
-
-#[cfg(windows)]
-impl ServerListeners {
-    pub(crate) const fn new(combined: tokio::net::TcpListener) -> Self {
-        Self { combined }
-    }
-}
-
-#[cfg(windows)]
-fn tcp_incoming(listener: tokio::net::TcpListener) -> TcpIncoming {
-    TcpIncoming::from(listener).with_nodelay(Some(true))
-}
-
-#[derive(Clone)]
-struct Authentication {
-    capability: CapabilityToken,
-}
-
-impl std::fmt::Debug for Authentication {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Authentication(REDACTED)")
-    }
-}
-
-impl Interceptor for Authentication {
-    fn call(&mut self, request: Request<()>) -> Result<Request<()>, Status> {
-        let authenticated = request
-            .metadata()
-            .get(AUTHORIZATION_METADATA_KEY)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix(AUTHORIZATION_SCHEME))
-            .is_some_and(|candidate| self.capability.authenticates(candidate));
-        if !authenticated {
-            return Err(Status::unauthenticated("authentication required"));
-        }
-        Ok(request)
-    }
-}
-
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn serve(
-    listeners: ServerListeners,
+    listener: LocalListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
     shutdown_grace_period: Duration,
-    capability: CapabilityToken,
     state: AppState,
 ) -> anyhow::Result<()> {
+    let (incoming, _ownership) = listener.into_parts();
     let (health_reporter, health_server) = tonic_health::server::health_reporter();
     for service_name in NATIVE_APPLICATION_SERVICE_NAMES {
         health_reporter
@@ -162,9 +96,10 @@ pub(crate) async fn serve(
     let tag_server = TagServiceServer::new(TagGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let viewer_server = ViewerServiceServer::new(ViewerGrpcService::new(state))
-        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-        .max_encoding_message_size(VIEWER_MAX_RESPONSE_MESSAGE_SIZE);
+    let viewer_server =
+        ViewerServiceServer::new(ViewerGrpcService::new(state, ViewerServerInfo::generate()))
+            .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_encoding_message_size(VIEWER_MAX_RESPONSE_MESSAGE_SIZE);
     let mut reflection_builder = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
         .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET);
@@ -178,22 +113,6 @@ pub(crate) async fn serve(
         .context("building the gRPC reflection service")?
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let native_authentication = || Authentication {
-        capability: capability.clone(),
-    };
-    let health_server = InterceptorLayer::new(native_authentication()).named_layer(health_server);
-    let reflection_server =
-        InterceptorLayer::new(native_authentication()).named_layer(reflection_server);
-    let diff_server = InterceptorLayer::new(native_authentication()).named_layer(diff_server);
-    let live_view_server =
-        InterceptorLayer::new(native_authentication()).named_layer(live_view_server);
-    let project_server = InterceptorLayer::new(native_authentication()).named_layer(project_server);
-    let repository_server =
-        InterceptorLayer::new(native_authentication()).named_layer(repository_server);
-    let settings_server =
-        InterceptorLayer::new(native_authentication()).named_layer(settings_server);
-    let tag_server = InterceptorLayer::new(native_authentication()).named_layer(tag_server);
-    let viewer_server = InterceptorLayer::new(native_authentication()).named_layer(viewer_server);
     let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
     let server_shutdown = wait_for_shutdown(shutdown_receiver);
 
@@ -210,11 +129,7 @@ pub(crate) async fn serve(
         .add_service(settings_server)
         .add_service(tag_server)
         .add_service(viewer_server);
-    #[cfg(unix)]
-    let grpc_server = server.serve_with_incoming_shutdown(listeners.native, server_shutdown);
-    #[cfg(windows)]
-    let grpc_server =
-        server.serve_with_incoming_shutdown(tcp_incoming(listeners.combined), server_shutdown);
+    let grpc_server = server.serve_with_incoming_shutdown(incoming, server_shutdown);
     supervise_server(
         grpc_server,
         shutdown,

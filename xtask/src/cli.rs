@@ -3,8 +3,7 @@ use std::{ffi::OsString, path::PathBuf};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::verbs::{
-    Verb, desktop_scroll::DesktopScrollBenchmarkArguments,
-    grpc_transport::GrpcTransportBenchmarkArguments,
+    desktop_scroll::DesktopScrollBenchmarkArguments,
     server_highlighting::ServerHighlightingBenchmarkArguments,
     view_source::ViewSourceBenchmarkArguments,
 };
@@ -22,18 +21,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Build and install both artifacts, and ensure `~/.local/bin` is on PATH.
-    #[command(name = Verb::SETUP.as_str())]
-    Setup,
+    /// Add the configured install directory to the Zsh PATH when needed.
+    EnsureInstallPath,
     /// Install prebuilt CLI, server, or viewer artifacts.
-    #[command(name = Verb::INSTALL.as_str())]
     Install {
         /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
         #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
         target: InstallTarget,
     },
     /// Remove installed CLI, server, and viewer artifacts.
-    #[command(name = Verb::UNINSTALL.as_str())]
     Uninstall {
         /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
         /// non-interactively unless `--force`).
@@ -44,34 +40,22 @@ pub enum Command {
         force: bool,
     },
     /// Validate Dioxus RSX formatting without allowing the formatter to rewrite source files.
-    #[command(name = Verb::CHECK_DIOXUS_FORMAT.as_str(), hide = true)]
+    #[command(hide = true)]
     CheckDioxusFormat,
     /// Check staged whitespace and formatting without scanning unrelated files.
-    #[command(name = Verb::PRE_COMMIT.as_str())]
     PreCommit,
     /// Run the ordered native desktop E2E workflow for the test supervisor.
     #[command(hide = true)]
     DesktopE2eWorker,
     /// Regenerate and verify the committed deterministic desktop scroll fixture.
-    #[command(name = Verb::DESKTOP_SCROLL_FIXTURE.as_str())]
     DesktopScrollFixture,
     /// Measure production desktop scrolling against the committed realistic fixture.
-    #[command(name = Verb::DESKTOP_SCROLL_BENCHMARK.as_str())]
     DesktopScrollBenchmark(DesktopScrollBenchmarkArguments),
     /// Measure production server-owned syntax highlighting and compare it with the local baseline.
-    #[command(name = Verb::SERVER_HIGHLIGHTING_BENCHMARK.as_str())]
     ServerHighlightingBenchmark(ServerHighlightingBenchmarkArguments),
     /// Measure Compact construction and the first demand-loaded Full transition.
-    #[command(name = Verb::VIEW_SOURCE_BENCHMARK.as_str())]
     ViewSourceBenchmark(ViewSourceBenchmarkArguments),
-    /// Measure the release gRPC transport with ghz and compare it with the local baseline.
-    #[command(name = Verb::GRPC_TRANSPORT_BENCHMARK.as_str())]
-    GrpcTransportBenchmark(GrpcTransportBenchmarkArguments),
-    /// Validate the release gRPC transport with a short, non-comparable ghz workload.
-    #[command(name = Verb::GRPC_TRANSPORT_SMOKE.as_str())]
-    GrpcTransportSmoke,
     /// Attribute full-language server highlighting allocations with Valgrind Massif.
-    #[command(name = Verb::SERVER_HIGHLIGHTING_PROFILE.as_str())]
     ServerHighlightingProfile,
     /// Regenerate the desktop scroll fixture inside the bounded worker scope.
     #[command(hide = true)]
@@ -89,39 +73,33 @@ pub enum Command {
         arguments: Vec<OsString>,
     },
     /// Build the CLI engine, desktop viewer, or both release artifacts.
-    #[command(name = Verb::BUILD.as_str())]
     Build {
         /// Which release artifact set to build.
         #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
         target: BuildTarget,
     },
+    /// Build the CLI, server, and desktop app and package a native macOS installer.
+    MacosPackage,
+    /// Exercise the installed macOS package and save a desktop launch screenshot.
+    MacosSmoke,
     /// Generate the static artifact stylesheet and stage the release Dioxus Web bundle.
-    #[command(name = Verb::WEB_BUILD.as_str())]
     WebBuild,
     /// Serve the Dioxus shell with repository-owned asset watchers.
-    #[command(name = Verb::WEB_SERVE.as_str())]
     WebServe {
         /// Arguments forwarded to `dx serve`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<String>,
     },
     /// Generate the tracked shared Tailwind stylesheet.
-    #[command(name = Verb::WEB_STYLES.as_str())]
     WebStyles,
-    /// Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
-    #[command(name = Verb::DRIFT_CHECK.as_str())]
-    DriftCheck,
     /// Reject forbidden outward Cargo dependency edges.
-    #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
     /// Compile every parser feature for the browser target with the managed C toolchain.
-    #[command(name = Verb::CHECK_PARSER_WASM.as_str(), hide = true)]
+    #[command(hide = true)]
     CheckParserWasm,
     /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
-    #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
     /// Cross-build Windows CLI, viewer, and server artifacts with cargo-xwin.
-    #[command(name = Verb::SHIP.as_str())]
     Ship {
         /// Compile all binaries in debug mode without artifact verification.
         #[arg(long)]

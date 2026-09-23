@@ -22,9 +22,6 @@ use crate::{
 
 pub const DEFAULT_VIEW_CACHE_WEIGHT: ViewCacheWeight = ViewCacheWeight::new(128 * 1024 * 1024);
 
-/// Marks a tab whose view is still being computed.
-pub const RENDER_PENDING_REASON: &str = "render pending";
-
 /// A generation token authorizing publication for one still-current compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputeTicket {
@@ -162,6 +159,7 @@ pub(crate) enum MoveOutcome {
 /// Session-owned metadata for one recipe tab.
 #[derive(Debug, Clone)]
 pub struct SessionTab {
+    pub history_id: Option<super::RenderHistoryId>,
     file_exclusions: Option<gtl_models::diffs::ExcludedExtensions>,
     pub tab: ViewerTab,
     pub recipe: Recipe,
@@ -259,15 +257,9 @@ impl ViewerSession {
             .and_then(|value| ViewerTabId::try_new(value).ok())?;
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.push(SessionTab {
+            history_id: None,
             file_exclusions: None,
-            tab: ViewerTab::new(
-                id,
-                label,
-                kind,
-                ViewerTabState::Error {
-                    reason: RENDER_PENDING_REASON.into(),
-                },
-            ),
+            tab: ViewerTab::new(id, label, kind, ViewerTabState::Pending),
             recipe,
             batch_id,
             generation: ViewerRangeGeneration::default(),
@@ -287,6 +279,7 @@ impl ViewerSession {
         self.cache.remove(id);
         tab.modified_files_active = false;
         tab.live_head = None;
+        tab.history_id = None;
         // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
         // one ticket remains in flight before an old ticket could compare equal again.
         tab.generation = tab.generation.next();
@@ -304,9 +297,7 @@ impl ViewerSession {
             id,
             tab.tab.label().into(),
             tab.tab.kind(),
-            ViewerTabState::Error {
-                reason: RENDER_PENDING_REASON.into(),
-            },
+            ViewerTabState::Pending,
         );
         let generation = tab.generation;
         self.bump_version();
@@ -340,6 +331,7 @@ impl ViewerSession {
         }
         tab.file_exclusions
             .get_or_insert_with(|| value.view.file_filter.excluded().clone());
+        let label = tab.recipe.name.as_ref().map_or(label, ToString::to_string);
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_version();
@@ -374,7 +366,7 @@ impl ViewerSession {
         let tab = self.tab(id)?;
         if self.active != Some(id)
             || tab.tab.kind() != ViewerTabKind::Live
-            || matches!(tab.tab.state(), ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON)
+            || matches!(tab.tab.state(), ViewerTabState::Pending)
         {
             return None;
         }
@@ -394,6 +386,51 @@ impl ViewerSession {
             .is_some_and(super::refresh_live_view::LiveViewState::is_branch_comparison)
     }
 
+    pub fn bind_snapshot_history(
+        &mut self,
+        ticket: ComputeTicket,
+        record: &crate::history::RecentRenderRecord,
+    ) {
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| {
+            tab.tab.id() == ticket.tab_id
+                && tab.generation == ticket.generation
+                && tab.tab.kind() == ViewerTabKind::Snapshot
+        }) {
+            tab.history_id = Some(record.id);
+            if tab.recipe.name.is_none() {
+                tab.recipe.name.clone_from(&record.recipe.name);
+            }
+            if let Some(name) = &tab.recipe.name {
+                tab.tab = ViewerTab::new(
+                    tab.tab.id(),
+                    name.to_string(),
+                    tab.tab.kind(),
+                    tab.tab.state().clone(),
+                );
+            }
+            self.bump_version();
+        }
+    }
+
+    pub(super) fn rename_snapshot(
+        &mut self,
+        history_id: super::RenderHistoryId,
+        name: &gtl_models::paths::ProjectName,
+    ) {
+        for tab in &mut self.tabs {
+            if tab.history_id == Some(history_id) && tab.tab.kind() == ViewerTabKind::Snapshot {
+                tab.recipe.name = Some(name.clone());
+                tab.tab = ViewerTab::new(
+                    tab.tab.id(),
+                    name.to_string(),
+                    tab.tab.kind(),
+                    tab.tab.state().clone(),
+                );
+            }
+        }
+        self.bump_version();
+    }
+
     pub(super) fn retain_snapshot_recipe(&mut self, ticket: ComputeTicket, recipe: &Recipe) {
         if let Some(tab) = self
             .tabs
@@ -401,7 +438,9 @@ impl ViewerSession {
             .find(|tab| tab.tab.id() == ticket.tab_id)
             && tab.tab.kind() == ViewerTabKind::Snapshot
         {
+            let name = tab.recipe.name.clone();
             tab.recipe = recipe.clone();
+            tab.recipe.name = name;
         }
     }
 
@@ -1240,6 +1279,7 @@ mod tests {
             ),
             PublishOutcome::Published
         );
+        assert_eq!(session.tab(id).unwrap().tab.state(), &ViewerTabState::Ready);
         (session, id)
     }
 
@@ -1564,6 +1604,7 @@ mod tests {
             super::super::Theme::Dark,
             gtl_models::viewer::ViewerKeybindings::default(),
             gtl_models::viewer::ViewerSidebarVisibility::default(),
+            gtl_models::settings::ViewerAccessibility::default(),
             None,
         )
         .unwrap()
@@ -1788,13 +1829,17 @@ mod tests {
     }
 
     #[test]
-    fn refresh_invalidates_cached_content_and_older_tickets() {
+    fn refresh_transitions_from_pending_to_success_and_invalidates_older_tickets() {
         let (mut session, id) = ready_session();
         let stale = session.begin_compute(id).unwrap();
 
         let refresh = session.refresh(id).unwrap();
 
         assert!(session.cached_view(id).is_none());
+        assert_eq!(
+            session.tab(id).unwrap().tab.state(),
+            &ViewerTabState::Pending
+        );
         assert_eq!(
             session.publish_labeled_if_current(
                 stale,
@@ -1811,10 +1856,11 @@ mod tests {
             ),
             PublishOutcome::Published
         );
+        assert_eq!(session.tab(id).unwrap().tab.state(), &ViewerTabState::Ready);
     }
 
     #[test]
-    fn beginning_reopen_compute_invalidates_old_view_before_error_publication() {
+    fn beginning_reopen_compute_transitions_from_pending_to_error() {
         let (mut session, id) = ready_session();
         assert!(session.cached_view(id).is_some());
 
@@ -1822,9 +1868,7 @@ mod tests {
         assert!(session.cached_view(id).is_none());
         assert_eq!(
             session.tab(id).unwrap().tab.state(),
-            &ViewerTabState::Error {
-                reason: RENDER_PENDING_REASON.into(),
-            }
+            &ViewerTabState::Pending
         );
         session.set_state_if_current(
             ticket,

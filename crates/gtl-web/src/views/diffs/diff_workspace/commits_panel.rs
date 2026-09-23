@@ -44,6 +44,7 @@ pub fn CommitsPanel(
 #[component]
 pub(super) fn WorkspaceCommitsPanel(
     details_popover_id_prefix: String,
+    actions: Option<Element>,
     #[props(default)] artifact: bool,
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
@@ -83,7 +84,7 @@ pub(super) fn WorkspaceCommitsPanel(
                     onloadmore.call(());
                 }
             },
-            CommitsPanelHeader {}
+            CommitsPanelHeader { actions }
             if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
                 CommitSelectionError { message: message.clone() }
             }
@@ -145,13 +146,18 @@ fn scroll_is_near_bottom(scroll: &ScrollData) -> bool {
 }
 
 #[component]
-fn CommitsPanelHeader() -> Element {
+fn CommitsPanelHeader(actions: Option<Element>) -> Element {
     rsx! {
         header { class: "diff-commits-header px-3 py-2 compact:px-2.5",
-            h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
-                "Commits"
+            div { class: "flex items-center justify-between gap-2",
+                div {
+                    h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
+                        "Commits"
+                    }
+                    CommitPanelHint {}
+                }
+                {actions}
             }
-            CommitPanelHint {}
         }
     }
 }

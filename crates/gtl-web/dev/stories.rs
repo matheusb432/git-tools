@@ -68,6 +68,12 @@ mod tests {
 
     #[test]
     fn lookup_resolves_only_cataloged_paths() {
+        for story_id in ["interactive", "info", "error", "push-confirmation"] {
+            assert!(
+                find("alert-dialog", story_id).unwrap().is_some(),
+                "missing alert-dialog story: {story_id}"
+            );
+        }
         assert!(find("button", "interactive").unwrap().is_some());
         assert!(
             find("viewer-tab-overflow-menu", "interactive")

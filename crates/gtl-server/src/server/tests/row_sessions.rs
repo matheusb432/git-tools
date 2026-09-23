@@ -2,7 +2,7 @@ use std::{fmt::Write as _, time::Duration};
 
 use gtl_application::live_views::save_live_view::{self, SaveLiveView};
 use gtl_infra::{app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient};
-use gtl_local_auth::LocalAuth;
+use gtl_local_transport::LocalEndpoint;
 use gtl_models::live_views::LiveComparison;
 use gtl_wire::{
     proto, v1,
@@ -12,16 +12,14 @@ use gtl_wire::{
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{service::interceptor::InterceptedService, transport::Channel};
+use tonic::transport::Channel;
 
 use super::{
-    ServerHarness, ServerHarnessAuthorization, TestResult,
+    ServerHarness, TestResult,
     live_views::{git, ready_shell},
 };
 
-type Client = v1::viewer_service_client::ViewerServiceClient<
-    InterceptedService<Channel, ServerHarnessAuthorization>,
->;
+type Client = v1::viewer_service_client::ViewerServiceClient<Channel>;
 
 async fn fixture() -> TestResult<(tempfile::TempDir, ServerHarness, Client, ViewerActiveView)> {
     fixture_tabs(1).await
@@ -69,10 +67,7 @@ async fn fixture_source(
     let settings = directory.path().join("settings.toml");
     std::fs::write(&settings, "")?;
     let server = ServerHarness::start(directory.path(), Some(settings)).await?;
-    let mut client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let shell = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
     let ViewerActiveState::Ready { view } = shell.active else {
         return Err("expected a ready fixture".into());
@@ -205,8 +200,8 @@ async fn long_lines_cross_grpc_as_previews_but_copy_reads_complete_source() -> T
 #[tokio::test]
 async fn native_windows_reuse_one_session_and_release_it_on_disconnect() -> TestResult {
     let (directory, server, mut client, view) = fixture().await?;
-    let auth = LocalAuth::from_data_root(directory.path())?;
-    let mut native = gtl_client::ViewerClient::connect(&auth).await?;
+    let endpoint = LocalEndpoint::from_root(directory.path())?;
+    let mut native = gtl_client::ViewerClient::connect(&endpoint).await?;
     for index in 0..25 {
         let count = receive_native(&mut native, demand(&view, index * 16, 512)?).await?;
         assert_eq!(count, 512);
@@ -266,8 +261,8 @@ async fn row_sessions_supersede_demand_recover_from_range_errors_and_close_with_
 #[tokio::test]
 async fn native_session_eviction_preserves_tabs_and_reopens_their_streams() -> TestResult {
     let (directory, server, mut client, _) = fixture_tabs(12).await?;
-    let auth = LocalAuth::from_data_root(directory.path())?;
-    let mut native = gtl_client::ViewerClient::connect(&auth).await?;
+    let endpoint = LocalEndpoint::from_root(directory.path())?;
+    let mut native = gtl_client::ViewerClient::connect(&endpoint).await?;
     let shell = native.get_shell().await?;
     assert_eq!(shell.tabs.len(), 12);
     for tab in shell.tabs.iter().chain(shell.tabs.iter().take(2)) {

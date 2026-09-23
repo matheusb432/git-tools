@@ -40,7 +40,7 @@ async fn settings_journey(session: &mut support::session::TestSession) -> Result
 
     let configuration_path = session.data_root().join("config.toml");
     let before = std::fs::read_to_string(&configuration_path)?;
-    select_value(session.driver(), "settings-theme", "light").await?;
+    select_value(session.driver(), "settings-theme", "carbon").await?;
     select_value(session.driver(), "settings-layout", "split").await?;
     select_value(session.driver(), "settings-density", "full").await?;
     select_value(session.driver(), "settings-push-confirmation", "false").await?;
@@ -50,6 +50,11 @@ async fn settings_journey(session: &mut support::session::TestSession) -> Result
     );
     save_settings(session.driver()).await?;
     wait_for_scalar_settings(session).await?;
+    session
+        .driver()
+        .query(By::Css("html[data-theme='carbon']"))
+        .first()
+        .await?;
     dismiss_toast(session.driver()).await?;
 
     fixture.forward()?;
@@ -86,7 +91,7 @@ async fn recover_from_concurrent_edit(
 
     select_value(session.driver(), "settings-push-confirmation", "true").await?;
     let current = std::fs::read_to_string(&configuration_path)?;
-    let concurrent = current.replacen("theme = \"light\"", "theme = \"noir\"", 1);
+    let concurrent = current.replacen("theme = \"carbon\"", "theme = \"graphite\"", 1);
     ensure!(
         current != concurrent,
         "could not prepare the concurrent settings edit"
@@ -144,7 +149,7 @@ async fn recover_from_concurrent_edit(
                 .driver()
                 .find(By::Css("section[aria-label='Resolved viewer settings']"))
                 .await?;
-            Ok(resolved.text().await?.contains("Noir").then_some(()))
+            Ok(resolved.text().await?.contains("Graphite").then_some(()))
         },
     )
     .await?;
@@ -156,7 +161,7 @@ async fn recover_from_concurrent_edit(
             .value()
             .await?
             .as_deref()
-            == Some("light"),
+            == Some("carbon"),
         "reloading the settings revision discarded the pending theme draft"
     );
     save_settings(session.driver()).await?;
@@ -168,7 +173,7 @@ async fn recover_from_concurrent_edit(
             let (settings, _) = store.load_viewer_settings()?;
             Ok((settings
                 .theme()
-                .is_some_and(|theme| theme.to_string() == "light")
+                .is_some_and(|theme| theme.to_string() == "carbon")
                 && settings.push_confirmation_required())
             .then_some(()))
         },
@@ -178,7 +183,7 @@ async fn recover_from_concurrent_edit(
     Ok(())
 }
 
-async fn open_settings(driver: &WebDriver) -> Result<()> {
+pub(super) async fn open_settings(driver: &WebDriver) -> Result<()> {
     support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER)
         .await?
         .click()
@@ -199,7 +204,7 @@ async fn open_settings(driver: &WebDriver) -> Result<()> {
     Ok(())
 }
 
-async fn select_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
+pub(super) async fn select_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
     let select = driver.find(By::Id(id)).await?;
     SelectElement::new(&select)
         .await?
@@ -228,7 +233,7 @@ async fn wait_for_scalar_settings(session: &support::session::TestSession) -> Re
             let options = settings.viewer_render_options();
             Ok((settings
                 .theme()
-                .is_some_and(|theme| theme.to_string() == "light")
+                .is_some_and(|theme| theme.to_string() == "carbon")
                 && options.layout().to_string() == "split"
                 && options.density().to_string() == "full"
                 && !settings.push_confirmation_required())

@@ -1,4 +1,3 @@
-use gtl_models::viewer::Theme;
 use gtl_wire::viewer::{ViewerFeedback, ViewerShell};
 
 use super::{
@@ -40,9 +39,10 @@ pub fn execute(
         shell::project(
             session,
             settings.viewer_render_options(),
-            settings.theme().unwrap_or(Theme::Dark),
+            settings.theme().unwrap_or_default(),
             settings.viewer_keybindings(),
             settings.sidebar_visibility(),
+            settings.accessibility(),
             feedback,
         )
     })??;

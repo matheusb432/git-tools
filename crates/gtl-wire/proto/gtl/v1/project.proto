@@ -75,11 +75,12 @@ message CreateProjectResponse {
 }
 
 message ProjectCreation {
+  reserved 4, 5;
+  reserved "mux_session_name", "affiliation";
+
   string title = 1;
   ProjectSource source = 2;
   optional string git_remote = 3;
-  string mux_session_name = 4;
-  ProjectAffiliation affiliation = 5;
   optional string color = 6;
   repeated string groups = 7;
   // Defaults to true when omitted.
@@ -100,13 +101,14 @@ message GetProjectRequest {
 }
 
 message GetProjectResponse {
+  reserved 5, 7;
+  reserved "mux_session_name", "affiliation";
+
   string id = 1;
   string title = 2;
   ProjectSource source = 3;
   optional string git_remote = 4;
-  string mux_session_name = 5;
   ProjectStatus status = 6;
-  ProjectAffiliation affiliation = 7;
   optional string color = 8;
   repeated string groups = 9;
 }
@@ -171,13 +173,14 @@ message ProjectMutation {
 }
 
 message Project {
+  reserved 5, 7;
+  reserved "mux_session_name", "affiliation";
+
   string id = 1;
   string title = 2;
   ProjectSource source = 3;
   optional string git_remote = 4;
-  string mux_session_name = 5;
   ProjectStatus status = 6;
-  ProjectAffiliation affiliation = 7;
   optional string color = 8;
   repeated string groups = 9;
 }
@@ -189,6 +192,7 @@ message ProjectSource {
 }
 
 message DirectorySource {
+  // Absolute native filesystem path. Repositories may be outside the user's home.
   string path = 1;
 }
 
@@ -196,10 +200,4 @@ enum ProjectStatus {
   PROJECT_STATUS_UNSPECIFIED = 0;
   PROJECT_STATUS_ACTIVE = 1;
   PROJECT_STATUS_PAUSED = 2;
-}
-
-enum ProjectAffiliation {
-  PROJECT_AFFILIATION_UNSPECIFIED = 0;
-  PROJECT_AFFILIATION_PERSONAL = 1;
-  PROJECT_AFFILIATION_WORK = 2;
 }

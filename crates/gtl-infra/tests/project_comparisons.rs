@@ -20,7 +20,7 @@ use gtl_infra::{app_state::SqliteAppState, git_client::HybridGitClient};
 use gtl_models::{
     paths::RepositoryRoot,
     projects::{
-        catalogue::{ProjectAffiliation, ProjectGroups, ProjectMetadata},
+        catalogue::{ProjectGroups, ProjectMetadata},
         comparison::ComparisonBranch,
     },
     recipes::RecipeBatchId,
@@ -50,10 +50,9 @@ fn git(path: &Path, arguments: &[&str]) {
 
 impl Fixture {
     fn new() -> Self {
-        let home = directories::BaseDirs::new().unwrap();
         let directory = tempfile::Builder::new()
             .prefix(".gtl-comparison-")
-            .tempdir_in(home.home_dir())
+            .tempdir()
             .unwrap();
         let path = directory.path().join("repository");
         std::fs::create_dir(&path).unwrap();
@@ -76,14 +75,7 @@ impl Fixture {
     }
 
     fn register(&self, id: &str, title: &str, path: &RepositoryRoot) {
-        let home = directories::BaseDirs::new().unwrap();
-        let source = format!(
-            "~/{}",
-            path.as_ref()
-                .strip_prefix(home.home_dir())
-                .unwrap()
-                .display()
-        );
+        let source = path.to_string();
         create_project::execute(
             &create_project::CreateProject {
                 id: id.to_owned().try_into().unwrap(),
@@ -91,8 +83,6 @@ impl Fixture {
                     title: title.to_owned().try_into().unwrap(),
                     source: source.try_into().unwrap(),
                     git_remote: None,
-                    mux_session_name: title.to_owned().try_into().unwrap(),
-                    affiliation: ProjectAffiliation::Personal,
                     color: None,
                     groups: ProjectGroups::default(),
                 },

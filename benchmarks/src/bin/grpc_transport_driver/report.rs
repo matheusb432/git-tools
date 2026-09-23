@@ -23,14 +23,14 @@ pub(crate) struct Compatibility {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Transport {
-    Tcp,
+    NamedPipe,
     Uds,
 }
 
 impl std::fmt::Display for Transport {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::Tcp => "tcp",
+            Self::NamedPipe => "named-pipe",
             Self::Uds => "uds",
         })
     }

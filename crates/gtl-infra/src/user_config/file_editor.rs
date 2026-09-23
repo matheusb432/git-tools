@@ -606,12 +606,12 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap();
         let raw = std::fs::read_to_string(path).unwrap();
 
         assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(raw.contains("# viewer"));
-        assert!(raw.contains("theme = \"light\""));
+        assert!(raw.contains("theme = \"glacier\""));
         assert!(raw.contains("[push]\nconfirm = false"));
     }
 
@@ -627,7 +627,7 @@ mod tests {
         std::fs::write(&target, "theme = \"dark\"\n").unwrap();
         create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap();
 
         assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(
@@ -638,7 +638,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(&target).unwrap(),
-            "theme = \"light\"\n"
+            "theme = \"glacier\"\n"
         );
     }
 
@@ -653,7 +653,7 @@ mod tests {
         let path = config_directory.join("config.toml");
         create_file_symbolic_link(Path::new("../managed/settings.toml"), &path).unwrap();
 
-        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap();
+        let outcome = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap();
 
         assert_eq!(outcome, UserSettingsEditOutcome::Changed);
         assert!(
@@ -664,7 +664,7 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(&target).unwrap(),
-            "theme = \"light\"\n"
+            "theme = \"glacier\"\n"
         );
     }
 
@@ -676,7 +676,7 @@ mod tests {
         create_file_symbolic_link(Path::new("config-other.toml"), &path).unwrap();
         create_file_symbolic_link(Path::new("config.toml"), &path_other).unwrap();
 
-        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap_err();
 
         assert!(format!("{error:#}").contains("exceeds 40 symbolic links"));
         assert!(
@@ -715,7 +715,7 @@ mod tests {
         let raw = "theme = 7\n";
         std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap_err();
 
         assert!(matches!(
             error,
@@ -732,7 +732,7 @@ mod tests {
         let raw = "theme = {{{\n";
         std::fs::write(&path, raw).unwrap();
 
-        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Light))).unwrap_err();
+        let error = edit(&path, set(SettingKeyValue::Theme(Theme::Glacier))).unwrap_err();
 
         assert!(matches!(
             error,
@@ -757,7 +757,7 @@ mod tests {
 
         let started_at = Instant::now();
         let worker = std::thread::spawn(move || {
-            let result = edit(&path_worker, set(SettingKeyValue::Theme(Theme::Light)));
+            let result = edit(&path_worker, set(SettingKeyValue::Theme(Theme::Glacier)));
             result_sender.send(result).unwrap();
         });
         let result = result_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
@@ -785,7 +785,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let raw = "theme = \"dark\"\nlayout = \"split\"\n";
-        let changed_raw = "theme = \"hearth\"\nlayout = \"split\"\n";
+        let changed_raw = "theme = \"mirage\"\nlayout = \"split\"\n";
         std::fs::write(&path, raw).unwrap();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let (continue_sender, continue_receiver) = mpsc::sync_channel(1);
@@ -800,7 +800,7 @@ mod tests {
             });
         let path_worker = path.clone();
         let worker = std::thread::spawn(move || {
-            edit(&path_worker, set(SettingKeyValue::Theme(Theme::Light)))
+            edit(&path_worker, set(SettingKeyValue::Theme(Theme::Glacier)))
         });
 
         ready_receiver.recv_timeout(RESULT_WAIT_TEST_MAX).unwrap();
@@ -821,7 +821,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         let loaded_raw = b"theme = \"dark\"\n";
-        let current_raw = "theme = \"hearth\"\n";
+        let current_raw = "theme = \"mirage\"\n";
         let expected_revision = super::revision(loaded_raw);
         std::fs::write(&path, current_raw).unwrap();
 
@@ -829,7 +829,7 @@ mod tests {
             &path,
             UserSettingsPatch {
                 expected_revision: Some(expected_revision),
-                theme: UserSettingsFieldUpdate::Update(Theme::Light),
+                theme: UserSettingsFieldUpdate::Update(Theme::Glacier),
                 ..UserSettingsPatch::default()
             },
         )
@@ -860,7 +860,7 @@ mod tests {
         let result_sender_theme = result_sender.clone();
         let theme_worker = std::thread::spawn(move || {
             attempt_sender_theme.send("theme").unwrap();
-            let result = store_theme.edit(SettingKeyValue::Theme(Theme::Light).into());
+            let result = store_theme.edit(SettingKeyValue::Theme(Theme::Glacier).into());
             result_sender_theme.send(("theme", result)).unwrap();
         });
 
@@ -909,7 +909,7 @@ mod tests {
 
         let raw = std::fs::read_to_string(path).unwrap();
         let document = toml::from_str::<toml::Value>(&raw).unwrap();
-        assert_eq!(document["theme"].as_str(), Some("light"));
+        assert_eq!(document["theme"].as_str(), Some("glacier"));
         assert_eq!(document["layout"].as_str(), Some("split"));
     }
 

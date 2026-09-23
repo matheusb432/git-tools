@@ -65,8 +65,31 @@ pub(crate) fn run_with_index(
 }
 
 fn run_status_command(
+    command: Command,
+    cancellation: &std::sync::atomic::AtomicBool,
+) -> anyhow::Result<GitProcessOutput> {
+    run_timed_command(command, cancellation, std::time::Duration::from_secs(10))
+}
+
+pub(crate) fn run_bounded(
+    repo: &Path,
+    args: &[&str],
+    timeout: std::time::Duration,
+) -> anyhow::Result<GitProcessOutput> {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::null());
+    run_timed_command(command, &std::sync::atomic::AtomicBool::new(false), timeout)
+}
+
+fn run_timed_command(
     mut command: Command,
     cancellation: &std::sync::atomic::AtomicBool,
+    timeout: std::time::Duration,
 ) -> anyhow::Result<GitProcessOutput> {
     use std::{
         io::{Read as _, Seek as _},
@@ -84,7 +107,7 @@ fn run_status_command(
     let started = Instant::now();
     let exit = loop {
         if cancellation.load(Ordering::Relaxed)
-            || started.elapsed() > Duration::from_secs(10)
+            || started.elapsed() > timeout
             || stdout
                 .metadata()
                 .map_or(true, |metadata| metadata.len() > 128 * 1024)
@@ -94,7 +117,9 @@ fn run_status_command(
         {
             let _ = child.kill();
             let _ = child.wait();
-            anyhow::bail!("status command cancelled or timed out");
+            anyhow::bail!(
+                "Git command cancelled, timed out, or exceeded its output limit; check repository status before retrying"
+            );
         }
         match child.try_wait() {
             Ok(Some(exit)) => break exit,

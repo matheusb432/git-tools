@@ -1,24 +1,20 @@
 use gtl_wire::viewer::ViewerTheme;
 
-pub(crate) const VIEWER_THEME_OPTIONS: [ViewerTheme; 7] = [
+pub(crate) const VIEWER_THEME_OPTIONS: [ViewerTheme; 5] = [
     ViewerTheme::Dark,
-    ViewerTheme::Light,
-    ViewerTheme::Hearth,
     ViewerTheme::Mirage,
     ViewerTheme::Glacier,
-    ViewerTheme::Noir,
     ViewerTheme::Graphite,
+    ViewerTheme::Carbon,
 ];
 
 pub(crate) const fn viewer_theme_label(theme: ViewerTheme) -> &'static str {
     match theme {
         ViewerTheme::Dark => "Dark",
-        ViewerTheme::Light => "Light",
-        ViewerTheme::Hearth => "Hearth",
         ViewerTheme::Mirage => "Mirage",
         ViewerTheme::Glacier => "Glacier",
-        ViewerTheme::Noir => "Noir",
         ViewerTheme::Graphite => "Graphite",
+        ViewerTheme::Carbon => "Carbon",
     }
 }
 

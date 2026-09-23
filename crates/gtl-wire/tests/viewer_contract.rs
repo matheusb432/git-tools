@@ -79,6 +79,8 @@ fn identity() -> TestResult<ViewerViewIdentity> {
 fn closed_value_tokens_keep_their_wire_contracts() {
     let values = [
         serde_json::to_value(ViewerTheme::Graphite).unwrap(),
+        serde_json::to_value(ViewerTheme::Carbon).unwrap(),
+        serde_json::to_value(ViewerTheme::Dark).unwrap(),
         serde_json::to_value(ViewerDiffLayout::Unified).unwrap(),
         serde_json::to_value(ViewerDiffDensity::Compact).unwrap(),
         serde_json::to_value(ViewerTabKind::Snapshot).unwrap(),
@@ -90,6 +92,8 @@ fn closed_value_tokens_keep_their_wire_contracts() {
         values,
         [
             json!("graphite"),
+            json!("carbon"),
+            json!("dark"),
             json!("unified"),
             json!("compact"),
             json!("snapshot"),
@@ -230,6 +234,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
         version: ViewerVersion::new(23),
         focus_request_version: Some(ViewerVersion::new(20)),
         tabs: vec![ViewerTab {
+            custom_name: None,
             pinned: false,
             id: tab_id(7)?,
             label: "git-tools".into(),
@@ -284,6 +289,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
             }),
         },
         preferences: ViewerPreferences {
+            accessibility: gtl_models::settings::ViewerAccessibility::default(),
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: identity.render_options,
@@ -360,6 +366,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         has_older: false,
     };
     let settings = ViewerUserSettings {
+        accessibility: gtl_models::settings::ViewerAccessibility::default(),
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x11; 32]),
         focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {

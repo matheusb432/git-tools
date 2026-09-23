@@ -55,19 +55,23 @@ fn wait_for_server_endpoint(
     data_root: &Path,
     failure: &std::sync::mpsc::Receiver<String>,
 ) -> Result<()> {
-    let endpoint = data_root.join("server").join("endpoint.json");
+    let endpoint = gtl_local_transport::LocalEndpoint::from_root(data_root)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build server readiness runtime")?;
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(15) {
         check_server_failure(failure)?;
-        if endpoint.is_file() {
+        if runtime
+            .block_on(gtl_client::GtlClient::connect(&endpoint))
+            .is_ok()
+        {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    bail!(
-        "gtl-server did not publish its endpoint at {}",
-        endpoint.display()
-    )
+    bail!("gtl-server did not become ready within 15 seconds")
 }
 
 fn check_server_failure(failure: &std::sync::mpsc::Receiver<String>) -> Result<()> {
@@ -83,10 +87,6 @@ fn check_server_failure(failure: &std::sync::mpsc::Receiver<String>) -> Result<(
 pub fn register_project(id: &str, title: &str, repository: &Path) -> Result<()> {
     use gtl_wire::v1;
 
-    let home = std::env::var_os("HOME").context("fixture home")?;
-    let relative = repository
-        .strip_prefix(home)
-        .context("fixture repository under home")?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -99,12 +99,10 @@ pub fn register_project(id: &str, title: &str, repository: &Path) -> Result<()> 
                     title: title.into(),
                     source: Some(v1::ProjectSource {
                         source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
-                            path: format!("~/{}", relative.to_string_lossy().replace('\\', "/")),
+                            path: repository.to_string_lossy().into_owned(),
                         })),
                     }),
                     git_remote: None,
-                    mux_session_name: id.to_ascii_lowercase(),
-                    affiliation: v1::ProjectAffiliation::Personal.into(),
                     color: None,
                     groups: Vec::new(),
                     include_in_full_export: None,

@@ -5,11 +5,18 @@
   .control-button-variant-primary { @apply border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2; }
   .control-button-variant-secondary { @apply border border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg; }
   .control-button-variant-destructive { @apply border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg; }
+  .control-button-variant-warning { @apply border border-warn-line bg-warn-bg text-warn hover:border-warn hover:bg-warn hover:text-bg active:border-warn active:bg-warn active:text-bg; }
   .control-button-variant-failure { @apply border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg; }
   .control-button-variant-outline { @apply border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
   .control-button-variant-ghost { @apply border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
+  .control-button-variant-accent { @apply border border-transparent bg-transparent text-acc enabled:hover:border-acc-line enabled:hover:bg-acc-soft enabled:hover:text-acc-2 disabled:text-ink-3; }
+  .control-button-variant-accent[aria-pressed="true"] { @apply border-acc-line bg-acc/25 enabled:hover:bg-acc/25; }
   .control-button-variant-toggle[aria-pressed="true"] { @apply bg-acc-soft text-acc; }
 
+
+  .control-table-actions { @apply flex justify-end gap-1; }
+  .control-table-actions > .control-button:not(:disabled),
+  .control-table-actions > span > .control-button:not(:disabled) { @apply text-acc; }
 
   .control-badge { @apply inline-flex items-center justify-center rounded-sm border; }
   .control-badge-neutral { @apply border-line-2 bg-sunk text-ink-2; }
@@ -20,6 +27,11 @@
 
   .control-empty-notice { @apply rounded-panel border border-dashed border-line-2 text-center text-ink-2 italic; }
   .control-floating-notice { @apply pointer-events-none fixed inset-x-4 bottom-6 z-50 max-w-3xl wrap-anywhere rounded-panel border border-acc-line bg-surface text-ink shadow-floating; }
+
+
+  .control-sectioned-surface { @apply overflow-hidden rounded-panel border border-line bg-surface; }
+  .control-sectioned-surface-header, .control-sectioned-surface-footer { @apply bg-surface-2; }
+  .control-sectioned-surface-body { @apply bg-surface; }
 
 
   .control-loading-spinner { @apply inline-flex flex-none items-center justify-center; }

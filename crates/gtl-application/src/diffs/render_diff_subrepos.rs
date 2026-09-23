@@ -269,7 +269,7 @@ diff --git a/notes.md b/notes.md\n\
             ..Default::default()
         };
         let app_settings = FixedUserSettingsStore::new(UserSettings::new(
-            Some(Theme::Noir),
+            Some(Theme::Graphite),
             RenderOptions::DEFAULT,
             gtl_models::viewer::ViewerKeybindings::default(),
             true,
@@ -299,6 +299,6 @@ diff --git a/notes.md b/notes.md\n\
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert!(artifact.html.contains("repo-a:noir:unified:compact:1"));
+        assert!(artifact.html.contains("repo-a:graphite:unified:compact:1"));
     }
 }

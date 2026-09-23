@@ -14,8 +14,8 @@ use std::{
 use anyhow::{Context as _, Result, bail, ensure};
 use gtl_benchmarks::release_server::{ReleaseServerConfig, ReleaseServerProcess};
 use gtl_client::GtlClient;
-use gtl_local_auth::{CapabilityToken, LocalAuth, ServerEndpoint};
-use serde::{Deserialize, Serialize};
+use gtl_local_transport::LocalEndpoint;
+use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
@@ -59,7 +59,7 @@ impl Mode {
             Self::Smoke => Workload {
                 config: SMOKE_CONFIG,
                 launches: 1,
-                total_request_count: 120,
+                total_request_count: 1_020,
                 warmup_request_count: 20,
                 ghz_wall_timeout: Duration::from_secs(30),
                 worker_wall_time_minutes: 2,
@@ -509,31 +509,23 @@ async fn measure_running_server(
 struct ServerAccess {
     target: String,
     transport: Transport,
-    capability: CapabilityToken,
 }
 
 async fn wait_for_server_access(server: &mut ReleaseServerProcess) -> Result<ServerAccess> {
-    let auth =
-        LocalAuth::from_data_root(server.data_root()).context("open isolated server auth")?;
+    let endpoint =
+        LocalEndpoint::from_root(server.data_root()).context("resolve isolated server endpoint")?;
     let deadline = deadline(SERVER_READY_TIMEOUT)?;
     loop {
         server.ensure_running()?;
-        let last_error = match GtlClient::connect(&auth).await {
+        let last_error = match GtlClient::connect(&endpoint).await {
             Ok(client) => match client.get_push_confirmation_requirement().await {
                 Ok(response) => {
                     ensure!(
                         response.push_confirmation_required,
                         "isolated server ignored the fixed push confirmation setting"
                     );
-                    let endpoint = auth.load_endpoint().context("load benchmark endpoint")?;
                     let (target, transport) = benchmark_target(&endpoint);
-                    return Ok(ServerAccess {
-                        target,
-                        transport,
-                        capability: auth
-                            .load_client_token()
-                            .context("load benchmark capability")?,
-                    });
+                    return Ok(ServerAccess { target, transport });
                 }
                 Err(error) => format!("settings request failed: {error}"),
             },
@@ -548,23 +540,21 @@ async fn wait_for_server_access(server: &mut ReleaseServerProcess) -> Result<Ser
     }
 }
 
-fn benchmark_target(endpoint: &ServerEndpoint) -> (String, Transport) {
+fn benchmark_target(endpoint: &LocalEndpoint) -> (String, Transport) {
     #[cfg(unix)]
     {
         (
-            format!("unix://{}", endpoint.uds_path().to_string_lossy()),
+            format!("unix://{}", endpoint.path().to_string_lossy()),
             Transport::Uds,
         )
     }
     #[cfg(windows)]
     {
-        (endpoint.tcp_address().to_string(), Transport::Tcp)
+        (
+            endpoint.path().to_string_lossy().into_owned(),
+            Transport::NamedPipe,
+        )
     }
-}
-
-#[derive(Serialize)]
-struct GhzMetadata {
-    authorization: String,
 }
 
 #[derive(Deserialize)]
@@ -634,21 +624,11 @@ fn run_ghz(
     access: &ServerAccess,
     server_process_id: u32,
 ) -> Result<GhzMeasurement> {
-    let mut metadata = tempfile::NamedTempFile::new_in(sandbox).context("create ghz metadata")?;
-    serde_json::to_writer(
-        &mut metadata,
-        &GhzMetadata {
-            authorization: format!("Bearer {}", access.capability.expose_secret()),
-        },
-    )
-    .context("encode ghz metadata")?;
-    metadata.flush().context("flush ghz metadata")?;
     let output = tempfile::NamedTempFile::new_in(sandbox).context("create ghz output")?;
     let mut command = Command::new(&paths.ghz_binary);
     command
         .current_dir(&paths.repository_root)
         .arg(format!("--config={}", paths.ghz_config.display()))
-        .arg(format!("--metadata-file={}", metadata.path().display()))
         .arg("--format=json")
         .arg(format!("--output={}", output.path().display()))
         .arg(&access.target)

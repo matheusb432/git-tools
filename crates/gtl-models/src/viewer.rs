@@ -4,6 +4,7 @@ mod ids;
 mod keybindings;
 mod options;
 mod pagination;
+mod push_id;
 mod tabs;
 
 pub use ids::{
@@ -19,6 +20,7 @@ pub use pagination::{
     HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
     InvalidHistoryPage,
 };
+pub use push_id::ViewerPushId;
 pub use tabs::{ViewerTab, ViewerTabKind, ViewerTabPlacement, ViewerTabState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

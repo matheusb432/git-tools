@@ -58,7 +58,7 @@ const SOURCE_BYTES_MAX: u64 = 256 * 1024 * 1024;
 const BUNDLE_FILE_BYTES_MAX: u64 = 64 * 1024 * 1024;
 const BUNDLE_BYTES_MAX: u64 = 256 * 1024 * 1024;
 const EXPECTED_BUNDLE_ASSETS: &[(&str, &str)] = &[
-    ("app-icon-dxh", "ico"),
+    ("app-icon-dxh", "svg"),
     ("focus-trap-dxh", "js"),
     ("gtl-web-dxh", "js"),
     ("gtl-web_bg-dxh", "wasm"),
@@ -687,7 +687,7 @@ mod tests {
         fs::create_dir_all(&public).unwrap();
         for (name, contents) in [
             ("index.html", "<html></html>"),
-            ("assets/app-icon-dxhone.ico", "icon"),
+            ("assets/app-icon-dxhone.svg", "icon"),
             ("assets/focus-trap-dxhone.js", "focus"),
             ("assets/gtl-web-dxhone.js", "app"),
             ("assets/gtl-web_bg-dxhone.wasm", "wasm"),

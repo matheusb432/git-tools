@@ -120,12 +120,14 @@ fn history_page_position(
 
 fn history_filter(filter: &ViewerHistoryFilter, parameters: &mut Vec<Value>) -> String {
     match filter {
-        ViewerHistoryFilter::All => "1 = 1".to_owned(),
-        ViewerHistoryFilter::Unassociated => "r.project_id IS NULL".to_owned(),
+        ViewerHistoryFilter::All => "r.render_status = 'success'".to_owned(),
+        ViewerHistoryFilter::Unassociated => {
+            "r.render_status = 'success' AND r.project_id IS NULL".to_owned()
+        }
         ViewerHistoryFilter::Project { name } => {
             parameters.push(Value::Text(name.to_string()));
             format!(
-                "r.project_id = (SELECT id FROM projects WHERE title = ?{})",
+                "r.render_status = 'success' AND r.project_id = (SELECT id FROM projects WHERE title = ?{})",
                 parameters.len()
             )
         }
@@ -298,7 +300,7 @@ mod tests {
         seed_history(&connection, 65);
         connection
             .execute_batch(
-                "INSERT INTO project_sources VALUES (1, 'directory', '~/gt');
+                "INSERT INTO project_sources VALUES (1, 'directory', '/repos/gt');
             INSERT INTO projects VALUES ('GT', 1, 'git-tools');
             UPDATE recent_renders SET project_id = 'GT' WHERE id % 2 = 1;",
             )

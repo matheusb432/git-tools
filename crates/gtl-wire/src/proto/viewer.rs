@@ -1,4 +1,5 @@
 pub mod projects;
+pub mod push;
 pub mod text;
 
 use std::path::PathBuf;
@@ -141,6 +142,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
         tabs: shell.tabs.into_iter().map(encode_viewer_tab).collect(),
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
+            accessibility: Some(encode_viewer_accessibility(shell.preferences.accessibility)),
             sidebars: Some(encode_sidebar_visibility(shell.preferences.sidebars)),
             theme: encode_viewer_theme(shell.preferences.theme) as i32,
             render_options: Some(encode_viewer_render_options(
@@ -155,6 +157,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
 fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
     v1::ViewerTab {
         pinned: tab.pinned,
+        custom_name: tab.custom_name,
         id: u64::from(tab.id),
         label: tab.label,
         kind: match tab.kind {
@@ -571,11 +574,61 @@ pub fn decode_get_viewer_history_copy_response(
     }
 }
 
+fn encode_viewer_accessibility(
+    value: gtl_models::settings::ViewerAccessibility,
+) -> v1::ViewerAccessibility {
+    v1::ViewerAccessibility {
+        ui_scale_percent: value.ui_scale_percent.into_inner(),
+        reduce_motion: value.reduce_motion,
+    }
+}
+
+fn decode_viewer_accessibility(
+    value: v1::ViewerAccessibility,
+) -> Result<gtl_models::settings::ViewerAccessibility, ViewerCodecError> {
+    Ok(gtl_models::settings::ViewerAccessibility {
+        ui_scale_percent: gtl_models::settings::ViewerScalePercent::try_new(value.ui_scale_percent)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        reduce_motion: value.reduce_motion,
+    })
+}
+
+fn encode_viewer_scale_update(
+    update: &FieldUpdate<gtl_models::settings::ViewerScalePercent>,
+) -> Option<v1::ViewerScaleFieldUpdate> {
+    use v1::viewer_scale_field_update::Operation;
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(value) => Operation::Update(value.into_inner()),
+    };
+    Some(v1::ViewerScaleFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+fn decode_viewer_scale_update(
+    update: Option<v1::ViewerScaleFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ViewerScalePercent>, ViewerCodecError> {
+    use v1::viewer_scale_field_update::Operation;
+    Ok(match update {
+        None => FieldUpdate::Unchanged,
+        Some(update) => match required(update.operation)? {
+            Operation::Clear(_) => FieldUpdate::Clear,
+            Operation::Update(value) => FieldUpdate::Update(
+                gtl_models::settings::ViewerScalePercent::try_new(value)
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+            ),
+        },
+    })
+}
+
 pub fn decode_get_viewer_settings_response(
     response: v1::GetViewerSettingsResponse,
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     let exclusions = required(response.diff_exclusions)?;
     Ok(ViewerUserSettings {
+        accessibility: decode_viewer_accessibility(required(response.accessibility)?)?,
         revision: response
             .revision
             .parse()
@@ -621,6 +674,7 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        accessibility: Some(encode_viewer_accessibility(settings.accessibility)),
         revision: settings.revision.to_string(),
         focus_window_on_diff: Some(settings.focus_window_on_diff),
         sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
@@ -734,6 +788,8 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
         }),
     };
     v1::EditSettingsRequest {
+        ui_scale_percent: encode_viewer_scale_update(&request.ui_scale_percent),
+        reduce_motion: encode_bool_field_update(&request.reduce_motion),
         expected_revision: request
             .expected_revision
             .map(|revision| revision.to_string()),
@@ -768,10 +824,12 @@ pub fn decode_edit_settings_request(
     request: v1::EditSettingsRequest,
 ) -> Result<EditSettingsRequest, ViewerCodecError> {
     use v1::{
-        bool_field_update, density_field_update, extensions_field_update, layout_field_update,
+        density_field_update, extensions_field_update, layout_field_update,
         project_settings_field_update, theme_field_update,
     };
     Ok(EditSettingsRequest {
+        ui_scale_percent: decode_viewer_scale_update(request.ui_scale_percent)?,
+        reduce_motion: decode_bool_field_update(request.reduce_motion)?,
         expected_revision: decode_user_settings_revision(request.expected_revision)?,
         focus_window_on_diff: decode_bool_field_update(request.focus_window_on_diff)?,
         files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)?,
@@ -822,20 +880,8 @@ pub fn decode_edit_settings_request(
                 }
             },
         },
-        wrap_lines: match request.wrap_lines {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                bool_field_update::Operation::Update(value) => FieldUpdate::Update(value),
-            },
-        },
-        push_confirmation_required: match request.push_confirmation_required {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                bool_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                bool_field_update::Operation::Update(value) => FieldUpdate::Update(value),
-            },
-        },
+        wrap_lines: decode_bool_field_update(request.wrap_lines)?,
+        push_confirmation_required: decode_bool_field_update(request.push_confirmation_required)?,
         default_diff_exclusions: match request.default_diff_exclusions {
             None => FieldUpdate::Unchanged,
             Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
@@ -1105,6 +1151,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
             .collect::<Result<Vec<_>, _>>()?,
         active: decode_viewer_active_state(required(shell.active)?)?,
         preferences: ViewerPreferences {
+            accessibility: decode_viewer_accessibility(required(preferences.accessibility)?)?,
             sidebars: decode_sidebar_visibility(required(preferences.sidebars)?),
             theme: decode_viewer_theme(preferences.theme)?,
             render_options: decode_viewer_render_options(required(preferences.render_options)?)?,
@@ -1171,6 +1218,7 @@ fn decode_viewer_keybindings(
 fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> {
     Ok(ViewerTab {
         pinned: tab.pinned,
+        custom_name: tab.custom_name,
         id: ViewerTabId::try_new(tab.id).map_err(|_| ViewerCodecError::InvalidMessage)?,
         label: tab.label,
         kind: match v1::ViewerTabKind::try_from(tab.kind) {
@@ -1475,12 +1523,10 @@ const fn encode_viewer_diff_density(density: ViewerDiffDensity) -> v1::ViewerDif
 pub fn decode_viewer_theme(theme: i32) -> Result<ViewerTheme, ViewerCodecError> {
     match v1::ViewerTheme::try_from(theme) {
         Ok(v1::ViewerTheme::Dark) => Ok(ViewerTheme::Dark),
-        Ok(v1::ViewerTheme::Light) => Ok(ViewerTheme::Light),
-        Ok(v1::ViewerTheme::Hearth) => Ok(ViewerTheme::Hearth),
-        Ok(v1::ViewerTheme::Mirage) => Ok(ViewerTheme::Mirage),
         Ok(v1::ViewerTheme::Glacier) => Ok(ViewerTheme::Glacier),
-        Ok(v1::ViewerTheme::Noir) => Ok(ViewerTheme::Noir),
+        Ok(v1::ViewerTheme::Mirage) => Ok(ViewerTheme::Mirage),
         Ok(v1::ViewerTheme::Graphite) => Ok(ViewerTheme::Graphite),
+        Ok(v1::ViewerTheme::Carbon) => Ok(ViewerTheme::Carbon),
         Ok(v1::ViewerTheme::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
     }
 }
@@ -1489,12 +1535,10 @@ pub fn decode_viewer_theme(theme: i32) -> Result<ViewerTheme, ViewerCodecError> 
 pub const fn encode_viewer_theme(theme: ViewerTheme) -> v1::ViewerTheme {
     match theme {
         ViewerTheme::Dark => v1::ViewerTheme::Dark,
-        ViewerTheme::Light => v1::ViewerTheme::Light,
-        ViewerTheme::Hearth => v1::ViewerTheme::Hearth,
         ViewerTheme::Mirage => v1::ViewerTheme::Mirage,
         ViewerTheme::Glacier => v1::ViewerTheme::Glacier,
-        ViewerTheme::Noir => v1::ViewerTheme::Noir,
         ViewerTheme::Graphite => v1::ViewerTheme::Graphite,
+        ViewerTheme::Carbon => v1::ViewerTheme::Carbon,
     }
 }
 
@@ -2044,4 +2088,14 @@ fn encode_projects_sort_update(
     Some(v1::ProjectsSortFieldUpdate {
         operation: Some(operation),
     })
+}
+
+#[must_use]
+pub fn encode_rename_viewer_snapshot_request(
+    request: crate::viewer::RenameViewerSnapshot,
+) -> v1::RenameViewerSnapshotRequest {
+    v1::RenameViewerSnapshotRequest {
+        tab_id: u64::from(request.tab_id),
+        name: request.name,
+    }
 }

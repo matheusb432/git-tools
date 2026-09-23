@@ -117,6 +117,7 @@ pub fn prepare(
         }
         PrepareRecipeOk::Broken { state } => match state {
             ViewerTabState::Error { reason } => anyhow::bail!(reason),
+            ViewerTabState::Pending => anyhow::bail!("live comparison is still pending"),
             state => anyhow::bail!("live comparison is unavailable: {state:?}"),
         },
         PrepareRecipeOk::Skipped { .. } => anyhow::bail!("live comparison produced no view"),

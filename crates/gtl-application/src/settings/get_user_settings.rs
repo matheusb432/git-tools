@@ -37,7 +37,7 @@ mod tests {
     #[test]
     fn query_returns_the_complete_validated_settings_snapshot() {
         let settings = UserSettings::new(
-            Some(Theme::Hearth),
+            Some(Theme::Mirage),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             gtl_models::viewer::ViewerKeybindings::default(),
             false,

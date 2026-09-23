@@ -255,11 +255,11 @@ diff --git a/notes.md b/notes.md\n\
         }
         let app_settings = SequenceUserSettingsStore::new([
             settings(
-                Theme::Hearth,
+                Theme::Mirage,
                 DiffExclusions::new([(crate::utils::project_name("repo-a"), vec!["md"])], None),
             ),
             settings(
-                Theme::Light,
+                Theme::Glacier,
                 DiffExclusions::new([(crate::utils::project_name("repo-b"), vec!["txt"])], None),
             ),
         ]);
@@ -312,10 +312,11 @@ diff --git a/notes.md b/notes.md\n\
             .html;
 
         assert!(
-            first_html.contains("repo-a:hearth:unified:compact:1|repo-b:hearth:unified:compact:2")
+            first_html.contains("repo-a:mirage:unified:compact:1|repo-b:mirage:unified:compact:2")
         );
         assert!(
-            second_html.contains("repo-a:light:unified:compact:2|repo-b:light:unified:compact:1")
+            second_html
+                .contains("repo-a:glacier:unified:compact:2|repo-b:glacier:unified:compact:1")
         );
     }
 }

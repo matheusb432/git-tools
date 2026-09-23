@@ -358,6 +358,7 @@ fn preview_tabs() -> PreviewResult<Vec<ViewerTab>> {
         .enumerate()
         .map(|(index, (label, kind, state))| {
             Ok(ViewerTab {
+                custom_name: None,
                 pinned: false,
                 id: ViewerTabId::try_new(index as u64 + 1)?,
                 label: label.to_owned(),

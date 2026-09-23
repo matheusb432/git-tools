@@ -1,14 +1,22 @@
 use std::path::Path;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use gtl_infra::app_state::SqliteAppState;
-use rusqlite::params;
+use rusqlite::{TransactionBehavior, params};
 
 pub struct ProjectCatalogue {
     database: SqliteAppState,
 }
 
 impl ProjectCatalogue {
+    pub fn has_project(&self, id: &str) -> Result<bool> {
+        Ok(self.database.connection_lock()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
+            [id],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn open(data_root: &Path) -> Result<Self> {
         Ok(Self {
             database: SqliteAppState::open(data_root)?,
@@ -24,7 +32,7 @@ impl ProjectCatalogue {
 
     pub fn seed_project_snapshots(&self, project_id: &str, count: i64) -> Result<()> {
         let mut connection = self.database.connection_lock()?;
-        let transaction = connection.transaction()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let existing: i64 = transaction.query_row(
             "SELECT COUNT(*) FROM recent_renders WHERE project_id = ?1",
             [project_id],
@@ -47,23 +55,16 @@ impl ProjectCatalogue {
     }
 
     pub fn set_projects(&self, projects: &[(&str, &str, &Path)]) -> Result<()> {
-        let fixture_home = std::env::var_os("HOME").context("isolated fixture home")?;
         let mut connection = self.database.connection_lock()?;
         let transaction = connection.transaction()?;
         transaction.execute_batch("DELETE FROM projects; DELETE FROM project_sources;")?;
         for (id, title, path) in projects {
-            let relative = path
-                .strip_prefix(&fixture_home)
-                .context("fixture projects under home")?;
             transaction.execute(
                 "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
-                [format!(
-                    "~/{}",
-                    relative.to_string_lossy().replace('\\', "/")
-                )],
+                [path.to_string_lossy().into_owned()],
             )?;
             let source_id = transaction.last_insert_rowid();
-            transaction.execute("INSERT INTO projects (id, source_id, title, mux_session_name, affiliation, export_include_in_all) VALUES (?1, ?2, ?3, ?4, 'personal', 1)", params![id, source_id, title, id.to_ascii_lowercase()])?;
+            transaction.execute("INSERT INTO projects (id, source_id, title, export_include_in_all) VALUES (?1, ?2, ?3, 1)", params![id, source_id, title])?;
         }
         transaction.commit()?;
         Ok(())

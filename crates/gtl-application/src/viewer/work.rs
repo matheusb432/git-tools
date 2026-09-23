@@ -12,7 +12,7 @@ use super::{
     prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     session::{
         BeginCommitSelectionError, CachedView, CommitPatchTicket, ComputeTicket, PublishOutcome,
-        RENDER_PENDING_REASON, ViewerSession,
+        ViewerSession,
     },
 };
 use crate::{
@@ -39,6 +39,11 @@ impl ReservedRecipeWork {
     #[must_use]
     pub const fn ticket(&self) -> ComputeTicket {
         self.ticket
+    }
+
+    #[must_use]
+    pub const fn recipe(&self) -> &Recipe {
+        &self.recipe
     }
 }
 
@@ -77,7 +82,9 @@ pub enum RecipePublication {
     Published {
         history: RecordRender,
     },
-    Broken,
+    Broken {
+        state: ViewerTabState,
+    },
     Skipped {
         path: gtl_models::paths::RepositoryRoot,
     },
@@ -231,12 +238,9 @@ fn active_needs_refresh(session: &mut ViewerSession) -> bool {
     let Some(active) = session.active() else {
         return false;
     };
-    let pending = session.tab(active).is_some_and(|tab| {
-        matches!(
-            tab.tab.state(),
-            ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON
-        )
-    });
+    let pending = session
+        .tab(active)
+        .is_some_and(|tab| matches!(tab.tab.state(), ViewerTabState::Pending));
     let ready = session
         .tab(active)
         .is_some_and(|tab| matches!(tab.tab.state(), ViewerTabState::Ready));
@@ -328,9 +332,10 @@ pub fn publish_recipe(
             )
         }
         Ok(PrepareRecipeOk::Broken { state: broken }) => {
+            let published = broken.clone();
             state.update(
-                |session| match session.set_state_if_current(ticket, broken) {
-                    PublishOutcome::Published => RecipePublication::Broken,
+                |session| match session.set_state_if_current(ticket, published) {
+                    PublishOutcome::Published => RecipePublication::Broken { state: broken },
                     PublishOutcome::Stale => RecipePublication::Stale,
                 },
             )

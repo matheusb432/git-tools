@@ -25,7 +25,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-cli",
             "gtl-client",
             "gtl-desktop",
-            "gtl-local-auth",
+            "gtl-local-transport",
             "gtl-parser",
             "gtl-server",
             "gtl-browser-e2e",
@@ -53,7 +53,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-cli",
             "gtl-client",
             "gtl-desktop",
-            "gtl-local-auth",
+            "gtl-local-transport",
             "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
@@ -81,7 +81,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-cli",
             "gtl-client",
             "gtl-desktop",
-            "gtl-local-auth",
+            "gtl-local-transport",
             "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
@@ -94,8 +94,8 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
         reason: "wire DTOs may depend on pure model values, not use cases, adapters, frameworks, or process roots",
     },
     EdgePolicy {
-        from: "gtl-local-auth",
-        label: "gtl-local-auth stays bootstrap-only",
+        from: "gtl-local-transport",
+        label: "gtl-local-transport stays IPC-only",
         forbidden: &[
             "gtl-application",
             "gtl-artifacts",
@@ -108,7 +108,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-wire",
         ],
         forbid_workspace_packages: false,
-        reason: "local authentication and discovery must not depend on domain or process behavior",
+        reason: "local IPC must not depend on domain or process behavior",
     },
     EdgePolicy {
         from: "gtl-client",
@@ -122,7 +122,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-server",
         ],
         forbid_workspace_packages: false,
-        reason: "the shared client may depend on wire and local bootstrap contracts, not application behavior or process roots",
+        reason: "the shared client may depend on wire and local IPC contracts, not application behavior or process roots",
     },
     EdgePolicy {
         from: "gtl-web",
@@ -131,7 +131,7 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
             "gtl-application",
             "gtl-desktop",
             "gtl-infra",
-            "gtl-local-auth",
+            "gtl-local-transport",
             "gtl-parser",
             "gtl-server",
             "prost",
@@ -355,13 +355,13 @@ mod tests {
     }
 
     #[test]
-    fn client_policy_accepts_bootstrap_and_wire_dependencies() {
+    fn client_policy_accepts_local_transport_and_wire_dependencies() {
         let client_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-client")
             .unwrap();
 
-        for dependency in ["gtl-local-auth", "gtl-models", "gtl-wire", "tonic"] {
+        for dependency in ["gtl-local-transport", "gtl-models", "gtl-wire", "tonic"] {
             assert!(!dependency_is_forbidden(
                 client_policy,
                 dependency,

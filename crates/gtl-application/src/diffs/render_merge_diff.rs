@@ -226,7 +226,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let app_settings = FixedUserSettingsStore::new(UserSettings::new(
-            Some(Theme::Noir),
+            Some(Theme::Graphite),
             RenderOptions::DEFAULT,
             gtl_models::viewer::ViewerKeybindings::default(),
             true,
@@ -251,7 +251,7 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
         assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
-        assert!(artifact.html.contains("noir"));
+        assert!(artifact.html.contains("graphite"));
     }
 
     #[test]

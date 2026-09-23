@@ -1,7 +1,10 @@
 //! Runs viewer computations outside the session lock and publishes current results.
 
 use gtl_application::{
-    history::record_render,
+    history::{
+        get_recent_render,
+        record_render::{self, RenderErrorCode, RenderFailure, StartRender},
+    },
     live_views::list_live_views,
     ports::Clock as _,
     recipes::RecipeBatch,
@@ -10,6 +13,7 @@ use gtl_application::{
         ReservedRecipeWork,
     },
 };
+use gtl_models::viewer::{RenderHistoryId, ViewerTabState};
 
 use crate::state::AppState;
 
@@ -44,19 +48,49 @@ pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
 
 pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
     tokio::task::spawn_blocking(move || {
+        let ticket = work.ticket();
+        let render_id = start_history(&state, &work);
         let work = work::compute_recipe(work, &state.user_settings, &state.git, &state.database);
         match work::publish_recipe(&state.viewer, work) {
             Ok(RecipePublication::Published { history }) => {
-                record_history(&state, &history);
+                if let Some(render_id) = render_id {
+                    succeed_history(&state, ticket, render_id, &history);
+                }
             }
             Ok(RecipePublication::Skipped { path }) => {
+                if let Some(render_id) = render_id {
+                    discard_history(&state, render_id);
+                }
                 record_project_renders(&state, &[path]);
             }
+            Ok(RecipePublication::Broken { state: broken }) => {
+                if let Some(render_id) = render_id {
+                    fail_history(&state, render_id, &broken_failure(&broken));
+                }
+            }
             Ok(RecipePublication::Failed { error }) => {
+                if let Some(render_id) = render_id {
+                    fail_history(
+                        &state,
+                        render_id,
+                        &RenderFailure::from_error(RenderErrorCode::RenderFailed, &error),
+                    );
+                }
                 tracing::error!(error = ?error, "viewer recipe computation failed");
             }
-            Ok(RecipePublication::Broken | RecipePublication::Stale) => {}
+            Ok(RecipePublication::Stale) => {
+                if let Some(render_id) = render_id {
+                    discard_history(&state, render_id);
+                }
+            }
             Err(error) => {
+                if let Some(render_id) = render_id {
+                    fail_history(
+                        &state,
+                        render_id,
+                        &RenderFailure::from_error(RenderErrorCode::PublicationFailed, &error),
+                    );
+                }
                 tracing::error!(error = ?error, "viewer recipe publication failed");
             }
         }
@@ -93,14 +127,77 @@ pub(crate) fn spawn_commit(state: AppState, work: ReservedCommitWork) {
     });
 }
 
-fn record_history(state: &AppState, history: &record_render::RecordRender) {
+fn start_history(state: &AppState, work: &ReservedRecipeWork) -> Option<RenderHistoryId> {
     let result = state.database.connection_lock().and_then(|mut connection| {
-        record_render::execute(history, &mut connection, &state.clock).map_err(anyhow::Error::from)
+        record_render::start(
+            &StartRender::new(work.recipe().clone()),
+            &mut connection,
+            &state.clock,
+        )
+        .map_err(anyhow::Error::from)
+    });
+    match result {
+        Ok(render_id) => Some(render_id),
+        Err(error) => {
+            tracing::error!(error = ?error, "viewer pending history recording failed");
+            None
+        }
+    }
+}
+
+fn succeed_history(
+    state: &AppState,
+    ticket: gtl_application::viewer::session::ComputeTicket,
+    render_id: RenderHistoryId,
+    history: &record_render::RecordRender,
+) {
+    let result = state.database.connection_lock().and_then(|mut connection| {
+        let id = record_render::succeed(render_id, history, &mut connection)?;
+        let record =
+            get_recent_render::execute(&get_recent_render::GetRecentRender { id }, &connection)?
+                .ok_or_else(|| anyhow::anyhow!("completed render is unavailable"))?;
+        state
+            .viewer
+            .update(|session| session.bind_snapshot_history(ticket, &record))?;
+        Ok(())
     });
     let result = result.and_then(|()| state.database.associate_render_projects());
     if let Err(error) = result {
-        tracing::error!(error = ?error, "viewer history recording failed");
+        tracing::error!(error = ?error, "viewer successful history publication failed");
     }
+}
+
+fn fail_history(state: &AppState, render_id: RenderHistoryId, failure: &RenderFailure) {
+    let result = state.database.connection_lock().and_then(|mut connection| {
+        record_render::fail(render_id, failure, &mut connection).map_err(anyhow::Error::from)
+    });
+    if let Err(error) = result {
+        tracing::error!(error = ?error, "viewer failure history recording failed");
+    }
+}
+
+fn discard_history(state: &AppState, render_id: RenderHistoryId) {
+    let result = state.database.connection_lock().and_then(|mut connection| {
+        record_render::discard(render_id, &mut connection).map_err(anyhow::Error::from)
+    });
+    if let Err(error) = result {
+        tracing::error!(error = ?error, "viewer pending history discard failed");
+    }
+}
+
+fn broken_failure(state: &ViewerTabState) -> RenderFailure {
+    let ViewerTabState::Broken { code, reason } = state else {
+        return RenderFailure::new(
+            RenderErrorCode::SourceUnavailable,
+            format!("unexpected broken render state: {state:?}"),
+        );
+    };
+    let code = match code.as_str() {
+        "DirNotFound" => RenderErrorCode::RepositoryDirectoryNotFound,
+        "DirNotGitRepo" => RenderErrorCode::RepositoryDirectoryNotGitRepository,
+        _ => RenderErrorCode::SourceUnavailable,
+    };
+    RenderFailure::new(code, reason)
 }
 
 pub(crate) fn record_project_renders(

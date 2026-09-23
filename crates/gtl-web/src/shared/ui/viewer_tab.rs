@@ -5,7 +5,9 @@ use lucide_dioxus::{ArrowUp, FileDiff, Pin, Radio, TriangleAlert, X};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use lucide_dioxus::{Check, ChevronDown};
 
-use super::{Button, ButtonSize, ButtonVariant, LoadingSpinner};
+use super::{
+    Button, ButtonSize, ButtonVariant, InlineTextEditor, InlineTextSubmission, LoadingSpinner,
+};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use super::{CountBadge, ScrollArea};
 use crate::shared::browser;
@@ -47,13 +49,15 @@ pub(crate) fn ViewerTabItem(
     #[props(default)] onmove: Option<EventHandler<MoveViewerTab>>,
     #[props(default)] onpin: Option<EventHandler<bool>>,
     #[props(default)] oncloseothers: Option<EventHandler<()>>,
+    #[props(default)] onrename: Option<EventHandler<InlineTextSubmission>>,
 ) -> Element {
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
     let tab_id = tab.id;
+    let mut editing = use_signal(|| false);
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(onmove);
     let menu_id = format!("viewer-tab-{tab_id}-menu");
-    let context_menu_id = menu_id.clone();
+    let mouse_menu_id = menu_id.clone();
     let keyboard_menu_id = menu_id.clone();
     let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
@@ -65,9 +69,15 @@ pub(crate) fn ViewerTabItem(
             oncontextmenu: move |event| {
                 if onpin.is_some() {
                     event.prevent_default();
+                    event.stop_propagation();
+                }
+            },
+            onmouseup: move |event| {
+                if onpin.is_some() && event.trigger_button() == Some(MouseButton::Secondary) {
+                    event.stop_propagation();
                     let point = event.client_coordinates();
                     menu_position.set((point.x, point.y));
-                    browser::show_popover(&context_menu_id);
+                    browser::show_popover(&mouse_menu_id);
                 }
             },
             onkeydown: move |event: KeyboardEvent| {
@@ -80,55 +90,79 @@ pub(crate) fn ViewerTabItem(
                     browser::show_popover(&keyboard_menu_id);
                 }
             },
-            button {
-                id: viewer_tab_element_id(tab_id),
-                class: "viewer-tab-trigger",
-                "data-reorderable": reorderable.to_string(),
-                r#type: "button",
-                draggable: "false",
-                role: "tab",
-                aria_roledescription: reorderable.then_some("sortable tab"),
-                aria_selected: active.to_string(),
-                aria_busy: presentation_state.is_loading().to_string(),
-                aria_controls: "viewer-active-view",
-                tabindex: if active { "0" } else { "-1" },
-                title: tab_description(&tab),
-                onpointerdown: move |event: PointerEvent| {
-                    if reorderable {
-                        drag.start.call(event.clone());
+            if editing() {
+                div { class: "viewer-tab-trigger",
+                    ViewerTabKindIndicator { kind: tab.kind }
+                    InlineTextEditor {
+                        initial_value: tab.custom_name.clone().unwrap_or_default(),
+                        label: "Snapshot name",
+                        placeholder: "Snapshot name",
+                        width_text: tab.label.clone(),
+                        onsubmit: move |submission| {
+                            if let Some(rename) = onrename {
+                                rename.call(submission);
+                            }
+                        },
+                        onfinish: move |focus| {
+                            editing.set(false);
+                            if focus {
+                                browser::focus_element(viewer_tab_element_id(tab_id));
+                            }
+                        },
                     }
-                    if activation_gesture
-                        .write()
-                        .pointer_down(event.trigger_button())
-                    {
-                        onactivate.call(());
-                    }
-                },
-                onpointermove: move |event| drag.move_pointer.call(event),
-                onpointerup: move |event| drag.release.call(event),
-                onlostpointercapture: move |_| drag.cancel.call(()),
-                onclick: move |event| {
-                    if drag.suppress_click.call(()) {
-                        event.prevent_default();
-                        return;
-                    }
-                    if activation_gesture.write().click() {
-                        onactivate.call(());
-                    }
-                },
-                onkeydown: move |event| {
-                    activation_gesture.write().cancel();
-                    if event.key() == Key::Escape {
+                }
+            } else {
+                button {
+                    id: viewer_tab_element_id(tab_id),
+                    class: "viewer-tab-trigger",
+                    "data-reorderable": reorderable.to_string(),
+                    r#type: "button",
+                    draggable: "false",
+                    role: "tab",
+                    aria_roledescription: reorderable.then_some("sortable tab"),
+                    aria_selected: active.to_string(),
+                    aria_busy: presentation_state.is_loading().to_string(),
+                    "data-viewer-state": presentation_state.dom_state(),
+                    aria_controls: "viewer-active-view",
+                    tabindex: if active { "0" } else { "-1" },
+                    title: tab_description(&tab),
+                    onpointerdown: move |event: PointerEvent| {
+                        if reorderable {
+                            drag.start.call(event.clone());
+                        }
+                        if activation_gesture
+                            .write()
+                            .pointer_down(event.trigger_button())
+                        {
+                            onactivate.call(());
+                        }
+                    },
+                    onpointermove: move |event| drag.move_pointer.call(event),
+                    onpointerup: move |event| drag.release.call(event),
+                    onlostpointercapture: move |_| drag.cancel.call(()),
+                    onclick: move |event| {
+                        if drag.suppress_click.call(()) {
+                            event.prevent_default();
+                            return;
+                        }
+                        if activation_gesture.write().click() {
+                            onactivate.call(());
+                        }
+                    },
+                    onkeydown: move |event| {
+                        activation_gesture.write().cancel();
+                        if event.key() == Key::Escape {
+                            drag.cancel.call(());
+                        }
+                        onkeydown.call(event);
+                    },
+                    onblur: move |_| activation_gesture.write().cancel(),
+                    onpointercancel: move |_| {
+                        activation_gesture.write().cancel();
                         drag.cancel.call(());
-                    }
-                    onkeydown.call(event);
-                },
-                onblur: move |_| activation_gesture.write().cancel(),
-                onpointercancel: move |_| {
-                    activation_gesture.write().cancel();
-                    drag.cancel.call(());
-                },
-                {viewer_tab_rail_content(&tab, presentation_state)}
+                    },
+                    {viewer_tab_rail_content(&tab, presentation_state)}
+                }
             }
             if tab.pinned {
                 Button {
@@ -157,7 +191,10 @@ pub(crate) fn ViewerTabItem(
                     trigger_id: viewer_tab_element_id(tab_id),
                     pinned: tab.pinned,
                     position: menu_position(),
+                    onrename: (tab.kind == ViewerTabKind::Snapshot && onrename.is_some())
+                        .then(|| EventHandler::new(move |()| editing.set(true))),
                     onpin,
+                    onclose,
                     oncloseothers,
                 }
             }
@@ -293,6 +330,7 @@ pub(crate) fn ViewerTabOverflowMenu(
     onmove: EventHandler<MoveViewerTab>,
     #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
+    #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
     #[props(default)] onopenchange: Option<EventHandler<bool>>,
 ) -> Element {
     let active_tab_state = active_tab
@@ -393,6 +431,7 @@ pub(crate) fn ViewerTabOverflowMenu(
                                         onmove,
                                         onpin,
                                         oncloseothers,
+                                        onrename,
                                     }
                                 }
                             }
@@ -417,12 +456,14 @@ fn ViewerTabOverflowMenuItem(
     onmove: EventHandler<MoveViewerTab>,
     #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
+    #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
 ) -> Element {
     let tab_id = tab.id;
+    let mut editing = use_signal(|| false);
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(Some(onmove));
     let menu_id = format!("viewer-overflow-tab-{tab_id}-menu");
-    let context_menu_id = menu_id.clone();
+    let mouse_menu_id = menu_id.clone();
     let keyboard_menu_id = menu_id.clone();
     let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
@@ -434,9 +475,15 @@ fn ViewerTabOverflowMenuItem(
             oncontextmenu: move |event| {
                 if onpin.is_some() {
                     event.prevent_default();
+                    event.stop_propagation();
+                }
+            },
+            onmouseup: move |event| {
+                if onpin.is_some() && event.trigger_button() == Some(MouseButton::Secondary) {
+                    event.stop_propagation();
                     let point = event.client_coordinates();
                     menu_position.set((point.x, point.y));
-                    browser::show_popover(&context_menu_id);
+                    browser::show_popover(&mouse_menu_id);
                 }
             },
             onkeydown: move |event: KeyboardEvent| {
@@ -449,66 +496,93 @@ fn ViewerTabOverflowMenuItem(
                     browser::show_popover(&keyboard_menu_id);
                 }
             },
-            button {
-                id: format!("viewer-overflow-tab-{tab_id}-trigger"),
-                class: "viewer-tab-menu-trigger",
-                "data-reorderable": reorderable.to_string(),
-                r#type: "button",
-                draggable: "false",
-                popovertarget: popover_id,
-                popovertargetaction: "hide",
-                aria_roledescription: reorderable.then_some("sortable tab"),
-                aria_current: active.then_some("page"),
-                aria_controls: "viewer-active-view",
-                onpointerdown: move |event: PointerEvent| {
-                    if reorderable {
-                        drag.start.call(event.clone());
+            if editing() {
+                div { class: "viewer-tab-menu-trigger",
+                    ViewerTabKindIndicator { kind: tab.kind }
+                    InlineTextEditor {
+                        initial_value: tab.custom_name.clone().unwrap_or_default(),
+                        label: "Snapshot name",
+                        placeholder: "Snapshot name",
+                        width_text: tab.label.clone(),
+                        onsubmit: move |submission| {
+                            if let Some(rename) = onrename {
+                                rename.call((tab_id, submission));
+                            }
+                        },
+                        onfinish: move |focus| {
+                            editing.set(false);
+                            if focus {
+                                browser::focus_element(format!("viewer-overflow-tab-{tab_id}-trigger"));
+                            }
+                        },
                     }
-                    if activation_gesture
-                        .write()
-                        .pointer_down(event.trigger_button())
-                    {
-                        onactivate.call(tab_id);
-                    }
-                },
-                onpointermove: move |event| drag.move_pointer.call(event),
-                onpointerup: move |event| drag.release.call(event),
-                onlostpointercapture: move |_| drag.cancel.call(()),
-                onclick: move |event| {
-                    if drag.suppress_click.call(()) {
-                        event.prevent_default();
-                        return;
-                    }
-                    if activation_gesture.write().click() {
-                        onactivate.call(tab_id);
-                    }
-                },
-                onkeydown: move |event| {
-                    activation_gesture.write().cancel();
-                    if event.key() == Key::Escape {
-                        event.prevent_default();
-                        drag.cancel.call(());
-                    }
-                },
-                onblur: move |_| activation_gesture.write().cancel(),
-                onpointercancel: move |_| {
-                    activation_gesture.write().cancel();
-                    drag.cancel.call(());
-                },
-                ViewerTabKindIndicator { kind: tab.kind }
-                strong { class: "min-w-0 flex-1 truncate text-xs font-semibold text-inherit",
-                    "{tab.label}"
                 }
-                span { class: "flex flex-none items-center gap-1.5",
-                    TabStateMarker { state: presentation_state }
-                    if let Some(label) = presentation_state.menu_label() {
-                        small { class: "text-xs text-ink-3", aria_hidden: "true", "{label}" }
+            } else {
+                button {
+                    id: format!("viewer-overflow-tab-{tab_id}-trigger"),
+                    class: "viewer-tab-menu-trigger",
+                    "data-reorderable": reorderable.to_string(),
+                    r#type: "button",
+                    draggable: "false",
+                    popovertarget: popover_id,
+                    popovertargetaction: "hide",
+                    aria_roledescription: reorderable.then_some("sortable tab"),
+                    aria_current: active.then_some("page"),
+                    aria_controls: "viewer-active-view",
+                    onpointerdown: move |event: PointerEvent| {
+                        if reorderable {
+                            drag.start.call(event.clone());
+                        }
+                        if activation_gesture
+                            .write()
+                            .pointer_down(event.trigger_button())
+                        {
+                            onactivate.call(tab_id);
+                        }
+                    },
+                    onpointermove: move |event| drag.move_pointer.call(event),
+                    onpointerup: move |event| drag.release.call(event),
+                    onlostpointercapture: move |_| drag.cancel.call(()),
+                    onclick: move |event| {
+                        if drag.suppress_click.call(()) {
+                            event.prevent_default();
+                            return;
+                        }
+                        if activation_gesture.write().click() {
+                            onactivate.call(tab_id);
+                        }
+                    },
+                    onkeydown: move |event| {
+                        activation_gesture.write().cancel();
+                        if event.key() == Key::Escape {
+                            event.prevent_default();
+                            drag.cancel.call(());
+                        }
+                    },
+                    onblur: move |_| activation_gesture.write().cancel(),
+                    onpointercancel: move |_| {
+                        activation_gesture.write().cancel();
+                        drag.cancel.call(());
+                    },
+                    ViewerTabKindIndicator { kind: tab.kind }
+                    strong { class: "min-w-0 flex-1 truncate text-xs font-semibold text-inherit",
+                        "{tab.label}"
                     }
-                    if active {
-                        span {
-                            class: "inline-flex size-4 items-center justify-center text-acc",
-                            aria_hidden: "true",
-                            Check { size: 15 }
+                    span { class: "flex flex-none items-center gap-1.5",
+                        TabStateMarker { state: presentation_state }
+                        if let Some(label) = presentation_state.menu_label() {
+                            small {
+                                class: "text-xs text-ink-3",
+                                aria_hidden: "true",
+                                "{label}"
+                            }
+                        }
+                        if active {
+                            span {
+                                class: "inline-flex size-4 items-center justify-center text-acc",
+                                aria_hidden: "true",
+                                Check { size: 15 }
+                            }
                         }
                     }
                 }
@@ -537,7 +611,10 @@ fn ViewerTabOverflowMenuItem(
                     trigger_id: format!("viewer-overflow-tab-{tab_id}-trigger"),
                     pinned: tab.pinned,
                     position: menu_position(),
+                    onrename: (tab.kind == ViewerTabKind::Snapshot && onrename.is_some())
+                        .then(|| EventHandler::new(move |()| editing.set(true))),
                     onpin: move |pinned| onpin.call((tab_id, pinned)),
+                    onclose: move |_| onclose.call(tab_id),
                     oncloseothers: move |()| {
                         if let Some(close) = oncloseothers {
                             close.call(tab_id);
@@ -575,6 +652,14 @@ impl TabPresentationState {
         matches!(self, Self::Loading)
     }
 
+    const fn dom_state(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Loading => "loading",
+            Self::Broken | Self::Error => "error",
+        }
+    }
+
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
     const fn menu_label(self) -> Option<&'static str> {
         match self {
@@ -589,10 +674,9 @@ const fn tab_presentation_state(
     diff_rows_loading: bool,
 ) -> TabPresentationState {
     match state {
-        ViewerTabState::Ready | ViewerTabState::Pending if diff_rows_loading => {
-            TabPresentationState::Loading
-        }
-        ViewerTabState::Ready | ViewerTabState::Pending => TabPresentationState::Ready,
+        ViewerTabState::Pending => TabPresentationState::Loading,
+        ViewerTabState::Ready if diff_rows_loading => TabPresentationState::Loading,
+        ViewerTabState::Ready => TabPresentationState::Ready,
         ViewerTabState::Broken => TabPresentationState::Broken,
         ViewerTabState::Error => TabPresentationState::Error,
     }
@@ -636,17 +720,23 @@ mod tests {
     use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
-    fn row_stream_loading_uses_the_tab_loading_state() {
-        for state in [ViewerTabState::Ready, ViewerTabState::Pending] {
-            assert_eq!(
-                tab_presentation_state(&state, true),
-                TabPresentationState::Loading
-            );
-            assert_eq!(
-                tab_presentation_state(&state, false),
-                TabPresentationState::Ready
-            );
-        }
+    fn typed_and_row_stream_states_map_to_dom_states() {
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Pending, false),
+            TabPresentationState::Loading
+        );
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Pending, true),
+            TabPresentationState::Loading
+        );
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Ready, false),
+            TabPresentationState::Ready
+        );
+        assert_eq!(
+            tab_presentation_state(&ViewerTabState::Ready, true),
+            TabPresentationState::Loading
+        );
         for rows_loading in [false, true] {
             assert_eq!(
                 tab_presentation_state(&ViewerTabState::Error, rows_loading),
@@ -657,6 +747,10 @@ mod tests {
                 TabPresentationState::Broken
             );
         }
+        assert_eq!(TabPresentationState::Ready.dom_state(), "ready");
+        assert_eq!(TabPresentationState::Loading.dom_state(), "loading");
+        assert_eq!(TabPresentationState::Broken.dom_state(), "error");
+        assert_eq!(TabPresentationState::Error.dom_state(), "error");
     }
 
     #[test]
@@ -688,9 +782,11 @@ mod tests {
         let tab_id = viewer_tab_id(1)?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            onrename: None,
             onpin: None,
             oncloseothers: None,
             tab: ViewerTab {
+                custom_name: None,
                 pinned: false,
                 id: tab_id,
                 label: "Working tree".to_owned(),
@@ -721,6 +817,7 @@ mod tests {
         assert!(html.contains("transform:translateX(-0.5px)"));
         assert!(html.contains("stroke-width=\"4\""));
         assert!(html.contains("aria-label=\"Close Working tree\""));
+        assert!(html.contains("data-viewer-state=\"ready\""));
         assert!(!html.contains("title=\"Close tab\""));
         assert!(html.contains(", Live"));
         assert!(!html.contains(">L<"));
@@ -728,13 +825,15 @@ mod tests {
     }
 
     #[test]
-    fn inactive_pending_tab_uses_the_sunk_surface_without_loading() -> TestResult {
+    fn inactive_pending_tab_exposes_its_loading_state() -> TestResult {
         let tab_id = viewer_tab_id(1)?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            onrename: None,
             onpin: None,
             oncloseothers: None,
             tab: ViewerTab {
+                custom_name: None,
                 pinned: false,
                 id: tab_id,
                 label: "Working tree".to_owned(),
@@ -755,10 +854,10 @@ mod tests {
 
         assert!(html.contains("data-active=\"false\""));
         assert!(html.contains("class=\"viewer-tab group/viewer-tab\""));
-        assert!(html.contains("aria-busy=\"false\""));
-        assert!(html.contains(", Live"));
-        assert!(!html.contains("animate-spin"));
-        assert!(!html.contains("Rendering"));
+        assert!(html.contains("aria-busy=\"true\""));
+        assert!(html.contains("data-viewer-state=\"loading\""));
+        assert!(html.contains("control-loading-spinner"));
+        assert!(html.contains("Rendering"));
         Ok(())
     }
 
@@ -779,6 +878,7 @@ mod tests {
         let html = dioxus_ssr::render_element(rsx! {
             ViewerTabRailMeasurementItem {
                 tab: ViewerTab {
+                    custom_name: None,
                     pinned: false,
                     id: viewer_tab_id(1)?,
                     label: "Working tree".to_owned(),
@@ -813,8 +913,9 @@ mod tests {
 
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
     #[test]
-    fn overflow_menu_names_the_current_tab_and_exposes_every_close_action() -> TestResult {
+    fn overflow_menu_exposes_current_pending_and_close_states() -> TestResult {
         let active_tab = ViewerTab {
+            custom_name: None,
             pinned: false,
             id: viewer_tab_id(1)?,
             label: "Working tree".to_owned(),
@@ -822,6 +923,7 @@ mod tests {
             state: ViewerTabState::Ready,
         };
         let pending_tab = ViewerTab {
+            custom_name: None,
             pinned: false,
             id: viewer_tab_id(2)?,
             label: "Saved comparison".to_owned(),
@@ -831,6 +933,7 @@ mod tests {
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabOverflowMenuProps {
             onopenchange: None,
+            onrename: None,
             onpin: None,
             oncloseothers: None,
             id: "viewer-tab-overflow-test".to_owned(),
@@ -850,8 +953,8 @@ mod tests {
         assert!(html.contains("aria-current=\"page\""));
         assert!(html.contains("Close Working tree"));
         assert!(html.contains("Close Saved comparison"));
-        assert!(!html.contains("Rendering"));
-        assert!(!html.contains("animate-spin"));
+        assert!(html.contains("Rendering"));
+        assert!(html.contains("control-loading-spinner"));
         assert_eq!(html.matches("draggable=\"false\"").count(), 2);
         assert_eq!(
             html.matches("aria-roledescription=\"sortable tab\"")
@@ -870,51 +973,86 @@ fn ViewerTabContextMenu(
     pinned: bool,
     position: (f64, f64),
     onpin: EventHandler<bool>,
+    onclose: EventHandler<MouseEvent>,
     oncloseothers: Option<EventHandler<()>>,
+    onrename: Option<EventHandler<()>>,
 ) -> Element {
     let keyboard_id = id.clone();
-    let close_id = id.clone();
+    let pin_id = id.clone();
+    let others_id = id.clone();
+    let rename_id = id.clone();
     let (x, y) = position;
     rsx! {
         div {
             id: id.clone(),
             class: "viewer-tab-context-menu",
-            style: "left:min({x}px, calc(100vw - 13rem));top:min({y}px, calc(100vh - 6rem));",
+            style: "left:clamp(0px, {x}px, calc(100vw - 13rem));top:clamp(0px, {y}px, calc(100vh - 8rem));",
             popover: "auto",
             role: "menu",
             aria_label: "Tab actions",
             onkeydown: move |event| super::menu_keyboard::keydown(&keyboard_id, &trigger_id, &event),
-            button {
-                class: super::MENU_ACTION_HOST_CLASSES,
-                r#type: "button",
-                role: "menuitem",
-                autofocus: true,
-                tabindex: "-1",
-                onclick: move |_| {
-                    browser::hide_popover(&id);
-                    onpin.call(!pinned);
-                },
-                if pinned {
-                    Pin { size: 15 }
-                    "Unpin tab"
-                } else {
-                    Pin { size: 15 }
-                    "Pin tab"
+            if let Some(rename) = onrename {
+                button {
+                    class: "control-menu-action viewer-tab-context-action",
+                    r#type: "button",
+                    role: "menuitem",
+                    tabindex: "-1",
+                    onclick: move |_| {
+                        browser::hide_popover(&rename_id);
+                        rename.call(());
+                    },
+                    "Rename snapshot"
                 }
             }
             button {
-                class: super::MENU_ACTION_HOST_CLASSES,
+                class: "control-menu-action viewer-tab-context-action",
                 r#type: "button",
                 role: "menuitem",
+                aria_keyshortcuts: "Alt+p",
+                autofocus: true,
                 tabindex: "-1",
                 onclick: move |_| {
-                    browser::hide_popover(&close_id);
+                    browser::hide_popover(&pin_id);
+                    onpin.call(!pinned);
+                },
+                span {
+                    if pinned {
+                        "Unpin tab"
+                    } else {
+                        "Pin tab"
+                    }
+                }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+P" }
+            }
+            button {
+                class: "control-menu-action viewer-tab-context-action",
+                r#type: "button",
+                role: "menuitem",
+                aria_keyshortcuts: "Control+w",
+                disabled: pinned,
+                tabindex: "-1",
+                onclick: move |event| {
+                    browser::hide_popover(&id);
+                    onclose.call(event);
+                },
+                span { "Close tab" }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Ctrl+W" }
+            }
+            button {
+                class: "control-menu-action viewer-tab-context-action",
+                r#type: "button",
+                role: "menuitem",
+                aria_keyshortcuts: "Alt+o",
+                disabled: oncloseothers.is_none(),
+                tabindex: "-1",
+                onclick: move |_| {
+                    browser::hide_popover(&others_id);
                     if let Some(close) = oncloseothers {
                         close.call(());
                     }
                 },
-                X { size: 15 }
-                "Close others"
+                span { "Close others" }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+O" }
             }
         }
     }

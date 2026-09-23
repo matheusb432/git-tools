@@ -11,12 +11,13 @@ serde.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+gtl-local-transport.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-stream.workspace = true
-gtl-local-auth.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
+uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures-channel = { workspace = true, optional = true }

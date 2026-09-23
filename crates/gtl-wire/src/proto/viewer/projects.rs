@@ -10,11 +10,199 @@ use super::{ViewerCodecError, required};
 use crate::{
     v1,
     viewer::projects::{
-        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
-        UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison, ViewerProjectDiffMode,
-        ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor, ViewerProjectsPageSize,
+        DiscoverProjectRepositories, DiscoveredProjectRepository, GetViewerProjectStatus,
+        ImportProjectRepositories, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
+        ProjectDiscovery, ProjectDiscoveryState, ProjectImportOutcome, ProjectImportResult,
+        ProjectImportSelection, UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison,
+        ViewerProjectDiffMode, ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor,
+        ViewerProjectsPageSize,
     },
 };
+
+#[must_use]
+pub fn encode_discover(
+    request: DiscoverProjectRepositories,
+) -> v1::DiscoverProjectRepositoriesRequest {
+    v1::DiscoverProjectRepositoriesRequest { root: request.root }
+}
+
+pub fn decode_discover(
+    request: v1::DiscoverProjectRepositoriesRequest,
+) -> Result<DiscoverProjectRepositories, ViewerCodecError> {
+    if request.root.trim().is_empty() {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
+    Ok(DiscoverProjectRepositories { root: request.root })
+}
+
+#[must_use]
+pub fn encode_discovery(discovery: ProjectDiscovery) -> v1::DiscoverProjectRepositoriesResponse {
+    v1::DiscoverProjectRepositoriesResponse {
+        root: discovery.root,
+        repositories: discovery
+            .repositories
+            .into_iter()
+            .map(|repository| {
+                let (state, existing_project_id) = match repository.state {
+                    ProjectDiscoveryState::New => (v1::ProjectDiscoveryState::New, None),
+                    ProjectDiscoveryState::Active(id) => {
+                        (v1::ProjectDiscoveryState::Active, Some(id.to_string()))
+                    }
+                    ProjectDiscoveryState::Paused(id) => {
+                        (v1::ProjectDiscoveryState::Paused, Some(id.to_string()))
+                    }
+                    ProjectDiscoveryState::Unmanaged(id) => {
+                        (v1::ProjectDiscoveryState::Unmanaged, Some(id.to_string()))
+                    }
+                };
+                v1::DiscoveredProjectRepository {
+                    path: repository.path.to_string(),
+                    label: repository.label.to_string(),
+                    state: state as i32,
+                    existing_project_id,
+                }
+            })
+            .collect(),
+    }
+}
+
+pub fn decode_discovery(
+    response: v1::DiscoverProjectRepositoriesResponse,
+) -> Result<ProjectDiscovery, ViewerCodecError> {
+    if response.repositories.len() > usize::from(gtl_models::projects::catalogue::PROJECTS_MAX)
+        || !std::path::Path::new(&response.root).is_absolute()
+    {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
+    let repositories = response
+        .repositories
+        .into_iter()
+        .map(|repository| {
+            let id = repository
+                .existing_project_id
+                .map(|id| id.try_into().map_err(|_| ViewerCodecError::InvalidMessage))
+                .transpose()?;
+            let state = match (v1::ProjectDiscoveryState::try_from(repository.state), id) {
+                (Ok(v1::ProjectDiscoveryState::New), None) => ProjectDiscoveryState::New,
+                (Ok(v1::ProjectDiscoveryState::Active), Some(id)) => {
+                    ProjectDiscoveryState::Active(id)
+                }
+                (Ok(v1::ProjectDiscoveryState::Paused), Some(id)) => {
+                    ProjectDiscoveryState::Paused(id)
+                }
+                (Ok(v1::ProjectDiscoveryState::Unmanaged), Some(id)) => {
+                    ProjectDiscoveryState::Unmanaged(id)
+                }
+                _ => return Err(ViewerCodecError::InvalidMessage),
+            };
+            Ok(DiscoveredProjectRepository {
+                path: gtl_models::paths::RepositoryRoot::try_new(repository.path.into())
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                label: repository
+                    .label
+                    .try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                state,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ProjectDiscovery {
+        root: response.root,
+        repositories,
+    })
+}
+
+#[must_use]
+pub fn encode_import(request: ImportProjectRepositories) -> v1::ImportProjectRepositoriesRequest {
+    v1::ImportProjectRepositoriesRequest {
+        selections: request
+            .selections
+            .into_iter()
+            .map(|selection| v1::ProjectImportSelection {
+                path: selection.path,
+                project_id: selection.project_id,
+                title: selection.title,
+            })
+            .collect(),
+    }
+}
+
+pub fn decode_import(
+    request: v1::ImportProjectRepositoriesRequest,
+) -> Result<ImportProjectRepositories, ViewerCodecError> {
+    if request.selections.is_empty()
+        || request.selections.len() > usize::from(gtl_models::projects::catalogue::PROJECTS_MAX)
+    {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
+    Ok(ImportProjectRepositories {
+        selections: request
+            .selections
+            .into_iter()
+            .map(|selection| ProjectImportSelection {
+                path: selection.path,
+                project_id: selection.project_id,
+                title: selection.title,
+            })
+            .collect(),
+    })
+}
+
+#[must_use]
+pub fn encode_import_results(
+    results: Vec<ProjectImportResult>,
+) -> v1::ImportProjectRepositoriesResponse {
+    v1::ImportProjectRepositoriesResponse {
+        results: results
+            .into_iter()
+            .map(|result| {
+                let (outcome, error) = match result.outcome {
+                    ProjectImportOutcome::Created => (v1::ProjectImportOutcome::Created, None),
+                    ProjectImportOutcome::Restored => (v1::ProjectImportOutcome::Restored, None),
+                    ProjectImportOutcome::Failed(message) => {
+                        (v1::ProjectImportOutcome::Failed, Some(message))
+                    }
+                };
+                v1::ProjectImportResult {
+                    path: result.path,
+                    project_id: result.project_id,
+                    outcome: outcome as i32,
+                    error,
+                }
+            })
+            .collect(),
+    }
+}
+
+pub fn decode_import_results(
+    response: v1::ImportProjectRepositoriesResponse,
+) -> Result<Vec<ProjectImportResult>, ViewerCodecError> {
+    if response.results.len() > usize::from(gtl_models::projects::catalogue::PROJECTS_MAX) {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
+    response
+        .results
+        .into_iter()
+        .map(|result| {
+            let outcome = match (
+                v1::ProjectImportOutcome::try_from(result.outcome),
+                result.error,
+            ) {
+                (Ok(v1::ProjectImportOutcome::Created), None) => ProjectImportOutcome::Created,
+                (Ok(v1::ProjectImportOutcome::Restored), None) => ProjectImportOutcome::Restored,
+                (Ok(v1::ProjectImportOutcome::Failed), Some(error)) if !error.is_empty() => {
+                    ProjectImportOutcome::Failed(error)
+                }
+                _ => return Err(ViewerCodecError::InvalidMessage),
+            };
+            Ok(ProjectImportResult {
+                path: result.path,
+                project_id: result.project_id,
+                outcome,
+            })
+        })
+        .collect()
+}
 
 #[must_use]
 pub fn encode_list(request: ListViewerProjects) -> v1::ListViewerProjectsRequest {

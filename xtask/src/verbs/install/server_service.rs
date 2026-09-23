@@ -112,6 +112,13 @@ fn service_install_context(program: PathBuf) -> Result<ServiceInstallCtx> {
     let contents = Some(service_unit(&program));
     #[cfg(not(target_os = "linux"))]
     let contents = None;
+    #[cfg(target_os = "macos")]
+    let environment = Some(macos_environment(
+        &program,
+        std::env::var_os("PATH").as_deref(),
+    )?);
+    #[cfg(not(target_os = "macos"))]
+    let environment = None;
     Ok(ServiceInstallCtx {
         label: service_label()?,
         contents,
@@ -119,7 +126,7 @@ fn service_install_context(program: PathBuf) -> Result<ServiceInstallCtx> {
         args: Vec::new(),
         username: None,
         working_directory: None,
-        environment: None,
+        environment,
         autostart: true,
         restart_policy: RestartPolicy::OnFailure {
             delay_secs: Some(2),
@@ -127,6 +134,38 @@ fn service_install_context(program: PathBuf) -> Result<ServiceInstallCtx> {
             reset_after_secs: None,
         },
     })
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn macos_environment(
+    program: &Path,
+    inherited_path: Option<&std::ffi::OsStr>,
+) -> Result<Vec<(String, String)>> {
+    let bindir = program.parent().context("gtl-server install directory")?;
+    // launchd does not read the developer's shell startup files.
+    let paths = std::iter::once(bindir.to_path_buf())
+        .chain(
+            inherited_path
+                .into_iter()
+                .flat_map(std::env::split_paths)
+                .filter(|path| path.is_absolute()),
+        )
+        .chain(
+            [
+                "/opt/homebrew/bin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+                "/usr/sbin",
+                "/sbin",
+            ]
+            .map(PathBuf::from),
+        );
+    let path = std::env::join_paths(paths)
+        .context("constructing the gtl-server launchd PATH")?
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("the gtl-server launchd PATH must be valid UTF-8"))?;
+    Ok(vec![("PATH".to_owned(), path)])
 }
 
 #[cfg(target_os = "linux")]
@@ -188,6 +227,27 @@ mod tests {
         let error = service_install_context(PathBuf::from("gtl-server")).unwrap_err();
 
         assert!(error.to_string().contains("must be absolute"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn launchd_path_preserves_developer_tools_and_supplies_login_defaults() {
+        let server = Path::new("/Users/developer/Local Tools/bin/gtl-server");
+        for inherited in [None, Some(std::ffi::OsStr::new("/custom/git/bin:relative"))] {
+            let environment = macos_environment(server, inherited).unwrap();
+            let (name, value) = &environment[0];
+            assert_eq!(name, "PATH");
+            let paths: Vec<_> = std::env::split_paths(value).collect();
+            assert_eq!(paths[0], server.parent().unwrap());
+            assert_eq!(
+                paths.contains(&PathBuf::from("/custom/git/bin")),
+                inherited.is_some()
+            );
+            assert!(paths.iter().all(|path| path.is_absolute()));
+            for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+                assert!(paths.contains(&PathBuf::from(directory)));
+            }
+        }
     }
 
     #[cfg(target_os = "linux")]

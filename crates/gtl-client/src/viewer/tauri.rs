@@ -2,14 +2,15 @@ use std::{cell::RefCell, collections::VecDeque};
 
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference, SetViewerTabPinned,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem, ViewerShell,
-    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, RenameViewerSnapshot,
+    SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference,
+    SetViewerTabPinned, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
+    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem,
+    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
-        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
-        UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+        DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
+        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
+        ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
     },
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -24,6 +25,10 @@ const ROWS_CANCEL_COMMAND: &str = "viewer_stream_rows_cancel";
 const WATCH_START_COMMAND: &str = "viewer_watch_start";
 const WATCH_NEXT_BATCH_COMMAND: &str = "viewer_watch_next_batch";
 const WATCH_CANCEL_COMMAND: &str = "viewer_watch_cancel";
+
+pub async fn pick_project_folder() -> Result<Option<String>, ViewerClientError> {
+    invoke_without_arguments("desktop_pick_project_folder").await
+}
 
 thread_local! {
     static CACHED_CONNECTION: RefCell<Option<ViewerConnection>> = const { RefCell::new(None) };
@@ -77,6 +82,13 @@ pub struct ViewerClient {
 }
 
 impl ViewerClient {
+    viewer_unary_methods! {
+        get_push_availability(gtl_wire::viewer::ViewerViewIdentity) -> gtl_wire::viewer::push::ViewerPushAvailability => "viewer_get_push_availability";
+        create_push(gtl_wire::viewer::push::CreateViewerPush) -> gtl_wire::viewer::push::ViewerPushRequest => "viewer_create_push";
+        get_push(gtl_wire::viewer::push::ViewerPushRequest) -> gtl_wire::viewer::push::ViewerPushStatus => "viewer_get_push";
+        start_push(gtl_wire::viewer::push::ViewerPushRequest) -> () => "viewer_start_push";
+    }
+
     pub async fn connect() -> Result<Self, ViewerClientError> {
         let connection = load_connection().await?;
         validate_viewer_protocol(connection.protocol_version)?;
@@ -110,6 +122,8 @@ impl ViewerClient {
     }
 
     viewer_unary_methods! {
+        discover_project_repositories(DiscoverProjectRepositories) -> ProjectDiscovery => "viewer_discover_project_repositories";
+        import_project_repositories(ImportProjectRepositories) -> Vec<ProjectImportResult> => "viewer_import_project_repositories";
         list_projects(ListViewerProjects) -> ViewerProjectPage => "viewer_list_projects";
         get_project_status(GetViewerProjectStatus) -> ViewerProjectStatus => "viewer_get_project_status";
         update_project(UpdateViewerProject) -> () => "viewer_update_project";
@@ -119,6 +133,7 @@ impl ViewerClient {
         close_tab(ViewerTabRequest) -> ViewerShell => "viewer_close_tab";
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
         select_commit(SelectViewerCommit) -> ViewerShell => "viewer_select_commit";
+        rename_snapshot(RenameViewerSnapshot) -> () => "viewer_rename_snapshot";
         set_tab_pinned(SetViewerTabPinned) -> () => "viewer_set_tab_pinned";
         close_other_tabs(ViewerTabRequest) -> () => "viewer_close_other_tabs";
         set_modified_files(SetViewerModifiedFiles) -> () => "viewer_set_modified_files";

@@ -1,4 +1,5 @@
 /target
+/crates/gtl-desktop/binaries/
 *.exe
 *.pdb
 .artifacts

@@ -10,6 +10,186 @@ use thirtyfour::{
 use crate::support;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn user_scans_and_imports_selected_repositories_with_row_feedback() -> Result<()> {
+    support::run_test("viewer-project-import", |session| {
+        Box::pin(run_project_import(session))
+    })
+    .await
+}
+
+async fn run_project_import(session: &mut support::session::TestSession) -> Result<()> {
+    let root = session.data_root().join("import-scan");
+    for name in ["alpha", "beta"] {
+        let path = root.join(name);
+        std::fs::create_dir_all(&path)?;
+        let output = std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .arg(&path)
+            .output()?;
+        ensure!(output.status.success(), "git init failed: {name}");
+    }
+    let driver = session.driver();
+    home(driver).await?;
+    driver
+        .query(By::Id("project-import-trigger"))
+        .and_enabled()
+        .first()
+        .await?
+        .click()
+        .await?;
+    let dialog = driver
+        .query(By::Css("#project-import-dialog[open]"))
+        .and_displayed()
+        .first()
+        .await?;
+    ensure!(
+        dialog.find(By::Css("button")).await?.is_displayed().await?,
+        "import dialog did not open"
+    );
+    scan_and_select(&dialog, &root).await?;
+    import_with_retry(session, &dialog).await?;
+    support::evidence::capture(driver, "project-import-results", true).await?;
+    dialog
+        .find(By::Css("button[aria-label='Close Add projects']"))
+        .await?
+        .click()
+        .await?;
+    card(driver, "alpha").await?;
+    card(driver, "beta").await?;
+    Ok(())
+}
+
+async fn scan_and_select(dialog: &WebElement, root: &std::path::Path) -> Result<()> {
+    dialog
+        .find(By::Css("input[placeholder^='~/my-projects']"))
+        .await?
+        .send_keys(root.to_string_lossy().as_ref())
+        .await?;
+    dialog
+        .query(By::Css("button"))
+        .with_text("Scan")
+        .and_enabled()
+        .first()
+        .await?
+        .click()
+        .await?;
+    support::wait::until(
+        "two discovered repositories",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            Ok((dialog
+                .find_all(By::Css("[data-testid='project-import-row']"))
+                .await?
+                .len()
+                == 2)
+                .then_some(()))
+        },
+    )
+    .await?;
+    let discovered = dialog
+        .find_all(By::Css(
+            "[data-testid='project-import-row'] input[type='checkbox']",
+        ))
+        .await?;
+    for checkbox in discovered {
+        ensure!(
+            !checkbox.is_selected().await?,
+            "discovered repositories must start unchecked"
+        );
+    }
+    dialog
+        .query(By::Css("button"))
+        .with_text("Select all")
+        .and_enabled()
+        .first()
+        .await?
+        .click()
+        .await?;
+    Ok(())
+}
+
+async fn import_with_retry(
+    session: &support::session::TestSession,
+    dialog: &WebElement,
+) -> Result<()> {
+    let rows = dialog
+        .find_all(By::Css("[data-testid='project-import-row']"))
+        .await?;
+    let title = rows[1]
+        .find_all(By::Css("input:not([type='checkbox'])"))
+        .await?;
+    title[1].clear().await?;
+    title[1].send_keys("alpha").await?;
+    dialog
+        .query(By::Css("button"))
+        .with_text("Add 2 selected")
+        .and_enabled()
+        .first()
+        .await?
+        .click()
+        .await?;
+    support::wait::until(
+        "independent import results",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            let rows = dialog
+                .find_all(By::Css("[data-testid='project-import-row']"))
+                .await?;
+            if rows.len() != 2 {
+                return Ok(None);
+            }
+            Ok((rows[0].text().await?.contains("Created")
+                && rows[1].text().await?.contains("Failed"))
+            .then_some(()))
+        },
+    )
+    .await?;
+    ensure!(
+        session.catalogue.has_project("ALPH")?,
+        "valid row was not created"
+    );
+    ensure!(
+        !session.catalogue.has_project("BETA")?,
+        "failed row was created"
+    );
+    let rows = dialog
+        .find_all(By::Css("[data-testid='project-import-row']"))
+        .await?;
+    let title = rows[1]
+        .find_all(By::Css("input:not([type='checkbox'])"))
+        .await?;
+    title[1].clear().await?;
+    title[1].send_keys("beta").await?;
+    dialog
+        .query(By::Css("button"))
+        .with_text("Add 1 selected")
+        .and_enabled()
+        .first()
+        .await?
+        .click()
+        .await?;
+    support::wait::until(
+        "retried import result",
+        support::wait::ASSERTION_TIMEOUT,
+        || async {
+            let rows = dialog
+                .find_all(By::Css("[data-testid='project-import-row']"))
+                .await?;
+            let Some(row) = rows.get(1) else {
+                return Ok(None);
+            };
+            Ok(row.text().await?.contains("Created").then_some(()))
+        },
+    )
+    .await?;
+    ensure!(
+        session.catalogue.has_project("BETA")?,
+        "corrected row was not created"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn user_opens_project_comparisons_and_restores_them() -> Result<()> {
     support::run_test("viewer-projects", |session| Box::pin(run_projects(session))).await
 }
@@ -42,6 +222,11 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
         },
     )
     .await?;
+    let document = session.driver().find(By::Css("html")).await?;
+    ensure!(
+        document.attr("data-theme").await?.as_deref() == Some("dark"),
+        "an unconfigured project workspace must use Dark"
+    );
     wait_for_project_statuses(session.driver()).await?;
     verify_watched_status(session.driver(), &fixture.beta).await?;
     let alpha = card(session.driver(), "Alpha").await?;
@@ -101,10 +286,25 @@ async fn run_projects(session: &mut support::session::TestSession) -> Result<()>
     support::evidence::capture(session.driver(), "projects-narrow", true).await?;
     session.driver().set_window_rect(0, 0, 1600, 900).await?;
 
-    exercise_table(session).await?;
-    review_comparisons(session, &fixture).await?;
-    exercise_local_comparison(session, &fixture).await?;
-    restore_comparisons(session).await
+    run_project_journeys(session, &fixture).await
+}
+
+async fn run_project_journeys(
+    session: &mut support::session::TestSession,
+    fixture: &support::fixture::ProjectsFixture,
+) -> Result<()> {
+    exercise_table(session)
+        .await
+        .context("exercise project table")?;
+    review_comparisons(session, fixture)
+        .await
+        .context("review project comparisons")?;
+    exercise_local_comparison(session, fixture)
+        .await
+        .context("exercise local project comparison")?;
+    restore_comparisons(session)
+        .await
+        .context("restore project comparisons")
 }
 
 async fn exercise_local_comparison(
@@ -451,12 +651,7 @@ async fn close_others_preserves_pins(session: &support::session::TestSession) ->
         .driver()
         .find(By::Css("[role='tab'][aria-selected='true']"))
         .await?;
-    session
-        .driver()
-        .action_chain()
-        .context_click_element(&active)
-        .perform()
-        .await?;
+    support::context_click_element(session.driver(), &active).await?;
     session
         .driver()
         .query(By::Css("[role='menu']:popover-open [role='menuitem']"))
@@ -495,11 +690,7 @@ async fn pin_active_snapshot(driver: &WebDriver) -> Result<()> {
     let active = driver
         .find(By::Css("[role='tab'][aria-selected='true']"))
         .await?;
-    driver
-        .action_chain()
-        .context_click_element(&active)
-        .perform()
-        .await?;
+    support::context_click_element(driver, &active).await?;
     support::evidence::capture(driver, "tab-context-menu", true).await?;
     driver
         .query(By::Css("[role='menu']:popover-open [role='menuitem']"))
@@ -943,6 +1134,21 @@ async fn assert_comparison_editor(driver: &WebDriver, evidence_name: &str) -> Re
         .with_context(|| format!("open comparison editor: {evidence_name}"))?;
     let panel = driver.find(By::Id(panel_id)).await?;
     panel.wait_until().displayed().await?;
+    let changes = table_row(driver, "Alpha")
+        .await?
+        .find(By::Css("[data-testid='project-table-changes']"))
+        .await?;
+    driver
+        .action_chain()
+        .move_to_element_center(&changes)
+        .perform()
+        .await?;
+    // Leave the pointer over Changes long enough to exercise its delayed tooltip.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    ensure!(
+        panel.is_displayed().await?,
+        "hovering project changes dismissed the comparison editor"
+    );
     let fits = driver
         .execute(
             r"

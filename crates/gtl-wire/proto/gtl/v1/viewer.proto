@@ -7,14 +7,22 @@ import "gtl/v1/repository.proto";
 import "gtl/v1/settings.proto";
 
 service ViewerService {
+  rpc GetViewerServerInfo(GetViewerServerInfoRequest) returns (GetViewerServerInfoResponse);
+  rpc GetViewerPushAvailability(GetViewerPushAvailabilityRequest) returns (GetViewerPushAvailabilityResponse);
+  rpc CreateViewerPush(CreateViewerPushRequest) returns (CreateViewerPushResponse);
+  rpc GetViewerPush(GetViewerPushRequest) returns (GetViewerPushResponse);
+  rpc StartViewerPush(StartViewerPushRequest) returns (StartViewerPushResponse);
   rpc GetViewerFileFilters(GetViewerFileFiltersRequest) returns (GetViewerFileFiltersResponse);
   rpc SetViewerFileFilters(SetViewerFileFiltersRequest) returns (SetViewerFileFiltersResponse);
   rpc UpdateDiffExclusions(UpdateDiffExclusionsRequest) returns (UpdateDiffExclusionsResponse);
+  rpc RenameViewerSnapshot(RenameViewerSnapshotRequest) returns (RenameViewerSnapshotResponse);
   rpc SetViewerTabPinned(SetViewerTabPinnedRequest) returns (SetViewerTabPinnedResponse);
   rpc CloseOtherViewerTabs(CloseOtherViewerTabsRequest) returns (CloseOtherViewerTabsResponse);
   rpc SetViewerModifiedFiles(SetViewerModifiedFilesRequest) returns (SetViewerModifiedFilesResponse);
   rpc GetViewerProjectStatus(GetViewerProjectStatusRequest) returns (GetViewerProjectStatusResponse);
   rpc ListViewerProjects(ListViewerProjectsRequest) returns (ListViewerProjectsResponse);
+  rpc DiscoverProjectRepositories(DiscoverProjectRepositoriesRequest) returns (DiscoverProjectRepositoriesResponse);
+  rpc ImportProjectRepositories(ImportProjectRepositoriesRequest) returns (ImportProjectRepositoriesResponse);
   rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
   rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
@@ -40,6 +48,66 @@ service ViewerService {
   rpc ResetSettings(ResetSettingsRequest) returns (ResetSettingsResponse);
   rpc EditSettings(EditSettingsRequest) returns (EditSettingsResponse);
   rpc OpenViewerDiffFile(OpenViewerDiffFileRequest) returns (OpenViewerDiffFileResponse);
+}
+
+message DiscoverProjectRepositoriesRequest {
+  // An absolute directory path or a path beginning with ~/.
+  string root = 1;
+}
+
+message DiscoverProjectRepositoriesResponse {
+  string root = 1;
+  repeated DiscoveredProjectRepository repositories = 2;
+}
+
+message DiscoveredProjectRepository {
+  string path = 1;
+  string label = 2;
+  ProjectDiscoveryState state = 3;
+  optional string existing_project_id = 4;
+}
+
+enum ProjectDiscoveryState {
+  PROJECT_DISCOVERY_STATE_UNSPECIFIED = 0;
+  PROJECT_DISCOVERY_STATE_NEW = 1;
+  PROJECT_DISCOVERY_STATE_ACTIVE = 2;
+  PROJECT_DISCOVERY_STATE_PAUSED = 3;
+  PROJECT_DISCOVERY_STATE_UNMANAGED = 4;
+}
+
+message ImportProjectRepositoriesRequest {
+  repeated ProjectImportSelection selections = 1;
+}
+
+message ProjectImportSelection {
+  string path = 1;
+  string project_id = 2;
+  string title = 3;
+}
+
+message ImportProjectRepositoriesResponse {
+  repeated ProjectImportResult results = 1;
+}
+
+message ProjectImportResult {
+  string path = 1;
+  string project_id = 2;
+  ProjectImportOutcome outcome = 3;
+  optional string error = 4;
+}
+
+enum ProjectImportOutcome {
+  PROJECT_IMPORT_OUTCOME_UNSPECIFIED = 0;
+  PROJECT_IMPORT_OUTCOME_CREATED = 1;
+  PROJECT_IMPORT_OUTCOME_RESTORED = 2;
+  PROJECT_IMPORT_OUTCOME_FAILED = 3;
+}
+
+message GetViewerServerInfoRequest {}
+
+message GetViewerServerInfoResponse {
+  string server_instance_id = 1;
+  uint32 protocol_version = 2;
 }
 
 message GetViewerShellRequest {}
@@ -125,6 +193,7 @@ message ViewerTab {
   ViewerTabKind kind = 3;
   ViewerTabState state = 4;
   bool pinned = 5;
+  optional string custom_name = 6;
 }
 
 enum ViewerFileStatus {
@@ -241,10 +310,16 @@ message ViewerSidebarVisibility {
 }
 
 message ViewerPreferences {
+  ViewerAccessibility accessibility = 5;
   ViewerSidebarVisibility sidebars = 4;
   ViewerTheme theme = 1;
   ViewerRenderOptions render_options = 2;
   ViewerKeybindings keybindings = 3;
+}
+
+message ViewerAccessibility {
+  uint32 ui_scale_percent = 1;
+  bool reduce_motion = 2;
 }
 
 enum ViewerKeybindingPlatform {
@@ -681,6 +756,7 @@ message ProjectsSortFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  ViewerAccessibility accessibility = 14;
   ProjectsSort projects_sort = 13;
   string revision = 12;
   optional bool focus_window_on_diff = 11;
@@ -746,6 +822,8 @@ message ProjectSettingsFieldUpdate {
 }
 
 message EditSettingsRequest {
+  ViewerScaleFieldUpdate ui_scale_percent = 15;
+  BoolFieldUpdate reduce_motion = 16;
   ProjectsSortFieldUpdate projects_sort = 14;
   optional string expected_revision = 13;
   BoolFieldUpdate focus_window_on_diff = 12;
@@ -760,6 +838,13 @@ message EditSettingsRequest {
   BoolFieldUpdate push_confirmation_required = 4;
   ExtensionsFieldUpdate default_diff_exclusions = 5;
   ProjectSettingsFieldUpdate projects = 6;
+}
+
+message ViewerScaleFieldUpdate {
+  oneof operation {
+    uint32 update = 1;
+    ClearSetting clear = 2;
+  }
 }
 
 message EditSettingsResponse {}
@@ -910,3 +995,51 @@ message UpdateDiffExclusionsRequest {
   ExtensionsValue expected = 3;
 }
 message UpdateDiffExclusionsResponse {}
+
+message CreateViewerPushRequest {
+  oneof source {
+    string project_path = 1;
+    ViewerViewIdentity identity = 2;
+  }
+}
+
+message CreateViewerPushResponse { string id = 1; }
+message GetViewerPushRequest { string id = 1; }
+message StartViewerPushRequest { string id = 1; }
+message StartViewerPushResponse {}
+message ViewerPushPreview {
+  string repository = 1;
+  string destination = 2;
+  string commit = 3;
+  uint64 count = 4;
+  string command = 5;
+}
+message ViewerPushRunning {}
+message ViewerPushQueued {}
+message ViewerPushSucceeded {}
+message GetViewerPushResponse {
+  oneof status {
+    ViewerPushPreview review = 1;
+    ViewerPushRunning running = 2;
+    ViewerPushSucceeded succeeded = 3;
+    string failure = 4;
+    ViewerPushQueued queued = 5;
+  }
+}
+
+message GetViewerPushAvailabilityRequest { ViewerViewIdentity identity = 1; }
+message ViewerPushAvailable {}
+message ViewerPushNothingToPush {}
+message GetViewerPushAvailabilityResponse {
+  oneof availability {
+    ViewerPushAvailable available = 1;
+    ViewerPushNothingToPush nothing_to_push = 2;
+    string unavailable = 3;
+  }
+}
+
+message RenameViewerSnapshotRequest {
+  uint64 tab_id = 1;
+  string name = 2;
+}
+message RenameViewerSnapshotResponse {}

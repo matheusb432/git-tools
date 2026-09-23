@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::collections::BTreeSet;
 
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::file_filters::ViewerFileFilters;
@@ -12,7 +12,6 @@ use crate::{
 
 pub struct GetViewerFileFilters {
     pub tab_id: ViewerTabId,
-    pub home: PathBuf,
 }
 
 #[cqrsy::query]
@@ -29,7 +28,6 @@ pub fn execute(
     let project = find_project_by_repository::execute(
         &FindProjectByRepository {
             path: &view.repo_root,
-            home: &request.home,
         },
         connection,
     )?

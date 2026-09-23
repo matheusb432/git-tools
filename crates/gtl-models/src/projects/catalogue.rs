@@ -20,25 +20,16 @@ pub struct ProjectId(String);
 pub struct ProjectTitle(String);
 
 #[nutype(
-    validate(predicate = |value| value.strip_prefix("~/").is_some_and(|path| !path.contains(['~', '\\', ':', '\0']) && path.split('/').all(|segment| !matches!(segment, "" | "." | "..")))),
+    validate(predicate = |value| Path::new(value).is_absolute() && !value.contains('\0') && !value.split(['/', '\\']).any(|segment| matches!(segment, "." | ".."))),
     derive(Debug, Clone, PartialEq, Eq, AsRef, Display, TryFrom)
 )]
 pub struct ProjectDirectorySource(String);
 
 impl ProjectDirectorySource {
-    pub fn resolve(
-        &self,
-        home: &Path,
-    ) -> Result<RepositoryRoot, crate::paths::RepositoryRootError> {
-        RepositoryRoot::try_new(home.join(&self.as_ref()[2..]))
+    pub fn resolve(&self) -> Result<RepositoryRoot, crate::paths::RepositoryRootError> {
+        RepositoryRoot::try_new(self.as_ref().into())
     }
 }
-
-#[nutype(
-    validate(predicate = |value| (1..=64).contains(&value.chars().count())),
-    derive(Debug, Clone, PartialEq, Eq, AsRef, Display, TryFrom)
-)]
-pub struct ProjectMuxSessionName(String);
 
 #[nutype(
     validate(predicate = |value| value.len() == 7 && value.starts_with('#') && value.as_bytes()[1..].iter().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))),
@@ -108,22 +99,6 @@ pub enum ProjectCollectionError {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectAffiliation {
-    Personal,
-    Work,
-}
-
-impl ProjectAffiliation {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Personal => "personal",
-            Self::Work => "work",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectStatus {
     Active,
     Paused,
@@ -134,8 +109,6 @@ pub struct ProjectMetadata {
     pub title: ProjectTitle,
     pub source: ProjectDirectorySource,
     pub git_remote: Option<RemoteUrl>,
-    pub mux_session_name: ProjectMuxSessionName,
-    pub affiliation: ProjectAffiliation,
     pub color: Option<ProjectColor>,
     pub groups: ProjectGroups,
 }
@@ -170,24 +143,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn source_paths_cannot_escape_home_on_supported_platforms() {
+    fn source_paths_must_be_absolute_without_parent_traversal() {
         for path in [
-            "/absolute",
             "~",
             "~/",
             "~/../outside",
-            "~/a/./b",
-            "~/a//b",
-            "~/C:/outside",
-            "~/a\\..\\outside",
+            "relative/path",
+            "/repos/../outside",
+            "/repos/./inside",
         ] {
             assert!(ProjectDirectorySource::try_new(path).is_err(), "{path}");
         }
-        let source = ProjectDirectorySource::try_new("~/tools/git tools").unwrap();
-        assert_eq!(
-            source.resolve(Path::new("/home/u")).unwrap().as_ref(),
-            Path::new("/home/u/tools/git tools")
+        let repository = std::env::temp_dir().join("repos/git tools");
+        let source = ProjectDirectorySource::try_new(repository.to_str().unwrap()).unwrap();
+        assert!(
+            ProjectDirectorySource::try_new(
+                std::env::temp_dir()
+                    .join("repos/~archive")
+                    .to_str()
+                    .unwrap()
+            )
+            .is_ok()
         );
+        assert_eq!(source.resolve().unwrap().as_ref(), repository.as_path());
+        #[cfg(windows)]
+        {
+            assert!(ProjectDirectorySource::try_new(r"C:\repos\git-tools").is_ok());
+            assert!(ProjectDirectorySource::try_new(r"C:repos\git-tools").is_err());
+        }
     }
 
     #[test]

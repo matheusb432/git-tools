@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use gtl_models::diffs::ExcludedExtensions;
 use gtl_wire::viewer::{
@@ -28,7 +28,6 @@ pub fn prepare(
     state: &ViewerState,
     settings: &impl UserSettingsReader,
     connection: &Connection,
-    home: &Path,
 ) -> Result<PreparedFileFilterChange, FileFiltersError> {
     let views = state
         .inspect(|session| session.file_filter_views(request.tab_id))?
@@ -36,7 +35,6 @@ pub fn prepare(
     let project = find_project_by_repository::execute(
         &FindProjectByRepository {
             path: &views.expected.repo_root,
-            home,
         },
         connection,
     )?

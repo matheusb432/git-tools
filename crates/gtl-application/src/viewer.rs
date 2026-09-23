@@ -12,6 +12,7 @@ pub mod move_viewer_tab;
 pub mod open_viewer_diff_file;
 pub mod prepare_recipe;
 mod probe_recipe;
+pub mod push;
 pub mod read_viewer_diff_text;
 mod recipe_label;
 pub mod refresh_live_view;
@@ -37,6 +38,7 @@ pub use state::{ViewerState, ViewerStateError};
 pub mod set_modified_files;
 
 pub mod pinned_tabs;
+pub mod rename_snapshot;
 
 pub mod file_filters;
 pub mod get_viewer_file_filters;

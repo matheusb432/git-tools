@@ -172,6 +172,7 @@ mod tests {
 
     fn tab(id: u64) -> TestResult<ViewerTab> {
         Ok(ViewerTab {
+            custom_name: None,
             pinned: false,
             id: viewer_tab_id(id)?,
             label: "Project".to_owned(),

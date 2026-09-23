@@ -337,17 +337,11 @@ impl Drop for ManagedChild {
     }
 }
 
-/// Build and run the platform desktop E2E workflow.
-pub fn run() -> Result<()> {
-    workflow()
-}
-
 pub(crate) fn run_scroll_benchmark() -> Result<()> {
     if std::env::consts::OS != "linux" {
         bail!("the production desktop scroll benchmark requires Linux WebKit");
     }
-    build::run(BuildTarget::Cli)?;
-    build::run(BuildTarget::Viewer)?;
+    build::run(BuildTarget::Both)?;
 
     let sandbox = Sandbox::create()?;
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
@@ -396,9 +390,9 @@ fn cargo_runner_config(executable: &Path) -> String {
     )
 }
 
-fn workflow() -> Result<()> {
-    build::run(BuildTarget::Cli)?;
-    build::run(BuildTarget::Viewer)?;
+/// Build and run the platform desktop E2E workflow.
+pub(crate) fn run() -> Result<()> {
+    build::run(BuildTarget::Both)?;
 
     let sandbox = Sandbox::create()?;
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
@@ -710,7 +704,12 @@ fn start_server(
     name: &'static str,
     log_name: &str,
 ) -> Result<ManagedChild> {
-    let endpoint = data_root.join("server").join("endpoint.json");
+    let endpoint = gtl_local_transport::LocalEndpoint::from_root(data_root)
+        .context("resolve browser gtl-server endpoint")?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build browser gtl-server readiness runtime")?;
     let server = ManagedChild::spawn(
         name,
         sandbox.server_binary.to_string_lossy().as_ref(),
@@ -719,8 +718,10 @@ fn start_server(
         &sandbox.root,
         &sandbox.logs.join(log_name),
     )?;
-    retry("gtl-server endpoint publication", READY_TIMEOUT, || {
-        endpoint.is_file()
+    retry("gtl-server readiness", READY_TIMEOUT, || {
+        runtime
+            .block_on(gtl_client::GtlClient::connect(&endpoint))
+            .is_ok()
     })?;
     Ok(server)
 }

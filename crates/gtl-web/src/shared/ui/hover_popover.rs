@@ -55,7 +55,7 @@ fn begin(mut state: Signal<HoverState>, pointer: bool, id: String) {
     }
     let task = spawn(async move {
         dioxus_sdk_time::sleep(std::time::Duration::from_millis(350)).await;
-        browser::show_popover(&id);
+        browser::show_hover_popover(&id);
     });
     state.write().reveal_task = Some(task);
 }

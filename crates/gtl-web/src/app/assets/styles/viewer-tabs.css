@@ -53,3 +53,13 @@
   .viewer-tab-menu-trigger[data-reorderable="true"] { @apply touch-none cursor-default; }
   .viewer-tab-menu-trigger[data-reorderable="false"] { @apply cursor-default; }
 }
+
+@layer components {
+  .inline-text-editor { @apply relative grid min-w-0 flex-1 animate-inline-edit-enter motion-reduce:animate-none; }
+  .inline-text-editor-input { @apply absolute inset-y-0 h-6 w-full min-w-0 rounded-sm border border-acc-line bg-acc-soft px-0 text-xs text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-acc focus:ring-1 focus:ring-acc-line read-only:text-ink-3; }
+  .inline-text-editor-input[aria-invalid="true"] { @apply border-del ring-1 ring-del-line; }
+  .inline-text-editor[data-pending="true"] input { @apply pr-6; }
+  .inline-text-editor-status { @apply pointer-events-none absolute inset-y-0 right-1 flex items-center text-acc; }
+  .inline-text-editor-error { @apply absolute top-full left-0 z-70 mt-1 w-56 rounded-sm border border-del-line bg-surface px-2 py-1 text-xs text-del shadow-floating; }
+  .inline-text-editor-width { @apply invisible h-6 truncate leading-6; }
+}

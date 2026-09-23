@@ -18,12 +18,15 @@ pub(crate) fn keydown(id: &str, trigger_id: &str, event: &KeyboardEvent) {
     else {
         return;
     };
-    let Ok(nodes) = menu.query_selector_all("[role='menuitem']") else {
+    let Ok(nodes) = menu.query_selector_all("[role='menuitem']:not(:disabled)") else {
         return;
     };
     let items = (0..nodes.length())
         .filter_map(|index| nodes.item(index)?.dyn_into::<HtmlElement>().ok())
         .collect::<Vec<_>>();
+    if items.is_empty() {
+        return;
+    }
     let active = document.active_element();
     let from_trigger = active.as_ref() == Some(trigger.as_ref());
     let index = items

@@ -6,7 +6,7 @@ use gtl_wire::viewer::ViewerTheme;
 
 use crate::shared::{browser, ui::ViewerThemePicker};
 
-const FAVICON: Asset = asset!("/src/app/assets/app-icon.ico");
+const FAVICON: Asset = asset!("/src/app/assets/app-icon.svg");
 const PREVIEW_CSS: Asset = asset!("/assets/component-preview.css");
 const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component catalog")
     .with_story_sets_per_page(match NonZeroUsize::new(15) {
@@ -18,7 +18,7 @@ const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component catalog")
 
 #[component]
 pub(super) fn App() -> Element {
-    let theme = use_signal(|| ViewerTheme::Dark);
+    let theme = use_signal(ViewerTheme::default);
     use_context_provider(|| theme);
     let selected_theme = theme();
     use_effect(use_reactive((&selected_theme,), move |(selected_theme,)| {

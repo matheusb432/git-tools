@@ -31,8 +31,7 @@ pub use git_client::{
 };
 pub use html_renderer::HtmlRenderer;
 pub use project_client::{
-    ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
-    ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
+    ProjectCatalogueDataError, ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
 };
 pub use project_comparison_reader::ProjectComparisonReader;
 pub use text_editor_client::TextEditorClient;

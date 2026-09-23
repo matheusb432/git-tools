@@ -91,10 +91,6 @@ impl ProjectService for ProjectGrpcService {
                 .project_id
                 .try_into()
                 .map_err(catalogue::invalid)?,
-            home: directories::BaseDirs::new()
-                .ok_or_else(|| Status::failed_precondition("home directory unavailable"))?
-                .home_dir()
-                .to_path_buf(),
         };
         let state = self.state.clone();
         let repository = run_blocking(move || {

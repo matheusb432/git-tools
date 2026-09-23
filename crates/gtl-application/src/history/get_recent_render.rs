@@ -37,7 +37,9 @@ fn get_recent_render(
     id: RenderHistoryId,
 ) -> Result<Option<RecentRenderRecord>, GetRecentRenderError> {
     let mut statement = connection
-        .prepare_cached(&format!("{RECENT_RENDER_SELECT} WHERE r.id = ?1"))
+        .prepare_cached(&format!(
+            "{RECENT_RENDER_SELECT} WHERE r.id = ?1 AND r.render_status = 'success'"
+        ))
         .map_err(anyhow::Error::from)?;
     let row = statement
         .query_row(params![i64::from(id)], RecentRenderRow::from_row)

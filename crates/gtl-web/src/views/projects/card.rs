@@ -46,6 +46,13 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                     "{project.name}"
                 }
                 div { class: "ml-auto",
+                    crate::views::push::PushButton {
+                        id: format!("project-push-card-{}", project.id),
+                        source: gtl_wire::viewer::push::CreateViewerPush::Project {
+                            path: project.path.clone(),
+                        },
+                        disabled: disabled || failed || !ahead.has_unpushed_commits(),
+                    }
                     super::SnapshotHistoryButton { project: project.name.clone() }
                     ProjectComparisonEditor { project: project.clone(), disabled }
                     if failed {

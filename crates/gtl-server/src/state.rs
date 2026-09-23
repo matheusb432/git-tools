@@ -14,6 +14,9 @@ use gtl_infra::{
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) viewer_push_operations: Arc<gtl_application::viewer::push::ViewerPushOperations>,
+    pub(crate) viewer_push_requests: Arc<tokio::sync::Semaphore>,
+    pub(crate) viewer_push_workers: Arc<tokio::sync::Semaphore>,
     pub(crate) viewer_file_filter_requests: Arc<tokio::sync::Semaphore>,
     pub(crate) git: HybridGitClient,
     pub(crate) artifacts: StoreArtifacts,
@@ -53,6 +56,9 @@ impl AppState {
         let database = SqliteAppState::open(data_root)
             .with_context(|| format!("opening application state at {}", data_root.display()))?;
         Ok(Self {
+            viewer_push_operations: Arc::default(),
+            viewer_push_requests: Arc::new(tokio::sync::Semaphore::new(4)),
+            viewer_push_workers: Arc::new(tokio::sync::Semaphore::new(4)),
             viewer_file_filter_requests: Arc::new(tokio::sync::Semaphore::new(1)),
             git: HybridGitClient,
             artifacts: StoreArtifacts,

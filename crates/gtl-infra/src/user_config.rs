@@ -217,15 +217,29 @@ mod tests {
     }
 
     #[test]
+    fn removed_saved_themes_fall_back_without_rewriting_other_settings() {
+        for theme in ["verdant", "noir", "light", "hearth"] {
+            let mut file = NamedTempFile::new().unwrap();
+            let raw = format!("# keep\ntheme = \"{theme}\"\nwrap_lines = true\n");
+            file.write_all(raw.as_bytes()).unwrap();
+            let settings = TomlSettingsStore::new(Some(file.path().to_path_buf()))
+                .load()
+                .unwrap();
+            assert_eq!(settings.theme(), Some(Theme::Dark));
+            assert_eq!(std::fs::read_to_string(file.path()).unwrap(), raw);
+        }
+    }
+
+    #[test]
     fn load_reads_theme_from_file() {
         let mut file = NamedTempFile::new().unwrap();
-        write!(file, "theme = \"light\"").unwrap();
+        write!(file, "theme = \"glacier\"").unwrap();
         assert_eq!(
             TomlSettingsStore::new(Some(file.path().to_path_buf()))
                 .load()
                 .unwrap()
                 .theme(),
-            Some(Theme::Light)
+            Some(Theme::Glacier)
         );
     }
 
@@ -456,13 +470,13 @@ excluded_from_push_all = true
     #[test]
     fn toml_settings_store_reads_fresh_snapshot() {
         let file = NamedTempFile::new().unwrap();
-        std::fs::write(file.path(), "theme = \"light\"").unwrap();
+        std::fs::write(file.path(), "theme = \"glacier\"").unwrap();
         let store = TomlSettingsStore::new(Some(file.path().to_path_buf()));
 
-        assert_eq!(store.load().unwrap().theme(), Some(Theme::Light));
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Glacier));
 
-        std::fs::write(file.path(), "theme = \"hearth\"").unwrap();
-        assert_eq!(store.load().unwrap().theme(), Some(Theme::Hearth));
+        std::fs::write(file.path(), "theme = \"mirage\"").unwrap();
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Mirage));
     }
 
     #[test]
@@ -474,7 +488,7 @@ excluded_from_push_all = true
         let viewer = gtl_application::viewer::ViewerState::new();
 
         let set = set_setting_key::execute(
-            gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
+            gtl_models::settings::SettingKeyValue::Theme(Theme::Glacier),
             &mut store,
             &viewer,
         )
@@ -492,7 +506,7 @@ excluded_from_push_all = true
             viewer.version().unwrap(),
             gtl_models::viewer::ViewerVersion::new(2)
         );
-        assert_eq!(store.load().unwrap().theme(), Some(Theme::Light));
+        assert_eq!(store.load().unwrap().theme(), Some(Theme::Glacier));
         assert_eq!(
             store.load().unwrap().viewer_render_options(),
             gtl_models::viewer::RenderOptions::DEFAULT
@@ -513,6 +527,10 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let settings_patch = UserSettingsPatch {
+            ui_scale_percent: UserSettingsFieldUpdate::Update(
+                gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
+            ),
+            reduce_motion: UserSettingsFieldUpdate::Update(true),
             expected_revision: None,
             diff_exclusions: None,
             focus_window_on_diff: UserSettingsFieldUpdate::Update(false),
@@ -548,6 +566,8 @@ excluded_from_push_all = true
             UserSettingsEditOutcome::Unchanged
         );
         let settings = store.load().unwrap();
+        assert_eq!(settings.accessibility().ui_scale_percent.into_inner(), 200);
+        assert!(settings.accessibility().reduce_motion);
         assert_eq!(settings.theme(), None);
         assert_eq!(
             settings.viewer_render_options(),
@@ -563,6 +583,76 @@ excluded_from_push_all = true
                 .push_all_exclusions()
                 .contains(&ProjectName::try_from("git-tools").unwrap())
         );
+    }
+
+    #[test]
+    fn accessibility_settings_persist_reset_and_reject_invalid_documents() {
+        use gtl_models::settings::{ViewerAccessibility, ViewerScalePercent};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(
+            store.load().unwrap().accessibility(),
+            ViewerAccessibility::default()
+        );
+        store
+            .edit(UserSettingsPatch {
+                ui_scale_percent: UserSettingsFieldUpdate::Update(
+                    ViewerScalePercent::try_new(300).unwrap(),
+                ),
+                reduce_motion: UserSettingsFieldUpdate::Update(true),
+                ..Default::default()
+            })
+            .unwrap();
+        let reloaded = TomlSettingsStore::new(Some(path.clone())).load().unwrap();
+        assert_eq!(reloaded.accessibility().ui_scale_percent.into_inner(), 300);
+        assert!(reloaded.accessibility().reduce_motion);
+        store
+            .edit(UserSettingsPatch {
+                reduce_motion: UserSettingsFieldUpdate::Update(false),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .accessibility()
+                .ui_scale_percent
+                .into_inner(),
+            300
+        );
+        assert!(!store.load().unwrap().accessibility().reduce_motion);
+        store
+            .edit(UserSettingsPatch {
+                ui_scale_percent: UserSettingsFieldUpdate::Clear,
+                reduce_motion: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            store.load().unwrap().accessibility(),
+            ViewerAccessibility::default()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# retained\ntheme = \"dark\"\n"
+        );
+        for invalid in [
+            "ui_scale_percent = 0",
+            "ui_scale_percent = 301",
+            "ui_scale_percent = 126",
+            "ui_scale_percent = -100",
+            "ui_scale_percent = '200'",
+            "reduce_motion = 'true'",
+        ] {
+            std::fs::write(&path, invalid).unwrap();
+            assert!(
+                TomlSettingsStore::new(Some(path.clone())).load().is_err(),
+                "accepted {invalid}"
+            );
+        }
     }
 
     #[test]
@@ -716,7 +806,7 @@ excluded_from_push_all = true
         ] {
             std::fs::write(
                 &path,
-                format!("# retained\ntheme = \"hearth\"\nprojects_page_size = {raw}\n"),
+                format!("# retained\ntheme = \"mirage\"\nprojects_page_size = {raw}\n"),
             )
             .unwrap();
             assert_eq!(
@@ -731,7 +821,7 @@ excluded_from_push_all = true
             );
             assert_eq!(
                 store.load().unwrap().theme(),
-                Some(gtl_models::viewer::Theme::Hearth)
+                Some(gtl_models::viewer::Theme::Mirage)
             );
         }
         for value in [10, 15, 30] {
@@ -757,7 +847,7 @@ excluded_from_push_all = true
             assert!(saved.contains("# retained"));
             assert_eq!(
                 store.load().unwrap().theme(),
-                Some(gtl_models::viewer::Theme::Hearth)
+                Some(gtl_models::viewer::Theme::Mirage)
             );
         }
         store
@@ -786,7 +876,7 @@ excluded_from_push_all = true
     fn projects_view_round_trips_and_clear_restores_grid_without_losing_other_settings() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
-        std::fs::write(&path, "# retained\ntheme = \"hearth\"\n").unwrap();
+        std::fs::write(&path, "# retained\ntheme = \"mirage\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         assert_eq!(
             store.load_viewer_settings().unwrap().1.view,
@@ -861,7 +951,7 @@ excluded_from_push_all = true
         let viewer = gtl_application::viewer::ViewerState::new();
 
         let error = set_setting_key::execute(
-            gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
+            gtl_models::settings::SettingKeyValue::Theme(Theme::Glacier),
             &mut store,
             &viewer,
         )

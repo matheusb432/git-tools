@@ -107,6 +107,7 @@ async fn csr_registry_owns_stateful_component_stories() -> anyhow::Result<()> {
         );
 
         assert_commits_panel_preview(&spec.session.page, &base_url).await?;
+        assert_alert_dialog_preview(&spec.session.page, &base_url).await?;
         Ok(())
     }
     .await;
@@ -222,6 +223,108 @@ async fn assert_commits_panel_preview(page: &Page, base_url: &str) -> anyhow::Re
         .to_have_count(0)
         .await
         .context("omit decorative timeline markers from the commit stack")
+}
+
+async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Result<()> {
+    navigate(
+        page,
+        &format!("{base_url}/render/alert-dialog/push-confirmation"),
+        "open the push confirmation story",
+    )
+    .await?;
+    let trigger = support::get_button(page, "Review push");
+    page.emulate_media(Some(
+        playwright_rs::protocol::EmulateMediaOptions::builder()
+            .reduced_motion(playwright_rs::protocol::ReducedMotion::Reduce)
+            .build(),
+    ))
+    .await?;
+    support::click(&trigger, "open the push confirmation").await?;
+
+    let dialog = page.get_by_role(
+        AriaRole::Alertdialog,
+        Some(
+            GetByRoleOptions::default()
+                .name("Push 2 commits?")
+                .exact(true),
+        ),
+    );
+    expect(dialog.clone())
+        .to_be_visible()
+        .await
+        .context("show the native push confirmation dialog")?;
+    expect(page.locator(".alert-dialog-surface"))
+        .to_have_css("animation-name", "none")
+        .await
+        .context("honor the system reduced-motion preference")?;
+    expect(dialog.clone())
+        .to_have_attribute("data-variant", "alert")
+        .await
+        .context("use the warning treatment for the push confirmation")?;
+    expect(dialog.get_by_text("origin/main", true))
+        .to_be_visible()
+        .await
+        .context("show the immutable push destination")?;
+    expect(dialog.get_by_text(
+        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
+        true,
+    ))
+    .to_be_visible()
+    .await
+    .context("show the exact push command")?;
+
+    expect(page.locator(".alert-dialog-actions button:first-child"))
+        .to_be_focused()
+        .await
+        .context("focus the safe action first")?;
+    page.keyboard().press("Escape", None).await?;
+    expect(dialog)
+        .to_be_hidden()
+        .await
+        .context("cancel the dialog after its exit transition")?;
+    expect(page.locator("#preview-push-trigger"))
+        .to_be_focused()
+        .await
+        .context("restore focus to the push trigger")?;
+    expect(page.get_by_text("Canceled", true))
+        .to_be_visible()
+        .await
+        .context("report the canceled outcome")?;
+    page.emulate_media(Some(
+        playwright_rs::protocol::EmulateMediaOptions::builder()
+            .reduced_motion(playwright_rs::protocol::ReducedMotion::NoPreference)
+            .build(),
+    ))
+    .await?;
+
+    navigate(
+        page,
+        &format!("{base_url}/render/alert-dialog/pending"),
+        "open the pending alert dialog story",
+    )
+    .await?;
+    support::click(
+        &support::get_button(page, "Open pending state"),
+        "open the pending alert dialog",
+    )
+    .await?;
+    let pending_dialog = page.get_by_role(
+        AriaRole::Alertdialog,
+        Some(
+            GetByRoleOptions::default()
+                .name("Delete saved snapshot?")
+                .exact(true),
+        ),
+    );
+    expect(pending_dialog.clone())
+        .to_be_visible()
+        .await
+        .context("show the pending alert dialog")?;
+    page.keyboard().press("Escape", None).await?;
+    expect(pending_dialog)
+        .to_be_visible()
+        .await
+        .context("keep the pending dialog open when cancellation is disabled")
 }
 
 async fn navigate(page: &Page, url: &str, label: &str) -> anyhow::Result<()> {

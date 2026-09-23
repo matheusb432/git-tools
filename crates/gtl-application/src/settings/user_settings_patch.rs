@@ -83,6 +83,8 @@ impl IntoIterator for ProjectSettingsUpdates {
 /// A complete typed mutation accepted by the user-settings editor port.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UserSettingsPatch {
+    pub ui_scale_percent: UserSettingsFieldUpdate<gtl_models::settings::ViewerScalePercent>,
+    pub reduce_motion: UserSettingsFieldUpdate<bool>,
     /// Rejects the edit when the serialized document changed after it was loaded.
     pub expected_revision: Option<UserSettingsRevision>,
     pub diff_exclusions: Option<DiffExclusionsUpdate>,

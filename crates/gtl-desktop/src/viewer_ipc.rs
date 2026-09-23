@@ -3,14 +3,15 @@ use std::{collections::HashMap, future::Future, sync::Arc, time::Duration};
 use gtl_client::{ViewerClient, ViewerClientError, ViewerRowStream, ViewerVersionStream};
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference, SetViewerTabPinned,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
-    ViewerUserSettings,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, RenameViewerSnapshot,
+    SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference,
+    SetViewerTabPinned, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
+    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
+    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
-        GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
-        UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+        DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
+        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
+        ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
     },
 };
 use serde::Serialize;
@@ -731,6 +732,18 @@ mod tests {
 }
 
 viewer_request_command!(
+    viewer_discover_project_repositories,
+    DiscoverProjectRepositories,
+    ProjectDiscovery,
+    discover_project_repositories
+);
+viewer_request_command!(
+    viewer_import_project_repositories,
+    ImportProjectRepositories,
+    Vec<ProjectImportResult>,
+    import_project_repositories
+);
+viewer_request_command!(
     viewer_list_projects,
     ListViewerProjects,
     ViewerProjectPage,
@@ -794,4 +807,37 @@ viewer_request_command!(
     gtl_wire::viewer::file_filters::UpdateDiffExclusions,
     (),
     update_diff_exclusions
+);
+
+viewer_request_command!(
+    viewer_create_push,
+    gtl_wire::viewer::push::CreateViewerPush,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    create_push
+);
+viewer_request_command!(
+    viewer_get_push,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    gtl_wire::viewer::push::ViewerPushStatus,
+    get_push
+);
+viewer_request_command!(
+    viewer_start_push,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    (),
+    start_push
+);
+
+viewer_request_command!(
+    viewer_get_push_availability,
+    gtl_wire::viewer::ViewerViewIdentity,
+    gtl_wire::viewer::push::ViewerPushAvailability,
+    get_push_availability
+);
+
+viewer_request_command!(
+    viewer_rename_snapshot,
+    RenameViewerSnapshot,
+    (),
+    rename_snapshot
 );

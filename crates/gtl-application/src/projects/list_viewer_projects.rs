@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use anyhow::Context as _;
 use gtl_models::projects::catalogue::{ProjectDirectorySource, ProjectId};
 use gtl_wire::viewer::projects::{
@@ -14,11 +12,10 @@ const PROJECT_SELECT: &str = "SELECT p.id, p.title, s.source_value, p.comparison
 #[cqrsy::query]
 pub fn execute(
     request: &ListViewerProjects,
-    home: &Path,
     connection: &Connection,
 ) -> anyhow::Result<ViewerProjectPage> {
     if let Some(sort) = request.sort {
-        return sorted_page(request, sort, home, connection);
+        return sorted_page(request, sort, connection);
     }
     let transaction = connection.unchecked_transaction()?;
     let connection = &transaction;
@@ -43,7 +40,7 @@ pub fn execute(
     };
     let mut projects = Vec::new();
     while let Some(row) = rows.next()? {
-        projects.push(read_project(row, home, connection)?);
+        projects.push(read_project(row, connection)?);
     }
     if reverse {
         projects.reverse();
@@ -61,10 +58,7 @@ pub fn execute(
     ViewerProjectPage::try_new(projects, total, count_before).context("invalid stored project page")
 }
 
-pub fn status_refresh_candidates(
-    home: &Path,
-    connection: &Connection,
-) -> anyhow::Result<Vec<ViewerProject>> {
+pub fn status_refresh_candidates(connection: &Connection) -> anyhow::Result<Vec<ViewerProject>> {
     let mut statement = connection.prepare_cached(
         "SELECT p.id, p.title, s.source_value, p.comparison_branch
          FROM projects p JOIN project_sources s USING (source_id)
@@ -77,7 +71,7 @@ pub fn status_refresh_candidates(
     let mut rows = statement.query([gtl_models::projects::catalogue::PROJECTS_MAX])?;
     let mut projects = Vec::new();
     while let Some(row) = rows.next()? {
-        projects.push(read_project(row, home, connection)?);
+        projects.push(read_project(row, connection)?);
     }
     Ok(projects)
 }
@@ -85,7 +79,6 @@ pub fn status_refresh_candidates(
 fn sorted_page(
     request: &ListViewerProjects,
     sort: gtl_models::settings::ProjectsSort,
-    home: &Path,
     connection: &Connection,
 ) -> anyhow::Result<ViewerProjectPage> {
     use gtl_models::settings::ProjectsSort;
@@ -153,7 +146,7 @@ fn sorted_page(
     while let Some(row) = rows.next()? {
         let position: u32 = row.get(4)?;
         count_before = count_before.min(position - 1);
-        projects.push(read_project(row, home, connection)?);
+        projects.push(read_project(row, connection)?);
     }
     if reverse {
         projects.reverse();
@@ -163,25 +156,20 @@ fn sorted_page(
 
 pub fn get_project(
     id: &ProjectId,
-    home: &Path,
     connection: &Connection,
 ) -> anyhow::Result<Option<ViewerProject>> {
     let mut statement = connection.prepare_cached(&format!("{PROJECT_SELECT} AND p.id = ?1"))?;
     let mut rows = statement.query([id.as_ref()])?;
     rows.next()?
-        .map(|row| read_project(row, home, connection))
+        .map(|row| read_project(row, connection))
         .transpose()
 }
 
-fn read_project(
-    row: &Row<'_>,
-    home: &Path,
-    connection: &Connection,
-) -> anyhow::Result<ViewerProject> {
+fn read_project(row: &Row<'_>, connection: &Connection) -> anyhow::Result<ViewerProject> {
     use rusqlite::OptionalExtension as _;
 
     let source: ProjectDirectorySource = row.get::<_, String>(2)?.try_into()?;
-    let path = source.resolve(home)?;
+    let path = source.resolve()?;
     let rendered: Option<String> = connection
         .query_row(
             "SELECT rendered_at FROM project_render_recency WHERE source_value = ?1",

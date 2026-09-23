@@ -1,7 +1,7 @@
 use gtl_application::projects::catalogue::{ProjectCatalogueError, create_project::CreateProject};
 use gtl_models::projects::catalogue::{
-    Project, ProjectAffiliation, ProjectGroups, ProjectMetadata, ProjectMutation,
-    ProjectMutationOutcome, ProjectOperationMode, ProjectStatus,
+    Project, ProjectGroups, ProjectMetadata, ProjectMutation, ProjectMutationOutcome,
+    ProjectOperationMode, ProjectStatus,
 };
 use gtl_wire::v1;
 use tonic::Status;
@@ -13,11 +13,6 @@ pub(super) fn create_request(request: v1::CreateProjectRequest) -> Result<Create
         v1::project_source::Source::Directory(directory) => {
             directory.path.try_into().map_err(invalid)?
         }
-    };
-    let affiliation = match v1::ProjectAffiliation::try_from(input.affiliation) {
-        Ok(v1::ProjectAffiliation::Personal) => ProjectAffiliation::Personal,
-        Ok(v1::ProjectAffiliation::Work) => ProjectAffiliation::Work,
-        _ => return Err(Status::invalid_argument("project affiliation is required")),
     };
     let groups = input
         .groups
@@ -35,8 +30,6 @@ pub(super) fn create_request(request: v1::CreateProjectRequest) -> Result<Create
                 .map(TryInto::try_into)
                 .transpose()
                 .map_err(invalid)?,
-            mux_session_name: input.mux_session_name.try_into().map_err(invalid)?,
-            affiliation,
             color: input
                 .color
                 .map(TryInto::try_into)
@@ -66,7 +59,7 @@ pub(super) fn error(error: ProjectCatalogueError) -> Status {
     match error {
         ProjectCatalogueError::NotFound => Status::not_found("project was not found"),
         ProjectCatalogueError::AlreadyExists => {
-            Status::already_exists("project ID, title, source, or session name already exists")
+            Status::already_exists("project ID, title, or source already exists")
         }
         ProjectCatalogueError::LimitExceeded => {
             Status::resource_exhausted("project catalogue exceeds its limit")
@@ -92,14 +85,9 @@ pub(super) fn project(project: Project) -> v1::Project {
             })),
         }),
         git_remote: project.metadata.git_remote.map(|remote| remote.to_string()),
-        mux_session_name: project.metadata.mux_session_name.to_string(),
         status: match project.status {
             ProjectStatus::Active => v1::ProjectStatus::Active,
             ProjectStatus::Paused => v1::ProjectStatus::Paused,
-        } as i32,
-        affiliation: match project.metadata.affiliation {
-            ProjectAffiliation::Personal => v1::ProjectAffiliation::Personal,
-            ProjectAffiliation::Work => v1::ProjectAffiliation::Work,
         } as i32,
         color: project.metadata.color.map(|color| color.to_string()),
         groups: project
@@ -119,9 +107,7 @@ pub(super) fn get_response(value: Project) -> v1::GetProjectResponse {
         title: project.title,
         source: project.source,
         git_remote: project.git_remote,
-        mux_session_name: project.mux_session_name,
         status: project.status,
-        affiliation: project.affiliation,
         color: project.color,
         groups: project.groups,
     }

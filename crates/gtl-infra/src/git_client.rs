@@ -3,6 +3,7 @@
 pub mod status_context;
 
 mod parsing;
+mod viewer_push;
 mod working_tree;
 
 use std::{

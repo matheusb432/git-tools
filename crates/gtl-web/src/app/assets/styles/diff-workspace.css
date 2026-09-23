@@ -27,7 +27,7 @@
     --commits-sidebar-size: 210px;
     @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[var(--files-sidebar-width,var(--files-sidebar-size))_minmax(0,1fr)_var(--commits-sidebar-width,var(--commits-sidebar-size))] workspace:grid-rows-[auto_minmax(0,1fr)] expanded:[--files-sidebar-size:262px] expanded:[--commits-sidebar-size:252px] wide-screen:[--files-sidebar-size:320px] wide-screen:[--commits-sidebar-size:304px] transition-[grid-template-columns] duration-150 ease-out motion-reduce:transition-none;
   }
-  .diff-workspace-mobile-navigation { @apply col-span-3 row-start-2 grid grid-cols-2 border-b border-line bg-surface; }
+  .diff-workspace-mobile-navigation { @apply col-span-3 row-start-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] border-b border-line bg-surface; }
   .diff-workspace-mobile-content { @apply col-span-3 row-start-3 overflow-hidden; }
   .diff-workspace-titlebar { @apply col-span-3 row-start-1 flex items-center border-b border-line bg-surface; }
   .diff-workspace-panel { @apply overflow-hidden bg-surface; }

@@ -1,11 +1,22 @@
 use std::error::Error;
 
 #[cfg(feature = "desktop")]
-use gtl_models::viewer::{HistoryPage, HistoryPageCount, HistoryPageNumber, RenderHistoryId};
+use gtl_models::{
+    git::{BranchName, GitHead, GitRevision},
+    viewer::{
+        HistoryPage, HistoryPageCount, HistoryPageNumber, RenderHistoryId, ViewerRangeGeneration,
+        ViewerSelectionGeneration,
+    },
+};
 use gtl_models::{
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::ViewerTabId,
+};
+#[cfg(feature = "desktop")]
+use gtl_wire::viewer::{
+    ViewerActiveView, ViewerCommandLine, ViewerCommitSelection, ViewerFooter, ViewerRenderOptions,
+    ViewerRowContentId, ViewerRowSourceState, ViewerViewIdentity,
 };
 use gtl_wire::viewer::{ViewerCodeLine, ViewerCodeSpan, ViewerUnifiedSourceRow};
 
@@ -18,6 +29,43 @@ pub(crate) fn viewer_tab_id(value: u64) -> TestResult<ViewerTabId> {
 #[cfg(feature = "desktop")]
 pub(crate) fn render_history_id(value: i64) -> TestResult<RenderHistoryId> {
     Ok(RenderHistoryId::try_new(value)?)
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActiveView> {
+    Ok(ViewerActiveView {
+        modified_files: false,
+        identity: ViewerViewIdentity {
+            tab_id,
+            range_generation: ViewerRangeGeneration::new(1),
+            selection_generation: ViewerSelectionGeneration::default(),
+            render_options: ViewerRenderOptions {
+                wrap_lines: false,
+                layout: gtl_wire::viewer::ViewerDiffLayout::Split,
+                density: gtl_wire::viewer::ViewerDiffDensity::Full,
+            },
+        },
+        content_id: ViewerRowContentId::from_digest([7; 32]),
+        row_source: ViewerRowSourceState::Ready,
+        title: "diff".to_owned(),
+        repository_name: project_name("project")?,
+        branch: GitHead::Branch(BranchName::main()),
+        upstream: GitRevision::main(),
+        command: ViewerCommandLine {
+            lead: "git diff ".to_owned(),
+            range: "main..HEAD".to_owned(),
+            trail: String::new(),
+        },
+        files: Vec::new(),
+        commits_label: "0 commits".to_owned(),
+        commit_count: 0,
+        commits: Vec::new(),
+        commit_selection: ViewerCommitSelection::None,
+        footer: ViewerFooter {
+            command: "git diff main..HEAD".to_owned(),
+        },
+        exclusions: None,
+    })
 }
 
 #[cfg(feature = "desktop")]

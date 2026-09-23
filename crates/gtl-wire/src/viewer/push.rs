@@ -1,0 +1,43 @@
+pub use gtl_models::viewer::ViewerPushId;
+use gtl_models::{diffs::CommitId, paths::RepositoryRoot};
+use serde::{Deserialize, Serialize};
+
+use super::ViewerViewIdentity;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CreateViewerPush {
+    Project { path: RepositoryRoot },
+    View { identity: ViewerViewIdentity },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerPushRequest {
+    pub id: ViewerPushId,
+}
+
+/// Display-only projection. Execution accepts only the server-issued operation ID.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerPushPreview {
+    pub repository: RepositoryRoot,
+    pub destination: String,
+    pub commit: CommitId,
+    pub count: u64,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerPushStatus {
+    Review(ViewerPushPreview),
+    Queued,
+    Running,
+    Succeeded,
+    Failed { message: String },
+}
+
+/// Eligibility for the current selection, checked against the repository's current upstream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerPushAvailability {
+    Available,
+    NothingToPush,
+    Unavailable { message: String },
+}

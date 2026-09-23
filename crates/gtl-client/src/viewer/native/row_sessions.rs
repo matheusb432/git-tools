@@ -10,7 +10,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::{ViewerClientError, ViewerRowStream, decode_status};
 
-type Client = v1::viewer_service_client::ViewerServiceClient<crate::AuthenticatedChannel>;
+type Client = v1::viewer_service_client::ViewerServiceClient<tonic::transport::Channel>;
 type RowResult = Result<v1::StreamViewerRowsResponse, ViewerClientError>;
 
 struct Demand {

@@ -79,7 +79,7 @@ fn build_document(
     );
     write!(
         html,
-        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark light\"><meta name=\"darkreader-lock\"><title>",
+        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"darkreader-lock\"><title>",
         payload.theme.as_str(),
         content_security_policy,
     )
@@ -132,11 +132,11 @@ mod tests {
 
     #[test]
     fn document_contains_complete_static_markup() {
-        let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None).unwrap();
         let policy =
             content_security_policy(static_artifact_enhancement_script(), assets::TAILWIND_CSS);
 
-        assert!(html.starts_with("<!doctype html>"));
+        assert!(html.starts_with("<!doctype html><html lang=\"en\" data-theme=\"dark\">"));
         assert!(html.contains("<title>api - diff · 0 commits</title>"));
         assert!(html.contains("static_rendered"));
         assert!(html.contains("data-gtl-diff-file"));
@@ -220,13 +220,13 @@ mod tests {
         let unified = build_html(
             &view,
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
-            None,
+            Some(Theme::Carbon),
         )
         .unwrap();
         let split = build_html(
             &view,
             RenderOptions::new(DiffLayout::Split, DiffDensity::Compact).with_wrap_lines(true),
-            None,
+            Some(Theme::Carbon),
         )
         .unwrap();
 
@@ -235,6 +235,7 @@ mod tests {
         assert!(unified.contains("data-layout=\"unified\""));
         assert!(unified.contains("text-[var(--sy-kw)]"));
         for html in [&unified, &split] {
+            assert!(html.contains("data-theme=\"carbon\""));
             assert!(html.contains("(+1501 characters omitted)"));
             assert!(html.contains(&"x".repeat(500)));
             assert!(!html.contains(&long_body));

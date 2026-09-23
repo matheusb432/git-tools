@@ -86,25 +86,21 @@ fn theme(raw: i32) -> Result<Theme, Status> {
         .map_err(|_| Status::invalid_argument("theme is not recognized"))?
     {
         v1::ViewerTheme::Unspecified => Err(Status::invalid_argument("theme is required")),
-        v1::ViewerTheme::Light => Ok(Theme::Light),
         v1::ViewerTheme::Dark => Ok(Theme::Dark),
-        v1::ViewerTheme::Hearth => Ok(Theme::Hearth),
         v1::ViewerTheme::Mirage => Ok(Theme::Mirage),
         v1::ViewerTheme::Glacier => Ok(Theme::Glacier),
-        v1::ViewerTheme::Noir => Ok(Theme::Noir),
         v1::ViewerTheme::Graphite => Ok(Theme::Graphite),
+        v1::ViewerTheme::Carbon => Ok(Theme::Carbon),
     }
 }
 
 fn wire_theme(theme: Theme) -> v1::ViewerTheme {
     match theme {
-        Theme::Light => v1::ViewerTheme::Light,
         Theme::Dark => v1::ViewerTheme::Dark,
-        Theme::Hearth => v1::ViewerTheme::Hearth,
         Theme::Mirage => v1::ViewerTheme::Mirage,
         Theme::Glacier => v1::ViewerTheme::Glacier,
-        Theme::Noir => v1::ViewerTheme::Noir,
         Theme::Graphite => v1::ViewerTheme::Graphite,
+        Theme::Carbon => v1::ViewerTheme::Carbon,
     }
 }
 

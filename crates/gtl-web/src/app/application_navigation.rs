@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::viewer::{
+    ViewerKeybindingAction, ViewerKeybindings, ViewerKeyboardModifier, ViewerTabId,
+};
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabRequest};
-use lucide_dioxus::LayoutGrid;
+use wasm_bindgen::JsCast as _;
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -151,6 +153,30 @@ pub(crate) fn ApplicationNavigation() -> Element {
             }
         });
     });
+    let rename_snapshot = use_callback(
+        move |(tab_id, submission): (ViewerTabId, crate::shared::ui::InlineTextSubmission)| {
+            spawn(async move {
+                let result =
+                    viewer_server::rename_snapshot(gtl_wire::viewer::RenameViewerSnapshot {
+                        tab_id,
+                        name: submission.value,
+                    })
+                    .await;
+                match result {
+                    Ok(()) => {
+                        if let Ok(shell) = viewer_server::get_shell().await {
+                            viewer.replace_shell(shell);
+                        }
+                        (submission.complete)(Ok(()));
+                    }
+                    Err(error) => {
+                        toast.error(error.message());
+                        (submission.complete)(Err(error.message().to_owned()));
+                    }
+                }
+            });
+        },
+    );
     let close_others = use_callback(move |tab_id| {
         spawn(async move {
             match viewer_server::close_other_tabs(ViewerTabRequest { tab_id }).await {
@@ -162,6 +188,50 @@ pub(crate) fn ApplicationNavigation() -> Element {
             }
         });
     });
+    let close_tab =
+        use_callback(move |(tab_id, focus): (ViewerTabId, bool)| {
+            let focus_tab_id = shell.with(|shell| match shell {
+                ViewerShellLoad::Ready(shell) => close_focus_target(
+                    &shell.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+                    tab_id,
+                ),
+                _ => None,
+            });
+            spawn(async move {
+                match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
+                    Ok(shell) => {
+                        viewer.replace_shell(shell);
+                        if focus {
+                            browser::focus_element(focus_tab_id.map_or_else(
+                                || "workspace-heading".to_owned(),
+                                viewer_tab_element_id,
+                            ));
+                        }
+                    }
+                    Err(error) => toast.error(error.message()),
+                }
+            });
+        });
+    let active_tab_id = route.tab_id();
+    let tab_shortcut = use_callback(move |shortcut: ViewerTabShortcut| {
+        let tab = shell.with(|shell| match shell {
+            ViewerShellLoad::Ready(shell) => shell
+                .tabs
+                .iter()
+                .find(|tab| Some(tab.id) == active_tab_id)
+                .cloned(),
+            _ => None,
+        });
+        if let Some(tab) = tab {
+            match shortcut {
+                ViewerTabShortcut::Close if !tab.pinned => close_tab.call((tab.id, true)),
+                ViewerTabShortcut::Pin => pin_tab.call((tab.id, !tab.pinned)),
+                ViewerTabShortcut::CloseOthers => close_others.call(tab.id),
+                ViewerTabShortcut::Close => {}
+            }
+        }
+    });
+    use_viewer_tab_shortcuts(shell, tab_shortcut);
     let shell_state = shell.read();
     let tabs = match &*shell_state {
         ViewerShellLoad::Ready(shell) => shell.tabs.as_slice(),
@@ -170,7 +240,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let pending_order = pending_tab_order();
     let displayed_tabs = tabs_in_order(tabs, pending_order.as_deref());
     let displayed_tab_ids = displayed_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
-    let active_tab_id = route.tab_id();
     let overflow_active_tab = active_tab_id
         .and_then(|tab_id| {
             displayed_tabs
@@ -231,8 +300,10 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     aria_label: "Projects",
                     aria_current: projects_active.then_some("page"),
                     title: "Projects",
-                    span { class: "viewer-navigation-icon size-3.5", aria_hidden: "true",
-                        LayoutGrid { size: 15 }
+                    span {
+                        class: "viewer-navigation-icon size-5 [&>svg]:size-full",
+                        aria_hidden: "true",
+                        dangerous_inner_html: include_str!("assets/app-icon.svg"),
                     }
                     span { class: "hidden sm:inline", "Projects" }
                     ViewerTabSelectionIndicator { active: projects_active }
@@ -272,7 +343,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                 {
                                     let tab_id = tab.id;
                                     let active = active_tab_id == Some(tab_id);
-                                    let focus_tab_id = close_focus_target(&displayed_tab_ids, tab_id);
                                     let key_tabs = displayed_tab_ids.clone();
                                     let drop_tabs = displayed_tab_ids.clone();
                                     let pinned_tabs = pinned_tab_ids.clone();
@@ -281,6 +351,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             key: "{tab.id}",
                                             tab: tab.clone(),
                                             active,
+                                            onrename: move |submission| rename_snapshot.call((tab_id, submission)),
                                             onpin: move |pinned| pin_tab.call((tab_id, pinned)),
                                             oncloseothers: move |()| close_others.call(tab_id),
                                             rows_loading: diff_rows_loading_tab_id == Some(tab_id),
@@ -311,21 +382,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                     }
                                                 }
                                             },
-                                            onclose: move |_| {
-                                                spawn(async move {
-                                                    match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
-                                                        Ok(shell) => {
-                                                            viewer.replace_shell(shell);
-                                                            if let Some(focus_id) = focus_tab_id {
-                                                                browser::focus_element(viewer_tab_element_id(focus_id));
-                                                            } else {
-                                                                browser::focus_element("workspace-heading".to_owned());
-                                                            }
-                                                        }
-                                                        Err(error) => toast.error(error.message()),
-                                                    }
-                                                });
-                                            },
+                                            onclose: move |_| close_tab.call((tab_id, true)),
                                             onmove: move |request: MoveViewerTab| {
                                                 if pinned_tabs.contains(&request.tab_id)
                                                     == pinned_tabs.contains(&request.target_tab_id)
@@ -348,6 +405,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             ViewerTabOverflowMenu {
                                 id: VIEWER_TAB_OVERFLOW_MENU_ID,
                                 tabs: overflow_tabs,
+                                onrename: rename_snapshot,
                                 onpin: pin_tab,
                                 oncloseothers: close_others,
                                 active_tab: overflow_active_tab,
@@ -361,16 +419,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             focus: false,
                                         });
                                 },
-                                onclose: move |tab_id| {
-                                    spawn(async move {
-                                        match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
-                                            Ok(shell) => {
-                                                viewer.replace_shell(shell);
-                                            }
-                                            Err(error) => toast.error(error.message()),
-                                        }
-                                    });
-                                },
+                                onclose: move |tab_id| close_tab.call((tab_id, false)),
                                 onmove: move |request: MoveViewerTab| {
                                     if overflow_pinned_tabs.contains(&request.tab_id)
                                         != overflow_pinned_tabs.contains(&request.target_tab_id)
@@ -401,6 +450,108 @@ pub(crate) fn ApplicationNavigation() -> Element {
             },
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum ViewerTabShortcut {
+    Close,
+    Pin,
+    CloseOthers,
+}
+
+impl ViewerTabShortcut {
+    fn conflicts_with(self, keybindings: ViewerKeybindings) -> bool {
+        let (key, modifier) = match self {
+            Self::Close => ("w", ViewerKeyboardModifier::Control),
+            Self::Pin => ("p", ViewerKeyboardModifier::Alt),
+            Self::CloseOthers => ("o", ViewerKeyboardModifier::Alt),
+        };
+        let modifiers = [modifier].into_iter().collect();
+        [
+            ViewerKeybindingAction::SearchFiles,
+            ViewerKeybindingAction::SearchTextInAllFiles,
+            ViewerKeybindingAction::ToggleFilesSidebar,
+            ViewerKeybindingAction::ToggleCommitsSidebar,
+        ]
+        .into_iter()
+        .any(|action| keybindings.matches_keypress(action, key, modifiers))
+    }
+
+    fn aria(self) -> &'static str {
+        match self {
+            Self::Close => "Control+w",
+            Self::Pin => "Alt+p",
+            Self::CloseOthers => "Alt+o",
+        }
+    }
+}
+
+fn use_viewer_tab_shortcuts(
+    shell: ReadSignal<ViewerShellLoad>,
+    onshortcut: Callback<ViewerTabShortcut>,
+) {
+    browser::use_window_keydown(move |event| {
+        if event.default_prevented()
+            || event.is_composing()
+            || event.shift_key()
+            || event.meta_key()
+        {
+            return;
+        }
+        let shortcut = match (
+            event.key().to_ascii_lowercase().as_str(),
+            event.ctrl_key(),
+            event.alt_key(),
+        ) {
+            ("w", true, false) => ViewerTabShortcut::Close,
+            ("p", false, true) => ViewerTabShortcut::Pin,
+            ("o", false, true) => ViewerTabShortcut::CloseOthers,
+            _ => return,
+        };
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let menu = document
+            .query_selector(".viewer-tab-context-menu:popover-open")
+            .ok()
+            .flatten();
+        if menu.is_none()
+            && document
+                .query_selector("dialog[open]")
+                .ok()
+                .flatten()
+                .is_some()
+        {
+            return;
+        }
+        if menu.is_none()
+            && shell.with(|shell| match shell {
+                ViewerShellLoad::Ready(shell) => {
+                    shortcut.conflicts_with(shell.preferences.keybindings)
+                }
+                _ => false,
+            })
+        {
+            return;
+        }
+        event.prevent_default();
+        event.stop_immediate_propagation();
+        if event.repeat() {
+            return;
+        }
+        let Some(menu) = menu else {
+            onshortcut.call(shortcut);
+            return;
+        };
+        if let Some(action) = menu
+            .query_selector(&format!("[aria-keyshortcuts='{}']", shortcut.aria()))
+            .ok()
+            .flatten()
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            action.click();
+        }
+    });
 }
 
 fn tabs_in_order<'a>(tabs: &'a [ViewerTab], order: Option<&[ViewerTabId]>) -> Vec<&'a ViewerTab> {

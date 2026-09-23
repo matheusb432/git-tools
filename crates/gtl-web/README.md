@@ -6,7 +6,7 @@ user settings, application navigation, transient desktop state, and static artif
 
 `gtl-server` remains authoritative for durable tabs, history, settings, Git decisions, cached views,
 and diff parsing. The WebView calls typed `gtl-client` operations through Tauri IPC; the desktop
-forwards them through the authenticated native gRPC client. The WebView stores received rows only as
+forwards them through the private native gRPC client. The WebView stores received rows only as
 temporary display state. Native artifact builds ask `gtl-application` to parse complete files and SSR
 the same row components before writing HTML.
 

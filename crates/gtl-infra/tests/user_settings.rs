@@ -59,10 +59,12 @@ fn project_sort_persists_through_cached_reads_edits_and_clear() -> anyhow::Resul
 }
 
 fn write_settings(path: &Path, theme: &str, page_size: u32) -> std::io::Result<()> {
+    // Preserve byte length when the cache test changes a theme without changing mtime.
+    let theme = format!("\"{theme}\"");
     fs::write(
         path,
         format!(
-            "theme = \"{theme}\"\nprojects_page_size = {page_size}\nprojects_view = \"table\"\n"
+            "theme = {theme:10}\nprojects_page_size = {page_size}\nprojects_view = \"table\"\n"
         ),
     )
 }
@@ -91,7 +93,7 @@ fn clones_reload_equal_length_edits_with_unchanged_modification_time() {
     assert_settings(&store, Theme::Dark, 30).unwrap();
     let metadata = fs::metadata(&path).unwrap();
 
-    write_settings(&path, "noir", 10).unwrap();
+    write_settings(&path, "graphite", 10).unwrap();
     fs::File::options()
         .write(true)
         .open(&path)
@@ -104,8 +106,8 @@ fn clones_reload_equal_length_edits_with_unchanged_modification_time() {
         changed_metadata.modified().unwrap(),
         metadata.modified().unwrap()
     );
-    assert_settings(&reader, Theme::Noir, 10).unwrap();
-    assert_settings(&store, Theme::Noir, 10).unwrap();
+    assert_settings(&reader, Theme::Graphite, 10).unwrap();
+    assert_settings(&store, Theme::Graphite, 10).unwrap();
 }
 
 #[test]
@@ -117,13 +119,13 @@ fn reads_follow_file_creation_deletion_and_recreation() {
     let defaults = TomlSettingsStore::new(None).load_viewer_settings().unwrap();
     assert_eq!(store.load_viewer_settings().unwrap(), defaults);
 
-    write_settings(&path, "light", 30).unwrap();
-    assert_settings(&reader, Theme::Light, 30).unwrap();
+    write_settings(&path, "glacier", 30).unwrap();
+    assert_settings(&reader, Theme::Glacier, 30).unwrap();
     fs::remove_file(&path).unwrap();
     assert_eq!(reader.load().unwrap(), defaults.0);
     assert_eq!(store.load_viewer_settings().unwrap(), defaults);
-    write_settings(&path, "noir", 10).unwrap();
-    assert_settings(&store, Theme::Noir, 10).unwrap();
+    write_settings(&path, "graphite", 10).unwrap();
+    assert_settings(&store, Theme::Graphite, 10).unwrap();
 }
 
 #[test]
@@ -160,8 +162,8 @@ fn cached_settings_do_not_hide_current_errors_and_reads_recover_after_repair() {
         Err(UserSettingsLoadError::Adapter(_))
     ));
     fs::remove_dir(&path).unwrap();
-    write_settings(&path, "light", 10).unwrap();
-    assert_settings(&reader, Theme::Light, 10).unwrap();
+    write_settings(&path, "glacier", 10).unwrap();
+    assert_settings(&reader, Theme::Glacier, 10).unwrap();
 }
 
 #[test]
@@ -173,15 +175,15 @@ fn editing_a_clone_preserves_external_changes_and_refreshes_both_read_paths() {
     let mut editor = store.clone();
     assert_settings(&store, Theme::Dark, 30).unwrap();
 
-    write_settings(&path, "light", 10).unwrap();
+    write_settings(&path, "glacier", 10).unwrap();
     editor
         .edit(UserSettingsPatch {
-            theme: UserSettingsFieldUpdate::Update(Theme::Noir),
+            theme: UserSettingsFieldUpdate::Update(Theme::Graphite),
             ..Default::default()
         })
         .unwrap();
-    assert_settings(&store, Theme::Noir, 10).unwrap();
-    assert_settings(&editor, Theme::Noir, 10).unwrap();
+    assert_settings(&store, Theme::Graphite, 10).unwrap();
+    assert_settings(&editor, Theme::Graphite, 10).unwrap();
 }
 
 #[test]
@@ -217,19 +219,19 @@ fn reads_follow_atomic_replacement_and_symbolic_link_retargeting() {
     let target = directory.path().join("managed.toml");
     let target_other = directory.path().join("other.toml");
     write_settings(&target, "dark", 30).unwrap();
-    write_settings(&target_other, "light", 10).unwrap();
+    write_settings(&target_other, "glacier", 10).unwrap();
     symlink(&target, &path).unwrap();
     let store = TomlSettingsStore::new(Some(path.clone()));
     assert_settings(&store, Theme::Dark, 30).unwrap();
 
     let mut replacement = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
     replacement
-        .write_all(b"theme = \"noir\"\nprojects_page_size = 15\nprojects_view = \"table\"\n")
+        .write_all(b"theme = \"graphite\"\nprojects_page_size = 15\nprojects_view = \"table\"\n")
         .unwrap();
     replacement.persist(&target).unwrap();
-    assert_settings(&store, Theme::Noir, 15).unwrap();
+    assert_settings(&store, Theme::Graphite, 15).unwrap();
     symlink(&target_other, directory.path().join("config-new.toml")).unwrap();
     fs::rename(directory.path().join("config-new.toml"), &path).unwrap();
-    assert_settings(&store, Theme::Light, 10).unwrap();
+    assert_settings(&store, Theme::Glacier, 10).unwrap();
     assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
 }

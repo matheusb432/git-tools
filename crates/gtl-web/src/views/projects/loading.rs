@@ -39,9 +39,11 @@ pub(super) fn use_projects(
     ready: Memo<bool>,
 ) -> Projects {
     let viewer = use_context::<ViewerContext>();
+    let push = use_context::<crate::views::push::PushController>();
     let mut revision = use_signal(|| 0_u64);
     let mut resource = use_resource(move || {
         let _ = revision();
+        let _ = (push.refresh_epoch)();
         load_page(cursor(), page_size(), sort(), viewer, active() && ready())
     });
     let page = use_memo(move || resource.read().clone());
@@ -131,6 +133,7 @@ pub(super) fn use_project_status(project: &ViewerProject) -> ProjectStatusHandle
 }
 
 fn use_status_watch(page: Memo<Option<ProjectPageLoad>>, revision: ReadSignal<u64>) {
+    let push = use_context::<crate::views::push::PushController>();
     let viewer = use_context::<ViewerContext>();
     let cache = use_context::<Signal<super::cache::ProjectStatusCache>>();
     let selected = use_memo(move || {
@@ -143,6 +146,7 @@ fn use_status_watch(page: Memo<Option<ProjectPageLoad>>, revision: ReadSignal<u6
     });
     use_resource(move || {
         let _ = revision();
+        let _ = (push.refresh_epoch)();
         let instance = viewer.server_instance_id();
         let projects = if viewer.actions_enabled() {
             selected()

@@ -16,8 +16,9 @@ use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 pub mod projects;
+pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 30;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 35;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -32,16 +33,15 @@ pub const VIEWER_SEARCH_QUERY_MAX_BYTES: usize = 256;
 pub const VIEWER_FILE_SEARCH_MAX_MATCHES: usize = 50_000;
 pub const VIEWER_FILE_SEARCH_MAX_ENCODED_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewerTheme {
+    #[default]
     Dark,
-    Light,
-    Hearth,
     Mirage,
     Glacier,
-    Noir,
     Graphite,
+    Carbon,
 }
 
 impl ViewerTheme {
@@ -50,12 +50,10 @@ impl ViewerTheme {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Dark => "dark",
-            Self::Light => "light",
-            Self::Hearth => "hearth",
             Self::Mirage => "mirage",
             Self::Glacier => "glacier",
-            Self::Noir => "noir",
             Self::Graphite => "graphite",
+            Self::Carbon => "carbon",
         }
     }
 }
@@ -156,6 +154,8 @@ pub enum ViewerTabState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTab {
+    #[serde(default)]
+    pub custom_name: Option<String>,
     #[serde(default)]
     pub pinned: bool,
     pub id: ViewerTabId,
@@ -476,6 +476,7 @@ pub enum ViewerActiveState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerPreferences {
+    pub accessibility: gtl_models::settings::ViewerAccessibility,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
@@ -580,6 +581,7 @@ pub struct ViewerDiffExclusions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
+    pub accessibility: gtl_models::settings::ViewerAccessibility,
     pub revision: UserSettingsRevision,
     pub focus_window_on_diff: bool,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
@@ -611,6 +613,8 @@ pub struct ViewerProjectSettingsUpdate {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EditSettingsRequest {
+    pub ui_scale_percent: FieldUpdate<gtl_models::settings::ViewerScalePercent>,
+    pub reduce_motion: FieldUpdate<bool>,
     pub expected_revision: Option<UserSettingsRevision>,
     pub focus_window_on_diff: FieldUpdate<bool>,
     pub files_sidebar_visible: FieldUpdate<bool>,
@@ -977,4 +981,10 @@ pub struct SetViewerModifiedFiles {
 pub struct SetViewerTabPinned {
     pub tab_id: ViewerTabId,
     pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameViewerSnapshot {
+    pub tab_id: ViewerTabId,
+    pub name: String,
 }

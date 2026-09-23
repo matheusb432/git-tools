@@ -23,8 +23,7 @@ async fn pulls_one_repository_and_reports_path_and_remote_failures() -> TestResu
     let checkout = tempfile::tempdir()?;
     repository(checkout.path())?;
     let server = ServerHarness::start(data.path(), None).await?;
-    let mut client =
-        RepositoryServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = RepositoryServiceClient::new(server.native_channel());
     let request = || v1::PullRepositoryRequest {
         repository_path: checkout.path().to_string_lossy().into_owned(),
         dry_run: false,

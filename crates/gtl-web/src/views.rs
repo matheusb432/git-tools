@@ -15,3 +15,6 @@ pub(crate) use user_settings::UserSettingsView;
 
 #[cfg(feature = "desktop")]
 pub(crate) mod projects;
+
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
+pub(crate) mod push;

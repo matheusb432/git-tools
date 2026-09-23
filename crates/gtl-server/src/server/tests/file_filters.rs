@@ -10,16 +10,14 @@ use gtl_wire::{
         file_filters::{SetViewerFileFilters, UpdateDiffExclusions, ViewerFileFilters},
     },
 };
-use tonic::{service::interceptor::InterceptedService, transport::Channel};
+use tonic::transport::Channel;
 
 use super::{
-    ServerHarness, ServerHarnessAuthorization, TestResult,
+    ServerHarness, TestResult,
     live_views::{git, ready_shell},
 };
 
-type Client = v1::viewer_service_client::ViewerServiceClient<
-    InterceptedService<Channel, ServerHarnessAuthorization>,
->;
+type Client = v1::viewer_service_client::ViewerServiceClient<Channel>;
 
 async fn active(client: &mut Client) -> TestResult<ViewerActiveView> {
     let shell = tokio::time::timeout(Duration::from_secs(10), ready_shell(client)).await??;
@@ -249,10 +247,7 @@ async fn file_filters_can_finish_for_an_inactive_tab_without_changing_the_active
         Some(directory.path().join("settings.toml")),
     )
     .await?;
-    let mut client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let shell = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
     assert_eq!(shell.tabs.len(), 2);
     let first = shell.tabs[0].id;
@@ -298,10 +293,9 @@ struct Fixture {
 }
 
 async fn fixture() -> TestResult<Fixture> {
-    let home = directories::BaseDirs::new().ok_or("home unavailable")?;
     let repository = tempfile::Builder::new()
         .prefix(".gtl-exclusions-")
-        .tempdir_in(home.home_dir())?;
+        .tempdir()?;
     let root = repository.path();
     git(root, &["init", "-q", "-b", "main"])?;
     git(root, &["config", "user.name", "Filters Test"])?;
@@ -328,10 +322,7 @@ async fn fixture() -> TestResult<Fixture> {
     let settings = directory.path().join("settings.toml");
     std::fs::write(&settings, "[diff]\nexclude = ['lock']\n")?;
     let server = ServerHarness::start(directory.path(), Some(settings.clone())).await?;
-    let client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     Ok(Fixture {
         directory,
         repository,
@@ -342,17 +333,13 @@ async fn fixture() -> TestResult<Fixture> {
 }
 
 fn associate(database: &SqliteAppState, root: &std::path::Path) -> TestResult {
-    let home = directories::BaseDirs::new().ok_or("home unavailable")?;
     let mut connection = database.connection_lock()?;
     let transaction = connection.transaction()?;
     transaction.execute(
         "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
-        [format!(
-            "~/{}",
-            root.strip_prefix(home.home_dir())?.display()
-        )],
+        [root.to_string_lossy().into_owned()],
     )?;
-    transaction.execute("INSERT INTO projects (id, source_id, title, mux_session_name, affiliation, export_include_in_all) VALUES ('FLT', ?1, 'Filters', 'filters', 'personal', 1)", [transaction.last_insert_rowid()])?;
+    transaction.execute("INSERT INTO projects (id, source_id, title, export_include_in_all) VALUES ('FLT', ?1, 'Filters', 1)", [transaction.last_insert_rowid()])?;
     transaction.commit()?;
     Ok(())
 }

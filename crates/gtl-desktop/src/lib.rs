@@ -1,6 +1,7 @@
 //! Tauri shell for the server-owned git-tools viewer.
 
 use viewer_ipc::{viewer_get_file_filters, viewer_set_file_filters, viewer_update_diff_exclusions};
+mod project_picker;
 mod viewer_ipc;
 mod window_activation;
 mod window_controls;
@@ -20,13 +21,15 @@ use tauri::{
 };
 use viewer_ipc::{
     ViewerIpcState, viewer_activate_tab, viewer_clear_commit_selection, viewer_close_other_tabs,
-    viewer_close_tab, viewer_connect, viewer_edit_settings, viewer_find_diff,
-    viewer_get_history_copy, viewer_get_project_status, viewer_get_settings,
-    viewer_get_settings_recovery, viewer_get_shell, viewer_list_commits, viewer_list_history,
-    viewer_list_projects, viewer_move_tab, viewer_open_diff_file, viewer_open_history,
-    viewer_open_project, viewer_read_diff_text, viewer_refresh_tab, viewer_reset_settings,
-    viewer_search_files, viewer_select_commit, viewer_set_modified_files, viewer_set_preference,
-    viewer_set_tab_pinned, viewer_stream_rows_cancel, viewer_stream_rows_next_batch,
+    viewer_close_tab, viewer_connect, viewer_create_push, viewer_discover_project_repositories,
+    viewer_edit_settings, viewer_find_diff, viewer_get_history_copy, viewer_get_project_status,
+    viewer_get_push, viewer_get_push_availability, viewer_get_settings,
+    viewer_get_settings_recovery, viewer_get_shell, viewer_import_project_repositories,
+    viewer_list_commits, viewer_list_history, viewer_list_projects, viewer_move_tab,
+    viewer_open_diff_file, viewer_open_history, viewer_open_project, viewer_read_diff_text,
+    viewer_refresh_tab, viewer_rename_snapshot, viewer_reset_settings, viewer_search_files,
+    viewer_select_commit, viewer_set_modified_files, viewer_set_preference, viewer_set_tab_pinned,
+    viewer_start_push, viewer_stream_rows_cancel, viewer_stream_rows_next_batch,
     viewer_stream_rows_start, viewer_update_project, viewer_watch_cancel, viewer_watch_next_batch,
     viewer_watch_start,
 };
@@ -199,7 +202,8 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
-    let mut builder = TrayIconBuilder::new()
+    let builder = TrayIconBuilder::new()
+        .icon(tauri::include_image!("icons/tray.png"))
         .menu(&menu)
         .tooltip("git-tools diff viewer")
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -211,9 +215,6 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
             "quit" => app.exit(0),
             _ => {}
         });
-    if let Some(icon) = app.default_window_icon().cloned() {
-        builder = builder.icon(icon);
-    }
     builder.build(app)?;
     Ok(())
 }
@@ -229,10 +230,18 @@ pub fn run() -> anyhow::Result<()> {
         .manage(ViewerIpcState::default())
         .invoke_handler(tauri::generate_handler![
             window_controls::desktop_window_state,
+            window_controls::desktop_window_scale,
             window_controls::desktop_window_action,
             viewer_connect,
+            project_picker::desktop_pick_project_folder,
+            viewer_create_push,
+            viewer_get_push,
+            viewer_get_push_availability,
+            viewer_start_push,
             viewer_get_shell,
             viewer_list_projects,
+            viewer_discover_project_repositories,
+            viewer_import_project_repositories,
             viewer_get_project_status,
             viewer_open_project,
             viewer_update_project,
@@ -240,6 +249,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_move_tab,
             viewer_close_tab,
             viewer_refresh_tab,
+            viewer_rename_snapshot,
             viewer_select_commit,
             viewer_clear_commit_selection,
             viewer_set_modified_files,
@@ -268,6 +278,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_watch_next_batch,
             viewer_watch_cancel,
         ])
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if WindowLaunch::from_arguments(argv).focuses_window()
                 && let Some(window) = app.get_webview_window("main")

@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 use gtl_models::projects::catalogue::{
-    Project, ProjectAffiliation, ProjectGroups, ProjectId, ProjectMetadata, ProjectStatus,
+    Project, ProjectGroups, ProjectId, ProjectMetadata, ProjectStatus,
 };
 use rusqlite::{Connection, Row};
 
@@ -14,7 +14,7 @@ pub mod set_project_status;
 pub enum ProjectCatalogueError {
     #[error("project was not found")]
     NotFound,
-    #[error("project ID, title, source, or session name already exists")]
+    #[error("project ID, title, or source already exists")]
     AlreadyExists,
     #[error("project catalogue exceeds its limit")]
     LimitExceeded,
@@ -25,7 +25,7 @@ pub enum ProjectCatalogueError {
 }
 
 const PROJECT_SELECT: &str = "SELECT p.id, p.title, s.source_kind, s.source_value,
-    p.git_remote, p.mux_session_name, p.affiliation, p.color, p.paused_at
+    p.git_remote, p.color, p.paused_at
     FROM projects p JOIN project_sources s USING (source_id)";
 
 fn read_project(row: &Row<'_>, connection: &Connection) -> Result<Project, ProjectCatalogueError> {
@@ -46,11 +46,6 @@ fn read_project(row: &Row<'_>, connection: &Connection) -> Result<Project, Proje
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
-        let affiliation = match row.get::<_, String>(6)?.as_str() {
-            "personal" => ProjectAffiliation::Personal,
-            "work" => ProjectAffiliation::Work,
-            _ => anyhow::bail!("invalid project affiliation"),
-        };
         Ok(Project {
             id,
             metadata: ProjectMetadata {
@@ -60,15 +55,13 @@ fn read_project(row: &Row<'_>, connection: &Connection) -> Result<Project, Proje
                     .get::<_, Option<String>>(4)?
                     .map(TryInto::try_into)
                     .transpose()?,
-                mux_session_name: row.get::<_, String>(5)?.try_into()?,
-                affiliation,
                 color: row
-                    .get::<_, Option<String>>(7)?
+                    .get::<_, Option<String>>(5)?
                     .map(TryInto::try_into)
                     .transpose()?,
                 groups: ProjectGroups::try_new(groups).context("invalid project groups")?,
             },
-            status: if row.get::<_, Option<String>>(8)?.is_some() {
+            status: if row.get::<_, Option<String>>(6)?.is_some() {
                 ProjectStatus::Paused
             } else {
                 ProjectStatus::Active

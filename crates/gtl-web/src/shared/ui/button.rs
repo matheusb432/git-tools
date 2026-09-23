@@ -51,9 +51,17 @@ pub(crate) enum ButtonVariant {
     Secondary,
     #[cfg(feature = "interactive-ui")]
     Destructive,
+    #[cfg(feature = "interactive-ui")]
+    #[cfg_attr(
+        not(feature = "component-preview"),
+        allow(dead_code, reason = "reserved for the viewer push feature")
+    )]
+    Warning,
     Failure,
     Outline,
     Ghost,
+    #[cfg(feature = "interactive-ui")]
+    Accent,
     Toggle,
     Bare,
 }
@@ -66,9 +74,13 @@ impl ButtonVariant {
             Self::Secondary => "control-button-variant-secondary",
             #[cfg(feature = "interactive-ui")]
             Self::Destructive => "control-button-variant-destructive",
+            #[cfg(feature = "interactive-ui")]
+            Self::Warning => "control-button-variant-warning",
             Self::Failure => "control-button-variant-failure",
             Self::Outline => "control-button-variant-outline",
             Self::Ghost => "control-button-variant-ghost",
+            #[cfg(feature = "interactive-ui")]
+            Self::Accent => "control-button-variant-accent",
             Self::Toggle => "control-button-variant-ghost control-button-variant-toggle",
             Self::Bare => "",
         }
@@ -202,6 +214,21 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{Button, ButtonType};
+    #[cfg(feature = "component-preview")]
+    use super::{ButtonLayout, ButtonSize, ButtonVariant, button_classes};
+
+    #[cfg(feature = "component-preview")]
+    #[test]
+    fn warning_variant_uses_the_warning_button_treatment() {
+        assert!(
+            button_classes(
+                ButtonLayout::Inline,
+                ButtonVariant::Warning,
+                ButtonSize::Medium,
+            )
+            .contains("control-button-variant-warning")
+        );
+    }
 
     #[test]
     fn submit_type_uses_native_form_semantics() {

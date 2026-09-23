@@ -25,6 +25,9 @@ mod settings_recovery;
 #[path = "viewer/settings_editing.rs"]
 mod settings_editing;
 
+#[path = "viewer/accessibility.rs"]
+mod accessibility;
+
 #[path = "viewer/line_wrapping.rs"]
 mod line_wrapping;
 
@@ -42,3 +45,6 @@ mod file_filters;
 
 #[path = "viewer/long_lines.rs"]
 mod long_lines;
+
+#[path = "viewer/push.rs"]
+mod push;

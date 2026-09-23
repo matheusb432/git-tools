@@ -5,8 +5,6 @@ SELECT
     project_sources.[source_kind],
     project_sources.[source_value],
     projects.[git_remote],
-    projects.[mux_session_name],
-    projects.[affiliation],
     projects.[color],
     projects.[created_at]
 FROM projects
@@ -63,7 +61,7 @@ CREATE TABLE project_status_index (
   checked_at INTEGER NOT NULL
 ) STRICT;
 
-CREATE TABLE projects (
+CREATE TABLE "projects" (
     [id] TEXT PRIMARY KEY
         CHECK (length([id]) BETWEEN 2 AND 4 AND [id] NOT GLOB '*[^A-Z]*'),
     [source_id] INTEGER NOT NULL UNIQUE
@@ -72,12 +70,6 @@ CREATE TABLE projects (
         CHECK ([title] = trim([title]) AND length([title]) > 0),
     [git_remote] TEXT
         CHECK ([git_remote] IS NULL OR ([git_remote] = trim([git_remote]) AND length([git_remote]) > 0)),
-    [mux_session_name] TEXT NOT NULL UNIQUE
-        CHECK (
-            length([mux_session_name]) BETWEEN 1 AND 64
-        ),
-    [affiliation] TEXT NOT NULL
-        CHECK ([affiliation] IN ('personal', 'work')),
     [color] TEXT
         CHECK (
             [color] IS NULL
@@ -97,9 +89,10 @@ CREATE TABLE projects (
     [paused_at] TEXT
         CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', [paused_at]) IS [paused_at]),
     [unmanaged_at] TEXT
-        CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', [unmanaged_at]) IS [unmanaged_at])
-, comparison_branch TEXT NOT NULL DEFAULT 'main'
-    CHECK (length(comparison_branch) BETWEEN 1 AND 1024 AND comparison_branch = trim(comparison_branch))) STRICT;
+        CHECK (strftime('%Y-%m-%dT%H:%M:%fZ', [unmanaged_at]) IS [unmanaged_at]),
+    [comparison_branch] TEXT NOT NULL DEFAULT 'main'
+        CHECK (length([comparison_branch]) BETWEEN 1 AND 1024 AND [comparison_branch] = trim([comparison_branch]))
+) STRICT;
 
 CREATE TABLE "recent_renders" (
   id           INTEGER PRIMARY KEY,
@@ -113,7 +106,8 @@ CREATE TABLE "recent_renders" (
   title        TEXT NOT NULL,
   repo_name    TEXT NOT NULL,
   range_label  TEXT NOT NULL,
-  rendered_at  TEXT NOT NULL, project_id TEXT REFERENCES projects (id),
+  rendered_at  TEXT NOT NULL, project_id TEXT REFERENCES projects (id), render_status TEXT NOT NULL DEFAULT 'success'
+    CHECK (render_status IN ('pending', 'success', 'error')),
   CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
   -- Only the diff operation (seeded id 1) takes a target.
   CHECK ((operation_id = 1) = (target_id IS NOT NULL))
@@ -121,16 +115,36 @@ CREATE TABLE "recent_renders" (
 
 CREATE UNIQUE INDEX recent_renders_fingerprint_idx
 ON recent_renders (
-  source_id,
-  repo_name,
-  coalesce(pinned_base, X''),
-  coalesce(pinned_head, X'')
-);
+    source_id,
+    repo_name,
+    coalesce(pinned_base, X''),
+    coalesce(pinned_head, X'')
+)
+WHERE render_status = 'success';
 
 CREATE INDEX recent_renders_project_id_idx ON recent_renders (project_id, id DESC);
 
 CREATE INDEX recent_renders_repo_name_idx
 ON recent_renders (repo_name);
+
+CREATE TABLE render_errors (
+    id INTEGER PRIMARY KEY,
+    recent_render_id INTEGER NOT NULL
+        REFERENCES recent_renders (id) ON DELETE CASCADE,
+    error_code TEXT NOT NULL
+        CHECK (error_code IN (
+            'repository_directory_not_found',
+            'repository_directory_not_git_repository',
+            'source_unavailable',
+            'render_failed',
+            'publication_failed'
+        )),
+    error_detail TEXT NOT NULL
+        CHECK (length(error_detail) > 0)
+) STRICT;
+
+CREATE INDEX render_errors_recent_render_id_idx
+ON render_errors (recent_render_id, id);
 
 CREATE TABLE render_operations (
   id   INTEGER PRIMARY KEY,

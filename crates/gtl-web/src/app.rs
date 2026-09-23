@@ -9,7 +9,7 @@ mod window_header;
 
 use application_router::Route;
 
-const FAVICON: Asset = asset!("/src/app/assets/app-icon.ico");
+const FAVICON: Asset = asset!("/src/app/assets/app-icon.svg");
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
 
 #[component]

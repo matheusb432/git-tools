@@ -68,6 +68,15 @@ fn records(session: &ViewerSession) -> Vec<(Recipe, bool)> {
 
 fn persist(connection: &mut Connection, records: &[(Recipe, bool)]) -> Result<(), PinnedTabsError> {
     let transaction = connection.transaction().map_err(anyhow::Error::from)?;
+    persist_records(&transaction, records)?;
+    transaction.commit().map_err(anyhow::Error::from)?;
+    Ok(())
+}
+
+pub(super) fn persist_records(
+    transaction: &rusqlite::Transaction<'_>,
+    records: &[(Recipe, bool)],
+) -> Result<(), PinnedTabsError> {
     transaction
         .execute("DELETE FROM pinned_viewer_tabs", [])
         .map_err(anyhow::Error::from)?;
@@ -81,7 +90,6 @@ fn persist(connection: &mut Connection, records: &[(Recipe, bool)]) -> Result<()
             )
             .map_err(anyhow::Error::from)?;
     }
-    transaction.commit().map_err(anyhow::Error::from)?;
     Ok(())
 }
 

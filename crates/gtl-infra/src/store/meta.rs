@@ -104,7 +104,11 @@ impl Sidecar {
             .density
             .parse::<DiffDensity>()
             .context("sidecar has an invalid diff density")?;
-        let theme = if self.theme_recorded {
+        let theme = if self.theme_recorded
+            && !matches!(
+                self.theme.as_deref(),
+                Some("verdant" | "noir" | "light" | "hearth")
+            ) {
             ArtifactThemeMetadata::Recorded(
                 self.theme
                     .map(|theme| theme.parse::<Theme>())
@@ -220,6 +224,17 @@ mod tests {
             theme_recorded: true,
             renderer_version: RENDERER_VERSION,
             excluded_extensions: vec![".MD".into(), "md".into()],
+        }
+    }
+
+    #[test]
+    fn removed_palette_preserves_history_but_cannot_match_a_cached_theme() {
+        for theme in ["verdant", "noir", "light", "hearth"] {
+            let mut sidecar = valid_sidecar();
+            sidecar.theme = Some(theme.to_owned());
+            let metadata = sidecar.try_into_metadata().unwrap();
+            assert_eq!(metadata.theme, ArtifactThemeMetadata::Unrecorded);
+            assert_eq!(metadata.repo_name.as_str(), "git-tools");
         }
     }
 

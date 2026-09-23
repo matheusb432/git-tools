@@ -7,14 +7,11 @@ use rusqlite::{Connection, params};
 pub fn record(
     project: &ViewerProject,
     status: Option<&ViewerProjectStatus>,
-    home: &std::path::Path,
     connection: &Connection,
 ) -> anyhow::Result<()> {
-    if !super::list_viewer_projects::get_project(&project.id, home, connection)?.is_some_and(
-        |current| {
-            current.path == project.path && current.comparison_branch == project.comparison_branch
-        },
-    ) {
+    if !super::list_viewer_projects::get_project(&project.id, connection)?.is_some_and(|current| {
+        current.path == project.path && current.comparison_branch == project.comparison_branch
+    }) {
         return Ok(());
     }
     if status.is_none()

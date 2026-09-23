@@ -1,4 +1,8 @@
-#[cfg(feature = "component-preview")]
+#[cfg(feature = "interactive-ui")]
+#[cfg_attr(
+    not(feature = "component-preview"),
+    allow(dead_code, reason = "reserved for the viewer push feature")
+)]
 mod alert_dialog;
 mod badge;
 mod button;
@@ -35,6 +39,8 @@ pub(crate) mod popover;
 pub(crate) mod scroll_area;
 mod search_panel;
 #[cfg(feature = "interactive-ui")]
+mod sectioned_surface;
+#[cfg(feature = "interactive-ui")]
 pub(crate) mod select;
 #[cfg(feature = "interactive-ui")]
 mod skeleton;
@@ -46,8 +52,12 @@ mod viewer_tab;
 #[cfg(feature = "component-preview")]
 mod viewer_theme_picker;
 
-#[cfg(feature = "component-preview")]
-pub(crate) use alert_dialog::AlertDialog;
+#[cfg_attr(
+    not(feature = "component-preview"),
+    expect(unused_imports, reason = "reserved for the viewer push feature")
+)]
+#[cfg(feature = "interactive-ui")]
+pub(crate) use alert_dialog::{AlertDialog, AlertDialogVariant};
 pub(crate) use badge::{Badge, BadgeVariant};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use button::ButtonType;
@@ -82,6 +92,10 @@ pub(crate) use scroll_area::ScrollArea;
 pub(crate) use scroll_area::ScrollAreaVariant;
 pub(crate) use search_panel::{SearchPanel, SearchPanelPlacement};
 #[cfg(feature = "interactive-ui")]
+pub(crate) use sectioned_surface::{
+    SectionedSurface, SectionedSurfaceBody, SectionedSurfaceFooter, SectionedSurfaceHeader,
+};
+#[cfg(feature = "interactive-ui")]
 pub(crate) use select::{Select, SelectOption};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use skeleton::Skeleton;
@@ -114,3 +128,8 @@ pub(crate) use hover_popover::{HoverPopover, use_hover_popover};
 
 #[cfg(feature = "interactive-ui")]
 pub(crate) mod menu_keyboard;
+
+#[cfg(feature = "interactive-ui")]
+mod inline_text_editor;
+#[cfg(feature = "interactive-ui")]
+pub(crate) use inline_text_editor::{InlineTextEditor, InlineTextSubmission};

@@ -1,5 +1,4 @@
 use std::{
-    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -104,8 +103,6 @@ impl ProjectCheck {
 
 impl Worker {
     fn run(&self, selection: &ViewerProjectSelection) -> anyhow::Result<()> {
-        let home =
-            directories::BaseDirs::new().ok_or_else(|| anyhow::anyhow!("home unavailable"))?;
         let mut watches = ProjectStatusWatch::new(selection.ids().len());
         let mut checks = selection
             .ids()
@@ -121,7 +118,7 @@ impl Worker {
                 .take_while(|_| !self.cancelled())
             {
                 self.publish_pending(check)?;
-                self.check(index, id, check, &mut watches, home.home_dir())?;
+                self.check(index, id, check, &mut watches)?;
                 self.publish_pending(check)?;
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -158,7 +155,6 @@ impl Worker {
         id: &ProjectId,
         check: &mut ProjectCheck,
         watches: &mut ProjectStatusWatch,
-        home: &Path,
     ) -> anyhow::Result<()> {
         let now = Instant::now();
         let reconcile = check
@@ -182,7 +178,7 @@ impl Worker {
         let _deadline = CheckDeadline(self.started.clone());
         let project = {
             let connection = self.state.database.connection_lock()?;
-            list_viewer_projects::get_project(id, home, &connection)?
+            list_viewer_projects::get_project(id, &connection)?
         };
         let replan = watches.begin_check(index) || project != check.project || reconcile;
         if replan && let Some(previous) = &check.project {
@@ -195,7 +191,7 @@ impl Worker {
         self.state
             .viewer_project_watch_registrations
             .store(watches.registrations(), Ordering::Relaxed);
-        let update = self.read_status(id, project.as_ref(), home)?;
+        let update = self.read_status(id, project.as_ref())?;
         if self.cancelled() {
             return Ok(());
         }
@@ -242,7 +238,6 @@ impl Worker {
         &self,
         id: &ProjectId,
         project: Option<&ViewerProject>,
-        home: &Path,
     ) -> anyhow::Result<ViewerProjectStatusUpdate> {
         let Some(project) = project else {
             return Ok(ViewerProjectStatusUpdate::Unavailable(id.clone()));
@@ -272,12 +267,7 @@ impl Worker {
         }
         {
             let connection = self.state.database.connection_lock()?;
-            gtl_application::projects::status_index::record(
-                project,
-                Some(&status),
-                home,
-                &connection,
-            )?;
+            gtl_application::projects::status_index::record(project, Some(&status), &connection)?;
         }
         self.state
             .viewer_project_status_cache

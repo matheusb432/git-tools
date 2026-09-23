@@ -28,14 +28,13 @@ pub(super) async fn get(
     let tab_id = proto::viewer::file_filters::decode_get(request.into_inner())
         .map_err(|_| Status::invalid_argument("invalid viewer identity"))?;
     let state = state.clone();
-    let home = super::projects::project_home()?;
     let result = run_blocking(move || {
         let connection = state
             .database
             .connection_lock()
             .map_err(FileFiltersError::Database)?;
         get_viewer_file_filters::execute(
-            &GetViewerFileFilters { tab_id, home },
+            &GetViewerFileFilters { tab_id },
             &state.viewer,
             &state.user_settings,
             &connection,
@@ -60,7 +59,6 @@ pub(super) async fn set(
         .try_acquire_owned()
         .map_err(|_| Status::resource_exhausted("file exclusions are already changing"))?;
     let state = state.clone();
-    let home = super::projects::project_home()?;
     run_blocking(move || {
         let _permit = permit;
         let prepared = {
@@ -73,7 +71,6 @@ pub(super) async fn set(
                 &state.viewer,
                 &state.user_settings,
                 &connection,
-                &home,
             )?
         };
         set_viewer_file_filters::execute(

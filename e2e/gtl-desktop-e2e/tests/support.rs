@@ -13,6 +13,47 @@ pub mod selectors;
 pub mod session;
 pub mod wait;
 
+pub async fn context_click_element(
+    driver: &WebDriver,
+    element: &thirtyfour::WebElement,
+) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = driver;
+        let rect = element.rect().await?;
+        // WebKitWebDriver releases button 0 after pressing button 2. Native input releases RMB.
+        let output = std::process::Command::new("timeout")
+            .args([
+                "5s",
+                "xdotool",
+                "search",
+                "--onlyvisible",
+                "--name",
+                "^git-tools diff viewer$",
+                "mousemove",
+                "--window",
+                "%1",
+                &format!("{:.0}", rect.x + rect.width / 2.0),
+                &format!("{:.0}", rect.y + rect.height / 2.0),
+                "click",
+                "3",
+            ])
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "native right click failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    driver
+        .action_chain()
+        .context_click_element(element)
+        .perform()
+        .await?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 struct CopyObservation {
     text: String,

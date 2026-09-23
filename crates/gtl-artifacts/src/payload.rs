@@ -25,7 +25,7 @@ pub(crate) fn project_payload(
     options: RenderOptions,
     theme: Option<Theme>,
 ) -> Result<ArtifactPayload> {
-    let theme = theme.unwrap_or(Theme::Dark);
+    let theme = theme.unwrap_or_default();
     let render_options = project_render_options(options);
     let mut projected_views = Vec::with_capacity(views.len());
 

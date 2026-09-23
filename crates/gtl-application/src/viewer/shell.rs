@@ -17,8 +17,7 @@ use super::{
     project_render_options, project_theme,
 };
 use crate::viewer::session::{
-    ActiveContentIdentity, ActiveContentSnapshot, CommitSelectionSnapshot, RENDER_PENDING_REASON,
-    ViewerSession,
+    ActiveContentIdentity, ActiveContentSnapshot, CommitSelectionSnapshot, ViewerSession,
 };
 
 const SOURCE_DIRECTORY_NOT_FOUND_MESSAGE: &str = "The configured Git repository directory was not found. Updates resume automatically when it is restored.";
@@ -42,12 +41,14 @@ pub fn project(
     theme: Theme,
     keybindings: ViewerKeybindings,
     sidebars: gtl_models::viewer::ViewerSidebarVisibility,
+    accessibility: gtl_models::settings::ViewerAccessibility,
     feedback: Option<ViewerFeedback>,
 ) -> Result<ViewerShell, ProjectViewerShellError> {
     let tabs = session
         .tabs()
         .map(|entry| ViewerTab {
             pinned: entry.pinned,
+            custom_name: entry.recipe.name.as_ref().map(ToString::to_string),
             id: entry.tab.id(),
             label: entry.tab.label().to_owned(),
             kind: match session
@@ -95,6 +96,7 @@ pub fn project(
         tabs,
         active,
         preferences: ViewerPreferences {
+            accessibility,
             sidebars,
             theme: project_theme(theme),
             render_options: project_render_options(options),
@@ -153,6 +155,12 @@ fn ready_active_view(
         commit_selection,
         displayed.content_id(project_render_options(options)),
     );
+    if let Some(tab) = session.tab(tab_id)
+        && tab.tab.kind() == viewer::ViewerTabKind::Snapshot
+        && let Some(name) = &tab.recipe.name
+    {
+        view.title = name.to_string();
+    }
     view.modified_files = modified_files;
     if options.density() == super::DiffDensity::Full
         && matches!(
@@ -269,11 +277,9 @@ const fn to_tab_kind(kind: viewer::ViewerTabKind) -> ViewerTabKind {
 
 fn to_tab_state(state: &viewer::ViewerTabState) -> ViewerTabState {
     match state {
+        viewer::ViewerTabState::Pending => ViewerTabState::Pending,
         viewer::ViewerTabState::Ready => ViewerTabState::Ready,
         viewer::ViewerTabState::Broken { .. } => ViewerTabState::Broken,
-        viewer::ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
-            ViewerTabState::Pending
-        }
         viewer::ViewerTabState::Error { .. } => ViewerTabState::Error,
     }
 }
@@ -300,10 +306,8 @@ fn non_ready_active_state(
     state: &viewer::ViewerTabState,
 ) -> Option<ViewerActiveState> {
     match state {
+        viewer::ViewerTabState::Pending => Some(ViewerActiveState::Pending { tab_id }),
         viewer::ViewerTabState::Ready => None,
-        viewer::ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
-            Some(ViewerActiveState::Pending { tab_id })
-        }
         viewer::ViewerTabState::Broken { code, .. } => {
             let (code, message) = broken_failure(code);
             Some(ViewerActiveState::Broken {
@@ -323,6 +327,28 @@ fn non_ready_active_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_render_states_project_without_reason_text_classification() {
+        let tab_id = gtl_models::viewer::ViewerTabId::try_new(7).unwrap();
+
+        assert_eq!(
+            to_tab_state(&viewer::ViewerTabState::Pending),
+            ViewerTabState::Pending
+        );
+        assert_eq!(
+            non_ready_active_state(tab_id, &viewer::ViewerTabState::Pending),
+            Some(ViewerActiveState::Pending { tab_id })
+        );
+        assert_eq!(
+            to_tab_state(&viewer::ViewerTabState::Ready),
+            ViewerTabState::Ready
+        );
+        assert_eq!(
+            non_ready_active_state(tab_id, &viewer::ViewerTabState::Ready),
+            None
+        );
+    }
 
     #[test]
     fn failure_projection_does_not_expose_backend_details() {

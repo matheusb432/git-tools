@@ -96,13 +96,23 @@ bench-view-source update="":
 # Compare the release gRPC transport against the local ghz baseline. Use --update to replace it.
 [arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
 [group('performance')]
+[linux]
 bench-grpc update="":
-    cargo run --quiet -p xtask -- grpc-transport-benchmark {{ update }}
+    @just _bench-grpc 30m {{ update }}
 
 # Validate the release gRPC transport with a short workload that never touches the baseline.
 [group('performance')]
+[linux]
 bench-grpc-smoke:
-    cargo run --quiet -p xtask -- grpc-transport-smoke
+    @just _bench-grpc 2m --smoke
+
+[private]
+[linux]
+_bench-grpc timeout *args:
+    cargo build --locked --release --jobs 1 -p gtl-server --bin gtl-server
+    cargo run --locked --release --jobs 1 -p gtl-benchmarks --bin grpc-transport-driver \
+        --config 'target."cfg(all())".runner = ["systemd-run", "--user", "--scope", "--quiet", "--collect", "--property=CPUQuota=200%", "--property=MemoryMax=2147483648", "--property=MemorySwapMax=0", "--property=TasksMax=128", "/usr/bin/nice", "-n", "10", "/usr/bin/timeout", "--signal=TERM", "--kill-after=15s", "{{ timeout }}"]' \
+        -- "${@:2}"
 
 # Attribute full-language release server highlighting allocations with Valgrind Massif.
 [group('performance')]
@@ -223,8 +233,15 @@ fix *args:
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
 drift-check:
-    cargo run --quiet --manifest-path ../../shared-libs/dx-story/Cargo.toml -p dx-story-cli -- styles
-    cargo run --quiet -p xtask -- drift-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just web preview-styles
+    just web build
+    status=$(git status --short --untracked-files=all -- crates/gtl-web/assets/{tailwind,component-preview,artifact}.css)
+    if [[ -n "$status" ]]; then
+        printf '%s\n' "$status" 'Stylesheets are stale; run just web styles and just web preview-styles, then commit.' >&2
+        exit 1
+    fi
 
 # Report missing Mise-managed tools without changing the host.
 [group('setup')]
@@ -245,7 +262,8 @@ prepare-tree-sitter:
 # Configure this clone, build, and install git-tools.
 [group('setup')]
 setup:
-    cargo run --quiet -p xtask -- setup
+    just update
+    cargo run --quiet -p xtask -- ensure-install-path
 
 # Converge the Ubuntu development environment and run repository setup.
 [group('setup')]

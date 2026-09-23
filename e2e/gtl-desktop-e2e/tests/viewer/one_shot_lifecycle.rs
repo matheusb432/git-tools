@@ -340,14 +340,14 @@ async fn assert_menu_covers_active_scrollbar(driver: &WebDriver) -> Result<()> {
 
 async fn assert_commit_details_hover_popover(driver: &WebDriver) -> Result<()> {
     let commits = support::selectors::by_test_id(driver, test_ids::COMMITS_PANEL).await?;
-    ensure!(
-        commits.find_all(By::Css("button")).await?.len() == 1,
-        "the commit shelf retained a separate details trigger"
-    );
     let card = commits
         .find(By::Css("[data-gtl-hover-popover-target]"))
         .await
         .context("find the desktop commit hover target")?;
+    ensure!(
+        card.find_all(By::Css("button")).await?.len() == 1,
+        "the commit card retained a separate details trigger"
+    );
     let popover = card
         .find(By::Css("[popover][role='tooltip']"))
         .await

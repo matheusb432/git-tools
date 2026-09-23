@@ -157,12 +157,10 @@ pub const fn project_render_options(options: RenderOptions) -> ViewerRenderOptio
 pub const fn project_theme(theme: Theme) -> ViewerTheme {
     match theme {
         Theme::Dark => ViewerTheme::Dark,
-        Theme::Light => ViewerTheme::Light,
-        Theme::Hearth => ViewerTheme::Hearth,
         Theme::Mirage => ViewerTheme::Mirage,
         Theme::Glacier => ViewerTheme::Glacier,
-        Theme::Noir => ViewerTheme::Noir,
         Theme::Graphite => ViewerTheme::Graphite,
+        Theme::Carbon => ViewerTheme::Carbon,
     }
 }
 

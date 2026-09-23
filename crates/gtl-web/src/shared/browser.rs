@@ -32,6 +32,17 @@ pub(crate) fn apply_theme(theme: &'static str) {
     let _ = root.set_attribute("data-theme", theme);
 }
 
+#[cfg(feature = "desktop")]
+pub(crate) fn apply_reduced_motion(reduce_motion: bool) {
+    let Some(root) = document().and_then(|document| document.document_element()) else {
+        return;
+    };
+    let _ = root.set_attribute(
+        "data-reduce-motion",
+        if reduce_motion { "true" } else { "false" },
+    );
+}
+
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) fn focus_element(id: String) {
     let focus = async move {
@@ -101,6 +112,22 @@ pub(crate) fn hide_popover(id: &str) {
         return;
     };
     let _ = element.hide_popover();
+}
+
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub(crate) fn show_hover_popover(id: &str) {
+    let blocked = document()
+        .and_then(|document| {
+            document
+                .query_selector("[popover]:popover-open:not([role='tooltip']), dialog[open]")
+                .ok()
+                .flatten()
+        })
+        .is_some();
+    // An auto tooltip would dismiss an open editor or menu when its delay expires.
+    if !blocked {
+        show_popover(id);
+    }
 }
 
 #[cfg(any(feature = "artifact", feature = "desktop"))]

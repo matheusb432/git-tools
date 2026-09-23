@@ -9,17 +9,9 @@ use gtl_models::{
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectClientError {
     #[error(transparent)]
-    InvalidConfiguration(#[from] ProjectCatalogueConfigurationError),
-    #[error(transparent)]
     Unavailable(#[from] ProjectCatalogueUnavailableError),
     #[error(transparent)]
     InvalidData(#[from] ProjectCatalogueDataError),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ProjectCatalogueConfigurationError {
-    #[error("project catalogue home directory is unavailable")]
-    HomeDirectoryUnavailable,
 }
 
 #[derive(Debug, thiserror::Error)]

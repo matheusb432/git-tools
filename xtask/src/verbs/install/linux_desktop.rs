@@ -81,13 +81,20 @@ fn install_files(data_home: &Path, viewer: &Path, icon_src: &Path) -> Result<()>
 
     write_if_changed(&desktop_path, desktop_entry(viewer).as_bytes())?;
     write_resized_icon(icon_src, &icon_path)?;
+    let scalable = scalable_icon_path(data_home);
+    fs::create_dir_all(scalable.parent().context("scalable icon directory")?)?;
+    write_if_changed(&scalable, &fs::read(icon_src.with_extension("svg"))?)?;
     bust_icon_theme_mtime(data_home)?;
     Ok(())
 }
 
 fn remove_files(data_home: &Path) -> io::Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
-    for path in [desktop_entry_path(data_home), icon_path(data_home)] {
+    for path in [
+        desktop_entry_path(data_home),
+        icon_path(data_home),
+        scalable_icon_path(data_home),
+    ] {
         if path.exists() {
             fs::remove_file(&path)?;
             removed.push(path);
@@ -112,6 +119,12 @@ fn icon_path(data_home: &Path) -> PathBuf {
         .join("512x512")
         .join("apps")
         .join(format!("{APP_ID}.png"))
+}
+
+fn scalable_icon_path(data_home: &Path) -> PathBuf {
+    data_home
+        .join("icons/hicolor/scalable/apps")
+        .join(format!("{APP_ID}.svg"))
 }
 
 fn write_if_changed(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -195,6 +208,11 @@ mod tests {
         let icon = temp.path().join("icon.png");
         fs::create_dir_all(viewer.parent().unwrap()).unwrap();
         fs::write(&viewer, b"viewer").unwrap();
+        fs::write(
+            icon.with_extension("svg"),
+            include_bytes!("../../../../crates/gtl-desktop/icons/icon.svg"),
+        )
+        .unwrap();
         image::RgbaImage::from_pixel(1024, 1024, image::Rgba([1, 2, 3, 255]))
             .save(&icon)
             .unwrap();
@@ -217,6 +235,10 @@ mod tests {
             super::desktop_entry(&viewer)
         );
         assert!(installed_icon.exists());
+        assert_eq!(
+            fs::read(super::scalable_icon_path(&data_home)).unwrap(),
+            fs::read(icon.with_extension("svg")).unwrap()
+        );
     }
 
     #[test]
@@ -227,6 +249,11 @@ mod tests {
         let icon = temp.path().join("icon.png");
         fs::create_dir_all(viewer.parent().unwrap()).unwrap();
         fs::write(&viewer, b"viewer").unwrap();
+        fs::write(
+            icon.with_extension("svg"),
+            include_bytes!("../../../../crates/gtl-desktop/icons/icon.svg"),
+        )
+        .unwrap();
         image::RgbaImage::from_pixel(1024, 1024, image::Rgba([1, 2, 3, 255]))
             .save(&icon)
             .unwrap();
@@ -246,6 +273,11 @@ mod tests {
         let icon = temp.path().join("icon.png");
         fs::create_dir_all(viewer.parent().unwrap()).unwrap();
         fs::write(&viewer, b"viewer").unwrap();
+        fs::write(
+            icon.with_extension("svg"),
+            include_bytes!("../../../../crates/gtl-desktop/icons/icon.svg"),
+        )
+        .unwrap();
         image::RgbaImage::from_pixel(1024, 1024, image::Rgba([1, 2, 3, 255]))
             .save(&icon)
             .unwrap();
@@ -255,5 +287,6 @@ mod tests {
 
         assert!(!super::desktop_entry_path(&data_home).exists());
         assert!(!super::icon_path(&data_home).exists());
+        assert!(!super::scalable_icon_path(&data_home).exists());
     }
 }

@@ -94,25 +94,22 @@ impl fmt::Display for DiffDensity {
 /// use gtl_models::viewer::Theme;
 /// use strum::VariantArray;
 ///
-/// assert_eq!("hearth".parse(), Ok(Theme::Hearth));
+/// assert_eq!("mirage".parse(), Ok(Theme::Mirage));
 /// assert_eq!(Theme::VARIANTS.first(), Some(&Theme::Dark));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Theme {
     /// Uses the dark neutral palette.
+    #[default]
     Dark,
-    /// Uses the light neutral palette.
-    Light,
-    /// Uses the warm hearth palette.
-    Hearth,
     /// Uses the desaturated blue-grey palette with a warm amber accent.
     Mirage,
     /// Uses the deep indigo palette with an ice-blue accent.
     Glacier,
-    /// Uses the true-black palette with a magenta accent.
-    Noir,
     /// Uses the neutral grey palette with a muted steel-blue accent.
     Graphite,
+    /// Uses charcoal surfaces, vivid blue accents, and warm code literals.
+    Carbon,
 }
 
 impl Theme {
@@ -122,12 +119,10 @@ impl Theme {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Dark => "dark",
-            Self::Light => "light",
-            Self::Hearth => "hearth",
             Self::Mirage => "mirage",
             Self::Glacier => "glacier",
-            Self::Noir => "noir",
             Self::Graphite => "graphite",
+            Self::Carbon => "carbon",
         }
     }
 }
@@ -327,7 +322,7 @@ mod tests {
     fn option_tokens_round_trip_through_display() {
         assert_eq!(DiffLayout::Unified.to_string(), "unified");
         assert_eq!(DiffDensity::Compact.to_string(), "compact");
-        assert_eq!(Theme::Hearth.to_string(), "hearth");
+        assert_eq!(Theme::Mirage.to_string(), "mirage");
     }
 
     #[test]
@@ -341,6 +336,23 @@ mod tests {
                 "{token} must round-trip"
             );
         }
+    }
+
+    #[test]
+    fn removed_themes_are_not_selectable() {
+        for token in ["verdant", "noir", "light", "hearth"] {
+            assert!(token.parse::<Theme>().is_err());
+        }
+        assert_eq!(
+            Theme::VARIANTS,
+            &[
+                Theme::Dark,
+                Theme::Mirage,
+                Theme::Glacier,
+                Theme::Graphite,
+                Theme::Carbon
+            ]
+        );
     }
 
     #[test]

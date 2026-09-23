@@ -20,13 +20,15 @@ const VIEWER_BUILD_ARGS: &[&str] = &[
 pub fn run(target: BuildTarget) -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
-    for stage in build_stages(target) {
-        match stage {
-            BuildStage::ArtifactStyles => dioxus_web::build_artifact_styles_unlocked(&root)?,
-            BuildStage::DioxusWeb => dioxus_web::build_release_unlocked(&root)?,
-            BuildStage::Cli => build_cli(&root)?,
-            BuildStage::Viewer => build_viewer(&root)?,
-        }
+    match target {
+        BuildTarget::Cli => dioxus_web::build_artifact_styles_unlocked(&root)?,
+        BuildTarget::Viewer | BuildTarget::Both => dioxus_web::build_release_unlocked(&root)?,
+    }
+    if matches!(target, BuildTarget::Cli | BuildTarget::Both) {
+        build_cli(&root)?;
+    }
+    if matches!(target, BuildTarget::Viewer | BuildTarget::Both) {
+        build_viewer(&root)?;
     }
     Ok(())
 }
@@ -56,56 +58,4 @@ fn build_viewer(root: &Path) -> Result<()> {
         })?;
     }
     desktop_release::run_cargo_unlocked("viewer-release-build", VIEWER_BUILD_ARGS, root)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BuildStage {
-    ArtifactStyles,
-    DioxusWeb,
-    Cli,
-    Viewer,
-}
-
-fn build_stages(target: BuildTarget) -> &'static [BuildStage] {
-    match target {
-        BuildTarget::Cli => &[BuildStage::ArtifactStyles, BuildStage::Cli],
-        BuildTarget::Viewer => &[BuildStage::DioxusWeb, BuildStage::Viewer],
-        BuildTarget::Both => &[BuildStage::DioxusWeb, BuildStage::Cli, BuildStage::Viewer],
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn viewer_build_is_release_custom_protocol_and_cannot_soft_skip() {
-        assert_eq!(
-            VIEWER_BUILD_ARGS,
-            [
-                "build",
-                "--release",
-                "-p",
-                "gtl-desktop",
-                "--features",
-                "custom-protocol"
-            ]
-        );
-    }
-
-    #[test]
-    fn viewer_build_stages_dioxus_transaction_before_cargo() {
-        assert_eq!(
-            build_stages(BuildTarget::Cli),
-            [BuildStage::ArtifactStyles, BuildStage::Cli]
-        );
-        assert_eq!(
-            build_stages(BuildTarget::Viewer),
-            [BuildStage::DioxusWeb, BuildStage::Viewer]
-        );
-        assert_eq!(
-            build_stages(BuildTarget::Both),
-            [BuildStage::DioxusWeb, BuildStage::Cli, BuildStage::Viewer]
-        );
-    }
 }

@@ -67,7 +67,7 @@ async fn recover_settings(session: &mut support::session::TestSession) -> Result
         ))
         .first()
         .await?;
-    session.write_user_config("theme = \"light\"\n")?;
+    session.write_user_config("theme = \"glacier\"\n")?;
     session
         .driver()
         .find(By::XPath("//button[normalize-space()='Retry']"))
@@ -80,7 +80,8 @@ async fn recover_settings(session: &mut support::session::TestSession) -> Result
         .first()
         .await?;
     ensure!(
-        std::fs::read_to_string(session.data_root().join("config.toml"))? == "theme = \"light\"\n"
+        std::fs::read_to_string(session.data_root().join("config.toml"))?
+            == "theme = \"glacier\"\n"
     );
     Ok(())
 }

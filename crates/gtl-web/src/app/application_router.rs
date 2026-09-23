@@ -279,12 +279,12 @@ fn Settings() -> Element {
 #[cfg(test)]
 mod tests {
     use gtl_wire::viewer::{
-        ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabKind, ViewerTabState,
-        ViewerTheme,
+        ViewerFailureCode, ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabKind,
+        ViewerTabState, ViewerTheme,
     };
 
     use super::*;
-    use crate::test_support::{TestResult, viewer_tab_id};
+    use crate::test_support::{TestResult, viewer_active_view, viewer_tab_id};
 
     fn shell(
         active: Option<ViewerTabId>,
@@ -296,6 +296,7 @@ mod tests {
             tabs: active
                 .into_iter()
                 .map(|id| ViewerTab {
+                    custom_name: None,
                     pinned: false,
                     id,
                     label: "diff".to_owned(),
@@ -307,6 +308,7 @@ mod tests {
                 ViewerActiveState::Pending { tab_id }
             }),
             preferences: ViewerPreferences {
+                accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {
@@ -373,6 +375,26 @@ mod tests {
     }
 
     #[test]
+    fn render_state_transitions_keep_the_canonical_tab_route() -> TestResult {
+        let tab_id = viewer_tab_id(7)?;
+        let expected = Route::Diff { tab_id };
+        for active in [
+            ViewerActiveState::Pending { tab_id },
+            ViewerActiveState::Ready {
+                view: Box::new(viewer_active_view(tab_id)?),
+            },
+            ViewerActiveState::Error {
+                tab_id,
+                code: ViewerFailureCode::RenderFailed,
+                message: "safe failure".to_owned(),
+            },
+        ] {
+            assert_eq!(Route::for_active(&active), expected);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn project_links_round_trip_paths_and_resolve_their_own_open() -> TestResult {
         let path = RepositoryRoot::try_new("/tmp/project with spaces & # + %20 ?/repo".into())?;
         let tab_id = viewer_tab_id(7)?;
@@ -420,6 +442,7 @@ mod tests {
         let second = viewer_tab_id(8)?;
         let mut shell = shell(Some(second), Some(ViewerVersion::new(1)));
         shell.tabs.push(ViewerTab {
+            custom_name: None,
             pinned: false,
             id: first,
             label: "first".to_owned(),

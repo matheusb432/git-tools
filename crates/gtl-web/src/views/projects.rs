@@ -2,6 +2,7 @@ pub(crate) mod cache;
 mod card;
 mod comparison_action;
 mod comparison_editor;
+mod import_dialog;
 mod loading;
 mod presentation;
 mod status;
@@ -15,6 +16,7 @@ use lucide_dioxus::History;
 
 use self::{
     card::ProjectCard,
+    import_dialog::ImportProjectsDialog,
     loading::{ProjectsActivity, use_projects, use_projects_active},
     table::ProjectTable,
     view_mode::{ProjectsViewToggle, use_projects_presentation},
@@ -39,6 +41,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
     let mut selection =
         use_signal(|| None::<(ProjectsPageSize, ProjectsSort, ViewerProjectsCursor)>);
     let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
+    let mut importing = use_signal(|| false);
     let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
     use_context_provider(|| OpenSnapshots(open_snapshots));
     let active = use_projects_active(route_active);
@@ -117,6 +120,14 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     "Projects"
                 }
                 div { class: "projects-header-actions ml-auto gap-3",
+                    Button {
+                        id: "project-import-trigger",
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Small,
+                        state: if disabled { crate::shared::ui::ButtonState::Disabled } else { crate::shared::ui::ButtonState::Enabled },
+                        onclick: move |_| importing.set(true),
+                        "Add projects"
+                    }
                     SnapshotHistoryButton {}
                     ProjectsViewToggle { presentation }
                 }
@@ -130,6 +141,17 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     open: true,
                     onclose: move |()| snapshots.set(None),
                     crate::views::SnapshotHistory { initial_filter: filter }
+                }
+            }
+            if importing() {
+                PanelDialog {
+                    id: "project-import-dialog",
+                    trigger_id: "project-import-trigger",
+                    title: "Add projects",
+                    variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
+                    open: true,
+                    onclose: move |()| importing.set(false),
+                    ImportProjectsDialog {}
                 }
             }
             ScrollArea {

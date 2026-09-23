@@ -1,3 +1,4 @@
+pub use gtl_models::settings::ViewerScalePercent;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,6 +6,58 @@ use gtl_models::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoverProjectRepositories {
+    pub root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectDiscovery {
+    pub root: String,
+    pub repositories: Vec<DiscoveredProjectRepository>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscoveredProjectRepository {
+    pub path: RepositoryRoot,
+    pub label: ProjectName,
+    pub state: ProjectDiscoveryState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectDiscoveryState {
+    New,
+    Active(gtl_models::projects::catalogue::ProjectId),
+    Paused(gtl_models::projects::catalogue::ProjectId),
+    Unmanaged(gtl_models::projects::catalogue::ProjectId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportProjectRepositories {
+    pub selections: Vec<ProjectImportSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectImportSelection {
+    pub path: String,
+    pub project_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectImportResult {
+    pub path: String,
+    pub project_id: String,
+    pub outcome: ProjectImportOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProjectImportOutcome {
+    Created,
+    Restored,
+    Failed(String),
+}
+
 #[nutype::nutype(
     validate(greater_or_equal = 1, less_or_equal = 100),
     default = 15,

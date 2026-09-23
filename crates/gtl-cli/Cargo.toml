@@ -29,6 +29,7 @@ tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 assert_cmd.workspace = true
+gtl-local-transport.workspace = true
 gtl-server.workspace = true
 predicates.workspace = true
 strum.workspace = true

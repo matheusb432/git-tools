@@ -16,7 +16,7 @@ fn main() {
 
 fn run(command: cli::Command) -> Result<()> {
     match command {
-        cli::Command::Setup => verbs::setup::run(),
+        cli::Command::EnsureInstallPath => verbs::install_path::ensure(),
         cli::Command::Install { target } => verbs::install::run_install(target),
         cli::Command::Uninstall {
             remove_config,
@@ -33,10 +33,6 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::ViewSourceBenchmark(arguments) => {
             verbs::view_source::run_benchmark(&arguments)
         }
-        cli::Command::GrpcTransportBenchmark(arguments) => {
-            verbs::grpc_transport::run_benchmark(&arguments)
-        }
-        cli::Command::GrpcTransportSmoke => verbs::grpc_transport::run_smoke(),
         cli::Command::ServerHighlightingProfile => verbs::server_highlighting::run_profile(),
         cli::Command::DesktopScrollFixtureWorker => verbs::desktop_scroll::run_fixture_worker(),
         cli::Command::DesktopScrollBenchmarkWorker => verbs::desktop_scroll::run_benchmark_worker(),
@@ -45,12 +41,13 @@ fn run(command: cli::Command) -> Result<()> {
             arguments,
         } => verbs::desktop_e2e::run_runtime(&executable, &arguments),
         cli::Command::Build { target } => verbs::build::run(target),
+        cli::Command::MacosPackage => verbs::macos_package::run(),
+        cli::Command::MacosSmoke => verbs::macos_package::smoke(),
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
         cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
-        cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
+        cli::Command::CheckDioxusFormat => verbs::dioxus_format::check(),
         cli::Command::PreCommit => verbs::pre_commit::run(),
-        cli::Command::DriftCheck => verbs::drift::run(),
         cli::Command::CheckStructure => {
             verbs::check_structure::run(None);
             Ok(())

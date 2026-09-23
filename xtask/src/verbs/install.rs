@@ -160,22 +160,20 @@ pub(crate) fn bindir() -> Result<PathBuf> {
 /// Uses the current directory as the repository root.
 pub fn run_install(target: InstallTarget) -> Result<()> {
     let repo_path = env::current_dir()?;
+    let release_directory = super::cargo_target_directory(&repo_path)?.join("release");
     let bindir = bindir()?;
     match target {
-        InstallTarget::Cli => install_cli(&repo_path, &bindir),
-        InstallTarget::Viewer => install_viewer(&repo_path, &bindir),
+        InstallTarget::Cli => install_cli(&release_directory, &bindir),
+        InstallTarget::Viewer => install_viewer(&repo_path, &release_directory, &bindir),
         InstallTarget::Both => {
-            install_cli(&repo_path, &bindir)?;
-            install_viewer(&repo_path, &bindir)
+            install_cli(&release_directory, &bindir)?;
+            install_viewer(&repo_path, &release_directory, &bindir)
         }
     }
 }
 
-fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
-    let src = repo_path
-        .join("target")
-        .join("release")
-        .join(cli_bin_name());
+fn install_cli(release_directory: &Path, bindir: &Path) -> Result<()> {
+    let src = release_directory.join(cli_bin_name());
     if !src.is_file() {
         bail!(
             "git-tools not built at {}, run `just cli build` first",
@@ -189,10 +187,7 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
     );
     println!("gtl {act} -> {}", bindir.join(cli_alias_name()).display());
 
-    let server_src = repo_path
-        .join("target")
-        .join("release")
-        .join(server_bin_name());
+    let server_src = release_directory.join(server_bin_name());
     if !server_src.is_file() {
         bail!(
             "gtl-server not built at {}, run `just cli build` first",
@@ -218,11 +213,8 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
-    let src = repo_path
-        .join("target")
-        .join("release")
-        .join(viewer_bin_name());
+fn install_viewer(repo_path: &Path, release_directory: &Path, bindir: &Path) -> Result<()> {
+    let src = release_directory.join(viewer_bin_name());
     if src.is_file() {
         let dst = bindir.join(viewer_bin_name());
         let act = install_binary_atomic(&src, bindir)?;

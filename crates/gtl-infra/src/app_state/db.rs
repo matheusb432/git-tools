@@ -1,6 +1,6 @@
 //! Initializes one process-owned app-state connection with its pragmas and migrations.
 
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::LazyLock, time::Duration};
 
 use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
@@ -217,28 +217,98 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-const MIGRATIONS_SLICE: &[M<'_>] = &[
-    M::up(SCHEMA_V1),
-    M::up(SCHEMA_V2),
-    M::up(SCHEMA_V3),
-    M::up(SCHEMA_V4),
-    M::up(SCHEMA_V5),
-    M::up(SCHEMA_V6),
-    M::up(include_str!("../../db/migrations/0007_own_projects.sql")),
-    M::up(include_str!(
-        "../../db/migrations/0008_project_comparison_branch.sql"
-    )),
-    M::up(include_str!(
-        "../../db/migrations/0009_snapshot_projects.sql"
-    )),
-    M::up(include_str!(
-        "../../db/migrations/0010_pinned_viewer_tabs.sql"
-    )),
-    M::up(include_str!(
-        "../../db/migrations/0011_project_status_index.sql"
-    )),
-];
-const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 14]> = LazyLock::new(|| {
+    [
+        M::up(SCHEMA_V1),
+        M::up(SCHEMA_V2),
+        M::up(SCHEMA_V3),
+        M::up(SCHEMA_V4),
+        M::up(SCHEMA_V5),
+        M::up(SCHEMA_V6),
+        M::up(include_str!("../../db/migrations/0007_own_projects.sql")),
+        M::up(include_str!(
+            "../../db/migrations/0008_project_comparison_branch.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0009_snapshot_projects.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0010_pinned_viewer_tabs.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0011_project_status_index.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0012_render_attempt_status.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0013_remove_legacy_project_fields.sql"
+        )),
+        M::up_with_hook(
+            include_str!("../../db/migrations/0014_absolute_project_sources.sql"),
+            migrate_absolute_project_sources,
+        ),
+    ]
+});
+static MIGRATIONS: LazyLock<Migrations<'static>> =
+    LazyLock::new(|| Migrations::from_slice(&MIGRATIONS_SLICE[..]));
+
+fn migrate_absolute_project_sources(
+    tx: &rusqlite::Transaction<'_>,
+) -> rusqlite_migration::HookResult {
+    use rusqlite::params;
+    use rusqlite_migration::HookError;
+    let mut statement = tx.prepare(
+        "SELECT source_id, source_value FROM project_sources WHERE source_kind = 'directory'",
+    )?;
+    let sources = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    let home = if sources.iter().any(|(_, source)| source.starts_with("~/")) {
+        Some(
+            directories::BaseDirs::new()
+                .ok_or_else(|| HookError::Hook("home directory unavailable".into()))?
+                .home_dir()
+                .to_path_buf(),
+        )
+    } else {
+        None
+    };
+    for (source_id, source_value) in sources {
+        let Some(relative) = source_value.strip_prefix("~/") else {
+            gtl_models::projects::catalogue::ProjectDirectorySource::try_new(source_value)
+                .map_err(|error| HookError::Hook(error.to_string()))?;
+            continue;
+        };
+        if relative.is_empty()
+            || relative.contains(['~', '\\', ':', '\0'])
+            || relative
+                .split('/')
+                .any(|part| matches!(part, "" | "." | ".."))
+        {
+            return Err(HookError::Hook(format!(
+                "invalid legacy project source: {source_value}"
+            )));
+        }
+        let absolute = home
+            .as_ref()
+            .ok_or_else(|| HookError::Hook("home directory unavailable".into()))?
+            .join(relative);
+        let absolute = absolute
+            .to_str()
+            .ok_or_else(|| HookError::Hook("home path is not UTF-8".into()))?;
+        gtl_models::projects::catalogue::ProjectDirectorySource::try_new(absolute.to_owned())
+            .map_err(|error| HookError::Hook(error.to_string()))?;
+        tx.execute(
+            "UPDATE project_sources SET source_value = ?1 WHERE source_id = ?2",
+            params![absolute, source_id],
+        )?;
+    }
+    Ok(())
+}
 
 /// Init-sequence retry ceiling: bounded well under the 5s `busy_timeout` so a
 /// genuinely failing pragma/migration still surfaces promptly.
@@ -365,7 +435,8 @@ mod tests {
             .to_latest(&mut connection)
             .unwrap();
         connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (1, 'directory', '~/tools/example');
-            INSERT INTO projects (id, source_id, title, mux_session_name, affiliation) VALUES ('PRJ', 1, 'Example', 'example', 'personal');
+            INSERT INTO projects (id, source_id, title, mux_session_name, affiliation)
+            VALUES ('PRJ', 1, 'Example', 'example', 'personal');
             INSERT INTO project_groups (project_id, group_name) VALUES ('PRJ', 'tools');").unwrap();
         MIGRATIONS.to_latest(&mut connection).unwrap();
         let row: (String, String) = connection
@@ -386,8 +457,8 @@ mod tests {
                 .unwrap(),
             "tools"
         );
-        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (2, 'directory', '~/tools/new');
-            INSERT INTO projects (id, source_id, title, mux_session_name, affiliation) VALUES ('NEW', 2, 'New', 'new', 'personal');").unwrap();
+        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (2, 'directory', '/tools/new');
+            INSERT INTO projects (id, source_id, title) VALUES ('NEW', 2, 'New');").unwrap();
         assert_eq!(
             connection
                 .query_row(
@@ -397,6 +468,315 @@ mod tests {
                 )
                 .unwrap(),
             "main"
+        );
+    }
+
+    fn seed_v12_project_catalogue(connection: &Connection) {
+        for index in 0_u8..35 {
+            let id = format!(
+                "P{}{}",
+                char::from(b'A' + index / 26),
+                char::from(b'A' + index % 26)
+            );
+            let source_id = i64::from(index) + 1;
+            let source = format!("~/projects/project-{index}");
+            let title = format!("Project {index}");
+            connection
+                .execute(
+                    "INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (?1, 'directory', ?2)",
+                    rusqlite::params![source_id, source],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO projects (id, source_id, title, mux_session_name, affiliation, git_remote, color, export_include_in_all, created_at, paused_at, unmanaged_at, comparison_branch) VALUES (?1, ?2, ?3, ?4, 'personal', 'git@example.test:project.git', '#123abc', 1, '2026-01-01T00:00:00.000Z', NULL, NULL, 'main')",
+                    rusqlite::params![id, source_id, title, format!("project-{index}")],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO project_groups (project_id, group_name) VALUES ('PAA', 'tools')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO project_status_index (project_id, source_id, comparison_branch, commits_ahead, tracked_changes, untracked_changes, checked_at) VALUES ('PAA', 1, 'main', 2, 1, 0, 1780000000)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO render_sources (id, kind, value, created_at)
+             VALUES (1, 'directory', '/repos/project-0', '2026-01-01T00:00:00Z');
+             INSERT INTO recent_renders
+               (id, source_id, operation_id, target_id, title, repo_name,
+                range_label, rendered_at, project_id)
+             VALUES (1, 1, 1, 1, 'Snapshot', 'project-0', 'main..HEAD',
+                     '2026-01-01T00:00:00Z', 'PAA');",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn migration_v13_removes_legacy_project_fields_and_preserves_v12_projects() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..12])
+            .to_latest(&mut connection)
+            .unwrap();
+
+        seed_v12_project_catalogue(&connection);
+
+        Migrations::from_slice(&MIGRATIONS_SLICE[..13])
+            .to_latest(&mut connection)
+            .unwrap();
+
+        let project_count: i64 = connection
+            .query_row("SELECT count(*) FROM projects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(project_count, 35);
+        let first_source: (i64, String) = connection
+            .query_row(
+                "SELECT source_id, source_value FROM project_sources WHERE source_id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(first_source, (1, "~/projects/project-0".into()));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT title, git_remote, color, export_include_in_all, created_at, comparison_branch FROM projects WHERE id = 'PAA'",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<i64>>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    }
+                )
+                .unwrap(),
+            (
+                "Project 0".to_owned(),
+                Some("git@example.test:project.git".to_owned()),
+                Some("#123abc".to_owned()),
+                Some(1),
+                "2026-01-01T00:00:00.000Z".to_owned(),
+                "main".to_owned()
+            )
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT group_name FROM project_groups WHERE project_id = 'PAA'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "tools"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_id, commits_ahead FROM project_status_index WHERE project_id = 'PAA'",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                )
+                .unwrap(),
+            (1, 2)
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT project_id FROM recent_renders WHERE id = 1",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "PAA"
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        let project_columns = connection
+            .prepare("PRAGMA table_info(projects)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(
+            !project_columns
+                .iter()
+                .any(|column| { matches!(column.as_str(), "mux_session_name" | "affiliation") })
+        );
+    }
+
+    #[test]
+    fn migration_v14_expands_sources_in_place_and_preserves_project_data() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        let other_directory = tempfile::tempdir().unwrap();
+        let other_path = other_directory.path().join("other");
+        let other_source = other_path.to_str().unwrap().to_owned();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..13])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO project_sources (source_id, source_kind, source_value) VALUES
+               (7, 'directory', '~/tools/git-tools'),
+               (8, 'directory', '/placeholder');
+             INSERT INTO projects (id, source_id, title, paused_at, comparison_branch)
+               VALUES ('GTL', 7, 'Git Tools', '2026-01-01T00:00:00.000Z', 'develop'),
+                      ('OTH', 8, 'Other', NULL, 'main');
+             INSERT INTO project_groups (project_id, group_name) VALUES ('GTL', 'tools');
+             INSERT INTO project_status_index
+               (project_id, source_id, comparison_branch, commits_ahead, checked_at)
+               VALUES ('GTL', 7, 'develop', 3, 1780000000);
+             INSERT INTO render_sources (id, kind, value, created_at)
+               VALUES (1, 'directory', '/repos/gt', '2026-01-01T00:00:00Z');
+             INSERT INTO recent_renders
+               (id, source_id, operation_id, target_id, title, repo_name,
+                range_label, rendered_at, project_id)
+               VALUES (1, 1, 1, 1, 'Snapshot', 'gt', 'main..HEAD',
+                       '2026-01-01T00:00:00Z', 'GTL');",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE project_sources SET source_value = ?1 WHERE source_id = 8",
+                [&other_source],
+            )
+            .unwrap();
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        let home = directories::BaseDirs::new().unwrap();
+        let expected = home
+            .home_dir()
+            .join("tools/git-tools")
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let sources = connection
+            .prepare("SELECT source_id, source_value FROM project_sources ORDER BY source_id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(sources, vec![(7, expected), (8, other_source)]);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_id, paused_at, comparison_branch FROM projects WHERE id = 'GTL'",
+                    [],
+                    |row| Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?
+                    ))
+                )
+                .unwrap(),
+            (7, "2026-01-01T00:00:00.000Z".into(), "develop".into())
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT project_id FROM recent_renders WHERE id = 1",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "GTL"
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn fresh_schema_v14_accepts_absolute_sources_outside_home() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("new").to_str().unwrap().to_owned();
+        let connection = open_app_db(directory.path()).unwrap();
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 14);
+        connection
+            .execute(
+                "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
+                [&source],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO projects (id, source_id, title) VALUES ('NEW', last_insert_rowid(), 'New')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_value FROM active_projects WHERE id = 'NEW'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            source
+        );
+    }
+
+    #[test]
+    fn migration_v14_rejects_relative_sources_without_partial_updates() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..13])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO project_sources (source_id, source_kind, source_value) VALUES
+               (1, 'directory', '~/tools/git-tools'),
+               (2, 'directory', 'relative/repository');",
+            )
+            .unwrap();
+        assert!(MIGRATIONS.to_latest(&mut connection).is_err());
+        let version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 13);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT source_value FROM project_sources WHERE source_id = 1",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "~/tools/git-tools"
         );
     }
 
@@ -410,7 +790,7 @@ mod tests {
             .unwrap();
         connection
             .execute(
-                "INSERT INTO settings (key, value) VALUES ('theme', 'light')",
+                "INSERT INTO settings (key, value) VALUES ('theme', 'glacier')",
                 [],
             )
             .unwrap();
@@ -446,7 +826,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 11);
+        assert_eq!(user_version, 14);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -681,7 +1061,74 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 11);
+        assert_eq!(user_version, 14);
+    }
+
+    #[test]
+    fn migration_v12_defaults_existing_renders_and_allows_concurrent_attempts() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..11])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO render_sources (id, kind, value, created_at)
+                 VALUES (1, 'directory', '/repos/gt', '2026-09-19T00:00:00Z');
+                 INSERT INTO recent_renders
+                   (id, source_id, operation_id, target_id, pinned_base, pinned_head,
+                    title, repo_name, range_label, rendered_at)
+                 VALUES
+                   (1, 1, 1, 1, 'base', 'head', 'existing', 'gt', 'base..head',
+                    '2026-09-19T00:00:00Z');",
+            )
+            .unwrap();
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+
+        let status: String = connection
+            .query_row(
+                "SELECT render_status FROM recent_renders WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "success");
+        connection
+            .execute_batch(
+                "INSERT INTO recent_renders
+                   (id, source_id, operation_id, target_id, pinned_base, pinned_head,
+                    title, repo_name, range_label, rendered_at, render_status)
+                 VALUES
+                   (2, 1, 1, 1, 'base', 'head', 'pending one', 'gt', 'base..head',
+                    '2026-09-19T00:00:01Z', 'pending'),
+                   (3, 1, 1, 1, 'base', 'head', 'pending two', 'gt', 'base..head',
+                    '2026-09-19T00:00:02Z', 'pending');
+                 UPDATE recent_renders SET render_status = 'error' WHERE id = 2;
+                 INSERT INTO render_errors (recent_render_id, error_code, error_detail)
+                 VALUES
+                   (2, 'render_failed', 'top-level failure'),
+                   (2, 'render_failed', 'source detail');",
+            )
+            .unwrap();
+        assert!(
+            connection
+                .execute(
+                    "UPDATE recent_renders SET render_status = 'success' WHERE id = 3",
+                    [],
+                )
+                .is_err()
+        );
+        let violations = connection
+            .prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query_map([], |_| Ok(()))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(violations.is_empty());
     }
 
     /// Two processes can open a fresh database concurrently; both

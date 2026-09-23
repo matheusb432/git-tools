@@ -1,12 +1,14 @@
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
-    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
-    SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabPinned, StreamViewerRows,
-    ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload,
-    ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, RenameViewerSnapshot,
+    SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabPinned,
+    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
+    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
+    ViewerUserSettings,
     projects::{
-        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, UpdateViewerProject,
-        ViewerProjectPage,
+        DiscoverProjectRepositories, ImportProjectRepositories, ListViewerProjects,
+        OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery, ProjectImportResult,
+        UpdateViewerProject, ViewerProjectPage,
     },
 };
 
@@ -53,6 +55,18 @@ viewer_request!(
     ListViewerProjects,
     ViewerProjectPage,
     list_projects
+);
+viewer_request!(
+    discover_project_repositories,
+    DiscoverProjectRepositories,
+    ProjectDiscovery,
+    discover_project_repositories
+);
+viewer_request!(
+    import_project_repositories,
+    ImportProjectRepositories,
+    Vec<ProjectImportResult>,
+    import_project_repositories
 );
 
 viewer_request!(
@@ -194,3 +208,31 @@ viewer_request!(
     (),
     update_diff_exclusions
 );
+
+viewer_request!(
+    create_push,
+    gtl_wire::viewer::push::CreateViewerPush,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    create_push
+);
+viewer_request!(
+    get_push,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    gtl_wire::viewer::push::ViewerPushStatus,
+    get_push
+);
+viewer_request!(
+    start_push,
+    gtl_wire::viewer::push::ViewerPushRequest,
+    (),
+    start_push
+);
+
+viewer_request!(
+    get_push_availability,
+    gtl_wire::viewer::ViewerViewIdentity,
+    gtl_wire::viewer::push::ViewerPushAvailability,
+    get_push_availability
+);
+
+viewer_request!(rename_snapshot, RenameViewerSnapshot, (), rename_snapshot);

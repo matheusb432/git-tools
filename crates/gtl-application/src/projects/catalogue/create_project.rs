@@ -2,6 +2,7 @@ use gtl_models::projects::catalogue::{PROJECTS_MAX, ProjectId, ProjectMetadata};
 use rusqlite::{Connection, TransactionBehavior, params};
 
 use super::ProjectCatalogueError;
+use crate::history::associate_render_projects;
 
 pub struct CreateProject {
     pub id: ProjectId,
@@ -27,18 +28,32 @@ pub fn execute(
         )
         .map_err(create_error)?;
     let source_id = transaction.last_insert_rowid();
-    transaction.execute(
-        "INSERT INTO projects (id, source_id, title, git_remote, mux_session_name, affiliation, color, export_include_in_all)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![request.id.as_ref(), source_id, request.metadata.title.as_ref(), request.metadata.git_remote.as_ref().map(AsRef::<str>::as_ref),
-            request.metadata.mux_session_name.as_ref(), request.metadata.affiliation.as_str(), request.metadata.color.as_ref().map(AsRef::<str>::as_ref), request.include_in_full_export],
-    ).map_err(create_error)?;
+    transaction
+        .execute(
+            "INSERT INTO projects (id, source_id, title, git_remote, color, export_include_in_all)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                request.id.as_ref(),
+                source_id,
+                request.metadata.title.as_ref(),
+                request
+                    .metadata
+                    .git_remote
+                    .as_ref()
+                    .map(AsRef::<str>::as_ref),
+                request.metadata.color.as_ref().map(AsRef::<str>::as_ref),
+                request.include_in_full_export
+            ],
+        )
+        .map_err(create_error)?;
     for group in request.metadata.groups.as_slice() {
         transaction.execute(
             "INSERT INTO project_groups (project_id, group_name) VALUES (?1, ?2)",
             params![request.id.as_ref(), group.as_ref()],
         )?;
     }
+    associate_render_projects::execute((), &transaction)
+        .map_err(ProjectCatalogueError::InvalidData)?;
     transaction.commit()?;
     Ok(request.id.clone())
 }

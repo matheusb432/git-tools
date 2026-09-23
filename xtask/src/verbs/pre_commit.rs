@@ -42,7 +42,7 @@ pub(crate) fn run() -> Result<()> {
         );
     }
     if !checks.dioxus.is_empty() {
-        steps.push(crate::verbs::format::dioxus_check_step(
+        steps.push(crate::verbs::dioxus_format::check_step(
             snapshot.directory(),
         ));
     }

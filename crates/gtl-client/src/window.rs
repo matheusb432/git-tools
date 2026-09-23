@@ -3,6 +3,20 @@ use gtl_wire::window::{WindowAction, WindowState};
 use crate::ViewerClientError;
 
 #[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub async fn set_scale(
+    scale: gtl_wire::window::ViewerScalePercent,
+) -> Result<(), ViewerClientError> {
+    crate::viewer::tauri::invoke_with_request("desktop_window_scale", scale).await
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
+pub fn set_scale(
+    _scale: gtl_wire::window::ViewerScalePercent,
+) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
+    std::future::ready(Err(ViewerClientError::Unavailable))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
 pub async fn state() -> Result<WindowState, ViewerClientError> {
     crate::viewer::tauri::invoke_without_arguments("desktop_window_state").await
 }

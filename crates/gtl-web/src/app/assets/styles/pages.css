@@ -25,14 +25,12 @@
   .settings-page-header { @apply border-b border-line; }
   .settings-page-title { @apply text-ink focus:outline-none; }
   .settings-page-description { @apply max-w-2xl text-ink-2; }
-  .settings-card { @apply overflow-hidden rounded-panel border border-line bg-surface; }
-  .settings-card-header { @apply border-b border-line bg-surface-2; }
   .settings-rows { @apply divide-y divide-line; }
   .settings-row { @apply grid sm:grid-cols-[14rem_minmax(0,1fr)]; }
   .settings-row-value { @apply break-words text-ink; }
   .settings-form-grid { @apply grid sm:grid-cols-2 xl:grid-cols-4; }
   .settings-form-field { @apply flex flex-col; }
-  .settings-form-footer { @apply flex items-center justify-between border-t border-line bg-surface-2; }
+  .settings-form-footer { @apply flex items-center justify-between; }
 
   .settings-recovery-path { @apply max-w-3xl break-all text-ink; }
   .settings-recovery-diagnostic { @apply max-w-3xl whitespace-pre-wrap break-words text-left text-ink-2; }
@@ -45,7 +43,8 @@
 }
 
 @layer components {
+  .viewer-tab-context-action { @apply min-h-7 w-full gap-6 px-2 py-1 text-xs; }
   .viewer-tab-context-menu {
-    @apply fixed inset-auto m-0 w-48 rounded-lg border border-line-2 bg-surface p-1.5 text-ink shadow-lg;
+    @apply fixed inset-auto m-0 w-52 rounded-sm border border-line-2 bg-surface p-1 text-ink shadow-lg;
   }
 }

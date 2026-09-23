@@ -284,15 +284,8 @@ impl Drop for TestSession {
 
 async fn start_server(data_root: &Path) -> Result<GroupChild> {
     let server_binary = required_binary("GTL_E2E_SERVER_BINARY", "gtl-server")?;
-    let endpoint = data_root.join("server").join("endpoint.json");
-    match fs::remove_file(&endpoint) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("remove stale server endpoint {}", endpoint.display()));
-        }
-    }
+    let endpoint = gtl_local_transport::LocalEndpoint::from_root(data_root)
+        .context("resolve desktop E2E server endpoint")?;
     let mut command = Command::new(&server_binary);
     command
         .env("GIT_TOOLS_DATA_DIR", data_root)
@@ -314,17 +307,14 @@ async fn start_server(data_root: &Path) -> Result<GroupChild> {
     })?;
     let deadline = Instant::now() + SERVER_READY_TIMEOUT;
     loop {
-        if endpoint.is_file() {
+        if gtl_client::GtlClient::connect(&endpoint).await.is_ok() {
             return Ok(child);
         }
         if let Some(status) = child.try_wait().context("inspect gtl-server launch")? {
             bail!("gtl-server exited before endpoint publication ({status})");
         }
         if Instant::now() >= deadline {
-            let error = anyhow!(
-                "gtl-server did not publish {} within {SERVER_READY_TIMEOUT:?}",
-                endpoint.display()
-            );
+            let error = anyhow!("gtl-server did not become ready within {SERVER_READY_TIMEOUT:?}");
             return Err(cleanup_start_failure("gtl-server", &mut child, error).await);
         }
         sleep(CONNECTION_RETRY_INTERVAL).await;

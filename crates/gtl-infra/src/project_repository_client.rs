@@ -1,10 +1,7 @@
-use std::path::PathBuf;
-
-use directories::BaseDirs;
 use gtl_application::{
     ports::{
-        ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
-        ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
+        ProjectCatalogueDataError, ProjectCatalogueUnavailableError, ProjectClient,
+        ProjectClientError,
     },
     projects::catalogue::{ProjectCatalogueError, list_active_projects},
 };
@@ -15,16 +12,12 @@ use crate::app_state::SqliteAppState;
 #[derive(Clone, Debug)]
 pub struct ProjectRepositoryClient {
     database: SqliteAppState,
-    home: Option<PathBuf>,
 }
 
 impl ProjectRepositoryClient {
     #[must_use]
     pub fn new(database: SqliteAppState) -> Self {
-        Self {
-            database,
-            home: BaseDirs::new().map(|directories| directories.home_dir().to_path_buf()),
-        }
+        Self { database }
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
@@ -35,10 +28,6 @@ impl ProjectRepositoryClient {
     }
 
     fn list_repositories(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
-        let home = self
-            .home
-            .as_deref()
-            .ok_or(ProjectCatalogueConfigurationError::HomeDirectoryUnavailable)?;
         let connection = self
             .database
             .connection_lock()
@@ -60,7 +49,7 @@ impl ProjectRepositoryClient {
                 let path = project
                     .metadata
                     .source
-                    .resolve(home)
+                    .resolve()
                     .map_err(ProjectCatalogueDataError::from)?;
                 Ok(ProjectRepository {
                     name,

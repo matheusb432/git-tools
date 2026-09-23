@@ -24,6 +24,16 @@ install:
 [group('desktop')]
 update: build install
 
+# Build a native macOS .pkg containing the viewer, CLI, and login service.
+[group('desktop')]
+package-macos:
+    cargo run --quiet -p xtask -- macos-package
+
+# Check the installed macOS package, restart its login service, and capture the viewer.
+[group('desktop')]
+smoke-macos:
+    cargo run --quiet -p xtask -- macos-smoke
+
 # Render the viewer icon assets (icon.png + multi-res icon.ico) via the Rust xtask generator.
 [group('desktop')]
 gen-icon:

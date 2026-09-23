@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeSet,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
 
+use anyhow::Context as _;
 use gix::bstr::ByteSlice as _;
 
 use super::PLAN_BYTES_MAX;
@@ -75,14 +77,25 @@ impl Plan {
 }
 
 pub(super) fn plan(path: &Path, cancellation: &AtomicBool) -> anyhow::Result<Plan> {
+    let path = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .context("missing watch root has no parent")?
+                .canonicalize()?;
+            parent.join(path.file_name().context("missing watch root has no name")?)
+        }
+        Err(error) => return Err(error.into()),
+    };
     let mut plan = Plan::default();
     let mut visited = 0;
     if path.join(".git").exists() {
-        collect_repository(&gix::open(path)?, &mut plan, cancellation, &mut visited, 0)?;
+        collect_repository(&gix::open(&path)?, &mut plan, cancellation, &mut visited, 0)?;
     } else {
-        plan.file(path.to_path_buf())?;
+        plan.file(path.clone())?;
         if path.is_dir() {
-            plan.directory(path.to_path_buf())?;
+            plan.directory(path.clone())?;
             plan.files.insert(path.join(".git"));
         }
     }
@@ -191,7 +204,8 @@ fn collect_metadata(
     visited: &mut usize,
 ) -> anyhow::Result<()> {
     for metadata in [repository.git_dir(), repository.common_dir()] {
-        plan.directory(metadata.to_path_buf())?;
+        let metadata = metadata.canonicalize()?;
+        plan.directory(metadata.clone())?;
         for name in [
             "HEAD",
             "index",
@@ -251,4 +265,74 @@ fn collect_refs(
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symlinked_roots_accept_canonical_events_for_present_and_missing_repositories() {
+        let temporary = tempfile::tempdir().unwrap();
+        let actual = temporary.path().join("actual");
+        std::fs::create_dir(&actual).unwrap();
+        let alias = temporary.path().join("alias");
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let actual = actual.canonicalize().unwrap();
+
+        let existing = plan(&alias, &AtomicBool::new(false)).unwrap();
+        assert!(existing.accepts(&actual.join(".git")));
+        assert!(existing.directories.contains(&actual));
+
+        let missing = plan(&alias.join("new-project"), &AtomicBool::new(false)).unwrap();
+        assert!(missing.accepts(&actual.join("new-project")));
+        assert!(missing.directories.contains(&actual));
+    }
+
+    #[test]
+    fn linked_worktrees_accept_canonical_events_for_aliased_git_metadata() {
+        let temporary = tempfile::tempdir().unwrap();
+        let actual = temporary.path().join("actual");
+        std::fs::create_dir(&actual).unwrap();
+        let actual = actual.canonicalize().unwrap();
+        let alias = temporary.path().join("alias");
+        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        let linked = temporary.path().join("linked");
+        for args in [
+            vec!["init", "-q", "-b", "main"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "initial",
+            ],
+            vec![
+                "worktree",
+                "add",
+                "-qb",
+                "feature",
+                linked.to_str().unwrap(),
+            ],
+        ] {
+            let output = std::process::Command::new("git")
+                .current_dir(&actual)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+        }
+        std::fs::write(
+            linked.join(".git"),
+            format!("gitdir: {}/.git/worktrees/linked\n", alias.display()),
+        )
+        .unwrap();
+
+        let watch = plan(&linked, &AtomicBool::new(false)).unwrap();
+        assert!(watch.accepts(&actual.join(".git/worktrees/linked/index")));
+        assert!(watch.accepts(&actual.join(".git/refs/heads/another")));
+    }
 }

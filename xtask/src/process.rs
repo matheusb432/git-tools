@@ -89,11 +89,10 @@ pub(crate) fn capture_bytes_with_stdin(
     Ok(output.stdout)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn development_child_remains_in_the_callers_process_group() {
         const CHILD_MARKER: &str = "XTASK_PROC_GROUP_CHILD";
@@ -121,7 +120,6 @@ mod tests {
         assert_eq!(child_group.unwrap(), parent_group);
     }
 
-    #[cfg(target_os = "linux")]
     fn linux_process_group(process_id: u32) -> std::io::Result<u32> {
         let stat = std::fs::read_to_string(format!("/proc/{process_id}/stat"))?;
         let (_, fields) = stat.rsplit_once(") ").ok_or_else(|| {

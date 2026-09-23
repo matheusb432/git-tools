@@ -5,6 +5,8 @@ use super::ViewerTabId;
 /// Describes whether a viewer tab can currently provide rendered diff content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewerTabState {
+    /// Indicates that the tab's view is still being computed.
+    Pending,
     /// Indicates that the tab has a corresponding rendered view.
     Ready,
     /// Indicates that a known protocol or persistence failure prevents rendering.

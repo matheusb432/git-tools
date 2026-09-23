@@ -22,7 +22,10 @@ use lucide_dioxus::Settings;
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem},
+    shared::ui::{
+        NavigationBar, ScrollArea, ScrollAreaVariant, SectionedSurface, SectionedSurfaceBody,
+        SectionedSurfaceHeader, ViewerTabItem,
+    },
     views::{
         diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
         viewer_menu::ViewerMenu,
@@ -263,6 +266,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     };
     let tabs = vec![
         ViewerTab {
+            custom_name: None,
             pinned: false,
             id: tab_id,
             label: "git-tools".to_owned(),
@@ -270,6 +274,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             state: ViewerTabState::Ready,
         },
         ViewerTab {
+            custom_name: None,
             pinned: false,
             id: ViewerTabId::try_new(2)?,
             label: "config-cleanup".to_owned(),
@@ -520,6 +525,7 @@ fn SettingsFormPreview() -> Element {
         },
         true,
         true,
+        gtl_models::settings::ViewerAccessibility::default(),
     );
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
@@ -550,17 +556,19 @@ fn SettingsFormPreview() -> Element {
 #[component]
 fn SettingsResolved() -> Element {
     rsx! {
-        section { class: "settings-card", aria_label: "Resolved viewer settings",
-            header { class: "settings-card-header px-4 py-3",
+        SectionedSurface { aria_label: "Resolved viewer settings",
+            SectionedSurfaceHeader { class: "px-4 py-3",
                 h2 { class: "font-semibold text-ink", "Resolved configuration" }
                 p { class: "mt-0.5 text-xs text-ink-3", "Current sources and effective values." }
             }
-            dl { class: "divide-y divide-line",
-                SettingsRow {
-                    term: "Configuration file",
-                    value: "~/.config/git-tools/config.toml",
+            SectionedSurfaceBody {
+                dl { class: "divide-y divide-line",
+                    SettingsRow {
+                        term: "Configuration file",
+                        value: "~/.config/git-tools/config.toml",
+                    }
+                    SettingsRow { term: "Effective theme", value: "Mirage" }
                 }
-                SettingsRow { term: "Effective theme", value: "Mirage" }
             }
         }
     }
@@ -569,14 +577,16 @@ fn SettingsResolved() -> Element {
 #[component]
 fn SettingsProjects() -> Element {
     rsx! {
-        section { class: "settings-card", aria_label: "Project exclusions",
-            header { class: "settings-card-header px-4 py-3",
+        SectionedSurface { aria_label: "Project exclusions",
+            SectionedSurfaceHeader { class: "px-4 py-3",
                 h2 { class: "font-semibold text-ink", "Project exclusions" }
                 p { class: "mt-0.5 text-xs text-ink-3", "Repository-specific extension filters." }
             }
-            dl { class: "divide-y divide-line",
-                SettingsRow { term: "git-tools", value: "*.lock, *.snap" }
-                SettingsRow { term: "sample_project", value: "*.wasm" }
+            SectionedSurfaceBody {
+                dl { class: "divide-y divide-line",
+                    SettingsRow { term: "git-tools", value: "*.lock, *.snap" }
+                    SettingsRow { term: "sample_project", value: "*.wasm" }
+                }
             }
         }
     }

@@ -6,6 +6,166 @@ use super::{ServerHarness, TestResult};
 
 #[tokio::test]
 #[serial(server_tracing)]
+async fn viewer_discovers_and_imports_repositories_with_independent_row_results() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("projects");
+    for name in ["active", "paused", "unmanaged", "new", "bad"] {
+        std::fs::create_dir_all(root.join(name).join(".git"))?;
+    }
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut projects = ProjectServiceClient::new(server.native_channel());
+    for (id, name) in [("ACT", "active"), ("PAU", "paused"), ("UNM", "unmanaged")] {
+        let mut request = creation(id, name);
+        request.project.as_mut().unwrap().source = Some(v1::ProjectSource {
+            source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
+                path: root.join(name).to_string_lossy().into_owned(),
+            })),
+        });
+        projects.create_project(request).await?;
+    }
+    projects
+        .pause_project(v1::PauseProjectRequest {
+            project_id: "PAU".into(),
+            mode: v1::ProjectOperationMode::Apply as i32,
+        })
+        .await?;
+    projects
+        .unmanage_projects(v1::UnmanageProjectsRequest {
+            project_ids: vec!["UNM".into()],
+            mode: v1::ProjectOperationMode::Apply as i32,
+        })
+        .await?;
+
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
+    let discover = || v1::DiscoverProjectRepositoriesRequest {
+        root: root.to_string_lossy().into_owned(),
+    };
+    let found = viewer
+        .discover_project_repositories(discover())
+        .await?
+        .into_inner();
+    assert_eq!(found.root, root.canonicalize()?.to_string_lossy());
+    assert_eq!(found.repositories.len(), 5);
+    for (name, state, id) in [
+        ("active", v1::ProjectDiscoveryState::Active, Some("ACT")),
+        ("paused", v1::ProjectDiscoveryState::Paused, Some("PAU")),
+        (
+            "unmanaged",
+            v1::ProjectDiscoveryState::Unmanaged,
+            Some("UNM"),
+        ),
+        ("new", v1::ProjectDiscoveryState::New, None),
+    ] {
+        let repository = found
+            .repositories
+            .iter()
+            .find(|repository| repository.label == name)
+            .ok_or("missing discovered repository")?;
+        assert_eq!(repository.state, state as i32);
+        assert_eq!(repository.existing_project_id.as_deref(), id);
+    }
+    let database = SqliteAppState::open(directory.path())?;
+    {
+        let connection = database.connection_lock()?;
+        connection.execute(
+            "INSERT INTO render_sources (id, kind, value, created_at) VALUES (1, 'directory', ?1, '2026-01-01T00:00:00Z')",
+            [root.join("new").to_string_lossy().into_owned()],
+        )?;
+        connection.execute_batch(
+            "INSERT INTO recent_renders
+             (id, source_id, operation_id, target_id, title, repo_name, range_label, rendered_at)
+             VALUES (1, 1, 1, 1, 'Snapshot', 'new', 'main..HEAD', '2026-01-01T00:00:00Z')",
+        )?;
+    }
+    let results = viewer
+        .import_project_repositories(v1::ImportProjectRepositoriesRequest {
+            selections: vec![
+                v1::ProjectImportSelection {
+                    path: root.join("new").to_string_lossy().into_owned(),
+                    project_id: "NEW".into(),
+                    title: "New project".into(),
+                },
+                v1::ProjectImportSelection {
+                    path: root.join("unmanaged").to_string_lossy().into_owned(),
+                    project_id: "UNM".into(),
+                    title: String::new(),
+                },
+                v1::ProjectImportSelection {
+                    path: root.join("bad").to_string_lossy().into_owned(),
+                    project_id: "bad".into(),
+                    title: "Bad project".into(),
+                },
+            ],
+        })
+        .await?
+        .into_inner()
+        .results;
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].outcome, v1::ProjectImportOutcome::Created as i32);
+    assert_eq!(
+        results[1].outcome,
+        v1::ProjectImportOutcome::Restored as i32
+    );
+    assert_eq!(results[2].outcome, v1::ProjectImportOutcome::Failed as i32);
+    assert!(
+        results[2]
+            .error
+            .as_deref()
+            .is_some_and(|error| !error.is_empty())
+    );
+    let created = projects
+        .get_project(v1::GetProjectRequest {
+            project_id: "NEW".into(),
+        })
+        .await?
+        .into_inner();
+    assert_eq!(created.git_remote, None);
+    assert_eq!(created.title, "New project");
+    assert_eq!(
+        database.connection_lock()?.query_row(
+            "SELECT project_id FROM recent_renders WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )?,
+        Some("NEW".to_owned())
+    );
+    assert_eq!(
+        created.source.unwrap().source.unwrap(),
+        v1::project_source::Source::Directory(v1::DirectorySource {
+            path: root.join("new").to_string_lossy().into_owned(),
+        })
+    );
+    projects
+        .get_project(v1::GetProjectRequest {
+            project_id: "UNM".into(),
+        })
+        .await?;
+    assert_eq!(
+        projects
+            .get_project(v1::GetProjectRequest {
+                project_id: "BAD".into(),
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        viewer
+            .discover_project_repositories(v1::DiscoverProjectRepositoriesRequest {
+                root: "relative/folder".into(),
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::InvalidArgument
+    );
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
 async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_disconnect()
 -> TestResult {
     use std::{process::Command, time::Duration};
@@ -59,19 +219,15 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
     std::fs::create_dir_all(repo.path().join("target/debug/deps"))?;
     let data = tempfile::tempdir()?;
     let server = ServerHarness::start(data.path(), None).await?;
-    let mut projects =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut projects = ProjectServiceClient::new(server.native_channel());
     let mut create = creation("TST", "Status watch");
     create.project.as_mut().unwrap().source = Some(v1::ProjectSource {
         source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
-            path: format!("~/{}", repo.path().strip_prefix(home.home_dir())?.display()),
+            path: repo.path().to_string_lossy().into_owned(),
         })),
     });
     projects.create_project(create).await?;
-    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     for ids in [
         vec!["TST".into(), "TST".into()],
         vec!["bad".into()],
@@ -159,12 +315,14 @@ fn creation(id: &str, title: &str) -> v1::CreateProjectRequest {
             title: title.into(),
             source: Some(v1::ProjectSource {
                 source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
-                    path: format!("~/tools/{id}"),
+                    path: std::env::temp_dir()
+                        .join("tools")
+                        .join(id)
+                        .to_string_lossy()
+                        .into_owned(),
                 })),
             }),
             git_remote: Some(format!("git@example.test:tools/{id}.git")),
-            mux_session_name: id.to_ascii_lowercase(),
-            affiliation: v1::ProjectAffiliation::Personal.into(),
             color: Some("#112233".into()),
             groups: vec!["tools".into()],
             include_in_full_export: None,
@@ -177,15 +335,11 @@ fn creation(id: &str, title: &str) -> v1::CreateProjectRequest {
 async fn updates_project_comparison_with_validation_and_a_revision_precondition() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut projects =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut projects = ProjectServiceClient::new(server.native_channel());
     projects
         .create_project(creation("TST", "Comparison test"))
         .await?;
-    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let project = viewer
         .list_viewer_projects(page_request(
             15,
@@ -259,11 +413,10 @@ async fn updates_project_comparison_with_validation_and_a_revision_precondition(
 
 #[tokio::test]
 #[serial(server_tracing)]
-async fn manages_its_own_projects_through_authenticated_grpc() -> TestResult {
+async fn manages_its_own_projects_through_private_grpc() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ProjectServiceClient::new(server.native_channel());
     let response = client
         .create_project(creation("GTL", "Git Tools"))
         .await?
@@ -431,10 +584,7 @@ async fn manages_its_own_projects_through_authenticated_grpc() -> TestResult {
         .await?;
     server.stop().await?;
     let restarted = ServerHarness::start(directory.path(), None).await?;
-    let mut client = ProjectServiceClient::with_interceptor(
-        restarted.native_channel(),
-        restarted.authorization(),
-    );
+    let mut client = ProjectServiceClient::new(restarted.native_channel());
     assert_eq!(
         client
             .list_active_projects(v1::ListActiveProjectsRequest {})
@@ -453,8 +603,7 @@ async fn manages_its_own_projects_through_authenticated_grpc() -> TestResult {
 async fn rejects_invalid_project_requests_and_rolls_back_duplicate_creation() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ProjectServiceClient::new(server.native_channel());
     client.create_project(creation("GTL", "Git Tools")).await?;
     for request in [creation("GTL", "Another"), creation("APP", "git tools")] {
         let error = client.create_project(request).await.unwrap_err();
@@ -532,17 +681,14 @@ async fn rejects_invalid_project_requests_and_rolls_back_duplicate_creation() ->
 async fn resolves_managed_project_sources_including_paused_projects() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ProjectServiceClient::new(server.native_channel());
     client
         .create_project(creation("DEMO", "Example project"))
         .await?;
     let request = || v1::GetProjectRepositoryRequest {
         project_id: "DEMO".into(),
     };
-    let expected = directories::BaseDirs::new()
-        .ok_or("home directory")?
-        .home_dir()
+    let expected = std::env::temp_dir()
         .join("tools/DEMO")
         .to_string_lossy()
         .into_owned();
@@ -624,12 +770,8 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
 
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut projects =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
-    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut projects = ProjectServiceClient::new(server.native_channel());
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let first = || page_request(2, Cursor::First(v1::Empty {}));
     let empty = viewer.list_viewer_projects(first()).await?.into_inner();
     assert!(empty.projects.is_empty());
@@ -811,10 +953,7 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
 async fn project_status_watch_bounds_waiting_pages_and_cancels_the_previous_page() -> TestResult {
     let data = tempfile::tempdir()?;
     let server = ServerHarness::start(data.path(), None).await?;
-    let mut viewer = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let request = v1::WatchViewerRequest {
         live_tab_id: None,
         project_ids: vec!["TST".into()],

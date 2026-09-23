@@ -509,6 +509,7 @@ fn ApplicationLayoutContent() -> Element {
     crate::views::diffs::use_diff_presentation_provider();
     crate::views::diffs::file_filter_changes::use_file_filter_changes_provider();
     crate::views::projects::cache::use_status_cache_provider();
+    crate::views::push::use_push_provider();
     use_viewer_routes(context);
 
     let visible = browser::use_document_visible();
@@ -619,17 +620,34 @@ fn ApplicationLayoutContent() -> Element {
     let connection = context.connection();
     let theme = match &*state {
         ViewerShellLoad::Ready(shell) => shell.preferences.theme,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerTheme::Dark,
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerTheme::default(),
     };
     use_effect(use_reactive((&theme,), move |(theme,)| {
         browser::apply_theme(theme.as_str());
     }));
 
+    let accessibility = match &*state {
+        ViewerShellLoad::Ready(shell) => shell.preferences.accessibility,
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
+            gtl_models::settings::ViewerAccessibility::default()
+        }
+    };
+    use_effect(use_reactive((&accessibility,), move |(accessibility,)| {
+        browser::apply_reduced_motion(accessibility.reduce_motion);
+        spawn(async move {
+            if let Err(error) = gtl_client::window::set_scale(accessibility.ui_scale_percent).await
+            {
+                context.toast.error(error.message());
+            }
+        });
+    }));
+
     rsx! {
         div {
-            class: "viewer-shell h-screen min-h-128 antialiased",
+            class: "viewer-shell h-screen antialiased",
             "data-theme": theme.as_str(),
             WindowHeader {}
+            crate::views::push::PushDialogHost {}
             div {
                 class: "viewer-connection-content",
                 "inert": (!connection.is_connected()).then_some(""),
@@ -761,6 +779,7 @@ mod tests {
                 .into_iter()
                 .map(|id| {
                     Ok(gtl_wire::viewer::ViewerTab {
+                        custom_name: None,
                         pinned: false,
                         id: viewer_tab_id(id)?,
                         label: format!("Diff {id}"),
@@ -773,6 +792,7 @@ mod tests {
                 tab_id: viewer_tab_id(tab_id)?,
             },
             preferences: ViewerPreferences {
+                accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: super::ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {

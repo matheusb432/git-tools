@@ -11,50 +11,18 @@ pub(crate) mod check_structure;
 pub(crate) mod desktop_e2e;
 pub(crate) mod desktop_release;
 pub(crate) mod desktop_scroll;
+pub(crate) mod dioxus_format;
 pub(crate) mod dioxus_web;
-pub(crate) mod drift;
-pub(crate) mod format;
-pub(crate) mod grpc_transport;
 pub(crate) mod icon;
 pub(crate) mod install;
+pub(crate) mod install_path;
+pub(crate) mod macos_package;
 pub(crate) mod pre_commit;
 pub(crate) mod server_highlighting;
-pub(crate) mod setup;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
 pub(crate) mod view_source;
 pub(crate) mod wasm_c;
-
-#[derive(Clone, Copy)]
-pub(crate) struct Verb(&'static str);
-
-impl Verb {
-    pub(crate) const BUILD: Self = Self("build");
-    pub(crate) const CHECK_DIOXUS_FORMAT: Self = Self("check-dioxus-format");
-    pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
-    pub(crate) const CHECK_PARSER_WASM: Self = Self("check-parser-wasm");
-    pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
-    pub(crate) const DESKTOP_SCROLL_BENCHMARK: Self = Self("desktop-scroll-benchmark");
-    pub(crate) const DESKTOP_SCROLL_FIXTURE: Self = Self("desktop-scroll-fixture");
-    pub(crate) const SERVER_HIGHLIGHTING_BENCHMARK: Self = Self("server-highlighting-benchmark");
-    pub(crate) const SERVER_HIGHLIGHTING_PROFILE: Self = Self("server-highlighting-profile");
-    pub(crate) const VIEW_SOURCE_BENCHMARK: Self = Self("view-source-benchmark");
-    pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
-    pub(crate) const GEN_ICON: Self = Self("gen-icon");
-    pub(crate) const GRPC_TRANSPORT_BENCHMARK: Self = Self("grpc-transport-benchmark");
-    pub(crate) const GRPC_TRANSPORT_SMOKE: Self = Self("grpc-transport-smoke");
-    pub(crate) const INSTALL: Self = Self("install");
-    pub(crate) const SETUP: Self = Self("setup");
-    pub(crate) const SHIP: Self = Self("ship");
-    pub(crate) const UNINSTALL: Self = Self("uninstall");
-    pub(crate) const WEB_BUILD: Self = Self("web-build");
-    pub(crate) const WEB_SERVE: Self = Self("web-serve");
-    pub(crate) const WEB_STYLES: Self = Self("web-styles");
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        self.0
-    }
-}
 
 pub(crate) fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")

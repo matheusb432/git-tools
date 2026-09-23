@@ -75,11 +75,16 @@ pub fn execute(req: FindRepositories) -> Result<Vec<RepositoryTarget>, FindRepos
         })?;
         repos.push(repository_root);
     }
+    let label_root =
+        std::fs::canonicalize(&root).map_err(|source| FindRepositoriesError::Resolve {
+            path: root.clone(),
+            source,
+        })?;
     repos.sort();
     Ok(repos
         .into_iter()
         .map(|repo| RepositoryTarget {
-            label: repo_label(&root, &repo),
+            label: repo_label(&label_root, &repo),
             path: repo,
         })
         .collect())
@@ -100,6 +105,12 @@ fn is_linked_worktree(directory: &Path) -> bool {
         return false;
     }
     std::fs::read_to_string(&git_path).is_ok_and(|content| rules::is_worktree_marker(&content))
+}
+
+/// Checks the same repository marker rule used by the default recursive scan.
+#[must_use]
+pub fn is_discoverable_repository(directory: &Path) -> bool {
+    directory.is_dir() && directory.join(".git").exists() && !is_linked_worktree(directory)
 }
 
 fn repo_label(root: &Path, repo_path: &RepositoryRoot) -> ProjectName {
@@ -151,10 +162,33 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn labels_repositories_relative_to_a_symlinked_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("actual");
+        utils::make_repository(&root.join("api"));
+        let alias = temporary.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+
+        let repositories = find_repositories::execute(FindRepositories {
+            root: alias,
+            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
+        })
+        .unwrap();
+
+        assert_eq!(repositories.len(), 1);
+        assert_eq!(repositories[0].label.as_str(), "api");
+        assert_eq!(
+            repositories[0].path.as_ref(),
+            root.join("api").canonicalize().unwrap()
+        );
+    }
+
     #[test]
     fn skips_linked_worktrees_by_default() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path();
+        let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("api"));
         utils::make_linked_worktree(
             &root.join("api/.worktrees/feature"),
@@ -162,7 +196,7 @@ mod tests {
         );
 
         let repositories = find_repositories::execute(FindRepositories {
-            root: root.to_path_buf(),
+            root: root.clone(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
         .unwrap();
@@ -174,13 +208,13 @@ mod tests {
     #[test]
     fn includes_linked_worktrees_when_requested() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path();
+        let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("api"));
         let worktree = root.join("api/.worktrees/feature");
         utils::make_linked_worktree(&worktree, "/abs/api/.git/worktrees/feature");
 
         let repositories = find_repositories::execute(FindRepositories {
-            root: root.to_path_buf(),
+            root: root.clone(),
             scope: RepositoryTraversalScope::IncludeLinkedWorktrees,
         })
         .unwrap();
@@ -197,14 +231,14 @@ mod tests {
     #[test]
     fn prunes_build_and_dependency_directories() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path();
+        let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("app"));
         utils::make_repository(&root.join("app/libs/inner"));
         utils::make_repository(&root.join("app/target/some/dependency"));
         utils::make_repository(&root.join("app/node_modules/package"));
 
         let repositories = find_repositories::execute(FindRepositories {
-            root: root.to_path_buf(),
+            root: root.clone(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
         .unwrap();
@@ -224,12 +258,12 @@ mod tests {
     #[test]
     fn keeps_submodule_git_pointers() {
         let temporary = tempfile::tempdir().unwrap();
-        let root = temporary.path();
+        let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("api"));
         utils::make_linked_worktree(&root.join("submodule"), "/repo/.git/modules/submodule");
 
         let repositories = find_repositories::execute(FindRepositories {
-            root: root.to_path_buf(),
+            root: root.clone(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         })
         .unwrap();

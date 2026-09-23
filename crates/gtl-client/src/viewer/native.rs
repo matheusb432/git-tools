@@ -1,7 +1,7 @@
 use gtl_wire::viewer::{SetViewerModifiedFiles, SetViewerTabPinned};
 mod row_sessions;
 
-use gtl_local_auth::LocalAuth;
+use gtl_local_transport::LocalEndpoint;
 use gtl_wire::{
     proto,
     v1::{self, viewer_service_client::ViewerServiceClient},
@@ -13,14 +13,15 @@ use gtl_wire::{
         ViewerHistoryPage, ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest,
         ViewerUserSettings,
         projects::{
-            GetViewerProjectStatus, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
-            UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+            DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
+            ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
+            ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
         },
     },
 };
 
 use super::{ViewerClientError, validate_viewer_protocol};
-use crate::{AuthenticatedChannel, GtlClient};
+use crate::GtlClient;
 
 const VIEWER_RESPONSE_MAX_BYTES: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 64 * 1024;
 
@@ -65,13 +66,69 @@ macro_rules! viewer_unary_methods_with_fallible_request {
 
 #[derive(Clone)]
 pub struct ViewerClient {
-    client: ViewerServiceClient<AuthenticatedChannel>,
+    client: ViewerServiceClient<tonic::transport::Channel>,
     server_instance_id: String,
     protocol_version: u32,
     row_sessions: std::sync::Arc<tokio::sync::Mutex<row_sessions::RowSessions>>,
 }
 
 impl ViewerClient {
+    pub async fn get_push_availability(
+        &mut self,
+        identity: gtl_wire::viewer::ViewerViewIdentity,
+    ) -> Result<gtl_wire::viewer::push::ViewerPushAvailability, ViewerClientError> {
+        let response = self
+            .client
+            .get_viewer_push_availability(proto::viewer::push::encode_availability_request(
+                identity,
+            ))
+            .await
+            .map_err(|error| decode_status(&error))?
+            .into_inner();
+        proto::viewer::push::decode_availability(response).map_err(Into::into)
+    }
+
+    pub async fn create_push(
+        &mut self,
+        request: gtl_wire::viewer::push::CreateViewerPush,
+    ) -> Result<gtl_wire::viewer::push::ViewerPushRequest, ViewerClientError> {
+        let response = self
+            .client
+            .create_viewer_push(proto::viewer::push::encode_create(request))
+            .await
+            .map_err(|error| decode_status(&error))?
+            .into_inner();
+        Ok(gtl_wire::viewer::push::ViewerPushRequest {
+            id: proto::viewer::push::decode_id(&response.id)?,
+        })
+    }
+    pub async fn get_push(
+        &mut self,
+        request: gtl_wire::viewer::push::ViewerPushRequest,
+    ) -> Result<gtl_wire::viewer::push::ViewerPushStatus, ViewerClientError> {
+        let response = self
+            .client
+            .get_viewer_push(v1::GetViewerPushRequest {
+                id: request.id.to_string(),
+            })
+            .await
+            .map_err(|error| decode_status(&error))?
+            .into_inner();
+        proto::viewer::push::decode_status(response).map_err(Into::into)
+    }
+    pub async fn start_push(
+        &mut self,
+        request: gtl_wire::viewer::push::ViewerPushRequest,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .start_viewer_push(v1::StartViewerPushRequest {
+                id: request.id.to_string(),
+            })
+            .await
+            .map_err(|error| decode_status(&error))?;
+        Ok(())
+    }
+
     pub async fn get_file_filters(
         &mut self,
         request: gtl_wire::viewer::ViewerTabRequest,
@@ -126,6 +183,19 @@ impl ViewerClient {
         Ok(())
     }
 
+    pub async fn rename_snapshot(
+        &mut self,
+        request: gtl_wire::viewer::RenameViewerSnapshot,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .rename_viewer_snapshot(proto::viewer::encode_rename_viewer_snapshot_request(
+                request,
+            ))
+            .await
+            .map_err(|status| decode_status(&status))?;
+        Ok(())
+    }
+
     pub async fn set_tab_pinned(
         &mut self,
         request: SetViewerTabPinned,
@@ -169,6 +239,38 @@ impl ViewerClient {
         proto::viewer::projects::decode_projects(response).map_err(Into::into)
     }
 
+    pub async fn discover_project_repositories(
+        &mut self,
+        request: DiscoverProjectRepositories,
+    ) -> Result<ProjectDiscovery, ViewerClientError> {
+        let response = self
+            .client
+            .discover_project_repositories(proto::viewer::projects::encode_discover(request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| {
+                if status.code() == tonic::Code::FailedPrecondition {
+                    ViewerClientError::ProjectScanFailed
+                } else {
+                    decode_status(&status)
+                }
+            })?;
+        proto::viewer::projects::decode_discovery(response).map_err(Into::into)
+    }
+
+    pub async fn import_project_repositories(
+        &mut self,
+        request: ImportProjectRepositories,
+    ) -> Result<Vec<ProjectImportResult>, ViewerClientError> {
+        let response = self
+            .client
+            .import_project_repositories(proto::viewer::projects::encode_import(request))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        proto::viewer::projects::decode_import_results(response).map_err(Into::into)
+    }
+
     pub async fn get_project_status(
         &mut self,
         request: GetViewerProjectStatus,
@@ -206,30 +308,29 @@ impl ViewerClient {
         proto::viewer::projects::decode_open_response(response).map_err(Into::into)
     }
 
-    /// Discovers the local server and connects through its authenticated native endpoint.
+    /// Resolves the local server and connects through its private native endpoint.
     pub async fn connect_local() -> Result<Self, ViewerClientError> {
-        let auth = LocalAuth::from_environment().map_err(|_| ViewerClientError::Unavailable)?;
-        Self::connect(&auth).await
+        let endpoint =
+            LocalEndpoint::from_environment().map_err(|_| ViewerClientError::Unavailable)?;
+        Self::connect(&endpoint).await
     }
 
-    /// Connects to the server published in `auth`'s data root.
-    pub async fn connect(auth: &LocalAuth) -> Result<Self, ViewerClientError> {
-        let bootstrap = auth
-            .load_viewer_bootstrap()
-            .map_err(|_| ViewerClientError::Unavailable)?;
-        validate_viewer_protocol(bootstrap.protocol_version())?;
-        let native = GtlClient::connect(auth)
+    /// Connects to an explicitly resolved local endpoint.
+    pub async fn connect(endpoint: &LocalEndpoint) -> Result<Self, ViewerClientError> {
+        let native = GtlClient::connect(endpoint)
             .await
             .map_err(|_| ViewerClientError::Unavailable)?;
-        if native.endpoint.instance_id() != bootstrap.instance_id() {
-            return Err(ViewerClientError::Unavailable);
-        }
-        let client = ViewerServiceClient::with_interceptor(native.channel, native.request_policy)
+        let server_info = native
+            .get_viewer_server_info()
+            .await
+            .map_err(|_| ViewerClientError::Unavailable)?;
+        validate_viewer_protocol(server_info.protocol_version())?;
+        let client = ViewerServiceClient::new(native.channel)
             .max_decoding_message_size(VIEWER_RESPONSE_MAX_BYTES);
         Ok(Self {
             client,
-            server_instance_id: bootstrap.instance_id().to_string(),
-            protocol_version: bootstrap.protocol_version(),
+            server_instance_id: server_info.server_instance_id().to_owned(),
+            protocol_version: server_info.protocol_version(),
             row_sessions: std::sync::Arc::default(),
         })
     }

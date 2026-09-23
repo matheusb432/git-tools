@@ -185,6 +185,7 @@ fn WorkspaceMobileNavigation(
     #[props(default)] preview_visible: bool,
     onfiles: EventHandler<MouseEvent>,
     oncommits: EventHandler<MouseEvent>,
+    commits_actions: Option<Element>,
 ) -> Element {
     let navigation_classes = if preview_visible {
         "diff-workspace-mobile-navigation"
@@ -235,6 +236,9 @@ fn WorkspaceMobileNavigation(
                     GitCommitHorizontal { size: 20 }
                 }
                 span { class: "font-semibold", "Commits" }
+            }
+            if let Some(actions) = commits_actions {
+                div { class: "flex items-center pr-1", {actions} }
             }
         }
     }
@@ -564,6 +568,7 @@ fn DiffWorkspaceDocument(
     onnavigate: EventHandler<String>,
     mobile_navigation: Option<Element>,
     live_actions: Option<Element>,
+    commits_actions: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
     #[props(default)] commits_loading: bool,
     commits_error: Option<String>,
@@ -615,6 +620,7 @@ fn DiffWorkspaceDocument(
                 visible: sidebars.commits,
                 WorkspaceCommitsPanel {
                     details_popover_id_prefix,
+                    actions: commits_actions,
                     artifact: artifact_view_id.is_some(),
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,

@@ -12,7 +12,7 @@ use gtl_application::recipes::{
 };
 use gtl_benchmarks::require;
 use gtl_client::GtlClient;
-use gtl_local_auth::LocalAuth;
+use gtl_local_transport::LocalEndpoint;
 use gtl_models::{paths::RepositoryRoot, recipes::RecipeBatchId};
 use gtl_server::ServerHarness;
 use gtl_wire::{
@@ -24,12 +24,7 @@ use gtl_wire::{
     viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
 };
 use prost::Message as _;
-use tonic::{
-    Request, Status,
-    metadata::{Ascii, MetadataValue},
-    service::{Interceptor, interceptor::InterceptedService},
-    transport::Channel,
-};
+use tonic::transport::Channel;
 
 const TOKIO_WORKER_THREADS: usize = 2;
 const GIT_ISOLATION_MARKER: &str = "GTL_GRPC_BENCHMARK_GIT_ISOLATED";
@@ -43,25 +38,11 @@ const STREAM_VIEWER_ROWS_BENCHMARK_NAME: &str = "grpc-requests/stream-viewer-row
 const VIEWER_READY_ATTEMPTS: usize = 500;
 const VIEWER_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
 
-type BenchmarkViewerClient = ViewerServiceClient<InterceptedService<Channel, ViewerAuthorization>>;
+type BenchmarkViewerClient = ViewerServiceClient<Channel>;
 
 struct RepositoryFixture {
     _directory: tempfile::TempDir,
     path: String,
-}
-
-#[derive(Clone)]
-struct ViewerAuthorization {
-    value: MetadataValue<Ascii>,
-}
-
-impl Interceptor for ViewerAuthorization {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        request
-            .metadata_mut()
-            .insert("authorization", self.value.clone());
-        Ok(request)
-    }
 }
 
 fn grpc_requests(criterion: &mut Criterion) {
@@ -86,10 +67,10 @@ fn grpc_requests(criterion: &mut Criterion) {
             "starting the benchmark gRPC server",
         );
         let client = require(
-            GtlClient::connect(server.auth()).await,
+            GtlClient::connect(server.endpoint()).await,
             "connecting the benchmark gRPC client",
         );
-        let viewer_client = connect_viewer_client(server.auth()).await;
+        let viewer_client = connect_viewer_client(server.endpoint()).await;
         (server, client, viewer_client)
     });
 
@@ -106,7 +87,7 @@ fn grpc_requests(criterion: &mut Criterion) {
     });
     benchmark_get_viewer_shell(criterion, &runtime, &viewer_client);
     benchmark_stream_viewer_rows(criterion, &runtime, &viewer_client, identity);
-    benchmark_native_row_windows(criterion, &runtime, server.auth(), identity);
+    benchmark_native_row_windows(criterion, &runtime, server.endpoint(), identity);
 
     runtime.block_on(async {
         require(server.stop().await, "stopping the benchmark gRPC server");
@@ -266,12 +247,12 @@ fn benchmark_stream_viewer_rows(
 fn benchmark_native_row_windows(
     criterion: &mut Criterion,
     runtime: &tokio::runtime::Runtime,
-    auth: &LocalAuth,
+    endpoint: &LocalEndpoint,
     identity: v1::ViewerViewIdentity,
 ) {
     let client = runtime.block_on(async {
         require(
-            gtl_client::ViewerClient::connect(auth).await,
+            gtl_client::ViewerClient::connect(endpoint).await,
             "connect native row client",
         )
     });
@@ -331,34 +312,14 @@ async fn consume_viewer_rows(
     black_box((message_count, output_bytes))
 }
 
-async fn connect_viewer_client(auth: &LocalAuth) -> BenchmarkViewerClient {
-    let endpoint = require(
-        auth.load_endpoint(),
-        "loading the benchmark server endpoint",
-    );
-    #[cfg(unix)]
-    let target = format!("unix://{}", endpoint.uds_path().to_string_lossy());
-    #[cfg(windows)]
-    let target = format!("http://{}", endpoint.tcp_address());
-    let endpoint = require(
-        tonic::transport::Endpoint::from_shared(target),
-        "building the benchmark viewer endpoint",
-    );
+async fn connect_viewer_client(endpoint: &LocalEndpoint) -> BenchmarkViewerClient {
     let channel = require(
-        endpoint.connect().await,
+        endpoint
+            .connect(Duration::from_secs(1), Duration::from_secs(30))
+            .await,
         "connecting the benchmark viewer client",
     );
-    let capability = require(
-        auth.load_client_token(),
-        "loading the benchmark native capability",
-    );
-    let authorization = ViewerAuthorization {
-        value: require(
-            format!("Bearer {}", capability.expose_secret()).parse(),
-            "encoding the benchmark native capability",
-        ),
-    };
-    ViewerServiceClient::with_interceptor(channel, authorization)
+    ViewerServiceClient::new(channel)
         .max_decoding_message_size(VIEWER_ROW_MAX_ENCODED_BYTES + 64 * 1024)
 }
 

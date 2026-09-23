@@ -133,7 +133,10 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            format!("not a git repo: {}", repository.display())
+            format!(
+                "not a git repo: {}",
+                repository.canonicalize().unwrap().display()
+            )
         );
     }
 }

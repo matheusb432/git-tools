@@ -16,7 +16,7 @@ use gtl_models::{
     },
     viewer::{
         DiffDensity, DiffLayout, InvalidViewerKeybindings, ParseRenderOptionError,
-        ParseViewerKeybindingError, RenderOptions, ViewerKeybinding, ViewerKeybindingAction,
+        ParseViewerKeybindingError, RenderOptions, Theme, ViewerKeybinding, ViewerKeybindingAction,
         ViewerKeybindingPlatform, ViewerKeybindings,
     },
 };
@@ -26,6 +26,10 @@ use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub(super) enum UserSettingsDocumentKey {
+    #[strum(to_string = "ui_scale_percent")]
+    UiScalePercent,
+    #[strum(to_string = "reduce_motion")]
+    ReduceMotion,
     #[strum(to_string = "focus_window_on_diff")]
     FocusWindowOnDiff,
     #[strum(to_string = "wrap_lines")]
@@ -83,6 +87,8 @@ pub(super) enum UserSettingsDocumentKey {
 impl UserSettingsDocumentKey {
     const fn root(self) -> &'static str {
         match self {
+            Self::UiScalePercent => "ui_scale_percent",
+            Self::ReduceMotion => "reduce_motion",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -114,6 +120,8 @@ impl UserSettingsDocumentKey {
 
     const fn leaf(self) -> &'static str {
         match self {
+            Self::UiScalePercent => "ui_scale_percent",
+            Self::ReduceMotion => "reduce_motion",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -141,6 +149,8 @@ impl UserSettingsDocumentKey {
 
     const fn container(self) -> &'static str {
         match self {
+            Self::UiScalePercent => "ui_scale_percent",
+            Self::ReduceMotion => "reduce_motion",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -315,6 +325,9 @@ type RawSettingValue = toml::Value;
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawUserSettingsDocument {
+    #[serde(default)]
+    ui_scale_percent: gtl_models::settings::ViewerScalePercent,
+    reduce_motion: Option<RawSettingValue>,
     focus_window_on_diff: Option<RawSettingValue>,
     files_sidebar_visible: Option<RawSettingValue>,
     commits_sidebar_visible: Option<RawSettingValue>,
@@ -472,7 +485,10 @@ fn parse_settings(
     let document = toml::from_str::<RawUserSettingsDocument>(raw)
         .map_err(UserSettingsDocumentError::TomlSchema)?;
     let theme = optional_string(UserSettingsDocumentKey::Theme, document.theme)?
-        .map(|value| parse_render_option(UserSettingsDocumentKey::Theme, &value))
+        .map(|value| match value.as_str() {
+            "verdant" | "noir" | "light" | "hearth" => Ok(Theme::default()),
+            _ => parse_render_option(UserSettingsDocumentKey::Theme, &value),
+        })
         .transpose()?;
     let layout = optional_string(UserSettingsDocumentKey::Layout, document.layout)?
         .map(|value| parse_render_option(UserSettingsDocumentKey::Layout, &value))
@@ -489,6 +505,14 @@ fn parse_settings(
         document.focus_window_on_diff,
     )?
     .unwrap_or(true);
+    let accessibility = gtl_models::settings::ViewerAccessibility {
+        ui_scale_percent: document.ui_scale_percent,
+        reduce_motion: optional_bool(
+            UserSettingsDocumentKey::ReduceMotion,
+            document.reduce_motion,
+        )?
+        .unwrap_or(false),
+    };
     let sidebars = gtl_models::viewer::ViewerSidebarVisibility {
         files: optional_bool(
             UserSettingsDocumentKey::FilesSidebarVisible,
@@ -526,6 +550,7 @@ fn parse_settings(
             DiffExclusions::new(projects.diff_exclusions, diff_exclusions_default),
             projects.push_all_exclusions,
         )
+        .with_accessibility(accessibility)
         .with_focus_window_on_diff(focus_window_on_diff)
         .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
@@ -748,6 +773,7 @@ fn project_settings(
 
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     for (key, update) in [
+        (UserSettingsDocumentKey::ReduceMotion, patch.reduce_motion),
         (
             UserSettingsDocumentKey::FocusWindowOnDiff,
             patch.focus_window_on_diff,
@@ -778,6 +804,16 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         ),
         UserSettingsFieldUpdate::Clear => {
             document.remove(UserSettingsDocumentKey::WrapLines.root());
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
+    match patch.ui_scale_percent {
+        UserSettingsFieldUpdate::Update(value) => set_value(
+            &mut document[UserSettingsDocumentKey::UiScalePercent.root()],
+            Value::from(i64::from(value.into_inner())),
+        ),
+        UserSettingsFieldUpdate::Clear => {
+            document.remove(UserSettingsDocumentKey::UiScalePercent.root());
         }
         UserSettingsFieldUpdate::Unchanged => {}
     }
@@ -1073,7 +1109,7 @@ mod tests {
     fn parse_closes_the_document_over_schema_and_domain_values() {
         let document = UserSettingsDocument::parse(
             br#"
-theme = "light"
+theme = "glacier"
 layout = "split"
 density = "full"
 push = { confirm = false }
@@ -1089,7 +1125,7 @@ diff = { exclude = ["js"] }
         .unwrap();
         let settings = document.into_viewer_settings().0;
 
-        assert_eq!(settings.theme(), Some(Theme::Light));
+        assert_eq!(settings.theme(), Some(Theme::Glacier));
         assert_eq!(
             settings.viewer_render_options(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)

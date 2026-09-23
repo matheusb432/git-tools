@@ -7,10 +7,7 @@ pub(crate) struct ServerClient {
 }
 
 pub(crate) struct ServerStatus {
-    #[cfg(unix)]
-    pub(crate) uds_path: std::path::PathBuf,
-    #[cfg(windows)]
-    pub(crate) tcp_address: std::net::SocketAddr,
+    pub(crate) endpoint: std::path::PathBuf,
     pub(crate) instance_id: String,
 }
 
@@ -23,14 +20,14 @@ impl ServerClient {
         Ok(Self { runtime, client })
     }
 
-    pub(crate) fn status(&self) -> ServerStatus {
-        ServerStatus {
-            #[cfg(unix)]
-            uds_path: self.client.endpoint().uds_path().to_path_buf(),
-            #[cfg(windows)]
-            tcp_address: self.client.endpoint().tcp_address(),
-            instance_id: self.client.endpoint().instance_id().to_string(),
-        }
+    pub(crate) fn status(&self) -> anyhow::Result<ServerStatus> {
+        let server_info = self
+            .runtime
+            .block_on(self.client.get_viewer_server_info())?;
+        Ok(ServerStatus {
+            endpoint: self.client.endpoint().path().to_path_buf(),
+            instance_id: server_info.server_instance_id().to_owned(),
+        })
     }
 
     pub(crate) fn render_diff(

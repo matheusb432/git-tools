@@ -3,16 +3,18 @@ mod live_views;
 mod projects;
 mod repositories;
 mod row_sessions;
+mod viewer_push;
 
 use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
     BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, ExtensionsFieldUpdate,
     ExtensionsValue, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetViewerSettingsRequest, GetViewerShellRequest, MoveViewerTabRequest,
-    PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest, ViewerTabPlacement,
-    ViewerTheme, WatchViewerRequest, bool_field_update, diff_service_client::DiffServiceClient,
-    diff_target, extensions_field_update, project_service_client::ProjectServiceClient,
+    GetViewerServerInfoRequest, GetViewerSettingsRequest, GetViewerShellRequest,
+    MoveViewerTabRequest, PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest,
+    ViewerTabPlacement, ViewerTheme, WatchViewerRequest, bool_field_update,
+    diff_service_client::DiffServiceClient, diff_target, extensions_field_update,
+    project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
 };
@@ -33,7 +35,7 @@ use tonic_reflection::pb::v1::{
 };
 
 use crate::{
-    harness::{ServerHarness, ServerHarnessAuthorization},
+    harness::ServerHarness,
     observability::{build_test_dispatch, read_json_records},
 };
 
@@ -45,29 +47,13 @@ const HEALTH_CHECK_URI: &str = "/grpc.health.v1.Health/Check";
 const REFLECTION_URI: &str = "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo";
 
 #[tokio::test]
-#[cfg(windows)]
-async fn tcp_incoming_disables_nagle() -> TestResult {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let address = listener.local_addr()?;
-    let mut incoming = Box::pin(super::tcp_incoming(listener));
-
-    let (client, accepted) = tokio::join!(tokio::net::TcpStream::connect(address), incoming.next());
-    let _client = client?;
-    let accepted = accepted.ok_or("TCP incoming ended before accepting a connection")??;
-
-    assert!(accepted.nodelay()?);
-    Ok(())
-}
-
-#[tokio::test]
 #[serial(server_tracing)]
-async fn serves_authenticated_health_and_reflection() -> TestResult {
+async fn serves_health_and_reflection() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
 
-    assert_health_serving(server.native_channel(), server.authorization()).await?;
-    assert_reflection_describes_gtl_contract(server.native_channel(), server.authorization())
-        .await?;
+    assert_health_serving(server.native_channel()).await?;
+    assert_reflection_describes_gtl_contract(server.native_channel()).await?;
 
     server.stop().await?;
     Ok(())
@@ -78,8 +64,7 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
 async fn validates_application_requests_through_the_generated_client() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        DiffServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = DiffServiceClient::new(server.native_channel());
 
     let error = client
         .render_diff(relative_working_directory_diff_request())
@@ -98,8 +83,7 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
     let settings_path = directory.path().join("config.toml");
     std::fs::write(&settings_path, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
     let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
-    let mut client =
-        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ProjectServiceClient::new(server.native_channel());
 
     let error = client
         .push_project_repositories(PushProjectRepositoriesRequest { dry_run: true })
@@ -132,8 +116,7 @@ async fn reports_invalid_viewer_keybinding_with_the_config_path() -> TestResult 
     let settings_path = directory.path().join("private-config.toml");
     std::fs::write(&settings_path, "[keybindings]\nsearch_files = \"Cmd+P\"\n")?;
     let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
-    let mut client =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ViewerServiceClient::new(server.native_channel());
 
     let error = client
         .get_viewer_shell(GetViewerShellRequest {})
@@ -164,8 +147,7 @@ async fn invalid_settings_can_be_inspected_and_reset_without_restarting_the_serv
     let raw = "[[projects]]\nname = \"rust-snake\"\nexclude_from_push_all = true\n";
     std::fs::write(&path, raw)?;
     let server = ServerHarness::start(directory.path(), Some(path.clone())).await?;
-    let mut client =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ViewerServiceClient::new(server.native_channel());
     let error = client
         .get_viewer_shell(GetViewerShellRequest {})
         .await
@@ -232,8 +214,7 @@ search_text_in_all_files = "ctrl+shift+g"
 "#,
     )?;
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
-    let mut client =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ViewerServiceClient::new(server.native_channel());
 
     let response = client
         .get_viewer_shell(GetViewerShellRequest {})
@@ -257,8 +238,7 @@ search_text_in_all_files = "ctrl+shift+g"
 async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        RepositoryServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = RepositoryServiceClient::new(server.native_channel());
     let root = directory.path().to_string_lossy().into_owned();
 
     let error = client
@@ -280,39 +260,36 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
 }
 
 #[tokio::test]
-#[serial(server_tracing)]
-async fn rejects_requests_without_the_capability() -> TestResult {
+async fn viewer_server_info_is_stable_until_the_server_is_replaced() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-
-    let error = HealthClient::new(server.native_channel())
-        .check(HealthCheckRequest {
-            service: String::new(),
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Unauthenticated);
-
+    let mut client = ViewerServiceClient::new(server.native_channel());
+    let first = client
+        .get_viewer_server_info(GetViewerServerInfoRequest {})
+        .await?
+        .into_inner();
+    let repeated = client
+        .get_viewer_server_info(GetViewerServerInfoRequest {})
+        .await?
+        .into_inner();
+    assert_eq!(first, repeated);
+    uuid::Uuid::parse_str(&first.server_instance_id)?;
+    assert_eq!(
+        first.protocol_version,
+        gtl_wire::viewer::VIEWER_PROTOCOL_VERSION
+    );
     server.stop().await?;
-    Ok(())
-}
 
-#[tokio::test]
-async fn viewer_service_accepts_the_native_capability() -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let server = ServerHarness::start(directory.path(), None).await?;
-
-    ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization())
-        .get_viewer_shell(GetViewerShellRequest {})
-        .await?;
-
-    let error = ViewerServiceClient::new(server.native_channel())
-        .get_viewer_shell(GetViewerShellRequest {})
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), tonic::Code::Unauthenticated);
-
-    server.stop().await?;
+    let replacement = ServerHarness::start(directory.path(), None).await?;
+    let replacement_info = ViewerServiceClient::new(replacement.native_channel())
+        .get_viewer_server_info(GetViewerServerInfoRequest {})
+        .await?
+        .into_inner();
+    assert_ne!(
+        replacement_info.server_instance_id,
+        first.server_instance_id
+    );
+    replacement.stop().await?;
     Ok(())
 }
 
@@ -320,8 +297,7 @@ async fn viewer_service_accepts_the_native_capability() -> TestResult {
 async fn move_viewer_tab_validates_identity_through_the_generated_client() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut viewer =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut viewer = ViewerServiceClient::new(server.native_channel());
 
     let error = viewer
         .move_viewer_tab(MoveViewerTabRequest {
@@ -342,8 +318,7 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
-    let mut viewer =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut viewer = ViewerServiceClient::new(server.native_channel());
     let mut viewer_updates = viewer
         .watch_viewer(WatchViewerRequest::default())
         .await?
@@ -353,12 +328,11 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
         .await
         .ok_or("viewer watch ended before its initial version")??
         .version;
-    let mut settings =
-        SettingsServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut settings = SettingsServiceClient::new(server.native_channel());
 
     settings
         .set_viewer_theme(SetViewerThemeRequest {
-            theme: ViewerTheme::Light as i32,
+            theme: ViewerTheme::Glacier as i32,
         })
         .await?;
 
@@ -379,8 +353,7 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
-    let mut viewer =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut viewer = ViewerServiceClient::new(server.native_channel());
 
     viewer
         .edit_settings(EditSettingsRequest {
@@ -487,14 +460,13 @@ async fn viewer_edit_settings_rejects_a_stale_document_revision_over_a_real_list
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
-    let mut viewer =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut viewer = ViewerServiceClient::new(server.native_channel());
     let revision = viewer
         .get_viewer_settings(GetViewerSettingsRequest {})
         .await?
         .into_inner()
         .revision;
-    let concurrent_contents = "theme = \"hearth\"\n";
+    let concurrent_contents = "theme = \"mirage\"\n";
     std::fs::write(&settings_path, concurrent_contents)?;
 
     let error = viewer
@@ -520,14 +492,8 @@ async fn viewer_edit_settings_rejects_a_stale_document_revision_over_a_real_list
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
     let directory = tempfile::tempdir()?;
     let mut server = ServerHarness::start(directory.path(), None).await?;
-    let mut server_health =
-        health_watch(server.native_channel(), server.authorization(), "").await?;
-    let mut diff_health = health_watch(
-        server.native_channel(),
-        server.authorization(),
-        "gtl.v1.DiffService",
-    )
-    .await?;
+    let mut server_health = health_watch(server.native_channel(), "").await?;
+    let mut diff_health = health_watch(server.native_channel(), "gtl.v1.DiffService").await?;
 
     assert_health_update(&mut server_health, ServingStatus::Serving).await?;
     assert_health_update(&mut diff_health, ServingStatus::Serving).await?;
@@ -552,8 +518,7 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
     let data_directory = tempfile::tempdir()?;
     let server = ServerHarness::start(data_directory.path(), None).await?;
 
-    let mut diff =
-        DiffServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut diff = DiffServiceClient::new(server.native_channel());
     let mut request = Request::new(relative_working_directory_diff_request());
     request
         .metadata_mut()
@@ -561,12 +526,12 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
     let error = diff.render_diff(request).await.unwrap_err();
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
 
-    HealthClient::with_interceptor(server.native_channel(), server.authorization())
+    HealthClient::new(server.native_channel())
         .check(HealthCheckRequest {
             service: "gtl.v1.DiffService".to_owned(),
         })
         .await?;
-    request_reflection(server.native_channel(), server.authorization()).await?;
+    request_reflection(server.native_channel()).await?;
     server.stop().await?;
     drop(default_dispatch_guard);
     drop(dispatch);
@@ -600,10 +565,9 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
 
 async fn health_watch(
     channel: Channel,
-    authorization: ServerHarnessAuthorization,
     service: &str,
 ) -> TestResult<tonic::Streaming<tonic_health::pb::HealthCheckResponse>> {
-    Ok(HealthClient::with_interceptor(channel, authorization)
+    Ok(HealthClient::new(channel)
         .watch(HealthCheckRequest {
             service: service.to_owned(),
         })
@@ -611,11 +575,8 @@ async fn health_watch(
         .into_inner())
 }
 
-async fn assert_health_serving(
-    channel: Channel,
-    authorization: ServerHarnessAuthorization,
-) -> TestResult {
-    let mut client = HealthClient::with_interceptor(channel, authorization);
+async fn assert_health_serving(channel: Channel) -> TestResult {
+    let mut client = HealthClient::new(channel);
     for service in [
         "",
         "gtl.v1.DiffService",
@@ -650,10 +611,7 @@ async fn assert_health_update(
     Ok(())
 }
 
-async fn assert_reflection_describes_gtl_contract(
-    channel: Channel,
-    authorization: ServerHarnessAuthorization,
-) -> TestResult {
+async fn assert_reflection_describes_gtl_contract(channel: Channel) -> TestResult {
     let requests = tokio_stream::iter([
         ServerReflectionRequest {
             host: String::new(),
@@ -666,7 +624,7 @@ async fn assert_reflection_describes_gtl_contract(
             )),
         },
     ]);
-    let mut responses = ServerReflectionClient::with_interceptor(channel, authorization)
+    let mut responses = ServerReflectionClient::new(channel)
         .server_reflection_info(Request::new(requests))
         .await?
         .into_inner();
@@ -716,15 +674,12 @@ async fn assert_reflection_describes_gtl_contract(
     Ok(())
 }
 
-async fn request_reflection(
-    channel: Channel,
-    authorization: ServerHarnessAuthorization,
-) -> TestResult {
+async fn request_reflection(channel: Channel) -> TestResult {
     let requests = tokio_stream::iter([ServerReflectionRequest {
         host: String::new(),
         message_request: Some(MessageRequest::ListServices(String::new())),
     }]);
-    let mut responses = ServerReflectionClient::with_interceptor(channel, authorization)
+    let mut responses = ServerReflectionClient::new(channel)
         .server_reflection_info(Request::new(requests))
         .await?
         .into_inner();
@@ -777,8 +732,7 @@ async fn next_reflection_response(
 async fn rejects_invalid_project_modes_before_catalogue_access() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client =
-        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
+    let mut client = ViewerServiceClient::new(server.native_channel());
     for (path, mode) in [
         ("relative", 1),
         ("/repos/project", 0),
@@ -792,6 +746,29 @@ async fn rejects_invalid_project_modes_before_catalogue_access() -> TestResult {
             .await
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn snapshot_rename_validates_requests_through_the_generated_client() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client = ViewerServiceClient::new(server.native_channel());
+    for (tab_id, name, code) in [
+        (0, "Review", tonic::Code::InvalidArgument),
+        (1, "", tonic::Code::InvalidArgument),
+        (1, "Review", tonic::Code::NotFound),
+    ] {
+        let error = client
+            .rename_viewer_snapshot(gtl_wire::v1::RenameViewerSnapshotRequest {
+                tab_id,
+                name: name.into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), code);
     }
     server.stop().await?;
     Ok(())

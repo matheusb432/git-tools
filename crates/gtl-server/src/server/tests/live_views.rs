@@ -7,13 +7,11 @@ use gtl_wire::{
     proto, v1,
     viewer::{ViewerActiveState, ViewerShell},
 };
-use tonic::{service::interceptor::InterceptedService, transport::Channel};
+use tonic::transport::Channel;
 
-use super::{ServerHarness, ServerHarnessAuthorization, TestResult};
+use super::{ServerHarness, TestResult};
 
-type Client = v1::viewer_service_client::ViewerServiceClient<
-    InterceptedService<Channel, ServerHarnessAuthorization>,
->;
+type Client = v1::viewer_service_client::ViewerServiceClient<Channel>;
 
 pub(super) fn git(path: &Path, args: &[&str]) -> TestResult {
     let output = Command::new("git")
@@ -89,10 +87,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
         &SystemClock,
     )?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let initial = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
     let tab_id = initial.tabs[0].id;
     let request = v1::WatchViewerRequest {
@@ -186,10 +181,7 @@ async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> Tes
     let settings = directory.path().join("settings.toml");
     std::fs::write(&settings, "")?;
     let server = ServerHarness::start(directory.path(), Some(settings)).await?;
-    let mut client = v1::viewer_service_client::ViewerServiceClient::with_interceptor(
-        server.native_channel(),
-        server.authorization(),
-    );
+    let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let first = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
     let ViewerActiveState::Ready { view: first } = first.active else {
         return Err("expected initial ready view".into());

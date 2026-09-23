@@ -23,6 +23,7 @@ fn variants() -> Element {
             Button { variant: ButtonVariant::Primary, "Primary" }
             Button { variant: ButtonVariant::Secondary, "Secondary" }
             Button { variant: ButtonVariant::Destructive, "Destructive" }
+            Button { variant: ButtonVariant::Warning, "Warning" }
             Button { variant: ButtonVariant::Failure, "Failure" }
             Button { variant: ButtonVariant::Outline, "Outline" }
             Button { variant: ButtonVariant::Ghost, "Ghost" }

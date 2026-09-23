@@ -170,12 +170,10 @@ fn run_set_theme(theme: Theme) -> ExitCode {
     let value_new = gtl_models::viewer::Theme::from(theme).to_string();
     let theme = match theme {
         Theme::Dark => v1::ViewerTheme::Dark,
-        Theme::Light => v1::ViewerTheme::Light,
-        Theme::Hearth => v1::ViewerTheme::Hearth,
         Theme::Mirage => v1::ViewerTheme::Mirage,
         Theme::Glacier => v1::ViewerTheme::Glacier,
-        Theme::Noir => v1::ViewerTheme::Noir,
         Theme::Graphite => v1::ViewerTheme::Graphite,
+        Theme::Carbon => v1::ViewerTheme::Carbon,
     };
     match ServerClient::connect().and_then(|client| {
         client.set_viewer_theme(v1::SetViewerThemeRequest {

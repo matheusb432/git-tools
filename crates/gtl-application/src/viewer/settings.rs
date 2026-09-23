@@ -42,6 +42,8 @@ pub fn settings_patch(
         FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
     };
     Ok(UserSettingsPatch {
+        ui_scale_percent: application_field_update(request.ui_scale_percent, |value| value),
+        reduce_motion: application_field_update(request.reduce_motion, |value| value),
         expected_revision: request.expected_revision,
         diff_exclusions: None,
         focus_window_on_diff: application_field_update(request.focus_window_on_diff, |value| value),
@@ -57,13 +59,11 @@ pub fn settings_patch(
         projects_sort: application_field_update(request.projects_sort, |value| value),
         projects_page_size: application_field_update(request.projects_page_size, |value| value),
         theme: application_field_update(request.theme, |value| match value {
-            ViewerTheme::Light => Theme::Light,
             ViewerTheme::Dark => Theme::Dark,
-            ViewerTheme::Hearth => Theme::Hearth,
             ViewerTheme::Mirage => Theme::Mirage,
             ViewerTheme::Glacier => Theme::Glacier,
-            ViewerTheme::Noir => Theme::Noir,
             ViewerTheme::Graphite => Theme::Graphite,
+            ViewerTheme::Carbon => Theme::Carbon,
         }),
         layout: application_field_update(request.layout, |value| match value {
             ViewerDiffLayout::Unified => DiffLayout::Unified,
@@ -98,12 +98,10 @@ pub fn preference_setting(preference: SetViewerPreference) -> SettingKeyValue {
         }),
         SetViewerPreference::Theme(theme) => SettingKeyValue::Theme(match theme {
             ViewerTheme::Dark => Theme::Dark,
-            ViewerTheme::Light => Theme::Light,
-            ViewerTheme::Hearth => Theme::Hearth,
             ViewerTheme::Mirage => Theme::Mirage,
             ViewerTheme::Glacier => Theme::Glacier,
-            ViewerTheme::Noir => Theme::Noir,
             ViewerTheme::Graphite => Theme::Graphite,
+            ViewerTheme::Carbon => Theme::Carbon,
         }),
     }
 }
@@ -117,6 +115,7 @@ pub fn project_settings(
     let configured_theme = settings.theme().map(super::project_theme);
     let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
+        accessibility: settings.accessibility(),
         revision,
         focus_window_on_diff: settings.focus_window_on_diff(),
         sidebars: settings.sidebar_visibility(),
@@ -125,7 +124,7 @@ pub fn project_settings(
         projects_page_size: projects.page_size,
         configuration_path,
         configured_theme,
-        effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),
+        effective_theme: super::project_theme(settings.theme().unwrap_or_default()),
         render_options: super::project_render_options(settings.viewer_render_options()),
         push_confirmation_required: settings.push_confirmation_required(),
         diff_exclusions: ViewerDiffExclusions {

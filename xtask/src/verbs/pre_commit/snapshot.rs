@@ -131,7 +131,10 @@ mod tests {
 
         let snapshot = create_snapshot_directory(&repository).unwrap();
 
-        assert_eq!(snapshot.path().parent(), Some(parent.path()));
+        assert_eq!(
+            snapshot.path().parent(),
+            Some(parent.path().canonicalize().unwrap().as_path())
+        );
         assert!(
             snapshot
                 .path()

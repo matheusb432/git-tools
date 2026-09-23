@@ -5,8 +5,10 @@ mod file_filters;
 mod files;
 mod history;
 mod live_watch;
+mod project_import;
 mod project_watch;
 mod projects;
+mod push;
 mod row_session;
 mod rows;
 mod search;
@@ -24,6 +26,7 @@ use gtl_models::{diffs::CommitId, viewer::ViewerTabId};
 use gtl_wire::{
     proto,
     v1::{self, viewer_service_server::ViewerService},
+    viewer::VIEWER_PROTOCOL_VERSION,
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
@@ -41,11 +44,27 @@ use crate::{state::AppState, viewer_runtime};
 
 pub(crate) struct ViewerGrpcService {
     state: AppState,
+    server_info: ViewerServerInfo,
 }
 
 impl ViewerGrpcService {
-    pub(crate) const fn new(state: AppState) -> Self {
-        Self { state }
+    pub(crate) const fn new(state: AppState, server_info: ViewerServerInfo) -> Self {
+        Self { state, server_info }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ViewerServerInfo {
+    server_instance_id: String,
+    protocol_version: u32,
+}
+
+impl ViewerServerInfo {
+    pub(crate) fn generate() -> Self {
+        Self {
+            server_instance_id: uuid::Uuid::new_v4().to_string(),
+            protocol_version: VIEWER_PROTOCOL_VERSION,
+        }
     }
 }
 
@@ -53,6 +72,42 @@ type WatchStream = Pin<Box<dyn Stream<Item = Result<v1::WatchViewerResponse, Sta
 
 #[tonic::async_trait]
 impl ViewerService for ViewerGrpcService {
+    async fn get_viewer_server_info(
+        &self,
+        _request: Request<v1::GetViewerServerInfoRequest>,
+    ) -> Result<Response<v1::GetViewerServerInfoResponse>, Status> {
+        Ok(Response::new(v1::GetViewerServerInfoResponse {
+            server_instance_id: self.server_info.server_instance_id.clone(),
+            protocol_version: self.server_info.protocol_version,
+        }))
+    }
+
+    async fn get_viewer_push_availability(
+        &self,
+        request: Request<v1::GetViewerPushAvailabilityRequest>,
+    ) -> Result<Response<v1::GetViewerPushAvailabilityResponse>, Status> {
+        push::availability(&self.state, request).await
+    }
+
+    async fn create_viewer_push(
+        &self,
+        request: Request<v1::CreateViewerPushRequest>,
+    ) -> Result<Response<v1::CreateViewerPushResponse>, Status> {
+        push::create(&self.state, request).await
+    }
+    async fn get_viewer_push(
+        &self,
+        request: Request<v1::GetViewerPushRequest>,
+    ) -> Result<Response<v1::GetViewerPushResponse>, Status> {
+        push::get(&self.state, request)
+    }
+    async fn start_viewer_push(
+        &self,
+        request: Request<v1::StartViewerPushRequest>,
+    ) -> Result<Response<v1::StartViewerPushResponse>, Status> {
+        push::start(&self.state, request)
+    }
+
     async fn get_viewer_file_filters(
         &self,
         request: Request<v1::GetViewerFileFiltersRequest>,
@@ -86,6 +141,20 @@ impl ViewerService for ViewerGrpcService {
         _request: Request<v1::ListViewerProjectsRequest>,
     ) -> Result<Response<v1::ListViewerProjectsResponse>, Status> {
         projects::list_viewer_projects(&self.state, _request).await
+    }
+
+    async fn discover_project_repositories(
+        &self,
+        request: Request<v1::DiscoverProjectRepositoriesRequest>,
+    ) -> Result<Response<v1::DiscoverProjectRepositoriesResponse>, Status> {
+        project_import::discover(&self.state, request).await
+    }
+
+    async fn import_project_repositories(
+        &self,
+        request: Request<v1::ImportProjectRepositoriesRequest>,
+    ) -> Result<Response<v1::ImportProjectRepositoriesResponse>, Status> {
+        project_import::import(&self.state, request).await
     }
 
     async fn open_viewer_project(
@@ -215,6 +284,38 @@ impl ViewerService for ViewerGrpcService {
         Ok(Response::new(v1::MoveViewerTabResponse {
             shell: Some(project_shell(&self.state, None)?),
         }))
+    }
+
+    async fn rename_viewer_snapshot(
+        &self,
+        request: Request<v1::RenameViewerSnapshotRequest>,
+    ) -> Result<Response<v1::RenameViewerSnapshotResponse>, Status> {
+        use viewer::rename_snapshot::{self, RenameSnapshotError};
+        let request = request.into_inner();
+        let request = gtl_wire::viewer::RenameViewerSnapshot {
+            tab_id: tab_id(request.tab_id)?,
+            name: request.name,
+        };
+        let state = self.state.clone();
+        run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(RenameSnapshotError::Unexpected)?;
+            rename_snapshot::execute(&request, &state.viewer, &mut connection)
+        })
+        .await?
+        .map_err(|error| match error {
+            RenameSnapshotError::InvalidName => Status::invalid_argument(error.to_string()),
+            RenameSnapshotError::UnknownTab | RenameSnapshotError::HistoryMissing => {
+                Status::not_found(error.to_string())
+            }
+            RenameSnapshotError::NotSnapshot | RenameSnapshotError::NotSaved => {
+                Status::failed_precondition(error.to_string())
+            }
+            error => unexpected(error, "rename snapshot"),
+        })?;
+        Ok(Response::new(v1::RenameViewerSnapshotResponse {}))
     }
 
     async fn set_viewer_tab_pinned(

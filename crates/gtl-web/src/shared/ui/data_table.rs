@@ -24,6 +24,13 @@ pub(crate) fn DataTable(caption: String, header: Element, children: Element) -> 
 }
 
 #[component]
+pub(crate) fn DataTableActions(children: Element) -> Element {
+    rsx! {
+        div { class: "control-table-actions", {children} }
+    }
+}
+
+#[component]
 pub(crate) fn TableHeading(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,

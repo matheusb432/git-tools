@@ -67,7 +67,7 @@ mod tests {
     fn successful_edits_publish_only_actual_viewer_changes() {
         for (mutation, outcome, viewer_rows_changed, version) in [
             (
-                SettingKeyValue::Theme(Theme::Light),
+                SettingKeyValue::Theme(Theme::Glacier),
                 UserSettingsEditOutcome::Changed,
                 false,
                 ViewerVersion::new(1),

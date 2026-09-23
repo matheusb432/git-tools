@@ -4,6 +4,7 @@ use gtl_models::projects::catalogue::{
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior};
 
 use super::ProjectCatalogueError;
+use crate::history::associate_render_projects;
 
 pub enum ProjectMembership {
     Managed,
@@ -52,6 +53,12 @@ pub fn execute(
                 ProjectMutationOutcome::Unchanged
             },
         });
+    }
+    if matches!(request.membership, ProjectMembership::Managed)
+        && request.mode == ProjectOperationMode::Apply
+    {
+        associate_render_projects::execute((), &transaction)
+            .map_err(ProjectCatalogueError::InvalidData)?;
     }
     transaction.commit()?;
     Ok(mutations)

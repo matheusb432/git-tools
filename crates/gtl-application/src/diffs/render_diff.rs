@@ -355,7 +355,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let app_settings = FixedUserSettingsStore::new(settings(
-            Some(Theme::Noir),
+            Some(Theme::Graphite),
             DiffExclusions::new(
                 [(crate::utils::project_name("repo"), vec!["md".to_string()])],
                 Some(vec!["txt".to_string()]),
@@ -381,7 +381,7 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
         assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
-        assert!(artifact.html.contains("noir"));
+        assert!(artifact.html.contains("graphite"));
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedUserSettingsStore::new(settings(Some(Theme::Light), DiffExclusions::default())),
+            &FixedUserSettingsStore::new(settings(Some(Theme::Glacier), DiffExclusions::default())),
             &source,
             &store,
             &StubRenderer,
