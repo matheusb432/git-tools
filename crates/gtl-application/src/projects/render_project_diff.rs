@@ -3,6 +3,7 @@
 use gtl_models::{
     artifacts::ArtifactDiffIdentity,
     diffs::ExcludedExtensions,
+    failure::ErrorMeta,
     paths::{ProjectName, RepositoryRoot},
 };
 use serde::{Deserialize, Serialize};
@@ -36,11 +37,13 @@ pub struct RenderProjectDiffOk {
 }
 
 /// Everything that can go wrong rendering diff-all.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RenderProjectDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

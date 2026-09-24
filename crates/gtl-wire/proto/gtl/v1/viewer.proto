@@ -3,6 +3,7 @@ syntax = "proto3";
 package gtl.v1;
 
 import "gtl/v1/common.proto";
+import "gtl/v1/failure.proto";
 import "gtl/v1/repository.proto";
 import "gtl/v1/settings.proto";
 
@@ -90,10 +91,12 @@ message ImportProjectRepositoriesResponse {
 }
 
 message ProjectImportResult {
+  reserved 4;
+  reserved "error";
   string path = 1;
   string project_id = 2;
   ProjectImportOutcome outcome = 3;
-  optional string error = 4;
+  Failure failure = 5;
 }
 
 enum ProjectImportOutcome {
@@ -140,9 +143,11 @@ message WatchViewerResponse {
 }
 
 message ViewerLiveCheck {
+  reserved 2;
+  reserved "error";
   uint64 tab_id = 1;
-  optional string error = 2;
   uint64 elapsed_ms = 3;
+  Failure failure = 4;
 }
 
 enum ViewerDiffLayout {
@@ -233,14 +238,6 @@ message ViewerAppliedExclusions {
   repeated string hidden_paths = 2;
 }
 
-enum ViewerFailureCode {
-  VIEWER_FAILURE_CODE_UNSPECIFIED = 0;
-  VIEWER_FAILURE_CODE_REPOSITORY_DIRECTORY_NOT_FOUND = 1;
-  VIEWER_FAILURE_CODE_REPOSITORY_DIRECTORY_NOT_GIT_REPOSITORY = 2;
-  VIEWER_FAILURE_CODE_SOURCE_UNAVAILABLE = 3;
-  VIEWER_FAILURE_CODE_RENDER_FAILED = 4;
-}
-
 enum ViewerCommitSelectionState {
   VIEWER_COMMIT_SELECTION_STATE_UNSPECIFIED = 0;
   VIEWER_COMMIT_SELECTION_STATE_NONE = 1;
@@ -250,9 +247,12 @@ enum ViewerCommitSelectionState {
 }
 
 message ViewerCommitSelection {
+  reserved 3;
+  reserved "message";
+
   ViewerCommitSelectionState state = 1;
   optional string commit_id = 2;
-  optional string message = 3;
+  Failure failure = 4;
 }
 
 enum ViewerRowSourceState {
@@ -285,9 +285,11 @@ message ViewerPendingState {
 }
 
 message ViewerFailureState {
+  reserved 2, 3;
+  reserved "code", "message";
+
   uint64 tab_id = 1;
-  ViewerFailureCode code = 2;
-  string message = 3;
+  Failure failure = 4;
 }
 
 message ViewerReadyState {
@@ -479,18 +481,10 @@ message StreamViewerRowSessionResponse {
 }
 
 message ViewerRowSessionFailure {
-  ViewerRowSessionFailureCode code = 1;
-}
+  reserved 1;
+  reserved "code";
 
-enum ViewerRowSessionFailureCode {
-  VIEWER_ROW_SESSION_FAILURE_CODE_UNSPECIFIED = 0;
-  VIEWER_ROW_SESSION_FAILURE_CODE_INVALID_REQUEST = 1;
-  VIEWER_ROW_SESSION_FAILURE_CODE_NOT_FOUND = 2;
-  VIEWER_ROW_SESSION_FAILURE_CODE_CONFLICT = 3;
-  VIEWER_ROW_SESSION_FAILURE_CODE_RESOURCE_EXHAUSTED = 4;
-  VIEWER_ROW_SESSION_FAILURE_CODE_UNAVAILABLE = 5;
-  VIEWER_ROW_SESSION_FAILURE_CODE_INVALID_SETTINGS = 6;
-  VIEWER_ROW_SESSION_FAILURE_CODE_INTERNAL = 7;
+  Failure failure = 2;
 }
 
 message SearchViewerFilesRequest {
@@ -622,18 +616,13 @@ message ViewerFileFinished {
   uint32 end_row = 3;
 }
 
-enum ViewerFileFailureCode {
-  VIEWER_FILE_FAILURE_CODE_UNSPECIFIED = 0;
-  VIEWER_FILE_FAILURE_CODE_SOURCE_UNAVAILABLE = 1;
-  VIEWER_FILE_FAILURE_CODE_PARSE_FAILED = 2;
-  VIEWER_FILE_FAILURE_CODE_ROW_TOO_LARGE = 3;
-}
-
 message ViewerFileFailed {
+  reserved 2, 3;
+  reserved "code", "message";
+
   string file_id = 1;
-  ViewerFileFailureCode code = 2;
-  string message = 3;
   bool retryable = 4;
+  Failure failure = 5;
 }
 
 message StreamViewerRowsResponse {
@@ -900,10 +889,12 @@ message GetViewerProjectStatusResponse {
   ViewerProjectBranchComparison branch_comparison = 5;
 }
 message ViewerProjectBranchComparison {
+  reserved 3;
+  reserved "unavailable_reason";
   oneof state {
     Empty upstream = 1;
     uint64 commits_ahead = 2;
-    string unavailable_reason = 3;
+    Failure unavailable = 4;
   }
 }
 message ComparisonBranchFieldUpdate {
@@ -1018,12 +1009,15 @@ message ViewerPushRunning {}
 message ViewerPushQueued {}
 message ViewerPushSucceeded {}
 message GetViewerPushResponse {
+  reserved 4;
+  reserved "failure";
+
   oneof status {
     ViewerPushPreview review = 1;
     ViewerPushRunning running = 2;
     ViewerPushSucceeded succeeded = 3;
-    string failure = 4;
     ViewerPushQueued queued = 5;
+    Failure failed = 6;
   }
 }
 
@@ -1031,10 +1025,13 @@ message GetViewerPushAvailabilityRequest { ViewerViewIdentity identity = 1; }
 message ViewerPushAvailable {}
 message ViewerPushNothingToPush {}
 message GetViewerPushAvailabilityResponse {
+  reserved 3;
+  reserved "unavailable";
+
   oneof availability {
     ViewerPushAvailable available = 1;
     ViewerPushNothingToPush nothing_to_push = 2;
-    string unavailable = 3;
+    Failure blocked = 4;
   }
 }
 

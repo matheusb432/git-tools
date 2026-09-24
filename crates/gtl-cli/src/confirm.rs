@@ -112,7 +112,7 @@ pub(crate) fn request(command: &str, bypass: bool, dialog: &Dialog) -> Result<()
         }
         Err(error) => {
             eprintln!("{command}: confirmation failed: {error}");
-            Err(ExitCode::Internal)
+            Err(ExitCode::Failed)
         }
     }
 }

@@ -1341,9 +1341,26 @@ pub(crate) fn make_repository(directory: &Path) {
 }
 
 #[cfg(test)]
-pub(crate) fn make_linked_worktree(directory: &Path, git_directory: &str) {
+pub(crate) fn make_linked_worktree(directory: &Path, administrative_directory: &Path) {
+    std::fs::create_dir_all(administrative_directory).unwrap();
+    std::fs::write(administrative_directory.join("commondir"), "../..\n").unwrap();
+    make_git_file(directory, administrative_directory);
+}
+
+#[cfg(test)]
+pub(crate) fn make_submodule(directory: &Path, module_directory: &Path) {
+    std::fs::create_dir_all(module_directory).unwrap();
+    make_git_file(directory, module_directory);
+}
+
+#[cfg(test)]
+fn make_git_file(directory: &Path, git_directory: &Path) {
     std::fs::create_dir_all(directory).unwrap();
-    std::fs::write(directory.join(".git"), format!("gitdir: {git_directory}\n")).unwrap();
+    std::fs::write(
+        directory.join(".git"),
+        format!("gitdir: {}\n", git_directory.display()),
+    )
+    .unwrap();
 }
 
 #[derive(Default)]

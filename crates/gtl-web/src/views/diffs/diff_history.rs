@@ -63,7 +63,7 @@ fn use_history_actions() -> HistoryActions {
             Ok(payload) if browser::copy_text(&payload.json).await => {
                 copied_id.set(Some(render_id));
             }
-            Ok(_) => error.set(Some(ViewerClientError::Unavailable)),
+            Ok(_) => error.set(Some(ViewerClientError::Disconnected)),
             Err(next_error) => error.set(Some(next_error)),
         }
         Ok::<(), std::convert::Infallible>(())
@@ -164,7 +164,7 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
                             div {
                                 class: "history-error mb-3 px-3 py-2",
                                 role: "alert",
-                                "{error.message()}"
+                                "{error}"
                             }
                         }
                     }
@@ -173,7 +173,7 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
                             HistoryLoading {}
                         },
                         (false, Some(Err(error))) => {
-                            let message = error.message();
+                            let message = error.to_string();
                             rsx! {
                                 PageNotice {
                                     class: "min-h-64",

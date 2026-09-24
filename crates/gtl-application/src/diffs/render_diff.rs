@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use gtl_models::{
     artifacts::{ArtifactCommitRange, ArtifactDiffIdentity, ArtifactRangeKind},
     diffs::{DiffKind, PinnedRange},
+    failure::ErrorMeta,
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
 };
@@ -40,15 +41,19 @@ pub enum RenderDiffOutcome {
     Empty,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RenderDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Comparison(#[from] crate::projects::comparison::ComparisonError),
     #[error(transparent)]
+    #[meta(transparent)]
     InvalidTarget(#[from] DiffTargetRequestError),
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

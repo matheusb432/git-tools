@@ -8,6 +8,7 @@ fn thumbnail() -> Element {
     rsx! {
         div { class: "max-w-sm",
             TextInput {
+                id: "story-search",
                 label: "Search",
                 placeholder: "Type to filter",
                 supporting_content: rsx! {
@@ -24,6 +25,7 @@ fn default() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
+                id: "story-branch-filter",
                 label: "Branch filter",
                 placeholder: "feature/component-preview",
                 supporting_content: rsx! {
@@ -34,18 +36,18 @@ fn default() -> Element {
     }
 }
 
-/// Invalid state with a text error.
+/// Invalid state: the error sits below the input and describes it before the helper text.
 #[story]
 fn validation() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
+                id: "story-remote-name",
                 label: "Remote name",
                 value: "origin main",
-                aria_invalid: "true",
-                aria_describedby: "remote-name-error",
+                error: "Remote names cannot contain spaces.",
                 supporting_content: rsx! {
-                    span { id: "remote-name-error", class: "text-del", "Remote names cannot contain spaces." }
+                    span { "Used as the push destination." }
                 },
             }
         }
@@ -58,6 +60,7 @@ fn disabled() -> Element {
     rsx! {
         div { class: "max-w-md",
             TextInput {
+                id: "story-repository-root",
                 label: "Repository root",
                 value: "/workspace/example",
                 disabled: true,
@@ -78,6 +81,7 @@ fn controlled() -> Element {
     rsx! {
         div { class: "grid max-w-md gap-3",
             TextInput {
+                id: "story-commit-message",
                 label: "Commit message",
                 value: visible_value.clone(),
                 placeholder: "Describe the change",

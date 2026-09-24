@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use gtl_models::{
+    failure::ErrorMeta,
     git::{BranchName, CommitCount, GitHead, GitRange, RemoteName, RemoteUrl},
     paths::{ProjectName, RepositoryRoot},
     repository::{PathCount, PendingChanges},
@@ -24,10 +25,11 @@ pub enum PlanPushOk {
     Ready(PushTarget),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 #[non_exhaustive]
 pub enum PlanPushError {
     #[error("{command}: {source}")]
+    #[meta(private(Internal))]
     Transport {
         command: String,
         #[source]

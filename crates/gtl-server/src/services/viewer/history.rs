@@ -8,7 +8,10 @@ use gtl_application::{
     recipes::RecipeOp,
     viewer::work,
 };
-use gtl_models::viewer::RenderHistoryId;
+use gtl_models::{
+    failure::{ErrorClass, Failure, Resource},
+    viewer::RenderHistoryId,
+};
 use gtl_wire::{
     proto, v1,
     viewer::{ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind},
@@ -16,8 +19,11 @@ use gtl_wire::{
 use tonic::{Request, Response, Status};
 
 use super::{
-    super::{run_blocking, unexpected},
-    errors::map_reserve_recipe,
+    super::{
+        run_blocking,
+        status::{GrpcResultExt as _, invalid_request, private, status},
+        unexpected,
+    },
     shell::project_shell,
 };
 use crate::{state::AppState, viewer_runtime};
@@ -28,7 +34,7 @@ pub(super) async fn list_viewer_history(
 ) -> Result<Response<v1::ListViewerHistoryResponse>, Status> {
     let request = request.into_inner();
     let decoded = proto::viewer::decode_list_viewer_history_request(request)
-        .map_err(|_| Status::invalid_argument("invalid history filter"))?;
+        .map_err(|_| invalid_request("filter"))?;
     let cursor = history_cursor(decoded.cursor);
     let state = state.clone();
     let page = run_blocking(move || {
@@ -52,8 +58,7 @@ pub(super) async fn open_viewer_history(
     request: Request<v1::OpenViewerHistoryRequest>,
 ) -> Result<Response<v1::OpenViewerHistoryResponse>, Status> {
     let record = history_record(state, request.into_inner().render_id).await?;
-    let work = work::reserve_history_open(&state.viewer, record)
-        .map_err(|error| map_reserve_recipe(error, "open viewer history"))?;
+    let work = work::reserve_history_open(&state.viewer, record).into_grpc()?;
     viewer_runtime::spawn_recipe(state.clone(), work);
     Ok(Response::new(v1::OpenViewerHistoryResponse {
         shell: Some(project_shell(state, None)?),
@@ -111,7 +116,7 @@ pub(super) fn project_history_page(
         has_older: page.has_older,
     };
     proto::viewer::encode_list_viewer_history_response(page)
-        .map_err(|_| Status::internal("stored viewer history is invalid"))
+        .map_err(|_| private(ErrorClass::DataLoss, "stored viewer history is invalid"))
 }
 
 pub(super) async fn history_record(
@@ -127,11 +132,14 @@ pub(super) async fn history_record(
     })
     .await?
     .map_err(|error| unexpected(error, "load viewer history entry"))?
-    .ok_or_else(|| Status::not_found("viewer history entry is not available"))
+    .ok_or_else(|| {
+        status(&Failure::Gone {
+            resource: Resource::Snapshot,
+        })
+    })
 }
 
 pub(super) fn render_history_id(raw: u64) -> Result<RenderHistoryId, Status> {
-    let raw = i64::try_from(raw).map_err(|_| Status::invalid_argument("render_id is invalid"))?;
-    RenderHistoryId::try_new(raw)
-        .map_err(|_| Status::invalid_argument("render_id must be positive"))
+    let raw = i64::try_from(raw).map_err(|_| invalid_request("render_id"))?;
+    RenderHistoryId::try_new(raw).map_err(|_| invalid_request("render_id"))
 }

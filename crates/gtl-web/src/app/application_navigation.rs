@@ -132,7 +132,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let mut move_tab = use_action(move |request: MoveViewerTab| async move {
         match viewer_server::move_tab(request).await {
             Ok(shell) => viewer.replace_shell(shell),
-            Err(error) => toast.error(error.message()),
+            Err(error) => toast.client_error(&error),
         }
         pending_tab_order.set(None);
         Ok::<(), std::convert::Infallible>(())
@@ -147,9 +147,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
             {
                 Ok(()) => match viewer_server::get_shell().await {
                     Ok(shell) => viewer.replace_shell(shell),
-                    Err(error) => toast.error(error.message()),
+                    Err(error) => toast.client_error(&error),
                 },
-                Err(error) => toast.error(error.message()),
+                Err(error) => toast.client_error(&error),
             }
         });
     });
@@ -170,8 +170,8 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         (submission.complete)(Ok(()));
                     }
                     Err(error) => {
-                        toast.error(error.message());
-                        (submission.complete)(Err(error.message().to_owned()));
+                        toast.client_error(&error);
+                        (submission.complete)(Err(error.to_string()));
                     }
                 }
             });
@@ -182,9 +182,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
             match viewer_server::close_other_tabs(ViewerTabRequest { tab_id }).await {
                 Ok(()) => match viewer_server::get_shell().await {
                     Ok(shell) => viewer.replace_shell(shell),
-                    Err(error) => toast.error(error.message()),
+                    Err(error) => toast.client_error(&error),
                 },
-                Err(error) => toast.error(error.message()),
+                Err(error) => toast.client_error(&error),
             }
         });
     });
@@ -208,7 +208,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             ));
                         }
                     }
-                    Err(error) => toast.error(error.message()),
+                    Err(error) => toast.client_error(&error),
                 }
             });
         });

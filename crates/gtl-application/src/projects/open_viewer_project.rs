@@ -1,4 +1,9 @@
-use gtl_models::{projects::ProjectRepository, recipes::RecipeBatchId, viewer::ViewerTabKind};
+use gtl_models::{
+    failure::{ErrorMeta, Failure, Resource},
+    projects::ProjectRepository,
+    recipes::RecipeBatchId,
+    viewer::ViewerTabKind,
+};
 use gtl_wire::viewer::projects::{OpenViewerProject, ViewerProjectDiffMode};
 use rusqlite::Connection;
 
@@ -19,11 +24,13 @@ pub struct OpenProjectComparison {
     pub repositories: Vec<ProjectRepository>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum OpenViewerProjectError {
     #[error("project is no longer available")]
+    #[meta(failure = Failure::Gone { resource: Resource::Project })]
     NotFound,
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

@@ -161,7 +161,7 @@ pub(super) fn use_sidebar_controls() -> SidebarControls {
         let shell = match result {
             Ok(shell) => shell,
             Err(error) => {
-                toast.error(error.message());
+                toast.client_error(&error);
                 return Ok::<(), std::convert::Infallible>(());
             }
         };

@@ -8,6 +8,7 @@ use gtl_models::{
 
 use super::{ViewerCodecError, required};
 use crate::{
+    proto::failure::{decode_failure, encode_failure},
     v1,
     viewer::projects::{
         DiscoverProjectRepositories, DiscoveredProjectRepository, GetViewerProjectStatus,
@@ -156,18 +157,19 @@ pub fn encode_import_results(
         results: results
             .into_iter()
             .map(|result| {
-                let (outcome, error) = match result.outcome {
+                let (outcome, failure) = match result.outcome {
                     ProjectImportOutcome::Created => (v1::ProjectImportOutcome::Created, None),
                     ProjectImportOutcome::Restored => (v1::ProjectImportOutcome::Restored, None),
-                    ProjectImportOutcome::Failed(message) => {
-                        (v1::ProjectImportOutcome::Failed, Some(message))
-                    }
+                    ProjectImportOutcome::Failed(failure) => (
+                        v1::ProjectImportOutcome::Failed,
+                        Some(encode_failure(&failure)),
+                    ),
                 };
                 v1::ProjectImportResult {
                     path: result.path,
                     project_id: result.project_id,
                     outcome: outcome as i32,
-                    error,
+                    failure,
                 }
             })
             .collect(),
@@ -186,12 +188,14 @@ pub fn decode_import_results(
         .map(|result| {
             let outcome = match (
                 v1::ProjectImportOutcome::try_from(result.outcome),
-                result.error,
+                result.failure,
             ) {
                 (Ok(v1::ProjectImportOutcome::Created), None) => ProjectImportOutcome::Created,
                 (Ok(v1::ProjectImportOutcome::Restored), None) => ProjectImportOutcome::Restored,
-                (Ok(v1::ProjectImportOutcome::Failed), Some(error)) if !error.is_empty() => {
-                    ProjectImportOutcome::Failed(error)
+                (Ok(v1::ProjectImportOutcome::Failed), Some(failure)) => {
+                    ProjectImportOutcome::Failed(
+                        decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+                    )
                 }
                 _ => return Err(ViewerCodecError::InvalidMessage),
             };
@@ -506,8 +510,8 @@ fn encode_branch_comparison(
             ViewerProjectBranchComparison::Branch { commits_ahead } => {
                 State::CommitsAhead(commits_ahead.into_inner())
             }
-            ViewerProjectBranchComparison::Unavailable { reason } => {
-                State::UnavailableReason(reason)
+            ViewerProjectBranchComparison::Unavailable { failure } => {
+                State::Unavailable(encode_failure(&failure))
             }
         }),
     }
@@ -523,7 +527,9 @@ fn decode_branch_comparison(
         State::CommitsAhead(count) => ViewerProjectBranchComparison::Branch {
             commits_ahead: CommitCount::new(count),
         },
-        State::UnavailableReason(reason) => ViewerProjectBranchComparison::Unavailable { reason },
+        State::Unavailable(failure) => ViewerProjectBranchComparison::Unavailable {
+            failure: decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+        },
     })
 }
 
@@ -555,20 +561,25 @@ pub fn decode_update(
     use crate::viewer::FieldUpdate;
     Ok(UpdateViewerProject {
         path: gtl_models::paths::RepositoryRoot::try_new(request.path.into())
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        expected_comparison_branch: request
-            .expected_comparison_branch
-            .try_into()
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+            .map_err(|_| ViewerCodecError::InvalidField { field: "path" })?,
+        expected_comparison_branch: request.expected_comparison_branch.try_into().map_err(
+            |_| ViewerCodecError::InvalidField {
+                field: "expected_comparison_branch",
+            },
+        )?,
         comparison_branch: match request.comparison_branch {
             None => FieldUpdate::Unchanged,
-            Some(field) => match required(field.operation)? {
+            Some(update) => match required(update.operation)
+                .map_err(|error| error.in_field("comparison_branch"))?
+            {
                 Operation::Clear(_) => FieldUpdate::Clear,
-                Operation::Update(branch) => FieldUpdate::Update(
-                    branch
-                        .try_into()
-                        .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                ),
+                Operation::Update(branch) => {
+                    FieldUpdate::Update(branch.try_into().map_err(|_| {
+                        ViewerCodecError::InvalidField {
+                            field: "comparison_branch",
+                        }
+                    })?)
+                }
             },
         },
     })
@@ -584,7 +595,7 @@ pub fn decode_status_update(
         .map_err(|_| ViewerCodecError::InvalidMessage)?;
     match required(update.result)? {
         v1::viewer_project_status_update::Result::Status(status) => {
-            let status = decode_project_status(status)?;
+            let status = decode_project_status(*status)?;
             if status.project_id != id {
                 return Err(ViewerCodecError::InvalidMessage);
             }
@@ -604,9 +615,9 @@ pub fn encode_status_update(
     match update {
         ViewerProjectStatusUpdate::Status(status) => v1::ViewerProjectStatusUpdate {
             project_id: status.project_id.to_string(),
-            result: Some(v1::viewer_project_status_update::Result::Status(
+            result: Some(v1::viewer_project_status_update::Result::Status(Box::new(
                 encode_project_status(status),
-            )),
+            ))),
         },
         ViewerProjectStatusUpdate::Unavailable(id) => v1::ViewerProjectStatusUpdate {
             project_id: id.to_string(),
@@ -614,5 +625,56 @@ pub fn encode_status_update(
                 v1::Empty {},
             )),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_updates_name_the_rejected_field() {
+        let valid = v1::UpdateViewerProjectRequest {
+            path: "/repos/project".into(),
+            comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
+                operation: Some(v1::comparison_branch_field_update::Operation::Update(
+                    "release".into(),
+                )),
+            }),
+            expected_comparison_branch: "main".into(),
+        };
+        for (request, field) in [
+            (
+                v1::UpdateViewerProjectRequest {
+                    path: String::new(),
+                    ..valid.clone()
+                },
+                "path",
+            ),
+            (
+                v1::UpdateViewerProjectRequest {
+                    comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
+                        operation: Some(v1::comparison_branch_field_update::Operation::Update(
+                            "bad..branch".into(),
+                        )),
+                    }),
+                    ..valid.clone()
+                },
+                "comparison_branch",
+            ),
+            (
+                v1::UpdateViewerProjectRequest {
+                    expected_comparison_branch: "HEAD".into(),
+                    ..valid.clone()
+                },
+                "expected_comparison_branch",
+            ),
+        ] {
+            assert_eq!(
+                decode_update(request),
+                Err(ViewerCodecError::InvalidField { field })
+            );
+        }
+        assert!(decode_update(valid).is_ok());
     }
 }

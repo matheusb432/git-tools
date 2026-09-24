@@ -59,7 +59,7 @@ pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters() -> Element {
         .unwrap_or_default();
     let error = controller
         .error(tab_id)
-        .or_else(|| fetched.and_then(|(_, _, result)| result.as_ref().err().copied()));
+        .or_else(|| fetched.and_then(|(_, _, result)| result.as_ref().err().cloned()));
     rsx! {
         ExtensionFilter {
             key: "{tab_id}",

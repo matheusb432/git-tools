@@ -1,24 +1,40 @@
-use gtl_models::paths::ProjectName;
+use gtl_models::{
+    failure::{ErrorMeta, Failure, Resource, ViewerFailure},
+    paths::ProjectName,
+};
 use gtl_wire::viewer::RenameViewerSnapshot;
 use rusqlite::{Connection, params};
 
 use super::{ViewerState, ViewerStateError, ViewerTabKind, pinned_tabs};
 
-#[derive(Debug, thiserror::Error)]
+/// Longest accepted snapshot name, in Unicode scalar values.
+pub const SNAPSHOT_NAME_CHARACTERS_MAX: u32 = 200;
+
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RenameSnapshotError {
-    #[error("snapshot name must contain 1 to 200 characters on a single line")]
+    #[error(
+        "snapshot name must contain 1 to {} characters on a single line",
+        SNAPSHOT_NAME_CHARACTERS_MAX
+    )]
+    #[meta(failure = ViewerFailure::SnapshotNameInvalid { characters_max: SNAPSHOT_NAME_CHARACTERS_MAX })]
     InvalidName,
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
     #[error("only snapshots can be renamed")]
+    #[meta(failure = ViewerFailure::NotSnapshot)]
     NotSnapshot,
     #[error("wait for the snapshot to be saved before renaming it")]
+    #[meta(failure = ViewerFailure::SnapshotPending)]
     NotSaved,
     #[error("the saved snapshot is no longer available")]
+    #[meta(failure = Failure::Gone { resource: Resource::Snapshot })]
     HistoryMissing,
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -29,7 +45,9 @@ pub fn execute(
     connection: &mut Connection,
 ) -> Result<(), RenameSnapshotError> {
     let text = request.name.trim();
-    if text.chars().count() > 200 || text.chars().any(char::is_control) {
+    if text.chars().count() > SNAPSHOT_NAME_CHARACTERS_MAX as usize
+        || text.chars().any(char::is_control)
+    {
         return Err(RenameSnapshotError::InvalidName);
     }
     let name =

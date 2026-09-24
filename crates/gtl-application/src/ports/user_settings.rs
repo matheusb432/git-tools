@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use gtl_models::settings::UserSettings;
+use gtl_models::{
+    failure::{ErrorMeta, ExternalDiagnostic, Failure, PublicFailure, SettingsFailure},
+    settings::UserSettings,
+};
 
 use crate::settings::UserSettingsPatch;
 
@@ -27,14 +30,26 @@ impl UserSettingsConfigurationError {
     }
 }
 
+impl PublicFailure for UserSettingsConfigurationError {
+    fn failure(&self) -> Failure {
+        SettingsFailure::Invalid {
+            path: self.path.clone(),
+            diagnostic: ExternalDiagnostic::new(&format!("{:#}", self.source)),
+        }
+        .into()
+    }
+}
+
 /// A strict user-settings snapshot could not be loaded.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum UserSettingsLoadError {
     /// The file was readable but was not a valid supported settings document.
     #[error(transparent)]
+    #[meta(failure)]
     InvalidConfiguration(#[from] UserSettingsConfigurationError),
     /// The settings adapter failed outside the document contract.
     #[error(transparent)]
+    #[meta(private(Internal))]
     Adapter(#[from] anyhow::Error),
 }
 
@@ -52,17 +67,34 @@ pub enum UserSettingsEditConflict {
     ConcurrentModification { path: PathBuf },
 }
 
+impl PublicFailure for UserSettingsEditConflict {
+    fn failure(&self) -> Failure {
+        match self {
+            Self::StaleRevision { .. } | Self::ConcurrentModification { .. } => {
+                SettingsFailure::Stale
+            }
+            Self::LockTimeout { wait_seconds, .. } => SettingsFailure::Locked {
+                wait_seconds: *wait_seconds,
+            },
+        }
+        .into()
+    }
+}
+
 /// A strict user-settings edit could not be completed safely.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum UserSettingsEditError {
     /// The existing or proposed document was not a valid supported configuration.
     #[error(transparent)]
+    #[meta(failure)]
     InvalidConfiguration(#[from] UserSettingsConfigurationError),
     /// Another writer prevented the edit from completing safely.
     #[error(transparent)]
+    #[meta(failure)]
     Conflict(#[from] UserSettingsEditConflict),
     /// The settings adapter failed outside the document contract.
     #[error(transparent)]
+    #[meta(private(Internal))]
     Adapter(#[from] anyhow::Error),
 }
 

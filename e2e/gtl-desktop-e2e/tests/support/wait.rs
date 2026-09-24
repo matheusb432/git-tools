@@ -1,6 +1,7 @@
 use std::{future::Future, time::Duration};
 
 use anyhow::{Context, Result, ensure};
+use thirtyfour::error::{WebDriverError, WebDriverErrorInner};
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 
 pub const ASSERTION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -16,6 +17,10 @@ where
         .with_context(|| format!("timed out after {duration:?} {description}"))?
 }
 
+/// Polls `probe` until it returns a value.
+///
+/// A probe that reads an element the viewer is re-rendering, or one that is not mounted yet,
+/// is retried instead of failing the wait.
 pub async fn until<T, F, Fut>(description: &str, duration: Duration, mut probe: F) -> Result<T>
 where
     F: FnMut() -> Fut,
@@ -25,9 +30,12 @@ where
     loop {
         let probe_result = timeout_at(deadline, probe())
             .await
-            .with_context(|| format!("timed out after {duration:?} waiting for {description}"))??;
-        if let Some(value) = probe_result {
-            return Ok(value);
+            .with_context(|| format!("timed out after {duration:?} waiting for {description}"))?;
+        match probe_result {
+            Ok(Some(value)) => return Ok(value),
+            Ok(None) => {}
+            Err(error) if is_transient_dom_error(&error) => {}
+            Err(error) => return Err(error),
         }
 
         let now = Instant::now();
@@ -37,4 +45,13 @@ where
         );
         sleep(POLL_INTERVAL.min(deadline - now)).await;
     }
+}
+
+fn is_transient_dom_error(error: &anyhow::Error) -> bool {
+    matches!(
+        error
+            .downcast_ref::<WebDriverError>()
+            .map(WebDriverError::as_inner),
+        Some(WebDriverErrorInner::StaleElementReference(_) | WebDriverErrorInner::NoSuchElement(_))
+    )
 }

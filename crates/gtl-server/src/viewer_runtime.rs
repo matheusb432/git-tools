@@ -13,7 +13,10 @@ use gtl_application::{
         ReservedRecipeWork,
     },
 };
-use gtl_models::viewer::{RenderHistoryId, ViewerTabState};
+use gtl_models::{
+    failure::ViewerFailure,
+    viewer::{RenderHistoryId, ViewerTabState},
+};
 
 use crate::state::AppState;
 
@@ -186,18 +189,22 @@ fn discard_history(state: &AppState, render_id: RenderHistoryId) {
 }
 
 fn broken_failure(state: &ViewerTabState) -> RenderFailure {
-    let ViewerTabState::Broken { code, reason } = state else {
+    let ViewerTabState::Broken { failure } = state else {
         return RenderFailure::new(
             RenderErrorCode::SourceUnavailable,
             format!("unexpected broken render state: {state:?}"),
         );
     };
-    let code = match code.as_str() {
-        "DirNotFound" => RenderErrorCode::RepositoryDirectoryNotFound,
-        "DirNotGitRepo" => RenderErrorCode::RepositoryDirectoryNotGitRepository,
+    let code = match failure {
+        ViewerFailure::SourceDirectoryMissing { .. } => {
+            RenderErrorCode::RepositoryDirectoryNotFound
+        }
+        ViewerFailure::SourceNotRepository { .. } => {
+            RenderErrorCode::RepositoryDirectoryNotGitRepository
+        }
         _ => RenderErrorCode::SourceUnavailable,
     };
-    RenderFailure::new(code, reason)
+    RenderFailure::new(code, failure.to_string())
 }
 
 pub(crate) fn record_project_renders(

@@ -1,5 +1,6 @@
 use gtl_models::{
     diffs::{CommitId, PinnedRange},
+    failure::{Classification, Classified, ErrorClass, ProjectFailure},
     git::{GitRange, GitRevision},
     paths::RepositoryRoot,
     projects::comparison::ComparisonBranch,
@@ -52,6 +53,7 @@ pub enum ComparisonError {
     MissingBranch {
         path: RepositoryRoot,
         branch: ComparisonBranch,
+        project: Option<RepositoryRoot>,
     },
     #[error("The repository at {path} has no commits to compare.")]
     Unborn { path: RepositoryRoot },
@@ -61,9 +63,38 @@ pub enum ComparisonError {
     NoCommonAncestor {
         path: RepositoryRoot,
         branch: ComparisonBranch,
+        project: Option<RepositoryRoot>,
     },
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
+}
+
+impl Classified for ComparisonError {
+    fn classify(&self) -> Classification {
+        let failure = match self {
+            Self::MissingBranch {
+                path,
+                branch,
+                project,
+            } => ProjectFailure::ComparisonBranchMissing {
+                path: path.clone(),
+                branch: branch.clone(),
+                project: project.clone(),
+            },
+            Self::Unborn { path } => ProjectFailure::RepositoryUnborn { path: path.clone() },
+            Self::NoCommonAncestor {
+                path,
+                branch,
+                project,
+            } => ProjectFailure::NoCommonAncestor {
+                path: path.clone(),
+                branch: branch.clone(),
+                project: project.clone(),
+            },
+            Self::Unexpected(_) => return Classification::Private(ErrorClass::Internal),
+        };
+        Classification::Public(failure.into())
+    }
 }
 
 impl ComparisonError {
@@ -73,21 +104,39 @@ impl ComparisonError {
     }
 }
 
-pub fn configured_branch(
+/// The comparison branch that applies to a repository and the project whose setting names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredComparison {
+    pub branch: ComparisonBranch,
+    /// `None` when no catalogued project owns the repository, so the default applies.
+    pub project: Option<RepositoryRoot>,
+}
+
+/// Reads the repository's own setting, then its primary worktree's, then the default.
+pub fn configured_comparison(
     path: &RepositoryRoot,
     git: &impl GitClient,
     comparisons: &impl ProjectComparisonReader,
-) -> anyhow::Result<ComparisonBranch> {
+) -> anyhow::Result<ConfiguredComparison> {
     if let Some(branch) = comparisons.comparison_branch(path)? {
-        return Ok(branch);
+        return Ok(ConfiguredComparison {
+            branch,
+            project: Some(path.clone()),
+        });
     }
     let primary = git.primary_worktree(path)?;
     if primary != *path
         && let Some(branch) = comparisons.comparison_branch(&primary)?
     {
-        return Ok(branch);
+        return Ok(ConfiguredComparison {
+            branch,
+            project: Some(primary),
+        });
     }
-    Ok(ComparisonBranch::default())
+    Ok(ConfiguredComparison {
+        branch: ComparisonBranch::default(),
+        project: None,
+    })
 }
 
 pub fn resolve(
@@ -108,12 +157,13 @@ pub(super) fn resolve_local(
     git: &impl GitClient,
     comparisons: &impl ProjectComparisonReader,
 ) -> Result<ResolvedComparison, ComparisonError> {
-    let branch = configured_branch(path, git, comparisons)?;
+    let ConfiguredComparison { branch, project } = configured_comparison(path, git, comparisons)?;
     let reference = branch.revision();
     if !git.revision_exists(path, &reference)? {
         return Err(ComparisonError::MissingBranch {
             path: path.clone(),
             branch,
+            project,
         });
     }
     if !git.revision_exists(path, &GitRevision::head())? {
@@ -125,6 +175,7 @@ pub(super) fn resolve_local(
         .ok_or_else(|| ComparisonError::NoCommonAncestor {
             path: path.clone(),
             branch: branch.clone(),
+            project,
         })?;
     Ok(ResolvedComparison::Branch {
         branch,

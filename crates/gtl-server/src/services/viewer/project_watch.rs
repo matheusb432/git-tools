@@ -11,6 +11,7 @@ use gtl_infra::{
     git_client::status_context::StatusContextScope, project_status_watch::ProjectStatusWatch,
 };
 use gtl_models::{
+    failure::{ErrorClass, Failure},
     projects::catalogue::ProjectId,
     repository::status::{RepositoryStatus, StatusChanges, StatusHead},
 };
@@ -21,6 +22,7 @@ use gtl_wire::{
 use tokio::sync::mpsc;
 use tonic::Status;
 
+use super::super::status::{private, status};
 use crate::state::AppState;
 
 type Sender = mpsc::Sender<Result<v1::WatchViewerResponse, Status>>;
@@ -34,7 +36,7 @@ pub(super) fn spawn(
         .viewer_project_watch_requests
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("project status watch limit reached"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     tokio::spawn(async move {
         let _admission = admission;
         supervise(state, selection, sender).await;
@@ -66,12 +68,12 @@ async fn supervise(state: AppState, selection: ViewerProjectSelection, sender: S
         tokio::select! {
             () = sender.closed() => break,
             result = &mut task => {
-                if !matches!(result, Ok(Ok(()))) { let _ = sender.try_send(Err(Status::unavailable("project status watch stopped"))); }
+                if !matches!(result, Ok(Ok(()))) { let _ = sender.try_send(Err(private(ErrorClass::Unavailable, "project status watch stopped"))); }
                 break;
             }
             _ = deadline.tick() => {
                 if started.lock().is_ok_and(|started| started.is_some_and(|started| started.elapsed() >= Duration::from_secs(30))) {
-                    let _ = sender.try_send(Err(Status::deadline_exceeded("project status check timed out")));
+                    let _ = sender.try_send(Err(private(ErrorClass::DeadlineExceeded, "project status check timed out")));
                     break;
                 }
             }
@@ -242,9 +244,12 @@ impl Worker {
         let Some(project) = project else {
             return Ok(ViewerProjectStatusUpdate::Unavailable(id.clone()));
         };
-        let Ok(mut status) = get_viewer_project_status::execute(project.clone(), &self.state.git)
-        else {
-            return Ok(ViewerProjectStatusUpdate::Unavailable(id.clone()));
+        let status = match get_viewer_project_status::execute(project.clone(), &self.state.git) {
+            Ok(status) => status,
+            Err(error) => {
+                tracing::warn!(error = ?error, project = %id, "project status unavailable");
+                return Ok(ViewerProjectStatusUpdate::Unavailable(id.clone()));
+            }
         };
         if self.cancelled()
             || matches!(
@@ -259,11 +264,6 @@ impl Worker {
             )
         {
             return Ok(ViewerProjectStatusUpdate::Unavailable(id.clone()));
-        }
-        if let gtl_wire::viewer::projects::ViewerProjectBranchComparison::Unavailable { reason } =
-            &mut status.branch_comparison
-        {
-            reason.truncate(reason.floor_char_boundary(2048));
         }
         {
             let connection = self.state.database.connection_lock()?;

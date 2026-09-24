@@ -6,13 +6,6 @@ pub use push_pull::{PushPullResult, RepoSyncStatus, run_pull_all, run_push_all};
 pub(crate) use push_summary::{PushOutcome, PushSummary};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ManagedExit {
-    Clean,
-    Warn,
-    Fail,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedOptions {
     pub dry: bool,
@@ -48,8 +41,20 @@ impl ManagedOutput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedRun<T> {
-    pub exit: ManagedExit,
+    pub exit: crate::ExitCode,
     pub results: Vec<T>,
     pub stdout: String,
     pub stderr: String,
+}
+
+impl<T> ManagedRun<T> {
+    /// A run that produced no results because the command failed.
+    pub(crate) fn failed(failure: &crate::failure::CommandFailure, prefix: Option<&str>) -> Self {
+        Self {
+            exit: failure.exit(),
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: failure.text(prefix),
+        }
+    }
 }

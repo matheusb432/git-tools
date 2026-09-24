@@ -159,7 +159,7 @@ mod tests {
         let temporary = repository_root();
         utils::make_linked_worktree(
             &temporary.path().join("api-worktree"),
-            "/real/api/.git/worktrees/feature",
+            &temporary.path().join("api/.git/worktrees/feature"),
         );
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("/real/api\n"),

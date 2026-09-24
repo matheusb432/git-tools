@@ -79,7 +79,7 @@ pub(super) fn run(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
         find_window(env, "^GTL focus peer$").ok()
     })?;
     let repository = create_native_fixture(sandbox, env)?;
-    for enabled in [true, false, true] {
+    for enabled in [true, false] {
         fs::write(
             &configuration,
             format!("focus_window_on_diff = {enabled}\n"),

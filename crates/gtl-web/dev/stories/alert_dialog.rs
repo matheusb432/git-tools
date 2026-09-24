@@ -89,7 +89,7 @@ fn push_confirmation() -> Element {
         commit: PUSH_COMMIT_SHA.parse()?,
         count: 2,
         command: format!(
-            "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --no-follow-tags --recurse-submodules=no -- origin {PUSH_COMMIT_SHA}:refs/heads/main",
+            "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin {PUSH_COMMIT_SHA}:refs/heads/main",
         ),
     };
     rsx! {

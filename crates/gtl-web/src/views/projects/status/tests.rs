@@ -1,4 +1,5 @@
 use gtl_models::{
+    failure::ProjectFailure,
     git::{BranchName, CommitCount, GitRefName},
     projects::comparison::ComparisonBranch,
     repository::status::{RepositoryStatus, StatusChanges, StatusHead, StatusUpstream},
@@ -38,7 +39,7 @@ fn unavailable_comparison_preserves_reason_and_local_action() -> TestResult {
     let project = viewer_project(
         tracking(0, StatusChanges::Clean)?,
         ViewerProjectBranchComparison::Unavailable {
-            reason: "missing comparison branch".to_owned(),
+            failure: ProjectFailure::CommitCountUnavailable.into(),
         },
     )?;
     let status = ProjectStatus::from_project(&project);
@@ -49,7 +50,7 @@ fn unavailable_comparison_preserves_reason_and_local_action() -> TestResult {
     assert_eq!(
         status.issue(),
         Some(&ProjectIssue::ComparisonUnavailable(
-            "missing comparison branch".to_owned()
+            ProjectFailure::CommitCountUnavailable.into()
         ))
     );
     Ok(())
@@ -106,5 +107,30 @@ fn absent_repository_disables_both_actions() -> TestResult {
     assert!(!status.local.is_available());
     assert!(!status.ahead.is_available());
     assert_eq!(status.issue(), Some(&ProjectIssue::RepositoryAbsent));
+    Ok(())
+}
+
+#[test]
+fn only_the_owning_projects_setting_offers_a_branch_change() -> TestResult {
+    let project = gtl_models::paths::RepositoryRoot::try_new("/repos/project".into())?;
+    let primary = gtl_models::paths::RepositoryRoot::try_new("/repos/primary".into())?;
+    let missing = |owner: Option<gtl_models::paths::RepositoryRoot>| {
+        ProjectIssue::ComparisonUnavailable(
+            ProjectFailure::ComparisonBranchMissing {
+                path: project.clone(),
+                branch: ComparisonBranch::default(),
+                project: owner,
+            }
+            .into(),
+        )
+    };
+
+    assert!(missing(Some(project.clone())).comparison_branch_resolves(&project));
+    assert!(!missing(Some(primary)).comparison_branch_resolves(&project));
+    assert!(!missing(None).comparison_branch_resolves(&project));
+    assert!(
+        !ProjectIssue::ComparisonUnavailable(ProjectFailure::CommitCountUnavailable.into())
+            .comparison_branch_resolves(&project)
+    );
     Ok(())
 }

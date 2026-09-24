@@ -1,8 +1,13 @@
 use gtl_application::projects::{get_viewer_project_status, list_viewer_projects};
+use gtl_models::failure::{ErrorClass, Failure, ProjectFailure, Resource};
 use gtl_wire::{proto, v1};
 use tonic::{Request, Response, Status};
 
-use super::super::{run_blocking, unexpected};
+use super::super::{
+    run_blocking,
+    status::{GrpcResultExt as _, invalid_request, private, status},
+    unexpected,
+};
 use crate::{state::AppState, viewer_runtime};
 
 pub(super) async fn list_viewer_projects(
@@ -10,7 +15,7 @@ pub(super) async fn list_viewer_projects(
     request: Request<v1::ListViewerProjectsRequest>,
 ) -> Result<Response<v1::ListViewerProjectsResponse>, Status> {
     let request = proto::viewer::projects::decode_list(request.into_inner())
-        .map_err(|_| Status::invalid_argument("invalid project page size or cursor"))?;
+        .map_err(|_| invalid_request("page"))?;
     if matches!(
         request.sort,
         Some(
@@ -43,13 +48,13 @@ async fn refresh_status_index(state: &AppState) -> Result<(), Status> {
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| Status::unavailable("project sorting stopped"))?;
+            .map_err(|_| private(ErrorClass::Unavailable, "project sorting stopped"))?;
         let permit = state
             .viewer_project_status_workers
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| Status::unavailable("project status workers stopped"))?;
+            .map_err(|_| private(ErrorClass::Unavailable, "project status workers stopped"))?;
         run_blocking(move || {
             let _request = request;
             let _permit = permit;
@@ -62,9 +67,7 @@ async fn refresh_status_index(state: &AppState) -> Result<(), Status> {
         .map_err(|error| project_catalogue_error(&error))
     })
     .await
-    .map_err(|_| {
-        Status::deadline_exceeded("project sorting timed out; retry to continue loading statuses")
-    })?
+    .map_err(|_| private(ErrorClass::DeadlineExceeded, "project sorting timed out"))?
 }
 
 fn refresh_status_index_blocking(
@@ -117,12 +120,12 @@ pub(super) async fn get_viewer_project_status(
     request: Request<v1::GetViewerProjectStatusRequest>,
 ) -> Result<Response<v1::GetViewerProjectStatusResponse>, Status> {
     let request = proto::viewer::projects::decode_get_status(request.into_inner())
-        .map_err(|_| Status::invalid_argument("invalid project ID"))?;
+        .map_err(|_| invalid_request("project_id"))?;
     let admission = state
         .viewer_project_status_requests
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("project status workers are busy"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     let state = state.clone();
     let status = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
         let permit = state
@@ -130,7 +133,7 @@ pub(super) async fn get_viewer_project_status(
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| Status::unavailable("project status workers stopped"))?;
+            .map_err(|_| private(ErrorClass::Unavailable, "project status workers stopped"))?;
         run_blocking(move || {
             let _admission = admission;
             let _permit = permit;
@@ -141,7 +144,7 @@ pub(super) async fn get_viewer_project_status(
                     .map_err(|error| unexpected(error, "open project database"))?;
                 list_viewer_projects::get_project(&request.project_id, &connection)
                     .map_err(|error| unexpected(error, "get viewer project"))?
-                    .ok_or_else(|| Status::not_found("project is no longer available"))?
+                    .ok_or_else(project_gone)?
             };
             let status = get_viewer_project_status::execute(project.clone(), &state.git)
                 .map_err(|error| unexpected(error, "get viewer project status"))?;
@@ -156,7 +159,7 @@ pub(super) async fn get_viewer_project_status(
         .await?
     })
     .await
-    .map_err(|_| Status::deadline_exceeded("project status timed out"))??;
+    .map_err(|_| private(ErrorClass::DeadlineExceeded, "project status timed out"))??;
     Ok(Response::new(
         proto::viewer::projects::encode_project_status(status),
     ))
@@ -170,7 +173,7 @@ pub(super) async fn open_viewer_project(
         self, OpenProjectComparison, OpenViewerProjectError,
     };
     let project = proto::viewer::projects::decode_open(request.into_inner())
-        .map_err(|_| Status::invalid_argument("invalid project comparison"))?;
+        .map_err(|_| invalid_request("comparison"))?;
     let repositories = state
         .projects
         .list_projects()
@@ -195,10 +198,7 @@ pub(super) async fn open_viewer_project(
         )
     })
     .await?
-    .map_err(|error| match error {
-        OpenViewerProjectError::NotFound => Status::not_found("project is no longer available"),
-        OpenViewerProjectError::Unexpected(error) => unexpected(error, "open project comparison"),
-    })?;
+    .into_grpc()?;
     let tab_id = work.ticket().tab_id.into();
     viewer_runtime::spawn_recipe(runtime_state, work);
     Ok(Response::new(v1::OpenViewerProjectResponse { tab_id }))
@@ -210,7 +210,7 @@ pub(super) async fn update_viewer_project(
 ) -> Result<Response<v1::UpdateViewerProjectResponse>, Status> {
     use gtl_application::projects::update_viewer_project::{self};
     let request = proto::viewer::projects::decode_update(request.into_inner())
-        .map_err(|_| Status::invalid_argument("invalid local comparison branch or project path"))?;
+        .map_err(|error| invalid_request(error.field().unwrap_or("project")))?;
     let repositories = state
         .projects
         .list_projects()
@@ -222,8 +222,7 @@ pub(super) async fn update_viewer_project(
             .database
             .connection_lock()
             .map_err(|error| unexpected(error, "open project database"))?;
-        update_viewer_project::execute(request, &repositories, &connection)
-            .map_err(update_project_error)
+        update_viewer_project::execute(request, &repositories, &connection).into_grpc()
     })
     .await??;
     Ok(Response::new(v1::UpdateViewerProjectResponse {}))
@@ -231,23 +230,11 @@ pub(super) async fn update_viewer_project(
 
 pub(super) fn project_catalogue_error(error: &impl std::fmt::Debug) -> Status {
     tracing::warn!(error = ?error, "viewer project catalogue is unavailable");
-    Status::failed_precondition("project catalogue is unavailable")
+    status(&ProjectFailure::CatalogueUnavailable)
 }
 
-fn update_project_error(
-    error: gtl_application::projects::update_viewer_project::UpdateViewerProjectError,
-) -> Status {
-    use gtl_application::projects::{
-        update_project_comparison::UpdateProjectComparisonError,
-        update_viewer_project::UpdateViewerProjectError,
-    };
-    match error {
-        UpdateViewerProjectError::NotFound => Status::not_found("project is no longer available"),
-        UpdateViewerProjectError::Comparison(UpdateProjectComparisonError::Conflict) => {
-            Status::aborted("project comparison changed")
-        }
-        UpdateViewerProjectError::Comparison(UpdateProjectComparisonError::Database(error)) => {
-            unexpected(error, "update project comparison")
-        }
-    }
+fn project_gone() -> Status {
+    status(&Failure::Gone {
+        resource: Resource::Project,
+    })
 }

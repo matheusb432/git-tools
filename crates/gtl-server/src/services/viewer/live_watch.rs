@@ -1,15 +1,34 @@
 use std::time::Duration;
 
 use gtl_application::viewer::{
-    refresh_live_view::{self, LiveViewCheck},
+    ViewerStateError,
+    refresh_live_view::{self, LiveViewCheck, RefreshLiveViewError},
     session::PublishOutcome,
 };
-use gtl_models::viewer::ViewerTabId;
-use gtl_wire::v1;
-use tokio::sync::mpsc;
+use gtl_models::{failure::ErrorMeta, viewer::ViewerTabId};
+use gtl_wire::{proto::failure::encode_failure, v1};
+use tokio::sync::{AcquireError, mpsc};
 use tonic::Status;
 
+use super::super::status::failure;
 use crate::state::AppState;
+
+/// Why one live view check could not complete.
+#[derive(Debug, thiserror::Error, ErrorMeta)]
+enum LiveCheckError {
+    #[error(transparent)]
+    #[meta(transparent)]
+    Refresh(#[from] RefreshLiveViewError),
+    #[error(transparent)]
+    #[meta(transparent)]
+    State(#[from] ViewerStateError),
+    #[error(transparent)]
+    #[meta(private(Internal))]
+    Permit(#[from] AcquireError),
+    #[error(transparent)]
+    #[meta(private(Internal))]
+    Worker(#[from] tokio::task::JoinError),
+}
 
 pub(super) fn spawn(
     state: AppState,
@@ -31,7 +50,7 @@ pub(super) fn spawn(
                 () = sender.closed() => break,
                 result = check(&state, tab_id) => result,
             };
-            let error = match check {
+            let failure = match check {
                 Ok(false) => {
                     delay = Duration::from_secs(2);
                     continue;
@@ -40,12 +59,9 @@ pub(super) fn spawn(
                     retry_delay = Duration::from_secs(2);
                     None
                 }
-                Err(error) => {
-                    tracing::warn!(%error, "live diff update failed");
-                    Some(error.to_string().chars().take(2048).collect())
-                }
+                Err(error) => Some(failure(&error)),
             };
-            delay = if error.is_some() {
+            delay = if failure.is_some() {
                 let delay = retry_delay;
                 retry_delay = (retry_delay * 2).min(Duration::from_secs(5));
                 delay
@@ -61,7 +77,7 @@ pub(super) fn spawn(
                     project_status: None,
                     live_check: Some(v1::ViewerLiveCheck {
                         tab_id: tab_id.into(),
-                        error,
+                        failure: failure.as_ref().map(encode_failure),
                         elapsed_ms: u64::try_from(started.elapsed().as_millis())
                             .unwrap_or(u64::MAX),
                     }),
@@ -75,7 +91,7 @@ pub(super) fn spawn(
     });
 }
 
-async fn check(state: &AppState, tab_id: ViewerTabId) -> anyhow::Result<bool> {
+async fn check(state: &AppState, tab_id: ViewerTabId) -> Result<bool, LiveCheckError> {
     let permit = state.live_refresh_permits.clone().acquire_owned().await?;
     let worker = state.clone();
     let result = tokio::task::spawn_blocking(move || {

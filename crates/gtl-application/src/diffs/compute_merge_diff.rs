@@ -2,6 +2,7 @@ mod view;
 
 use gtl_models::{
     diffs::ExcludedExtensions,
+    failure::ErrorMeta,
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
     viewer::Theme,
@@ -34,11 +35,13 @@ pub struct ComputeMergeDiffOk {
     pub excluded_extensions: ExcludedExtensions,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ComputeMergeDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

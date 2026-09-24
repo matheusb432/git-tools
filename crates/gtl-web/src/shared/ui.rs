@@ -4,6 +4,7 @@
     allow(dead_code, reason = "reserved for the viewer push feature")
 )]
 mod alert_dialog;
+mod animation;
 mod badge;
 mod button;
 #[cfg(feature = "interactive-ui")]
@@ -16,7 +17,6 @@ mod dialog;
 mod empty_notice;
 #[cfg(feature = "interactive-ui")]
 mod extension_exclusions;
-#[cfg(feature = "interactive-ui")]
 mod field_error;
 #[cfg(feature = "interactive-ui")]
 mod field_label;
@@ -69,7 +69,6 @@ pub(crate) use count_badge::CountBadge;
 pub(crate) use empty_notice::EmptyNotice;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use extension_exclusions::{ExtensionExclusionsAction, ExtensionExclusionsInput};
-#[cfg(feature = "interactive-ui")]
 pub(crate) use field_error::FieldError;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use field_label::FieldLabel;
@@ -104,6 +103,8 @@ pub(crate) use text_input::TextInput;
 pub(crate) use text_input::TextInputLabelVisibility;
 #[cfg(feature = "desktop")]
 pub(crate) use toast::ToastHandle;
+#[cfg(feature = "interactive-ui")]
+pub(crate) use toast::ToastKind;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use toast::{ToastHost, use_toast};
 #[cfg(feature = "interactive-ui")]

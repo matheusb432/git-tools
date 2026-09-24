@@ -1,13 +1,14 @@
-use gtl_models::settings::UserSettings;
+use gtl_models::{failure::ErrorMeta, settings::UserSettings};
 
 use crate::ports::{UserSettingsLoadError, UserSettingsReader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetUserSettings;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum GetUserSettingsError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
 }
 

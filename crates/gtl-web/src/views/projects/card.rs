@@ -4,7 +4,7 @@ use lucide_dioxus::{GitBranch, GitCompare};
 
 use super::{
     comparison_action::{ProjectActionShape, ProjectComparisonAction},
-    comparison_editor::ProjectComparisonEditor,
+    comparison_editor::{ProjectComparisonEditor, comparison_popover_id},
     presentation::{
         ProjectPresentation, ProjectSignalGlyph, ReviewStatusDot, project_presentation,
     },
@@ -19,7 +19,7 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
     let failed = load.failed;
     let result = load.status.as_ref().map(Ok).or_else(|| {
         failed.then_some(Err(
-            crate::shared::viewer_client::ViewerClientError::Internal,
+            crate::shared::viewer_client::ViewerClientError::InvalidMessage,
         ))
     });
     let ProjectPresentation {
@@ -30,6 +30,7 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
         ahead,
         ahead_label,
         issue,
+        comparison_branch_fix,
         rendered,
     } = project_presentation(&project, result);
     rsx! {
@@ -108,7 +109,19 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             if let Some(issue) = issue {
-                p { class: "text-xs break-words text-warn", "{issue}" }
+                div { class: "flex flex-wrap items-center gap-x-3 gap-y-1",
+                    p { class: "min-w-0 text-xs break-words text-warn", "{issue}" }
+                    if comparison_branch_fix {
+                        crate::shared::ui::Button {
+                            variant: crate::shared::ui::ButtonVariant::Ghost,
+                            size: crate::shared::ui::ButtonSize::Small,
+                            popovertarget: comparison_popover_id(&project.path),
+                            popovertargetaction: "show",
+                            disabled,
+                            "Change comparison branch"
+                        }
+                    }
+                }
             }
             p { class: "truncate text-xs text-ink-3",
                 if let Some(rendered) = rendered {

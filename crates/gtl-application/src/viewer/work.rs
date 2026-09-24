@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use gtl_models::{
     diffs::CommitId,
+    failure::{Classified as _, ErrorMeta, Failure, Resource, ViewerFailure},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 
@@ -22,10 +23,6 @@ use crate::{
     ports::{GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind},
 };
-
-const COMPUTE_FAILED_MESSAGE: &str = "The diff could not be rendered. Please retry.";
-const COMMIT_FAILED_MESSAGE: &str =
-    "The selected commit could not be rendered. Show all changes and retry.";
 
 #[derive(Debug)]
 pub struct ReservedRecipeWork {
@@ -101,21 +98,26 @@ pub enum CommitPublication {
     Stale,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ReserveRecipeError {
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error("viewer tab identifiers are exhausted")]
+    #[meta(private(Internal))]
     TabIdentifiersExhausted,
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ReserveCommitError {
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error(transparent)]
+    #[meta(transparent)]
     Selection(#[from] BeginCommitSelectionError),
 }
 
@@ -350,13 +352,13 @@ pub fn publish_recipe(
             let outcome = session.set_state_if_current(
                 ticket,
                 gtl_models::viewer::ViewerTabState::Error {
-                    reason: match &error {
+                    failure: match &error {
                         PrepareRecipeError::Compute(
                             super::compute_recipe::ComputeRecipeError::Diff(
                                 crate::diffs::compute_diff::ComputeDiffError::Comparison(error),
                             ),
-                        ) if error.is_unavailable() => error.to_string(),
-                        _ => COMPUTE_FAILED_MESSAGE.to_owned(),
+                        ) if error.is_unavailable() => error.classify().into_failure(),
+                        _ => ViewerFailure::RenderFailed.into(),
                     },
                 },
             );
@@ -434,7 +436,7 @@ pub fn publish_commit(
             PublishOutcome::Stale => CommitPublication::Stale,
         },
         Err(error) => match session
-            .set_commit_patch_error_if_current(ticket, COMMIT_FAILED_MESSAGE.to_owned())
+            .set_commit_patch_error_if_current(ticket, ViewerFailure::CommitFailed.into())
         {
             PublishOutcome::Published => CommitPublication::Failed { error },
             PublishOutcome::Stale => CommitPublication::Stale,

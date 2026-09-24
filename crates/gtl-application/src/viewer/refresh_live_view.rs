@@ -1,17 +1,40 @@
 use gtl_models::{
+    failure::{ErrorMeta, Failure, ViewerFailure},
     git::GitHeadState,
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 
 use super::{
-    ViewerState,
-    prepare_recipe::{self, PrepareRecipe, PrepareRecipeOk},
+    ViewerState, ViewerStateError,
+    prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     session::{CachedView, ComputeTicket, PublishOutcome},
 };
 use crate::{
     ports::{GitClient, UserSettingsReader},
+    projects::comparison::ComparisonError,
     recipes::Recipe,
 };
+
+/// Why a live view could not be refreshed.
+#[derive(Debug, thiserror::Error, ErrorMeta)]
+pub enum RefreshLiveViewError {
+    /// The live source cannot produce a view for a typed reason.
+    #[error(transparent)]
+    #[meta(failure)]
+    Refused(Failure),
+    #[error(transparent)]
+    #[meta(transparent)]
+    Comparison(#[from] ComparisonError),
+    #[error(transparent)]
+    #[meta(transparent)]
+    Prepare(#[from] PrepareRecipeError),
+    #[error(transparent)]
+    #[meta(transparent)]
+    State(#[from] ViewerStateError),
+    #[error(transparent)]
+    #[meta(private(Internal))]
+    Unexpected(#[from] anyhow::Error),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LiveViewState {
@@ -29,7 +52,7 @@ pub(super) fn inspect_recipe(
     recipe: &Recipe,
     git: &impl GitClient,
     comparisons: &impl crate::ports::ProjectComparisonReader,
-) -> anyhow::Result<LiveViewState> {
+) -> Result<LiveViewState, RefreshLiveViewError> {
     let path = recipe.cwd();
     let head = git.head_state(&path)?;
     let comparison = if matches!(
@@ -84,7 +107,7 @@ pub fn prepare(
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
     comparisons: &impl crate::ports::ProjectComparisonReader,
-) -> anyhow::Result<LiveViewCheck> {
+) -> Result<LiveViewCheck, RefreshLiveViewError> {
     let Some(request) = state.inspect(|session| session.live_refresh_request(tab_id))? else {
         return Ok(LiveViewCheck::Inactive);
     };
@@ -115,12 +138,19 @@ pub fn prepare(
                 label,
             }))
         }
-        PrepareRecipeOk::Broken { state } => match state {
-            ViewerTabState::Error { reason } => anyhow::bail!(reason),
-            ViewerTabState::Pending => anyhow::bail!("live comparison is still pending"),
-            state => anyhow::bail!("live comparison is unavailable: {state:?}"),
-        },
-        PrepareRecipeOk::Skipped { .. } => anyhow::bail!("live comparison produced no view"),
+        PrepareRecipeOk::Broken { state } => Err(match state {
+            ViewerTabState::Error { failure } => RefreshLiveViewError::Refused(failure),
+            ViewerTabState::Broken { failure } => RefreshLiveViewError::Refused(failure.into()),
+            ViewerTabState::Pending => {
+                RefreshLiveViewError::Refused(ViewerFailure::SourcePreparing.into())
+            }
+            ViewerTabState::Ready => {
+                anyhow::anyhow!("a broken live comparison reported a ready tab").into()
+            }
+        }),
+        PrepareRecipeOk::Skipped { .. } => {
+            Err(anyhow::anyhow!("live comparison produced no view").into())
+        }
     }
 }
 

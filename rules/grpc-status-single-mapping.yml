@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rust_rule.json
+
+id: grpc-status-single-mapping
+language: rust
+severity: error
+message: "Build gRPC statuses through `services::status`."
+note: |
+  Classify the error with `ErrorMeta` and call `.into_grpc()`, or use `status`, `invalid_request`,
+  `private`, or `private_error`. A raw constructor omits the typed failure that clients branch on.
+files:
+  - crates/gtl-server/src/**/*.rs
+ignores:
+  - crates/gtl-server/src/services/status.rs
+  - crates/gtl-server/src/server/tests.rs
+  - crates/gtl-server/src/server/tests/**
+rule:
+  kind: call_expression
+  has:
+    field: function
+    kind: scoped_identifier
+    all:
+      - has:
+          field: path
+          regex: "(^|::)Status$"
+      - has:
+          field: name
+          regex: "^(new|with_details|with_details_and_metadata|internal|invalid_argument|not_found|failed_precondition|aborted|resource_exhausted|unavailable|deadline_exceeded|cancelled|permission_denied|out_of_range|data_loss|already_exists|unimplemented|unknown|unauthenticated)$"

@@ -1,9 +1,7 @@
 use gtl_application::repositories::{
     apply_push::{self, ApplyPush, ApplyPushError, ApplyPushOk, PushBasis, PushMode, PushProgress},
     apply_recursive_push,
-    get_recursive_repository_statuses::{
-        self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
-    },
+    get_recursive_repository_statuses::{self, GetRecursiveRepositoryStatuses},
     get_repository_status,
     plan_push::{self, PlanPushOk, PushTarget},
     plan_recursive_push,
@@ -23,7 +21,9 @@ use gtl_wire::v1::{self, repository_service_server::RepositoryService};
 use tonic::{Request, Response, Status};
 
 use super::{
-    absolute_path, repository_resolution_error, repository_root, required, run_blocking, unexpected,
+    absolute_path, repository_root, required, run_blocking,
+    status::{GrpcResultExt as _, invalid_request},
+    unexpected,
 };
 use crate::state::AppState;
 
@@ -49,7 +49,7 @@ impl RepositoryService for RepositoryGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || plan_push::execute(&request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "plan repository push"))?;
+            .into_grpc()?;
         let outcome = match result {
             PlanPushOk::Ready(target) => {
                 v1::plan_repository_push_response::Outcome::Ready(push_target(target))
@@ -75,12 +75,12 @@ impl RepositoryService for RepositoryGrpcService {
             Ok(v1::RepositoryPushMode::CommitChanges) => {
                 let message = required(request.message, "message")?;
                 if message.trim().is_empty() {
-                    return Err(Status::invalid_argument("message must not be empty"));
+                    return Err(invalid_request("message"));
                 }
                 PushMode::CommitChanges { message }
             }
             Ok(v1::RepositoryPushMode::Unspecified) | Err(_) => {
-                return Err(Status::invalid_argument("mode is invalid"));
+                return Err(invalid_request("mode"));
             }
         };
         let state = self.state.clone();
@@ -98,7 +98,7 @@ impl RepositoryService for RepositoryGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || plan_recursive_push::execute(request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "plan recursive repository push"))?;
+            .into_grpc()?;
         let outcome = match result {
             SubreposPlan::Ready(targets) => {
                 v1::plan_recursive_repository_push_response::Outcome::Ready(v1::RecursivePushPlan {
@@ -123,9 +123,7 @@ impl RepositoryService for RepositoryGrpcService {
     ) -> Result<Response<v1::ExecuteRecursiveRepositoryPushResponse>, Status> {
         let request = request.into_inner();
         if request.targets.len() > MAX_REPOSITORIES_PER_REQUEST {
-            return Err(Status::resource_exhausted(format!(
-                "targets cannot contain more than {MAX_REPOSITORIES_PER_REQUEST} entries"
-            )));
+            return Err(invalid_request("targets"));
         }
         let targets = request
             .targets
@@ -186,7 +184,7 @@ impl RepositoryService for RepositoryGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || pull_repository::execute(request, &state.git))
             .await?
-            .map_err(repository_resolution_error)?;
+            .into_grpc()?;
         Ok(Response::new(v1::PullRepositoryResponse {
             result: Some(super::project::sync_result(result)),
         }))
@@ -200,7 +198,7 @@ impl RepositoryService for RepositoryGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || get_repository_status::execute(request, &state.git))
             .await?
-            .map_err(repository_resolution_error)?;
+            .into_grpc()?;
 
         Ok(Response::new(v1::GetRepositoryStatusResponse {
             results: status_results(std::slice::from_ref(&result)),
@@ -219,7 +217,7 @@ impl RepositoryService for RepositoryGrpcService {
         let results =
             run_blocking(move || get_recursive_repository_statuses::execute(request, &state.git))
                 .await?
-                .map_err(recursive_repository_statuses_error)?;
+                .into_grpc()?;
 
         Ok(Response::new(v1::GetRecursiveRepositoryStatusesResponse {
             results: status_results(&results),
@@ -256,14 +254,13 @@ fn application_push_target(target: v1::RepositoryPushTarget) -> Result<PushTarge
         name: project_name(target.project_name, "target.project_name")?,
         top: repository_root(target.repository_root, "target.repository_root")?,
         branch: branch_name(target.branch, "target.branch")?,
-        remote: RemoteName::try_new(target.remote)
-            .map_err(|_| Status::invalid_argument("target.remote must not be empty"))?,
+        remote: RemoteName::try_new(target.remote).map_err(|_| invalid_request("target.remote"))?,
         remote_urls: target
             .remote_urls
             .into_iter()
             .map(RemoteUrl::try_new)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| Status::invalid_argument("target.remote_urls must not be empty"))?,
+            .map_err(|_| invalid_request("target.remote_urls"))?,
         pending: application_pending(required(target.pending, "target.pending")?),
     })
 }
@@ -278,13 +275,11 @@ fn application_pending(pending: v1::PendingChanges) -> PendingChanges {
 }
 
 fn project_name(raw: String, field: &'static str) -> Result<ProjectName, Status> {
-    ProjectName::try_new(raw)
-        .map_err(|_| Status::invalid_argument(format!("{field} must not be empty")))
+    ProjectName::try_new(raw).map_err(|_| invalid_request(field))
 }
 
 fn branch_name(raw: String, field: &'static str) -> Result<BranchName, Status> {
-    BranchName::try_new(raw)
-        .map_err(|_| Status::invalid_argument(format!("{field} must not be empty")))
+    BranchName::try_new(raw).map_err(|_| invalid_request(field))
 }
 
 fn recursive_push_target(target: RepoTarget) -> v1::RecursivePushTarget {
@@ -330,8 +325,7 @@ fn application_recursive_push_target(
     };
     Ok(RepoTarget {
         path: repository_root(target.repository_root, "targets.repository_root")?,
-        label: ProjectName::try_new(target.label)
-            .map_err(|_| Status::invalid_argument("targets.label must not be empty"))?,
+        label: ProjectName::try_new(target.label).map_err(|_| invalid_request("targets.label"))?,
         dest,
     })
 }
@@ -341,24 +335,14 @@ fn application_push_destination(
     push: bool,
 ) -> Result<Dest, Status> {
     let branch = BranchName::try_new(destination.branch)
-        .map_err(|_| Status::invalid_argument("destination.branch must not be empty"))?;
+        .map_err(|_| invalid_request("destination.branch"))?;
     let remote = RemoteName::try_new(destination.remote)
-        .map_err(|_| Status::invalid_argument("destination.remote must not be empty"))?;
+        .map_err(|_| invalid_request("destination.remote"))?;
     Ok(if push {
         Dest::Push { branch, remote }
     } else {
         Dest::Synced { branch, remote }
     })
-}
-
-fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesError) -> Status {
-    match error {
-        GetRecursiveRepositoryStatusesError::NoRepositories { root } => Status::not_found(format!(
-            "no git repositories found under {}",
-            root.display()
-        )),
-        error => unexpected(error, "get recursive repository statuses"),
-    }
 }
 
 pub(super) fn status_results(results: &[StatusResult]) -> Vec<v1::RepositoryStatusResult> {

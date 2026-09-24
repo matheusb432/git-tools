@@ -1,41 +1,57 @@
-use gtl_application::projects::catalogue::{ProjectCatalogueError, create_project::CreateProject};
-use gtl_models::projects::catalogue::{
-    Project, ProjectGroups, ProjectMetadata, ProjectMutation, ProjectMutationOutcome,
-    ProjectOperationMode, ProjectStatus,
+use gtl_application::projects::catalogue::create_project::CreateProject;
+use gtl_models::{
+    failure::ErrorClass,
+    projects::catalogue::{
+        Project, ProjectGroups, ProjectMetadata, ProjectMutation, ProjectMutationOutcome,
+        ProjectOperationMode, ProjectStatus,
+    },
 };
 use gtl_wire::v1;
 use tonic::Status;
 
+use super::super::{
+    required,
+    status::{invalid_request, private_error},
+};
+
 pub(super) fn create_request(request: v1::CreateProjectRequest) -> Result<CreateProject, Status> {
-    let input = super::super::required(request.project, "project")?;
-    let source = super::super::required(input.source, "project.source")?;
-    let source = match super::super::required(source.source, "project.source.directory")? {
-        v1::project_source::Source::Directory(directory) => {
-            directory.path.try_into().map_err(invalid)?
-        }
+    let input = required(request.project, "project")?;
+    let source = required(input.source, "project.source")?;
+    let source = match required(source.source, "project.source.directory")? {
+        v1::project_source::Source::Directory(directory) => directory
+            .path
+            .try_into()
+            .map_err(|_| invalid_request("project.source.directory.path"))?,
     };
     let groups = input
         .groups
         .into_iter()
         .map(TryInto::try_into)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(invalid)?;
+        .map_err(|_| invalid_request("project.groups"))?;
     Ok(CreateProject {
-        id: request.project_id.try_into().map_err(invalid)?,
+        id: request
+            .project_id
+            .try_into()
+            .map_err(|_| invalid_request("project_id"))?,
         metadata: ProjectMetadata {
-            title: input.title.try_into().map_err(invalid)?,
+            title: input
+                .title
+                .try_into()
+                .map_err(|_| invalid_request("project.title"))?,
             source,
             git_remote: input
                 .git_remote
                 .map(TryInto::try_into)
                 .transpose()
-                .map_err(invalid)?,
+                .map_err(|_| invalid_request("project.git_remote"))?,
             color: input
                 .color
                 .map(TryInto::try_into)
                 .transpose()
-                .map_err(invalid)?,
-            groups: ProjectGroups::try_new(groups).map_err(invalid)?,
+                .map_err(|_| invalid_request("project.color"))?,
+            groups: ProjectGroups::try_new(groups)
+                .map_err(|_| invalid_request("project.groups"))?,
         },
         include_in_full_export: input.include_in_full_export.unwrap_or(true),
     })
@@ -45,33 +61,7 @@ pub(super) fn mode(raw: i32) -> Result<ProjectOperationMode, Status> {
     match v1::ProjectOperationMode::try_from(raw) {
         Ok(v1::ProjectOperationMode::Preview) => Ok(ProjectOperationMode::Preview),
         Ok(v1::ProjectOperationMode::Apply) => Ok(ProjectOperationMode::Apply),
-        _ => Err(Status::invalid_argument(
-            "project operation mode is required",
-        )),
-    }
-}
-
-pub(super) fn invalid(error: impl std::fmt::Display) -> Status {
-    Status::invalid_argument(error.to_string())
-}
-
-pub(super) fn error(error: ProjectCatalogueError) -> Status {
-    match error {
-        ProjectCatalogueError::NotFound => Status::not_found("project was not found"),
-        ProjectCatalogueError::AlreadyExists => {
-            Status::already_exists("project ID, title, or source already exists")
-        }
-        ProjectCatalogueError::LimitExceeded => {
-            Status::resource_exhausted("project catalogue exceeds its limit")
-        }
-        ProjectCatalogueError::InvalidData(source) => {
-            tracing::error!(error = ?source, "project catalogue contains invalid data");
-            Status::data_loss("project catalogue contains invalid data")
-        }
-        ProjectCatalogueError::Database(source) => {
-            tracing::error!(error = ?source, "project database operation failed");
-            Status::internal("project database operation failed")
-        }
+        _ => Err(invalid_request("mode")),
     }
 }
 
@@ -131,6 +121,5 @@ pub(super) fn mutations(values: Vec<ProjectMutation>) -> Vec<v1::ProjectMutation
 }
 
 pub(super) fn lock_error(error: &anyhow::Error) -> Status {
-    tracing::warn!(error = ?error, "project database is unavailable");
-    Status::unavailable("project database is unavailable")
+    private_error(ErrorClass::Unavailable, error)
 }

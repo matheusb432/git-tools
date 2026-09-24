@@ -41,7 +41,10 @@ fn run_managed(client: &ServerClient) -> anyhow::Result<()> {
     for result in response.results {
         match saved_from_response(result) {
             Ok(()) => saved += 1,
-            Err(error) => eprintln!("diff live: {}", crate::error_text(&error)),
+            Err(error) => eprintln!(
+                "{}",
+                crate::failure::CommandFailure::from_error(&error).text(Some("diff live"))
+            ),
         }
     }
     if saved == 0 {
@@ -78,7 +81,7 @@ fn saved_from_response(response: v1::SaveLiveViewResponse) -> anyhow::Result<()>
             }
         }
         v1::save_live_view_response::Outcome::Rejected(rejection) => {
-            anyhow::bail!(rejection.detail)
+            Err(crate::failure::Refusal(rejection.detail).into())
         }
     }
 }

@@ -29,8 +29,6 @@ mod metrics;
 mod process_memory;
 #[path = "desktop_scroll_baseline/runner_environment.rs"]
 mod runner_environment;
-#[path = "desktop_scroll_baseline/viewport_journey.rs"]
-mod viewport_journey;
 
 use metrics::BrowserScrollSample;
 
@@ -631,7 +629,7 @@ async fn measure_single_file_launch(
     launch: usize,
     conditions_before_launch: DesktopScrollSystemConditions,
 ) -> Result<DesktopScrollSingleFileLaunch> {
-    let repository = create_single_file_repository(launch)?;
+    let repository = create_single_file_repository(single_file_repository_path(launch)?)?;
     let driver = session.driver();
     driver
         .set_window_rect(20, 20, WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -714,11 +712,15 @@ fn hydrate_repository(launch: usize) -> Result<PathBuf> {
     Ok(repository)
 }
 
-fn create_single_file_repository(launch: usize) -> Result<PathBuf> {
+fn single_file_repository_path(launch: usize) -> Result<PathBuf> {
     let fixture_root = runner_environment::required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
-    let repository = fixture_root
+    Ok(fixture_root
         .join("desktop-scroll-single-file-repositories")
-        .join(format!("launch-{launch}"));
+        .join(format!("launch-{launch}")))
+}
+
+/// Creates the 20,000-line single-file repository at `repository`.
+pub(crate) fn create_single_file_repository(repository: PathBuf) -> Result<PathBuf> {
     ensure!(
         !repository.exists(),
         "single-file fixture already exists: {}",
@@ -793,7 +795,7 @@ fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
     forward_diff(repository, data_root, VIEW_NAME, "10")
 }
 
-fn forward_single_file_fixture(repository: &Path, data_root: &Path) -> Result<()> {
+pub(crate) fn forward_single_file_fixture(repository: &Path, data_root: &Path) -> Result<()> {
     forward_diff(repository, data_root, SINGLE_FILE_VIEW_NAME, "1")
 }
 

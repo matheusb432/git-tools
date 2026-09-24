@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
+#[cfg(feature = "interactive-ui")]
 use super::LoadingSpinner;
 
 const BUTTON_CLASSES: &str = "control-button";
@@ -128,6 +129,9 @@ pub(crate) enum ButtonState {
     Disabled,
     #[cfg(feature = "interactive-ui")]
     Loading,
+    /// Busy behind other work; shows a clock instead of the spinner.
+    #[cfg(feature = "interactive-ui")]
+    Waiting,
 }
 
 impl ButtonState {
@@ -136,16 +140,30 @@ impl ButtonState {
             Self::Enabled => false,
             Self::Disabled => true,
             #[cfg(feature = "interactive-ui")]
-            Self::Loading => true,
+            Self::Loading | Self::Waiting => true,
         }
     }
 
-    const fn is_loading(self) -> bool {
+    const fn is_busy(self) -> bool {
         match self {
             Self::Enabled => false,
             Self::Disabled => false,
             #[cfg(feature = "interactive-ui")]
-            Self::Loading => true,
+            Self::Loading | Self::Waiting => true,
+        }
+    }
+
+    fn indicator(self) -> Option<Element> {
+        match self {
+            Self::Enabled | Self::Disabled => None,
+            #[cfg(feature = "interactive-ui")]
+            Self::Loading => Some(rsx! {
+                LoadingSpinner {}
+            }),
+            #[cfg(feature = "interactive-ui")]
+            Self::Waiting => Some(rsx! {
+                lucide_dioxus::Clock { size: 14 }
+            }),
         }
     }
 }
@@ -181,9 +199,10 @@ pub(crate) fn Button(
         class: button_classes(layout, variant, size),
         r#type: button_type.as_html_type(),
         disabled: state.is_disabled(),
-        aria_busy: state.is_loading().then_some("true"),
+        aria_busy: state.is_busy().then_some("true"),
     });
     let attributes = merge_attributes(vec![attributes, base]);
+    let indicator = state.indicator();
 
     rsx! {
         button {
@@ -195,14 +214,10 @@ pub(crate) fn Button(
             ..attributes,
             if let Some(icon) = icon {
                 span { class: "inline-flex size-3.5 shrink-0 items-center justify-center",
-                    if state.is_loading() {
-                        LoadingSpinner {}
-                    } else {
-                        {icon}
-                    }
+                    {indicator.unwrap_or(icon)}
                 }
-            } else if state.is_loading() {
-                LoadingSpinner {}
+            } else if let Some(indicator) = indicator {
+                {indicator}
             }
             {children}
         }

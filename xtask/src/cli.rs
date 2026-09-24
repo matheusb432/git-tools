@@ -44,9 +44,16 @@ pub enum Command {
     CheckDioxusFormat,
     /// Check staged whitespace and formatting without scanning unrelated files.
     PreCommit,
-    /// Run the ordered native desktop E2E workflow for the test supervisor.
+    /// Run one hermetic desktop E2E suite for the test supervisor.
     #[command(hide = true)]
-    DesktopE2eWorker,
+    DesktopE2eWorker {
+        /// Suite to build and run.
+        #[arg(value_enum)]
+        suite: DesktopE2eSuite,
+        /// Nextest arguments that select journeys; only the journey suite accepts them.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        nextest_arguments: Vec<OsString>,
+    },
     /// Regenerate and verify the committed deterministic desktop scroll fixture.
     DesktopScrollFixture,
     /// Measure production desktop scrolling against the committed realistic fixture.
@@ -115,6 +122,16 @@ pub enum BuildTarget {
     Cli,
     Viewer,
     Both,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum DesktopE2eSuite {
+    /// `WebDriver` journeys through the release Tauri viewer.
+    Journeys,
+    /// Native window focus across CLI diff opens.
+    Native,
+    /// Playwright raw-artifact and component-preview journeys.
+    Browser,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

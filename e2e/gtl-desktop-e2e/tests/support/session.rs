@@ -26,7 +26,6 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub struct TestSession {
-    pub catalogue: super::catalogue::ProjectCatalogue,
     driver: Option<WebDriver>,
     driver_child: Option<GroupChild>,
     server_child: Option<GroupChild>,
@@ -42,11 +41,9 @@ impl TestSession {
     async fn start_with_data_root(data_root: PathBuf) -> Result<Self> {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
-        let catalogue = super::catalogue::ProjectCatalogue::open(&data_root)?;
         let mut server_child = start_server(&data_root).await?;
         match start_driver_with_retries(&data_root, &viewer_binary).await {
             Ok((driver, driver_child)) => Ok(Self {
-                catalogue,
                 driver: Some(driver),
                 driver_child: Some(driver_child),
                 server_child: Some(server_child),
@@ -54,50 +51,6 @@ impl TestSession {
             }),
             Err(error) => Err(cleanup_start_failure("gtl-server", &mut server_child, error).await),
         }
-    }
-
-    pub fn project_requests(&self) -> Result<usize> {
-        let log = fs::read_to_string(self.data_root.join("server.stderr.log"))?;
-        Ok(log
-            .lines()
-            .filter(|line| {
-                line.contains("/gtl.v1.ViewerService/ListViewerProjects")
-                    && line.contains("finished processing request")
-            })
-            .count())
-    }
-
-    pub fn project_status_checks(&self) -> Result<usize> {
-        let log = fs::read_to_string(self.data_root.join("server.stderr.log"))?;
-        Ok(log
-            .lines()
-            .filter(|line| line.contains("project status checked"))
-            .count())
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn project_watch_registrations(&self) -> Result<usize> {
-        let server = self
-            .server_child
-            .as_ref()
-            .context("running fixture server")?;
-        let mut count = 0;
-        for entry in fs::read_dir(format!("/proc/{}/fdinfo", server.id()))? {
-            let path = entry?.path();
-            match fs::read_to_string(&path) {
-                Ok(contents) => {
-                    count += contents
-                        .lines()
-                        .filter(|line| line.starts_with("inotify wd:"))
-                        .count();
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(error).with_context(|| format!("read {}", path.display()));
-                }
-            }
-        }
-        Ok(count)
     }
 
     pub fn driver(&self) -> &WebDriver {
@@ -110,12 +63,6 @@ impl TestSession {
 
     pub fn data_root(&self) -> &Path {
         &self.data_root
-    }
-
-    pub fn write_user_config(&self, contents: &str) -> Result<()> {
-        let path = self.data_root.join("config.toml");
-        fs::write(&path, contents)
-            .with_context(|| format!("write E2E user settings {}", path.display()))
     }
 
     pub async fn restart(&mut self) -> Result<()> {
@@ -265,9 +212,12 @@ fn suite_data_root(name: &str) -> Result<PathBuf> {
     let base = env::var_os("GTL_E2E_DATA_ROOT")
         .map(PathBuf::from)
         .ok_or_else(|| anyhow!("GTL_E2E_DATA_ROOT is required"))?;
-    let data_root = base.join(name);
-    fs::create_dir_all(&data_root)
-        .with_context(|| format!("create suite data root {}", data_root.display()))?;
+    // Repeated runs in one sandbox, such as Nextest stress runs, must not share state.
+    let data_root = tempfile::Builder::new()
+        .prefix(&format!("{name}-"))
+        .tempdir_in(&base)
+        .with_context(|| format!("create suite data root for {name} in {}", base.display()))?
+        .keep();
     Ok(data_root)
 }
 

@@ -1,3 +1,4 @@
+use gtl_client::ViewerClientError;
 use gtl_wire::window::{WindowAction, WindowState};
 
 pub(super) const CUSTOM_TITLEBAR: bool = cfg!(any(target_os = "linux", target_os = "windows"));
@@ -6,19 +7,19 @@ pub(super) const CUSTOM_TITLEBAR: bool = cfg!(any(target_os = "linux", target_os
 pub(super) async fn desktop_window_scale(
     window: tauri::WebviewWindow,
     request: gtl_wire::window::ViewerScalePercent,
-) -> Result<(), String> {
+) -> Result<(), ViewerClientError> {
     tauri::async_runtime::spawn_blocking(move || {
         window.set_zoom(f64::from(request.into_inner()) / 100.0)
     })
     .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+    .map_err(|error| ViewerClientError::desktop(&error))?
+    .map_err(|error| ViewerClientError::desktop(&error))
 }
 
 #[tauri::command]
 pub(super) async fn desktop_window_state(
     window: tauri::WebviewWindow,
-) -> Result<WindowState, String> {
+) -> Result<WindowState, ViewerClientError> {
     tauri::async_runtime::spawn_blocking(move || {
         Ok::<_, tauri::Error>(WindowState {
             custom_titlebar: CUSTOM_TITLEBAR,
@@ -27,15 +28,15 @@ pub(super) async fn desktop_window_state(
         })
     })
     .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+    .map_err(|error| ViewerClientError::desktop(&error))?
+    .map_err(|error| ViewerClientError::desktop(&error))
 }
 
 #[tauri::command]
 pub(super) async fn desktop_window_action(
     window: tauri::WebviewWindow,
     request: WindowAction,
-) -> Result<(), String> {
+) -> Result<(), ViewerClientError> {
     tauri::async_runtime::spawn_blocking(move || match request {
         WindowAction::Minimize => window.minimize(),
         WindowAction::ToggleMaximize => window.is_maximized().and_then(|maximized| {
@@ -48,6 +49,6 @@ pub(super) async fn desktop_window_action(
         WindowAction::Close => window.close(),
     })
     .await
-    .map_err(|error| error.to_string())?
-    .map_err(|error| error.to_string())
+    .map_err(|error| ViewerClientError::desktop(&error))?
+    .map_err(|error| ViewerClientError::desktop(&error))
 }

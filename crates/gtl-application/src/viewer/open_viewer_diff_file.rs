@@ -1,3 +1,4 @@
+use gtl_models::failure::{ErrorMeta, Failure, Resource};
 use gtl_wire::viewer::OpenViewerDiffFile;
 
 use super::{
@@ -9,13 +10,16 @@ use crate::{
     ports::{FileSystemClient, TextEditorClient, UserSettingsReader},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum OpenViewerDiffFileError {
     #[error(transparent)]
+    #[meta(transparent)]
     Source(#[from] ViewerSourceError),
     #[error("the file is not present in the current diff")]
+    #[meta(failure = Failure::Gone { resource: Resource::DiffFile })]
     MissingFile,
     #[error(transparent)]
+    #[meta(transparent)]
     Open(#[from] OpenDiffFileInConfiguredEditorError),
 }
 

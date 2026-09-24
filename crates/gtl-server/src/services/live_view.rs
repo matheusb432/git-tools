@@ -8,13 +8,13 @@ use gtl_application::{
     },
     projects::select_comparison_repositories,
     recipes::{Recipe, RecipeBatch, RecipeBatchKind},
-    settings::get_user_settings::{self, GetUserSettings, GetUserSettingsError},
+    settings::get_user_settings::{self, GetUserSettings},
 };
 use gtl_models::{live_views::LiveSource, recipes::RecipeBatchId};
 use gtl_wire::v1::{self, live_view_service_server::LiveViewService};
 use tonic::{Request, Response, Status};
 
-use super::{application_notes, project_client_error, run_blocking, unexpected};
+use super::{application_notes, run_blocking, status::GrpcResultExt as _, unexpected};
 use crate::{state::AppState, viewer_process, viewer_runtime};
 
 pub(crate) struct LiveViewGrpcService {
@@ -48,7 +48,7 @@ impl LiveViewService for LiveViewGrpcService {
             save_live_view::execute(request, &state.git, &mut connection, &state.clock)
         })
         .await?
-        .map_err(|error| unexpected(error, "save live view"))?;
+        .into_grpc()?;
 
         let recipe = recipe_for_save(&result);
         let result = save_response(result);
@@ -65,12 +65,7 @@ impl LiveViewService for LiveViewGrpcService {
         request: Request<v1::SaveAndPresentProjectLiveViewsRequest>,
     ) -> Result<Response<v1::SaveAndPresentProjectLiveViewsResponse>, Status> {
         let open_viewer = request.into_inner().open_viewer;
-        let repos = self
-            .state
-            .projects
-            .list_projects()
-            .await
-            .map_err(|error| project_client_error(&error))?;
+        let repos = self.state.projects.list_projects().await.into_grpc()?;
         let state = self.state.clone();
         let results = run_blocking(move || {
             let selected =
@@ -136,12 +131,7 @@ fn present_saved_live_views(
     if !open_viewer || recipes.is_empty() {
         return Ok(None);
     }
-    let settings =
-        get_user_settings::execute(GetUserSettings, &state.user_settings).map_err(|error| {
-            match error {
-                GetUserSettingsError::Settings(error) => super::user_settings_load_error(error),
-            }
-        })?;
+    let settings = get_user_settings::execute(GetUserSettings, &state.user_settings).into_grpc()?;
     if let Err(error) = viewer_process::open(settings.focus_window_on_diff()) {
         tracing::warn!(error = ?error, "desktop viewer could not be opened for saved live views");
         return Ok(Some(v1::DiffPresentation {

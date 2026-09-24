@@ -13,8 +13,8 @@ use gtl_models::{
 use gtl_wire::v1;
 
 use self::palette::StatusColorPalette;
-use super::{ManagedExit, ManagedOptions, ManagedRun};
-use crate::server_client::ServerClient;
+use super::{ManagedOptions, ManagedRun};
+use crate::{failure::CommandFailure, server_client::ServerClient};
 mod palette;
 
 #[must_use]
@@ -24,7 +24,7 @@ pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     status_response(response, options)
 }
 
-/// Returns exit 2 outside a repository.
+/// Exits as refused outside a repository.
 #[must_use]
 pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response = ServerClient::connect().and_then(|client| {
@@ -35,7 +35,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
     status_response(response, options)
 }
 
-/// Returns exit 2 when no repositories are found.
+/// Exits as refused when no repositories are found.
 #[must_use]
 pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response = ServerClient::connect().and_then(|client| {
@@ -62,7 +62,7 @@ where
             .collect()
     }) {
         Ok(results) => status_run(results, options),
-        Err(error) => status_fail(format!("status: {}", crate::error_text(&error))),
+        Err(error) => ManagedRun::failed(&CommandFailure::from_error(&error), Some("status")),
     }
 }
 
@@ -166,21 +166,12 @@ fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRu
         &results,
     ) {
         Ok(stdout) => ManagedRun {
-            exit: ManagedExit::Clean,
+            exit: crate::ExitCode::Ok,
             results,
             stdout,
             stderr: String::new(),
         },
-        Err(error) => status_fail(format!("status: {}", crate::error_text(&error))),
-    }
-}
-
-fn status_fail(message: String) -> ManagedRun<StatusResult> {
-    ManagedRun {
-        exit: ManagedExit::Fail,
-        results: Vec::new(),
-        stdout: String::new(),
-        stderr: message,
+        Err(error) => ManagedRun::failed(&CommandFailure::from_error(&error), Some("status")),
     }
 }
 

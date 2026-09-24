@@ -32,7 +32,7 @@ impl From<ViewerViewIdentity> for ViewerCommitListKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ViewerCommitPageRequest {
     Idle,
     Loading,
@@ -40,13 +40,13 @@ enum ViewerCommitPageRequest {
 }
 
 impl ViewerCommitPageRequest {
-    const fn is_loading(self) -> bool {
+    const fn is_loading(&self) -> bool {
         matches!(self, Self::Loading)
     }
 
-    const fn error(self) -> Option<ViewerClientError> {
+    fn error(&self) -> Option<ViewerClientError> {
         match self {
-            Self::Error(error) => Some(error),
+            Self::Error(error) => Some(error.clone()),
             Self::Idle | Self::Loading => None,
         }
     }
@@ -201,24 +201,25 @@ fn validate_page(
     page: ViewerCommitPage,
 ) -> Result<ViewerCommitPage, ViewerClientError> {
     if ViewerCommitListKey::from(page.identity) != current.key {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
-    let cursor = usize::try_from(cursor.into_inner()).map_err(|_| ViewerClientError::Internal)?;
+    let cursor =
+        usize::try_from(cursor.into_inner()).map_err(|_| ViewerClientError::InvalidMessage)?;
     if cursor != current.commits.len() {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     let loaded_count = cursor
         .checked_add(page.commits.len())
-        .ok_or(ViewerClientError::Internal)?;
+        .ok_or(ViewerClientError::InvalidMessage)?;
     if loaded_count > current.expected_count {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     match page.next_cursor {
         Some(next_cursor)
             if usize::try_from(next_cursor.into_inner()).ok() == Some(loaded_count)
                 && loaded_count < current.expected_count => {}
         None if loaded_count == current.expected_count => {}
-        Some(_) | None => return Err(ViewerClientError::Internal),
+        Some(_) | None => return Err(ViewerClientError::InvalidMessage),
     }
     Ok(page)
 }
@@ -285,7 +286,7 @@ mod tests {
         );
         assert_eq!(
             validate_page(&current, ViewerCommitCursor::new(1), page),
-            Err(ViewerClientError::Internal)
+            Err(ViewerClientError::InvalidMessage)
         );
         Ok(())
     }
@@ -306,7 +307,7 @@ mod tests {
                 ViewerCommitCursor::default(),
                 incomplete_final_page
             ),
-            Err(ViewerClientError::Internal)
+            Err(ViewerClientError::InvalidMessage)
         );
         Ok(())
     }

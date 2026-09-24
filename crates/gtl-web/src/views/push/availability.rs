@@ -43,8 +43,8 @@ pub(crate) fn ViewPushButton(
         Some(Ok(ViewerPushAvailability::NothingToPush)) => {
             "No unpushed commits through this SHA".to_owned()
         }
-        Some(Ok(ViewerPushAvailability::Unavailable { message })) => message,
-        Some(Err(error)) => error.message().to_owned(),
+        Some(Ok(ViewerPushAvailability::Blocked { failure })) => failure.to_string(),
+        Some(Err(error)) => error.to_string(),
         None => "Checking for unpushed commits".to_owned(),
     };
     rsx! {

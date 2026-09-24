@@ -1,4 +1,8 @@
-use gtl_models::{paths::ProjectName, projects::comparison::ComparisonBranch};
+use gtl_models::{
+    failure::{ErrorMeta, Failure},
+    paths::ProjectName,
+    projects::comparison::ComparisonBranch,
+};
 use gtl_wire::viewer::FieldUpdate;
 use rusqlite::{Connection, params};
 
@@ -8,11 +12,13 @@ pub struct UpdateProjectComparison {
     pub expected_comparison_branch: ComparisonBranch,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum UpdateProjectComparisonError {
     #[error("The project changed or is no longer available. Reload Projects and retry.")]
+    #[meta(failure = Failure::Changed)]
     Conflict,
     #[error(transparent)]
+    #[meta(private(Internal))]
     Database(#[from] rusqlite::Error),
 }
 

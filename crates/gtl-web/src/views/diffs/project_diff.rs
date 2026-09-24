@@ -81,7 +81,7 @@ pub(crate) fn ProjectDiffView(
                         class: "h-full",
                         role: "alert",
                         title: "Could not open comparison",
-                        message: error.message(),
+                        message: error.to_string(),
                         Button { variant: ButtonVariant::Outline, onclick: move |_| opening.restart(), "Try again" }
                     }
                 },
@@ -124,7 +124,7 @@ async fn open_project_diff(
     if !viewer.actions_enabled() {
         return Ok(());
     }
-    let path = path.ok_or(ViewerClientError::InvalidRequest)?;
+    let path = path.ok_or(ViewerClientError::InvalidMessage)?;
     let request = OpenViewerProject { path, mode };
     let cached = match &*viewer.shell().peek() {
         ViewerShellLoad::Ready(shell) => {

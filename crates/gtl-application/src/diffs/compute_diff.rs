@@ -1,4 +1,4 @@
-use gtl_models::paths::RepositoryRoot;
+use gtl_models::{failure::ErrorMeta, paths::RepositoryRoot};
 
 use crate::{
     diffs::{
@@ -22,13 +22,16 @@ pub struct ComputeDiffOk {
     pub notes: Vec<Note>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ComputeDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Comparison(#[from] crate::projects::comparison::ComparisonError),
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

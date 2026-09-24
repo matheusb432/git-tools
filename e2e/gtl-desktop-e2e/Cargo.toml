@@ -9,8 +9,6 @@ autotests = false
 e2e = []
 
 [dev-dependencies]
-gtl-infra.workspace = true
-rusqlite.workspace = true
 anyhow.workspace = true
 command-group.workspace = true
 futures-util.workspace = true

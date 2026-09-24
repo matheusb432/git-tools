@@ -1,19 +1,15 @@
 use gtl_application::{
     diffs::{
         DiffTarget, DiffTargetRequest, RepoRef,
-        compute_merge_diff::ComputeMergeDiffError,
-        render_diff::{self, RenderDiff, RenderDiffError, RenderDiffOk, RenderDiffOutcome},
+        render_diff::{self, RenderDiff, RenderDiffOk, RenderDiffOutcome},
         render_diff_subrepos::{
-            self, RenderDiffSubrepos, RenderDiffSubreposError, RenderDiffSubreposOk,
-            RenderDiffSubreposOutcome,
+            self, RenderDiffSubrepos, RenderDiffSubreposOk, RenderDiffSubreposOutcome,
         },
-        render_merge_diff::{self, RenderMergeDiff, RenderMergeDiffError},
+        render_merge_diff::{self, RenderMergeDiff},
     },
     projects::{
         build_recipes::BuildProjectRecipes,
-        render_project_diff::{
-            self, RenderProjectDiff, RenderProjectDiffError, RenderProjectDiffOk,
-        },
+        render_project_diff::{self, RenderProjectDiff, RenderProjectDiffOk},
         select_comparison_repositories,
     },
     recipes::{
@@ -24,18 +20,19 @@ use gtl_application::{
         build_recipes::BuildRepositoryRecipes,
         find_repository_roots::{self, FindRepositoryRoots},
     },
-    settings::get_user_settings::{self, GetUserSettings, GetUserSettingsError},
+    settings::get_user_settings::{self, GetUserSettings},
 };
 use gtl_models::{
-    git::GitRevision, paths::ProjectName, recipes::RecipeBatchId,
+    failure::RepositoryFailure, git::GitRevision, paths::ProjectName, recipes::RecipeBatchId,
     repository::traversal::RepositoryTraversalScope,
 };
 use gtl_wire::v1::{self, diff_service_server::DiffService};
 use tonic::{Request, Response, Status};
 
 use super::{
-    application_notes, artifact, project_client_error, repository_root, required, run_blocking,
-    unexpected, user_settings_load_error,
+    application_notes, artifact, repository_root, required, run_blocking,
+    status::{GrpcResultExt as _, invalid_request, status},
+    unexpected,
 };
 use crate::{state::AppState, viewer_process, viewer_runtime};
 
@@ -71,7 +68,7 @@ impl DiffService for DiffGrpcService {
                 .name
                 .map(ProjectName::try_new)
                 .transpose()
-                .map_err(|_| Status::invalid_argument("name must not be empty"))?,
+                .map_err(|_| invalid_request("name"))?,
         };
         let state = self.state.clone();
         let recipe = run_blocking(move || build_recipe::execute(request, &state.git))
@@ -177,12 +174,7 @@ impl DiffService for DiffGrpcService {
         use gtl_application::projects::build_recipes;
 
         let root = request.into_inner().root;
-        let repos = self
-            .state
-            .projects
-            .list_projects()
-            .await
-            .map_err(|error| project_client_error(&error))?;
+        let repos = self.state.projects.list_projects().await.into_grpc()?;
         let request = BuildProjectRecipes {
             repos,
             operation: RecipeOp::Diff {
@@ -231,7 +223,7 @@ impl DiffService for DiffGrpcService {
             )
         })
         .await?
-        .map_err(render_error)?;
+        .into_grpc()?;
 
         viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         Ok(Response::new(render_response(result)))
@@ -254,7 +246,7 @@ impl DiffService for DiffGrpcService {
             )
         })
         .await?
-        .map_err(render_merge_error)?;
+        .into_grpc()?;
 
         viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         Ok(Response::new(render_merge_response(
@@ -280,7 +272,7 @@ impl DiffService for DiffGrpcService {
                 &state.clock,
                 &state.database,
             )
-            .map_err(render_subrepositories_error)
+            .into_grpc()
         })
         .await??;
 
@@ -293,12 +285,7 @@ impl DiffService for DiffGrpcService {
         request: Request<v1::RenderProjectRepositoryDiffsRequest>,
     ) -> Result<Response<v1::RenderProjectRepositoryDiffsResponse>, Status> {
         let root = repository_root(request.into_inner().root, "root")?;
-        let repos = self
-            .state
-            .projects
-            .list_projects()
-            .await
-            .map_err(|error| project_client_error(&error))?;
+        let repos = self.state.projects.list_projects().await.into_grpc()?;
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repos = select_comparison_repositories::execute(repos, &state.git, &state.database)
@@ -327,7 +314,7 @@ impl DiffService for DiffGrpcService {
                 &state.database,
             )
             .map(|result| (Some(result), repos.notes))
-            .map_err(render_project_error)
+            .into_grpc()
         })
         .await??;
 
@@ -374,10 +361,9 @@ fn to_render_subrepositories_request(
     )
     .map_err(|error| unexpected(error, "discover subrepositories for diff"))?;
     if repositories.is_empty() {
-        return Err(Status::not_found(format!(
-            "no git repos found under {}",
-            root.as_ref().display()
-        )));
+        return Err(status(&RepositoryFailure::NoRepositories {
+            root: root.as_ref().to_path_buf(),
+        }));
     }
     Ok(RenderDiffSubrepos {
         root,
@@ -406,8 +392,7 @@ fn validated_diff_target(target: Option<v1::DiffTarget>) -> Result<DiffTarget, S
         v1::diff_target::Selection::MergeBase(base) => DiffTargetRequest::Merge { base },
         v1::diff_target::Selection::LastCommitCount(count) => DiffTargetRequest::Last { count },
     };
-    DiffTarget::try_from(request.clone())
-        .map_err(|error| Status::invalid_argument(error.to_string()))
+    DiffTarget::try_from(request.clone()).into_grpc()
 }
 
 fn viewer_recipe_target(target: Option<v1::DiffTarget>) -> Result<RecipeTarget, Status> {
@@ -427,7 +412,7 @@ fn optional_revision(
     revision
         .map(GitRevision::try_new)
         .transpose()
-        .map_err(|_| Status::invalid_argument(format!("{field} must not be empty")))
+        .map_err(|_| invalid_request(field))
 }
 
 const fn traversal_scope(include_linked_worktrees: bool) -> RepositoryTraversalScope {
@@ -453,12 +438,7 @@ fn present_snapshot(
             outcome: Some(v1::diff_presentation::Outcome::Empty(v1::Empty {})),
         }));
     }
-    let settings =
-        get_user_settings::execute(GetUserSettings, &state.user_settings).map_err(|error| {
-            match error {
-                GetUserSettingsError::Settings(error) => super::user_settings_load_error(error),
-            }
-        })?;
+    let settings = get_user_settings::execute(GetUserSettings, &state.user_settings).into_grpc()?;
     if let Err(error) = viewer_process::open(settings.focus_window_on_diff()) {
         tracing::warn!(error = ?error, "desktop viewer could not be opened");
         return Ok(SnapshotPresentation::ViewerUnavailable(error));
@@ -564,48 +544,6 @@ fn prepend_fallback_note(
         .collect()
 }
 
-fn render_error(error: RenderDiffError) -> Status {
-    match error {
-        RenderDiffError::Comparison(error) => match error {
-            gtl_application::projects::comparison::ComparisonError::Unexpected(error) => {
-                unexpected(error, "resolve diff comparison")
-            }
-            error => Status::failed_precondition(error.to_string()),
-        },
-        RenderDiffError::InvalidTarget(error) => Status::invalid_argument(error.to_string()),
-        RenderDiffError::Settings(error) => user_settings_load_error(error),
-        RenderDiffError::Unexpected(error) => unexpected(error, "render diff"),
-    }
-}
-
-fn render_subrepositories_error(error: RenderDiffSubreposError) -> Status {
-    match error {
-        RenderDiffSubreposError::InvalidTarget(error) => {
-            Status::invalid_argument(error.to_string())
-        }
-        RenderDiffSubreposError::Settings(error) => user_settings_load_error(error),
-        RenderDiffSubreposError::Unexpected(error) => {
-            unexpected(error, "render subrepositories diff")
-        }
-    }
-}
-
-fn render_merge_error(error: RenderMergeDiffError) -> Status {
-    match error {
-        RenderMergeDiffError::Compute(ComputeMergeDiffError::Settings(error)) => {
-            user_settings_load_error(error)
-        }
-        error => unexpected(error, "render merge diff"),
-    }
-}
-
-fn render_project_error(error: RenderProjectDiffError) -> Status {
-    match error {
-        RenderProjectDiffError::Settings(error) => user_settings_load_error(error),
-        error @ RenderProjectDiffError::Unexpected(_) => unexpected(error, "render project diff"),
-    }
-}
-
 fn render_merge_response(
     placement: &gtl_application::ports::PlacedArtifact,
     notes: &[gtl_application::shared::notes::Note],
@@ -682,7 +620,12 @@ mod tests {
         let error = diff_target(Some(v1::DiffTarget { selection: None })).unwrap_err();
 
         assert_eq!(error.code(), tonic::Code::InvalidArgument);
-        assert_eq!(error.message(), "target.selection is required");
+        assert_eq!(
+            super::super::status::decoded_failure(&error),
+            Some(gtl_models::failure::Failure::InvalidRequest {
+                field: "target.selection".into()
+            })
+        );
     }
 
     #[test]

@@ -7,9 +7,8 @@ use crate::{
         DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, ProjectCommand, PullArgs,
         PushArgs, ServerArgs, ServerCommand, StatusArgs, Theme,
     },
-    commands::managed::{
-        ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
-    },
+    commands::managed::{ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary},
+    failure::{CommandFailure, Refusal, fail},
     server_client::ServerClient,
 };
 
@@ -19,19 +18,27 @@ pub mod preprocess;
 
 mod confirm;
 mod diff_viewer_client;
+mod failure;
 mod output;
 mod server_client;
 #[cfg(test)]
 mod testing;
 mod viewer;
 
-/// Exit codes 0, 1, and 2 are stable.
+/// Process exit status. The values are stable and documented in `gtl --help`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum ExitCode {
+    /// The operation succeeded, or the user declined its confirmation.
     Ok = 0,
-    Internal = 1,
+    /// The operation ran and failed.
+    Failed = 1,
+    /// The arguments or input are invalid.
     Usage = 2,
+    /// The repository, project, or settings state prevents the operation.
+    Refused = 3,
+    /// gtl-server is unreachable, busy, or timed out; retrying may succeed.
+    Unavailable = 4,
 }
 
 #[must_use]
@@ -134,10 +141,7 @@ fn run_push(args: PushArgs) -> ExitCode {
     }
     match ServerClient::connect().and_then(|client| client.get_push_confirmation_requirement()) {
         Ok(settings) => run_push_current(args.yes, settings.push_confirmation_required, id),
-        Err(error) => {
-            eprintln!("push: {}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => fail("push", &error),
     }
 }
 
@@ -146,10 +150,7 @@ fn run_pull(args: &PullArgs) -> ExitCode {
         .and_then(|root| commands::pull::run(&root, args.managed));
     match result {
         Ok(()) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("pull: {}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => fail("pull", &error),
     }
 }
 
@@ -159,10 +160,7 @@ fn run_server_ctl(command: &ServerCommand) -> ExitCode {
     };
     match result {
         Ok(()) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("gtl-server: {}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => fail("gtl-server", &error),
     }
 }
 
@@ -187,10 +185,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
             );
             ExitCode::Ok
         }
-        Err(error) => {
-            eprintln!("error: {}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => fail("diff", &error),
     }
 }
 
@@ -236,10 +231,7 @@ fn run_push_with_message(message: &str, yes: bool, id: Option<&ProjectId>) -> Ex
 
     let (client, target) = match plan_push(id) {
         Ok(planned) => planned,
-        Err(error) => {
-            eprintln!("push: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push", &error),
     };
 
     if target.pending.changed.is_zero() && target.pending.ahead.into_inner() == 0 {
@@ -256,10 +248,7 @@ fn run_push_with_message(message: &str, yes: bool, id: Option<&ProjectId>) -> Ex
         message: Some(message.into()),
     }) {
         Ok(result) => result,
-        Err(error) => {
-            eprintln!("push: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push", &error),
     };
     finish_push_response(&result)
 }
@@ -269,15 +258,12 @@ fn run_push_current(yes: bool, confirm: bool, id: Option<&ProjectId>) -> ExitCod
 
     let (client, target) = match plan_push(id) {
         Ok(planned) => planned,
-        Err(error) => {
-            eprintln!("push: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push", &error),
     };
 
     if !target.pending.changed.is_zero() {
         eprintln!("push: working tree has uncommitted changes");
-        return ExitCode::Internal;
+        return ExitCode::Refused;
     }
     if target.pending.ahead.into_inner() == 0 {
         println!("Already up to date");
@@ -294,10 +280,7 @@ fn run_push_current(yes: bool, confirm: bool, id: Option<&ProjectId>) -> ExitCod
         message: None,
     }) {
         Ok(result) => result,
-        Err(error) => {
-            eprintln!("push: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push", &error),
     };
     finish_push_response(&result)
 }
@@ -317,7 +300,7 @@ fn plan_push(id: Option<&ProjectId>) -> anyhow::Result<(ServerClient, commands::
             commands::sync::push_target_from_grpc(target)?
         }
         v1::plan_repository_push_response::Outcome::Refused(refusal) => {
-            anyhow::bail!(refusal.detail)
+            return Err(Refusal(refusal.detail).into());
         }
     };
     Ok((client, target))
@@ -329,14 +312,18 @@ fn finish_push_response(response: &v1::ExecuteRepositoryPushResponse) -> ExitCod
             println!("{}", output::sentence(&response.detail));
             ExitCode::Ok
         }
-        Ok(v1::RepositoryPushStatus::Refused | v1::RepositoryPushStatus::Failed) => {
+        Ok(status @ (v1::RepositoryPushStatus::Refused | v1::RepositoryPushStatus::Failed)) => {
             eprintln!("push: {}", response.detail);
             commands::sync::print_failure_progress(response.progress.as_ref());
-            ExitCode::Internal
+            if status == v1::RepositoryPushStatus::Refused {
+                ExitCode::Refused
+            } else {
+                ExitCode::Failed
+            }
         }
         Ok(v1::RepositoryPushStatus::Unspecified) | Err(_) => {
             eprintln!("push: gtl-server returned an invalid push status");
-            ExitCode::Internal
+            ExitCode::Failed
         }
     }
 }
@@ -348,45 +335,33 @@ fn run_push_subrepos(yes: bool, id: Option<&ProjectId>) -> ExitCode {
 
     let root = match commands::repository_path(id) {
         Ok(root) => root,
-        Err(error) => {
-            eprintln!("push -r: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push -r", &error),
     };
 
     let client = match ServerClient::connect() {
         Ok(client) => client,
-        Err(error) => {
-            eprintln!("push -r: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push -r", &error),
     };
     let plan = match client.plan_recursive_repository_push(v1::PlanRecursiveRepositoryPushRequest {
         root: root.to_string_lossy().into_owned(),
     }) {
         Ok(plan) => plan,
-        Err(error) => {
-            eprintln!("push -r: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return fail("push -r", &error),
     };
     let targets = match plan.outcome {
         Some(v1::plan_recursive_repository_push_response::Outcome::Ready(plan)) => {
             match targets_from_grpc(plan.targets) {
                 Ok(targets) => targets,
-                Err(error) => {
-                    eprintln!("push -r: {}", error_text(&error));
-                    return ExitCode::Internal;
-                }
+                Err(error) => return fail("push -r", &error),
             }
         }
         Some(v1::plan_recursive_repository_push_response::Outcome::Refused(refusal)) => {
             eprintln!("push -r: {}", refusal.detail);
-            return ExitCode::Internal;
+            return ExitCode::Refused;
         }
         None => {
             eprintln!("push -r: gtl-server returned no recursive-push plan outcome");
-            return ExitCode::Internal;
+            return ExitCode::Failed;
         }
     };
 
@@ -429,22 +404,16 @@ fn run_push_subrepos(yes: bool, id: Option<&ProjectId>) -> ExitCode {
         }) {
             Ok(response) => match result_from_grpc(response) {
                 Ok(result) => result,
-                Err(error) => {
-                    eprintln!("push -r: {}", error_text(&error));
-                    return ExitCode::Internal;
-                }
+                Err(error) => return fail("push -r", &error),
             },
-            Err(error) => {
-                eprintln!("push -r: {}", error_text(&error));
-                return ExitCode::Internal;
-            }
+            Err(error) => return fail("push -r", &error),
         };
     let detail = format_push_subrepos_result(&result);
     println!("{detail}");
     match result.status {
         gtl_models::repository::recursive_push::Status::Ok => ExitCode::Ok,
         gtl_models::repository::recursive_push::Status::Partial
-        | gtl_models::repository::recursive_push::Status::Fail => ExitCode::Internal,
+        | gtl_models::repository::recursive_push::Status::Fail => ExitCode::Failed,
     }
 }
 
@@ -509,12 +478,7 @@ fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> 
 }
 
 fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::StatusResult> {
-    ManagedRun {
-        exit: ManagedExit::Fail,
-        results: Vec::new(),
-        stdout: String::new(),
-        stderr: format!("status: {}", error_text(error)),
-    }
+    ManagedRun::failed(&CommandFailure::from_error(error), Some("status"))
 }
 
 fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
@@ -544,45 +508,20 @@ fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
     if !run.stderr.is_empty() {
         eprintln!("{}", run.stderr);
     }
-    match run.exit {
-        ManagedExit::Clean => ExitCode::Ok,
-        ManagedExit::Warn => ExitCode::Internal,
-        ManagedExit::Fail => ExitCode::Usage,
-    }
-}
-
-pub(crate) fn error_text(error: &anyhow::Error) -> String {
-    for source in error.chain() {
-        if let Some(error) = source.downcast_ref::<gtl_client::ClientError>() {
-            return error.status().message().to_owned();
-        }
-        if let Some(status) = source
-            .downcast_ref::<gtl_client::ConnectError>()
-            .and_then(gtl_client::ConnectError::status)
-        {
-            return status.message().to_owned();
-        }
-    }
-    format!("{error:#}")
+    run.exit
 }
 
 fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("{}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => CommandFailure::from_error(&error).report(None),
     }
 }
 
 fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("{}", error_text(&error));
-            ExitCode::Internal
-        }
+        Err(error) => CommandFailure::from_error(&error).report(None),
     }
 }
 
@@ -633,8 +572,10 @@ mod tests {
     #[test]
     fn exit_code_values_are_stable() {
         assert_eq!(ExitCode::Ok as i32, 0);
-        assert_eq!(ExitCode::Internal as i32, 1);
+        assert_eq!(ExitCode::Failed as i32, 1);
         assert_eq!(ExitCode::Usage as i32, 2);
+        assert_eq!(ExitCode::Refused as i32, 3);
+        assert_eq!(ExitCode::Unavailable as i32, 4);
     }
 
     #[test]
@@ -651,12 +592,5 @@ mod tests {
     #[test]
     fn unknown_command_is_usage() {
         assert_eq!(run(&["bogus".into()]), ExitCode::Usage);
-    }
-
-    #[test]
-    fn diff_errors_print_without_cli_prefix() {
-        let error = anyhow::anyhow!("fatal: bad ref\nnot a commit: nope");
-
-        assert_eq!(error_text(&error), "fatal: bad ref\nnot a commit: nope");
     }
 }

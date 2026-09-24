@@ -62,7 +62,7 @@ pub(super) fn use_projects_presentation(active: Memo<bool>) -> ProjectsPresentat
                 .read()
                 .as_ref()
                 .and_then(|result| result.as_ref().err())
-                .copied()
+                .cloned()
         })
     });
     let mut save = use_action(move |request: EditSettingsRequest| async move {

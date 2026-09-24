@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
-use gtl_models::repository::{status::StatusResult, traversal::RepositoryTraversalScope};
+use gtl_models::{
+    failure::{Classification, Classified, RepositoryFailure},
+    repository::{status::StatusResult, traversal::RepositoryTraversalScope},
+};
 
 use crate::{
     ports::GitClient,
@@ -24,6 +27,17 @@ pub enum GetRecursiveRepositoryStatusesError {
     Discover(#[from] find_repository_roots::FindRepositoryRootsError),
     #[error("no git repositories found under {}", root.display())]
     NoRepositories { root: PathBuf },
+}
+
+impl Classified for GetRecursiveRepositoryStatusesError {
+    fn classify(&self) -> Classification {
+        match self {
+            Self::Discover(error) => error.classify(),
+            Self::NoRepositories { root } => Classification::Public(
+                RepositoryFailure::NoRepositories { root: root.clone() }.into(),
+            ),
+        }
+    }
 }
 
 /// Discovers canonical repository roots and classifies each local status.

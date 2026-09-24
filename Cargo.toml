@@ -9,6 +9,7 @@ members = [
   "crates/gtl-wire",
   "crates/gtl-server",
   "crates/gtl-desktop",
+  "crates/gtl-macros",
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
@@ -27,6 +28,7 @@ default-members = [
   "crates/gtl-local-transport",
   "crates/gtl-wire",
   "crates/gtl-server",
+  "crates/gtl-macros",
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
@@ -46,6 +48,7 @@ gtl-local-transport = { path = "crates/gtl-local-transport" }
 gtl-wire = { path = "crates/gtl-wire", default-features = false }
 gtl-desktop = { path = "crates/gtl-desktop" }
 gtl-artifacts = { path = "crates/gtl-artifacts" }
+gtl-macros = { path = "crates/gtl-macros" }
 gtl-models = { path = "crates/gtl-models" }
 gtl-parser = { path = "crates/gtl-parser", default-features = false }
 gtl-server = { path = "crates/gtl-server" }
@@ -138,6 +141,7 @@ tonic-health = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tonic-reflection = "0.14.6"
+tonic-types = "0.14.6"
 tower = { version = "0.5.3", default-features = false }
 tower-http = { version = "0.7.0", default-features = false, features = [
   "trace",

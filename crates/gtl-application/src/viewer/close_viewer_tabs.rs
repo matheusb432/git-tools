@@ -1,4 +1,7 @@
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{
+    failure::{ErrorMeta, Failure, Resource},
+    viewer::ViewerTabId,
+};
 use rusqlite::{Connection, params};
 
 use crate::viewer::{
@@ -12,15 +15,19 @@ pub enum CloseViewerTabs {
     Others(ViewerTabId),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum CloseViewerTabsError {
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
     #[error(transparent)]
+    #[meta(transparent)]
     ViewerState(#[from] ViewerStateError),
     #[error(transparent)]
+    #[meta(transparent)]
     ReserveWork(#[from] ReserveRecipeError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Persistence(#[from] rusqlite::Error),
 }
 

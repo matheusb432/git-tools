@@ -4,9 +4,8 @@ use anyhow::{Context, Result, ensure};
 use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::json;
-use thirtyfour::{By, WebDriver, prelude::ElementQueryable as _};
+use thirtyfour::{By, WebDriver, WebElement, prelude::ElementQueryable as _};
 
-pub mod catalogue;
 pub mod evidence;
 pub mod fixture;
 pub mod selectors;
@@ -139,24 +138,78 @@ pub async fn wait_for_active_diff(
     wait::until(
         &format!("{repository} diff containing {marker}"),
         wait::ASSERTION_TIMEOUT,
+        || probe_active_diff(driver, repository, marker),
+    )
+    .await
+}
+
+/// Waits for the first displayed element that `locator` matches.
+pub async fn visible(driver: &WebDriver, locator: By) -> Result<WebElement> {
+    wait::until(
+        &format!("visible {locator:?}"),
+        wait::ASSERTION_TIMEOUT,
         || async {
-            let result = probe_active_diff(driver, repository, marker).await;
-            match result {
-                Err(error)
-                    if matches!(
-                        error
-                            .downcast_ref::<thirtyfour::error::WebDriverError>()
-                            .map(thirtyfour::error::WebDriverError::as_inner),
-                        Some(thirtyfour::error::WebDriverErrorInner::StaleElementReference(_))
-                    ) =>
-                {
-                    Ok(None)
+            for element in driver.find_all(locator.clone()).await? {
+                if element.is_displayed().await? {
+                    return Ok(Some(element));
                 }
-                result => result,
             }
+            Ok(None)
         },
     )
     .await
+}
+
+/// Clicks the first displayed, enabled element that `locator` matches, retrying while it
+/// re-renders.
+pub async fn click(driver: &WebDriver, locator: By) -> Result<()> {
+    wait::until(
+        &format!("clickable {locator:?}"),
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            for element in driver.find_all(locator.clone()).await? {
+                if element.is_displayed().await? && element.is_enabled().await? {
+                    element.click().await?;
+                    return Ok(Some(()));
+                }
+            }
+            Ok(None)
+        },
+    )
+    .await
+}
+
+/// Waits for a current toast containing `text` and dismisses it.
+///
+/// Toasts that are already leaving keep their text during the exit animation, so they never
+/// satisfy the wait.
+pub async fn dismiss_toast(driver: &WebDriver, text: &str) -> Result<()> {
+    let toast = wait::until(
+        &format!("toast containing {text:?}"),
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let current = format!(
+                "{}:not([data-state='leaving'])",
+                gtl_web_contracts::test_ids::TOAST.selector()
+            );
+            for toast in driver.find_all(By::Css(current)).await? {
+                if toast.text().await?.contains(text) {
+                    return Ok(Some(toast));
+                }
+            }
+            Ok(None)
+        },
+    )
+    .await?;
+    toast
+        .find(By::Css(
+            gtl_web_contracts::test_ids::TOAST_DISMISS.selector(),
+        ))
+        .await?
+        .click()
+        .await
+        .with_context(|| format!("dismiss the toast containing {text:?}"))?;
+    Ok(())
 }
 
 async fn probe_active_diff(

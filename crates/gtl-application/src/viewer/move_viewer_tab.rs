@@ -1,12 +1,15 @@
+use gtl_models::failure::{ErrorMeta, Failure, Resource};
 use gtl_wire::viewer::MoveViewerTab;
 
 use super::{ViewerState, ViewerStateError};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum MoveViewerTabError {
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
 }
 

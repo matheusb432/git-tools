@@ -6,6 +6,7 @@ use std::sync::Arc;
 pub use cache::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache};
 use gtl_models::{
     diffs::{Commit, CommitId},
+    failure::{ErrorMeta, Failure, Resource},
     live_views::LiveSource,
     recipes::RecipeBatchId,
     viewer::{
@@ -95,7 +96,7 @@ enum CommitSelection {
     },
     Error {
         commit: Commit,
-        reason: String,
+        failure: Failure,
     },
 }
 
@@ -121,19 +122,23 @@ pub enum CommitSelectionSnapshot {
     },
     Error {
         id: CommitId,
-        reason: String,
+        failure: Failure,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, ErrorMeta)]
 pub enum BeginCommitSelectionError {
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
     #[error("viewer range changed")]
+    #[meta(failure = Failure::Changed)]
     StaleRange,
     #[error("commit is not available in this range")]
+    #[meta(failure = Failure::Gone { resource: Resource::Commit })]
     UnknownCommit,
     #[error("another commit selection is pending")]
+    #[meta(failure = Failure::Changed)]
     SelectionPending,
 }
 
@@ -638,7 +643,7 @@ impl ViewerSession {
     pub(super) fn set_commit_patch_error_if_current(
         &mut self,
         ticket: CommitPatchTicket,
-        reason: String,
+        failure: Failure,
     ) -> PublishOutcome {
         if !self.commit_patch_is_current(ticket) {
             return PublishOutcome::Stale;
@@ -655,7 +660,7 @@ impl ViewerSession {
         else {
             return PublishOutcome::Stale;
         };
-        tab.selection = CommitSelection::Error { commit, reason };
+        tab.selection = CommitSelection::Error { commit, failure };
         self.bump_version();
         PublishOutcome::Published
     }
@@ -772,9 +777,9 @@ impl ViewerSession {
             CommitSelection::Pending { commit } => CommitSelectionSnapshot::Pending {
                 id: commit.id.clone(),
             },
-            CommitSelection::Error { commit, reason } => CommitSelectionSnapshot::Error {
+            CommitSelection::Error { commit, failure } => CommitSelectionSnapshot::Error {
                 id: commit.id.clone(),
-                reason: reason.clone(),
+                failure: failure.clone(),
             },
             CommitSelection::Ready { commit, transient } => {
                 let view = selected_view(&mut self.cache, id, transient.as_ref());
@@ -1728,7 +1733,10 @@ mod tests {
         assert!(session.active_content_identity().is_none());
         assert_eq!(session.active_displayed_content_identity(), Some(selected));
         assert_eq!(
-            session.set_commit_patch_error_if_current(second_selection, "failed".into()),
+            session.set_commit_patch_error_if_current(
+                second_selection,
+                gtl_models::failure::ViewerFailure::CommitFailed.into()
+            ),
             PublishOutcome::Published
         );
         let selection_error = session.active_content_identity().unwrap();
@@ -1873,7 +1881,7 @@ mod tests {
         session.set_state_if_current(
             ticket,
             ViewerTabState::Error {
-                reason: "new failure".into(),
+                failure: gtl_models::failure::ViewerFailure::RenderFailed.into(),
             },
         );
 
@@ -1881,7 +1889,7 @@ mod tests {
         assert_eq!(
             session.tab(id).unwrap().tab.state(),
             &ViewerTabState::Error {
-                reason: "new failure".into()
+                failure: gtl_models::failure::ViewerFailure::RenderFailed.into()
             }
         );
     }
@@ -1902,7 +1910,7 @@ mod tests {
         session.set_state_if_current(
             ticket,
             ViewerTabState::Error {
-                reason: "safe".into(),
+                failure: gtl_models::failure::ViewerFailure::RenderFailed.into(),
             },
         );
         assert!(session.version() > pending);

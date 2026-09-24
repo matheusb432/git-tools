@@ -22,14 +22,17 @@ use lucide_dioxus::Settings;
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{
-        NavigationBar, ScrollArea, ScrollAreaVariant, SectionedSurface, SectionedSurfaceBody,
-        SectionedSurfaceHeader, ViewerTabItem,
+    shared::{
+        field_errors::FieldErrors,
+        ui::{
+            NavigationBar, ScrollArea, ScrollAreaVariant, SectionedSurface, SectionedSurfaceBody,
+            SectionedSurfaceHeader, ViewerTabItem,
+        },
     },
     views::{
         diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
         viewer_menu::ViewerMenu,
-        viewer_settings_form::{ViewerSettingsForm, ViewerSettingsSelection},
+        viewer_settings_form::{SettingsField, ViewerSettingsForm, ViewerSettingsSelection},
     },
 };
 
@@ -123,6 +126,16 @@ fn mobile_viewer() -> Element {
 fn settings_form() -> Element {
     rsx! {
         SettingsMock {}
+    }
+}
+
+/// A server rejection shown beside the setting it names, with a form-level summary.
+#[story(name = "Settings form with a rejected setting")]
+fn settings_form_rejected() -> Element {
+    rsx! {
+        main { class: "story-settings-preview mx-auto w-full px-4 py-5 sm:px-6",
+            SettingsFormPreview { rejected: Some(SettingsField::Theme) }
+        }
     }
 }
 
@@ -515,7 +528,7 @@ fn SettingsMock() -> Element {
 }
 
 #[component]
-fn SettingsFormPreview() -> Element {
+fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
     let initial = ViewerSettingsSelection::new(
         Some(gtl_wire::viewer::ViewerTheme::Mirage),
         ViewerRenderOptions {
@@ -540,7 +553,14 @@ fn SettingsFormPreview() -> Element {
             initial,
             pending: pending(),
             saved: saved(),
-            save_error: None,
+            save_error: rejected.map(|_| "Correct the highlighted setting and save again.".to_owned()),
+            field_errors: rejected
+                .map(|field| {
+                    let mut errors = FieldErrors::default();
+                    errors.reject(field);
+                    errors
+                })
+                .unwrap_or_default(),
             reload_available: false,
             onmodified: move |()| saved.set(false),
             onreload: move |()| {},
@@ -616,6 +636,7 @@ const VIEWER_SETTINGS_REDESIGN_STORIES: () = &[
     filter_paths_mobile,
     mobile_viewer,
     settings_form,
+    settings_form_rejected,
 ];
 
 #[cfg(test)]

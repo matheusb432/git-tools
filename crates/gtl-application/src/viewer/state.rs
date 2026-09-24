@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use gtl_models::viewer::ViewerVersion;
+use gtl_models::{failure::ErrorMeta, viewer::ViewerVersion};
 
 use super::{
     ViewerDiffSnapshot,
@@ -17,11 +17,13 @@ pub struct ViewerState {
     version_sender: tokio::sync::watch::Sender<ViewerVersion>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ViewerStateError {
     #[error("viewer state lock is poisoned")]
+    #[meta(private(Internal))]
     LockPoisoned,
     #[error("viewer source pool lock is poisoned")]
+    #[meta(private(Internal))]
     SourceLockPoisoned,
 }
 

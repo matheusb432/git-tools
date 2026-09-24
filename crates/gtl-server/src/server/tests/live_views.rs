@@ -95,35 +95,41 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
         project_ids: Vec::new(),
     };
     let mut stream = client.watch_viewer(request).await?.into_inner();
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     let initial = shell(&mut client).await?;
     std::fs::write(repository.join("work.txt"), "uncommitted\n")?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     assert_eq!(shell(&mut client).await?.version, initial.version);
     git(&repository, &["commit", "--allow-empty", "-qm", "new HEAD"])?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     let committed = shell(&mut client).await?;
     assert!(committed.version > initial.version);
     git(&repository, &["switch", "-qc", "same-commit"])?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     let switched = shell(&mut client).await?;
     assert!(switched.version > committed.version);
     git(&repository, &["switch", "--detach", "-q"])?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     let detached = shell(&mut client).await?;
     assert!(detached.version > switched.version);
     git(
         &repository,
         &["commit", "--amend", "--allow-empty", "-qm", "amended HEAD"],
     )?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     let amended = shell(&mut client).await?;
     assert!(amended.version > detached.version);
     std::fs::rename(repository.join(".git"), repository.join("git-unavailable"))?;
-    assert!(next_check(&mut stream).await?.error.is_some());
+    assert_eq!(
+        next_check(&mut stream)
+            .await?
+            .failure
+            .and_then(proto::failure::decode_failure),
+        Some(gtl_models::failure::Failure::Unexpected)
+    );
     assert_eq!(shell(&mut client).await?, amended);
     std::fs::rename(repository.join("git-unavailable"), repository.join(".git"))?;
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     drop(stream);
     git(
         &repository,
@@ -138,7 +144,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
         })
         .await?
         .into_inner();
-    assert!(next_check(&mut stream).await?.error.is_none());
+    assert!(next_check(&mut stream).await?.failure.is_none());
     assert!(shell(&mut client).await?.version > amended.version);
     server.stop().await?;
     Ok(())

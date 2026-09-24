@@ -594,7 +594,12 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
 
     let mut malformed_revision = encode_edit_settings_request(request);
     malformed_revision.expected_revision = Some("not-a-revision".to_owned());
-    assert!(decode_edit_settings_request(malformed_revision).is_err());
+    assert_eq!(
+        decode_edit_settings_request(malformed_revision),
+        Err(ViewerCodecError::InvalidField {
+            field: "expected_revision"
+        })
+    );
 }
 
 #[test]
@@ -828,6 +833,11 @@ fn accessibility_patch_preserves_clear_and_rejects_invalid_scale() {
             }),
             ..Default::default()
         };
-        assert!(decode_edit_settings_request(request).is_err());
+        assert_eq!(
+            decode_edit_settings_request(request),
+            Err(ViewerCodecError::InvalidField {
+                field: "ui_scale_percent"
+            })
+        );
     }
 }

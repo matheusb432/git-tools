@@ -36,17 +36,11 @@ pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::Ex
 fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
     let repo_path = match super::canonical_working_directory() {
         Ok(path) => path,
-        Err(error) => {
-            eprintln!("tag: {}", crate::error_text(&error));
-            return crate::ExitCode::Internal;
-        }
+        Err(error) => return crate::failure::fail("tag", &error),
     };
     let client = match ServerClient::connect() {
         Ok(client) => client,
-        Err(error) => {
-            eprintln!("tag: {}", crate::error_text(&error));
-            return crate::ExitCode::Internal;
-        }
+        Err(error) => return crate::failure::fail("tag", &error),
     };
     let repository_path = repo_path.to_string_lossy().into_owned();
     match command {
@@ -267,17 +261,11 @@ fn finish_tag_list(result: anyhow::Result<v1::ListTagsResponse>, commits: bool) 
             }
             Ok(ListTagsOk::Failed { detail }) => {
                 eprintln!("tag: {detail}");
-                crate::ExitCode::Internal
+                crate::ExitCode::Failed
             }
-            Err(error) => {
-                eprintln!("tag: {}", crate::error_text(&error));
-                crate::ExitCode::Internal
-            }
+            Err(error) => crate::failure::fail("tag", &error),
         },
-        Err(error) => {
-            eprintln!("tag: {}", crate::error_text(&error));
-            crate::ExitCode::Internal
-        }
+        Err(error) => crate::failure::fail("tag", &error),
     }
 }
 
@@ -378,10 +366,7 @@ where
 {
     match result {
         Ok(outcome) => render_tag_action(&outcome.into()),
-        Err(error) => {
-            eprintln!("tag: {}", crate::error_text(&error));
-            crate::ExitCode::Internal
-        }
+        Err(error) => crate::failure::fail("tag", &error),
     }
 }
 
@@ -395,7 +380,7 @@ fn render_tag_action(outcome: &TagActionResult) -> crate::ExitCode {
                     Ok(detail) => println!("{detail}"),
                     Err(error) => {
                         eprintln!("tag: {error}");
-                        return crate::ExitCode::Internal;
+                        return crate::ExitCode::Failed;
                     }
                 }
             }
@@ -410,11 +395,11 @@ fn render_tag_action(outcome: &TagActionResult) -> crate::ExitCode {
                     Err(error) => eprintln!("tag: {error}"),
                 }
             }
-            crate::ExitCode::Internal
+            crate::ExitCode::Failed
         }
         Ok(v1::TagActionStatus::Unspecified) | Err(_) => {
             eprintln!("tag: gtl-server returned an invalid tag action status");
-            crate::ExitCode::Internal
+            crate::ExitCode::Failed
         }
     }
 }

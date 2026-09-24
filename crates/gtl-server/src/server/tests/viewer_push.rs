@@ -5,6 +5,7 @@ use std::{
 };
 
 use gtl_application::live_views::save_live_view;
+use gtl_models::failure::{Failure, PushFailure, PushRefRejection};
 use gtl_wire::{
     proto, v1,
     viewer::push::{CreateViewerPush, ViewerPushRequest, ViewerPushStatus},
@@ -263,10 +264,13 @@ async fn rewritten_commit_is_rejected_even_while_its_object_still_exists() -> Te
     git(&fixture.repository, &["reset", "--soft", &fixture.base])?;
     git(&fixture.repository, &["commit", "-qm", "squashed"])?;
     git(&fixture.repository, &["cat-file", "-e", &fixture.latest])?;
-    let ViewerPushStatus::Failed { message } = fixture.start(request).await? else {
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::CommitRemoved { commit }),
+    } = fixture.start(request).await?
+    else {
         return Err("expected rewrite rejection".into());
     };
-    assert!(message.contains("no longer in this branch"));
+    assert_eq!(commit.as_ref(), fixture.latest);
     assert_eq!(git(&fixture.remote, &["rev-parse", "main"])?, fixture.base);
     fixture.server.stop().await?;
     Ok(())
@@ -281,10 +285,13 @@ async fn checkout_and_destination_changes_invalidate_pending_reviews() -> TestRe
         &fixture.repository,
         &["branch", "--set-upstream-to=origin/main"],
     )?;
-    let ViewerPushStatus::Failed { message } = fixture.start(request).await? else {
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::CheckoutChanged { current }),
+    } = fixture.start(request).await?
+    else {
         return Err("expected checkout rejection".into());
     };
-    assert!(message.contains("Checkout changed"));
+    assert_eq!(current.as_ref(), "other");
     git(&fixture.repository, &["checkout", "-q", "feature"])?;
     let request = fixture.prepare().await?;
     git(
@@ -297,10 +304,12 @@ async fn checkout_and_destination_changes_invalidate_pending_reviews() -> TestRe
             fixture.repository.to_str().ok_or("repository path")?,
         ],
     )?;
-    let ViewerPushStatus::Failed { message } = fixture.start(request).await? else {
-        return Err("expected destination rejection".into());
-    };
-    assert!(message.contains("destination changed"));
+    assert_eq!(
+        fixture.start(request).await?,
+        ViewerPushStatus::Failed {
+            failure: Failure::Push(PushFailure::DestinationChanged),
+        }
+    );
     assert_eq!(git(&fixture.remote, &["rev-parse", "main"])?, fixture.base);
     fixture.server.stop().await?;
     Ok(())
@@ -332,11 +341,53 @@ async fn atomic_support_is_required_and_git_rejections_are_relayed() -> TestResu
         &["config", "receive.advertiseAtomic", "false"],
     )?;
     let request = fixture.prepare().await?;
-    let ViewerPushStatus::Failed { message } = fixture.start(request).await? else {
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::GitFailed { diagnostic }),
+    } = fixture.start(request).await?
+    else {
         return Err("expected atomic rejection".into());
     };
-    assert!(message.contains("atomic"));
+    assert!(diagnostic.as_str().contains("atomic"));
     assert_eq!(git(&fixture.remote, &["rev-parse", "main"])?, fixture.base);
+    fixture.server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_rejections_are_reported_per_ref() -> TestResult {
+    let mut fixture = Fixture::new().await?;
+    let request = fixture.prepare().await?;
+    let tree = git(&fixture.remote, &["rev-parse", "main^{tree}"])?;
+    let remote_only = git(
+        &fixture.remote,
+        &[
+            "-c",
+            "user.name=Remote",
+            "-c",
+            "user.email=remote@example.invalid",
+            "commit-tree",
+            &tree,
+            "-p",
+            &fixture.base,
+            "-m",
+            "remote only",
+        ],
+    )?;
+    git(
+        &fixture.remote,
+        &["update-ref", "refs/heads/main", &remote_only],
+    )?;
+
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::Rejected { refs, .. }),
+    } = fixture.start(request).await?
+    else {
+        return Err("expected a remote rejection".into());
+    };
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].destination.as_ref(), "refs/heads/main");
+    assert_eq!(refs[0].reason, PushRefRejection::FetchFirst);
+    assert_eq!(git(&fixture.remote, &["rev-parse", "main"])?, remote_only);
     fixture.server.stop().await?;
     Ok(())
 }
@@ -346,10 +397,13 @@ async fn missing_upstream_and_multiple_push_urls_cannot_prepare_a_push() -> Test
     let mut fixture = Fixture::new().await?;
     git(&fixture.repository, &["branch", "--unset-upstream"])?;
     let request = fixture.prepare().await?;
-    let ViewerPushStatus::Failed { message } = fixture.status(request).await? else {
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::NoUpstream { branch }),
+    } = fixture.status(request).await?
+    else {
         return Err("expected upstream refusal".into());
     };
-    assert!(message.contains("upstream"));
+    assert_eq!(branch.as_ref(), "feature");
     git(
         &fixture.repository,
         &["branch", "--set-upstream-to=origin/main"],
@@ -373,10 +427,13 @@ async fn missing_upstream_and_multiple_push_urls_cannot_prepare_a_push() -> Test
         ],
     )?;
     let request = fixture.prepare().await?;
-    let ViewerPushStatus::Failed { message } = fixture.status(request).await? else {
+    let ViewerPushStatus::Failed {
+        failure: Failure::Push(PushFailure::MultipleDestinations { remote }),
+    } = fixture.status(request).await?
+    else {
         return Err("expected multiple destination refusal".into());
     };
-    assert!(message.contains("exactly one"));
+    assert_eq!(remote.as_ref(), "origin");
     fixture.server.stop().await?;
     Ok(())
 }
@@ -476,7 +533,9 @@ async fn push_availability_reads_current_git_without_replacing_the_displayed_vie
     );
 
     git(&fixture.repository, &["reset", "--soft", &fixture.first])?;
-    let ViewerPushAvailability::Unavailable { message } = read(
+    let ViewerPushAvailability::Blocked {
+        failure: Failure::Push(PushFailure::CommitRemoved { .. }),
+    } = read(
         fixture
             .client
             .get_viewer_push_availability(request)
@@ -486,7 +545,6 @@ async fn push_availability_reads_current_git_without_replacing_the_displayed_vie
     else {
         return Err("rewritten target was reported as pushable".into());
     };
-    assert!(message.contains("no longer in this branch"));
     let unchanged = tokio::time::timeout(
         Duration::from_secs(10),
         wait_view(&mut fixture.client, |_| true),

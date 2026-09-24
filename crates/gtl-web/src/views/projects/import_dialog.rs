@@ -1,6 +1,10 @@
 use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
+use gtl_models::{
+    failure::{Failure, ProjectFailure},
+    projects::catalogue::{ProjectId, ProjectTitle},
+};
 use gtl_wire::viewer::projects::{
     DiscoverProjectRepositories, DiscoveredProjectRepository, ImportProjectRepositories,
     ProjectDiscoveryState, ProjectImportOutcome, ProjectImportResult, ProjectImportSelection,
@@ -10,13 +14,78 @@ use super::loading::Projects;
 use crate::{
     entities::diffs::viewer_server,
     shared::{
+        field_errors::{FieldErrors, FormField},
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, TextInput,
             TextInputLabelVisibility,
         },
-        viewer_client::ViewerClientError,
+        viewer_client::{ViewerClientError, captured_client_error},
     },
 };
+
+/// The folder input that scans for repositories.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScanField {
+    Root,
+}
+
+impl FormField for ScanField {
+    const ALL: &'static [Self] = &[Self::Root];
+
+    fn request_field(self) -> &'static str {
+        "root"
+    }
+
+    fn correction(self) -> &'static str {
+        "Enter a folder to scan."
+    }
+}
+
+/// Places a scan failure on the folder input when the folder caused it.
+fn scan_field_errors(error: &ViewerClientError) -> Option<FieldErrors<ScanField>> {
+    let failure = error.failure()?;
+    if let Some(errors) = FieldErrors::from_failure(failure) {
+        return Some(errors);
+    }
+    match failure {
+        Failure::Project(
+            ProjectFailure::ScanFolderInvalid { .. }
+            | ProjectFailure::ScanFailed { .. }
+            | ProjectFailure::HomeUnavailable
+            | ProjectFailure::TooManyRepositories { .. },
+        ) => {
+            let mut errors = FieldErrors::default();
+            errors.insert(ScanField::Root, failure.to_string());
+            Some(errors)
+        }
+        _ => None,
+    }
+}
+
+/// The editable inputs of one new repository row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportRowField {
+    ProjectId,
+    Title,
+}
+
+impl FormField for ImportRowField {
+    const ALL: &'static [Self] = &[Self::ProjectId, Self::Title];
+
+    fn request_field(self) -> &'static str {
+        match self {
+            Self::ProjectId => "project_id",
+            Self::Title => "title",
+        }
+    }
+
+    fn correction(self) -> &'static str {
+        match self {
+            Self::ProjectId => "Use 2 to 4 uppercase letters.",
+            Self::Title => "Enter a project title.",
+        }
+    }
+}
 
 #[derive(Clone, PartialEq)]
 struct ImportRow {
@@ -27,6 +96,7 @@ struct ImportRow {
     project_id: String,
     title: String,
     outcome: Option<ProjectImportOutcome>,
+    field_errors: FieldErrors<ImportRowField>,
 }
 
 impl ImportRow {
@@ -40,13 +110,55 @@ impl ImportRow {
         )
     }
 
-    fn selection(&self) -> ProjectImportSelection {
-        ProjectImportSelection {
-            path: self.path.clone(),
-            project_id: self.project_id.clone(),
-            title: self.title.clone(),
+    /// Parses the row into a selection; restored rows keep their stored ID and title.
+    fn selection(&self) -> Result<ProjectImportSelection, FieldErrors<ImportRowField>> {
+        if !matches!(self.state, ProjectDiscoveryState::New) {
+            return Ok(ProjectImportSelection {
+                path: self.path.clone(),
+                project_id: self.project_id.clone(),
+                title: self.title.clone(),
+            });
+        }
+        let mut errors = FieldErrors::default();
+        let project_id = errors.parse(
+            ImportRowField::ProjectId,
+            ProjectId::try_new(self.project_id.trim().to_owned()),
+        );
+        let title = errors.parse(
+            ImportRowField::Title,
+            ProjectTitle::try_new(self.title.trim().to_owned()),
+        );
+        match (project_id, title) {
+            (Some(project_id), Some(title)) => Ok(ProjectImportSelection {
+                path: self.path.clone(),
+                project_id: project_id.to_string(),
+                title: title.to_string(),
+            }),
+            _ => Err(errors),
         }
     }
+}
+
+/// Parses every selected row, recording corrections on the rows that cannot be imported.
+fn import_selections(rows: &mut [ImportRow]) -> Option<Vec<ProjectImportSelection>> {
+    let mut selections = Vec::new();
+    let mut valid = true;
+    for row in rows
+        .iter_mut()
+        .filter(|row| row.selected && row.available())
+    {
+        match row.selection() {
+            Ok(selection) => {
+                row.field_errors = FieldErrors::default();
+                selections.push(selection);
+            }
+            Err(errors) => {
+                row.field_errors = errors;
+                valid = false;
+            }
+        }
+    }
+    valid.then_some(selections)
 }
 
 fn import_rows(repositories: Vec<DiscoveredProjectRepository>) -> Vec<ImportRow> {
@@ -78,6 +190,7 @@ fn import_rows(repositories: Vec<DiscoveredProjectRepository>) -> Vec<ImportRow>
                 project_id,
                 title: name,
                 outcome: None,
+                field_errors: FieldErrors::default(),
             }
         })
         .collect()
@@ -150,9 +263,15 @@ pub(super) fn ImportProjectsDialog() -> Element {
     let selected = rows().iter().filter(|row| row.selected).count();
     let available = rows().iter().filter(|row| row.available()).count();
     let scan_error = scan.value().and_then(Result::err);
+    let scan_field_errors = scan_error
+        .as_ref()
+        .and_then(captured_client_error)
+        .and_then(scan_field_errors)
+        .unwrap_or_default();
     let picker_error = picker.value().and_then(Result::err);
     let import_error = import.value().and_then(Result::err);
     let error = scan_error
+        .filter(|_| scan_field_errors.is_empty())
         .or(picker_error)
         .or(import_error)
         .map(|error| error.to_string());
@@ -161,8 +280,10 @@ pub(super) fn ImportProjectsDialog() -> Element {
         div { class: "flex h-full min-h-0 flex-col gap-4",
             div { class: "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end",
                 TextInput {
+                    id: "project-import-root",
                     label: "Folder to scan",
                     value: root(),
+                    error: scan_field_errors.message(ScanField::Root),
                     placeholder: "~/my-projects or /path/to/projects",
                     disabled: busy,
                     oninput: move |event: FormEvent| {
@@ -254,14 +375,12 @@ pub(super) fn ImportProjectsDialog() -> Element {
                 Button {
                     state: if busy || selected == 0 { ButtonState::Disabled } else { ButtonState::Enabled },
                     onclick: move |_| {
-                        import
-                            .call(ImportProjectRepositories {
-                                selections: rows()
-                                    .into_iter()
-                                    .filter(|row| row.selected && row.available())
-                                    .map(|row| row.selection())
-                                    .collect(),
-                            });
+                        if let Some(selections) = rows.with_mut(|rows| import_selections(rows)) {
+                            import
+                                .call(ImportProjectRepositories {
+                                    selections,
+                                });
+                        }
                     },
                     "Add {selected} selected"
                 }
@@ -274,8 +393,19 @@ fn apply_results(rows: &mut [ImportRow], results: Vec<ProjectImportResult>) {
     for result in results {
         if let Some(row) = rows.iter_mut().find(|row| row.path == result.path) {
             row.selected = matches!(result.outcome, ProjectImportOutcome::Failed(_));
+            row.field_errors = rejected_fields(&result.outcome);
             row.outcome = Some(result.outcome);
         }
+    }
+}
+
+/// The row inputs a failed import names; other failures stay on the row.
+fn rejected_fields(outcome: &ProjectImportOutcome) -> FieldErrors<ImportRowField> {
+    match outcome {
+        ProjectImportOutcome::Failed(failure) => {
+            FieldErrors::from_failure(failure).unwrap_or_default()
+        }
+        ProjectImportOutcome::Created | ProjectImportOutcome::Restored => FieldErrors::default(),
     }
 }
 
@@ -325,34 +455,43 @@ fn ProjectImportRow(
             {
                 div { class: "mt-3 grid gap-3 pl-7 sm:grid-cols-[7rem_minmax(0,1fr)]",
                     TextInput {
+                        id: "project-import-{index}-id",
                         label: "Project ID for {row.label}",
                         label_visibility: TextInputLabelVisibility::Hidden,
                         value: row.project_id,
                         maxlength: "4",
                         disabled: disabled || !editable,
+                        error: row.field_errors.message(ImportRowField::ProjectId),
                         oninput: move |event: FormEvent| {
                             rows.with_mut(|rows| {
                                 rows[index].project_id = event.value().to_ascii_uppercase();
+                                rows[index].field_errors.clear(ImportRowField::ProjectId);
                                 rows[index].outcome = None;
                             });
                         },
                     }
                     TextInput {
+                        id: "project-import-{index}-title",
                         label: "Project title for {row.label}",
                         label_visibility: TextInputLabelVisibility::Hidden,
                         value: row.title,
                         disabled: disabled || !editable,
+                        error: row.field_errors.message(ImportRowField::Title),
                         oninput: move |event: FormEvent| {
                             rows.with_mut(|rows| {
                                 rows[index].title = event.value();
+                                rows[index].field_errors.clear(ImportRowField::Title);
                                 rows[index].outcome = None;
                             });
                         },
                     }
                 }
             }
-            if let Some(ProjectImportOutcome::Failed(message)) = row.outcome {
-                p { class: "mt-2 pl-7 text-xs text-del", role: "alert", "{message}" }
+            if let Some(ProjectImportOutcome::Failed(failure)) = row
+                .outcome
+                .filter(|_| row.field_errors.is_empty())
+            {
+                p { class: "mt-2 pl-7 text-xs text-del", role: "alert", "{failure}" }
             }
         }
     }
@@ -365,12 +504,78 @@ async fn pick_folder() -> Result<Option<String>, ViewerClientError> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn pick_folder() -> impl std::future::Future<Output = Result<Option<String>, ViewerClientError>> {
-    std::future::ready(Err(ViewerClientError::Unavailable))
+    std::future::ready(Err(ViewerClientError::Disconnected))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::suggested_id;
+    use super::*;
+
+    fn new_row(project_id: &str, title: &str) -> ImportRow {
+        ImportRow {
+            path: "/repos/example".into(),
+            label: "example".into(),
+            state: ProjectDiscoveryState::New,
+            selected: true,
+            project_id: project_id.into(),
+            title: title.into(),
+            outcome: None,
+            field_errors: FieldErrors::default(),
+        }
+    }
+
+    #[test]
+    fn invalid_rows_keep_a_correction_on_each_rejected_input() {
+        let mut rows = [new_row("x", "  "), new_row("EXM", " Example ")];
+
+        assert_eq!(import_selections(&mut rows), None);
+        assert!(
+            rows[0]
+                .field_errors
+                .message(ImportRowField::ProjectId)
+                .is_some()
+        );
+        assert!(
+            rows[0]
+                .field_errors
+                .message(ImportRowField::Title)
+                .is_some()
+        );
+        assert!(rows[1].field_errors.is_empty());
+    }
+
+    #[test]
+    fn valid_rows_import_trimmed_values() {
+        let mut rows = [new_row("EXM", " Example ")];
+
+        let selections = import_selections(&mut rows).unwrap();
+
+        assert_eq!(selections[0].project_id, "EXM");
+        assert_eq!(selections[0].title, "Example");
+    }
+
+    #[test]
+    fn server_field_rejections_mark_the_row_input() {
+        let mut rows = [new_row("EXM", "Example")];
+
+        apply_results(
+            &mut rows,
+            vec![ProjectImportResult {
+                path: "/repos/example".into(),
+                project_id: "EXM".into(),
+                outcome: ProjectImportOutcome::Failed(Failure::InvalidRequest {
+                    field: "project_id".into(),
+                }),
+            }],
+        );
+
+        assert!(
+            rows[0]
+                .field_errors
+                .message(ImportRowField::ProjectId)
+                .is_some()
+        );
+    }
 
     #[test]
     fn suggestions_use_unique_uppercase_ids() {

@@ -1,6 +1,7 @@
 use anyhow::Context as _;
-use gtl_models::projects::catalogue::{
-    Project, ProjectGroups, ProjectId, ProjectMetadata, ProjectStatus,
+use gtl_models::{
+    failure::{ErrorMeta, Failure, ProjectFailure, Resource},
+    projects::catalogue::{Project, ProjectGroups, ProjectId, ProjectMetadata, ProjectStatus},
 };
 use rusqlite::{Connection, Row};
 
@@ -10,17 +11,22 @@ pub mod list_active_projects;
 pub mod set_project_membership;
 pub mod set_project_status;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ProjectCatalogueError {
     #[error("project was not found")]
+    #[meta(failure = Failure::Gone { resource: Resource::Project })]
     NotFound,
     #[error("project ID, title, or source already exists")]
+    #[meta(failure = ProjectFailure::AlreadyExists)]
     AlreadyExists,
     #[error("project catalogue exceeds its limit")]
+    #[meta(failure = ProjectFailure::CatalogueFull { projects_max: u32::from(gtl_models::projects::catalogue::PROJECTS_MAX) })]
     LimitExceeded,
     #[error("project catalogue contains invalid data")]
+    #[meta(private(DataLoss))]
     InvalidData(#[source] anyhow::Error),
     #[error("project database operation failed")]
+    #[meta(private(Internal))]
     Database(#[from] rusqlite::Error),
 }
 

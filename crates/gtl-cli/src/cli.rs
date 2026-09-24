@@ -29,6 +29,15 @@ fn project_id(value: &str) -> Result<ProjectId, String> {
         .map_err(|_| "project ID must contain 2 to 4 ASCII letters".to_string())
 }
 
+/// Documents the stable process exit codes that `crate::ExitCode` defines.
+const EXIT_STATUS_HELP: &str = "\
+Exit status:
+  0  Success, or a declined confirmation
+  1  The operation failed
+  2  Invalid arguments or input
+  3  The repository, project, or settings state refused the operation
+  4  gtl-server is unreachable, busy, or timed out; retrying may succeed";
+
 /// Inspect repositories and run Git workflows.
 #[derive(Debug, Parser)]
 #[command(
@@ -36,6 +45,7 @@ fn project_id(value: &str) -> Result<ProjectId, String> {
     version,
     about,
     long_about = None,
+    after_long_help = EXIT_STATUS_HELP,
     arg_required_else_help = true,
     styles = clap_cargo::style::CLAP_STYLING
 )]
@@ -354,8 +364,8 @@ impl From<Theme> for gtl_models::viewer::Theme {
 
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Report the current repo plus any nested subrepos under the current directory (linked
-    /// worktrees are skipped).
+    /// Report the current repo plus any nested subrepos under the current directory (nested
+    /// linked worktrees are skipped).
     #[arg(short = 'r', long)]
     pub recursive: bool,
     #[command(flatten)]
@@ -428,7 +438,28 @@ pub enum DiffTargetParseError {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory as _;
+
     use super::*;
+
+    #[test]
+    fn long_help_documents_every_exit_status() {
+        let help = Cli::command().render_long_help().to_string();
+
+        for (code, meaning) in [
+            ("0", "Success"),
+            ("1", "failed"),
+            ("2", "Invalid arguments"),
+            ("3", "refused"),
+            ("4", "unreachable"),
+        ] {
+            assert!(
+                help.lines()
+                    .any(|line| line.trim_start().starts_with(code) && line.contains(meaning)),
+                "missing exit status {code}"
+            );
+        }
+    }
 
     #[test]
     fn parse_args_tag_bump_accepts_short_aliases() {

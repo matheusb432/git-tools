@@ -34,6 +34,7 @@ gtl-server.workspace = true
 predicates.workspace = true
 strum.workspace = true
 tempfile.workspace = true
+tonic.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 expectrl.workspace = true

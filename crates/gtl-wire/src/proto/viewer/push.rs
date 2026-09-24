@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use super::{ViewerCodecError, decode_viewer_view_identity, encode_viewer_view_identity, required};
 use crate::{
+    proto::failure::{decode_failure, encode_failure},
     v1,
     viewer::push::{CreateViewerPush, ViewerPushId, ViewerPushPreview, ViewerPushStatus},
 };
@@ -54,7 +55,7 @@ pub fn encode_status(value: ViewerPushStatus) -> v1::GetViewerPushResponse {
             ViewerPushStatus::Running => Status::Running(v1::ViewerPushRunning {}),
             ViewerPushStatus::Queued => Status::Queued(v1::ViewerPushQueued {}),
             ViewerPushStatus::Succeeded => Status::Succeeded(v1::ViewerPushSucceeded {}),
-            ViewerPushStatus::Failed { message } => Status::Failure(message),
+            ViewerPushStatus::Failed { failure } => Status::Failed(encode_failure(&failure)),
         }),
     }
 }
@@ -79,7 +80,9 @@ pub fn decode_status(
         Status::Running(_) => ViewerPushStatus::Running,
         Status::Queued(_) => ViewerPushStatus::Queued,
         Status::Succeeded(_) => ViewerPushStatus::Succeeded,
-        Status::Failure(message) => ViewerPushStatus::Failed { message },
+        Status::Failed(failure) => ViewerPushStatus::Failed {
+            failure: decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+        },
     })
 }
 
@@ -113,7 +116,9 @@ pub fn encode_availability(
             ViewerPushAvailability::NothingToPush => {
                 Availability::NothingToPush(v1::ViewerPushNothingToPush {})
             }
-            ViewerPushAvailability::Unavailable { message } => Availability::Unavailable(message),
+            ViewerPushAvailability::Blocked { failure } => {
+                Availability::Blocked(encode_failure(&failure))
+            }
         }),
     }
 }
@@ -127,6 +132,8 @@ pub fn decode_availability(
     Ok(match required(value.availability)? {
         Availability::Available(_) => ViewerPushAvailability::Available,
         Availability::NothingToPush(_) => ViewerPushAvailability::NothingToPush,
-        Availability::Unavailable(message) => ViewerPushAvailability::Unavailable { message },
+        Availability::Blocked(failure) => ViewerPushAvailability::Blocked {
+            failure: decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+        },
     })
 }

@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlDialogElement, HtmlElement};
 
-const DIALOG_CLOSE_DURATION_MAX: Duration = Duration::from_secs(1);
+use super::animation::computed_animation_duration;
+
 const DIALOG_SURFACE_SELECTOR: &str = "[data-dialog-surface]";
 
 struct DialogState {
@@ -109,42 +110,12 @@ async fn dialog_close_duration(
     }
 
     dioxus_sdk_time::sleep(Duration::ZERO).await;
-    let Some(window) = web_sys::window() else {
-        return close_duration_fallback;
-    };
-    let Some(surface) = dialog
+    dialog
         .query_selector(DIALOG_SURFACE_SELECTOR)
         .ok()
         .flatten()
-    else {
-        return close_duration_fallback;
-    };
-    let Some(style) = window.get_computed_style(&surface).ok().flatten() else {
-        return close_duration_fallback;
-    };
-    if style
-        .get_property_value("animation-name")
-        .is_ok_and(|name| name.trim() == "none")
-    {
-        return Duration::ZERO;
-    }
-
-    style
-        .get_property_value("animation-duration")
-        .ok()
-        .and_then(|value| parse_css_duration(&value))
-        .filter(|duration| *duration <= DIALOG_CLOSE_DURATION_MAX)
+        .and_then(|surface| computed_animation_duration(&surface))
         .unwrap_or(close_duration_fallback)
-}
-
-fn parse_css_duration(value: &str) -> Option<Duration> {
-    let value = value.split(',').next()?.trim();
-    let seconds = match value.strip_suffix("ms") {
-        Some(milliseconds) => milliseconds.trim().parse::<f64>().ok()? / 1_000.0,
-        None => value.strip_suffix('s')?.trim().parse::<f64>().ok()?,
-    };
-    (seconds.is_finite() && seconds >= 0.0 && seconds <= DIALOG_CLOSE_DURATION_MAX.as_secs_f64())
-        .then(|| Duration::from_secs_f64(seconds))
 }
 
 async fn focus_initial_element(dialog: &HtmlDialogElement) {
@@ -168,36 +139,5 @@ async fn restore_trigger_focus(document: &web_sys::Document, trigger_id: &str) {
 fn focus_element(element: Option<HtmlElement>) {
     if let Some(element) = element {
         let _ = element.focus();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use super::parse_css_duration;
-
-    #[test]
-    fn css_duration_accepts_seconds_and_milliseconds() {
-        assert_eq!(
-            parse_css_duration("120ms"),
-            Some(Duration::from_millis(120))
-        );
-        assert_eq!(
-            parse_css_duration("0.16s"),
-            Some(Duration::from_millis(160))
-        );
-        assert_eq!(
-            parse_css_duration("0.12s, 80ms"),
-            Some(Duration::from_millis(120))
-        );
-    }
-
-    #[test]
-    fn css_duration_rejects_invalid_values() {
-        assert_eq!(parse_css_duration("none"), None);
-        assert_eq!(parse_css_duration("-120ms"), None);
-        assert_eq!(parse_css_duration("NaNs"), None);
-        assert_eq!(parse_css_duration("1e300s"), None);
     }
 }

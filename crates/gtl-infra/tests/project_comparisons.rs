@@ -186,15 +186,19 @@ fn persisted_settings_inherit_across_worktrees_and_explicit_registration_wins() 
     );
     let linked = RepositoryRoot::try_new(linked).unwrap();
     assert_eq!(
-        comparison::configured_branch(&linked, &HybridGitClient, &fixture.database)
-            .unwrap()
-            .as_ref(),
-        "develop"
+        comparison::configured_comparison(&linked, &HybridGitClient, &fixture.database).unwrap(),
+        comparison::ConfiguredComparison {
+            branch: ComparisonBranch::try_new("develop").unwrap(),
+            project: Some(fixture.repository.clone()),
+        }
     );
     fixture.register("WT", "linked", &linked);
     assert_eq!(
-        comparison::configured_branch(&linked, &HybridGitClient, &fixture.database).unwrap(),
-        ComparisonBranch::default()
+        comparison::configured_comparison(&linked, &HybridGitClient, &fixture.database).unwrap(),
+        comparison::ConfiguredComparison {
+            branch: ComparisonBranch::default(),
+            project: Some(linked.clone()),
+        }
     );
     let reopened = SqliteAppState::open(&fixture.directory.path().join("state")).unwrap();
     assert_eq!(
@@ -215,7 +219,8 @@ fn upstream_wins_and_tags_cannot_satisfy_a_local_comparison_branch() {
     fixture.set_branch("project", "main", "only-tag");
     assert!(matches!(
         comparison::resolve(&fixture.repository, &HybridGitClient, &fixture.database),
-        Err(comparison::ComparisonError::MissingBranch { .. })
+        Err(comparison::ComparisonError::MissingBranch { project: Some(project), .. })
+            if project == fixture.repository
     ));
     git(
         fixture.repository.as_ref(),

@@ -1,6 +1,7 @@
 mod exclusion_editor;
 
 use dioxus::prelude::*;
+use gtl_models::failure::{Failure, SettingsFailure};
 use gtl_wire::viewer::{ViewerRenderOptions, ViewerTheme, ViewerUserSettings};
 use lucide_dioxus::{FileCog, Settings};
 
@@ -8,6 +9,8 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
+        failure_notice::{client_error_severity, is_invalid_settings},
+        field_errors::FieldErrors,
         ui::{
             Button, ButtonVariant, PageNotice, ScrollArea, SectionedSurface, SectionedSurfaceBody,
             SectionedSurfaceHeader, Skeleton, use_toast,
@@ -16,7 +19,7 @@ use crate::{
         viewer_theme::viewer_theme_label,
     },
     views::viewer_settings_form::{
-        ViewerSettingsForm, ViewerSettingsSelection, viewer_settings_patch,
+        SettingsField, ViewerSettingsForm, ViewerSettingsSelection, viewer_settings_patch,
     },
 };
 
@@ -59,14 +62,11 @@ pub(crate) fn UserSettingsView() -> Element {
                         (_, None) => rsx! {
                             SettingsLoading {}
                         },
-                        (
-                            _,
-                            Some(Err(crate::shared::viewer_client::ViewerClientError::InvalidSettings)),
-                        ) => rsx! {
+                        (_, Some(Err(error))) if is_invalid_settings(error) => rsx! {
                             crate::views::settings_recovery::SettingsRecovery { onretry: move |()| settings.restart() }
                         },
                         (_, Some(Err(error))) => {
-                            let message = error.message();
+                            let message = error.to_string();
                             rsx! {
                                 PageNotice {
                                     class: "min-h-64",
@@ -182,8 +182,12 @@ fn SettingsEditableForm(
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
     let mut failure = use_signal(|| None::<ViewerClientError>);
-    let save_error = failure().map(|error| settings_edit_error_message(error).to_owned());
-    let reload_available = failure().is_some_and(settings_edit_reload_available);
+    let save_error = failure().map(|error| settings_edit_error_message(&error));
+    let field_errors = failure()
+        .as_ref()
+        .and_then(rejected_settings)
+        .unwrap_or_default();
+    let reload_available = failure().is_some_and(|error| settings_edit_reload_available(&error));
 
     rsx! {
         ViewerSettingsForm {
@@ -191,6 +195,7 @@ fn SettingsEditableForm(
             pending: pending(),
             saved: saved(),
             save_error,
+            field_errors,
             reload_available,
             onmodified: move |()| {
                 saved.set(false);
@@ -217,8 +222,13 @@ fn SettingsEditableForm(
                             onchanged.call(());
                         }
                         Err(error) => {
+                            toast
+                                .show(
+                                    client_error_severity(&error),
+                                    settings_edit_error_message(&error),
+                                    None,
+                                );
                             failure.set(Some(error));
-                            toast.error(settings_edit_error_message(error));
                         }
                     }
                     pending.set(false);
@@ -228,28 +238,42 @@ fn SettingsEditableForm(
     }
 }
 
-pub(super) const fn settings_edit_error_message(error: ViewerClientError) -> &'static str {
+/// The form inputs the server rejected, when it named one.
+fn rejected_settings(error: &ViewerClientError) -> Option<FieldErrors<SettingsField>> {
+    error.failure().and_then(FieldErrors::from_failure)
+}
+
+/// Explains a settings edit failure in terms of this page's reload action.
+pub(super) fn settings_edit_error_message(error: &ViewerClientError) -> String {
     match error {
-        ViewerClientError::Conflict => {
-            "Settings changed since this page loaded. Reload them before saving again."
+        ViewerClientError::Failed(Failure::Settings(SettingsFailure::Stale)) => {
+            "Settings changed since this page loaded. Reload them before saving again.".to_owned()
         }
-        ViewerClientError::InvalidRequest => {
-            "One or more settings were rejected. Reload the saved values and try again."
+        ViewerClientError::Failed(Failure::InvalidRequest { .. })
+            if rejected_settings(error).is_some() =>
+        {
+            "Correct the highlighted setting and save again.".to_owned()
         }
-        ViewerClientError::InvalidSettings => {
-            "The settings file became invalid. Reload it to repair or reset it."
+        ViewerClientError::Failed(Failure::InvalidRequest { .. }) => {
+            "One or more settings were rejected. Reload the saved values and try again.".to_owned()
         }
-        _ => error.message(),
+        ViewerClientError::Failed(Failure::Settings(SettingsFailure::Invalid { .. })) => {
+            "The settings file became invalid. Reload it to repair or reset it.".to_owned()
+        }
+        error => error.to_string(),
     }
 }
 
-const fn settings_edit_reload_available(error: ViewerClientError) -> bool {
-    matches!(
-        error,
-        ViewerClientError::Conflict
-            | ViewerClientError::InvalidRequest
-            | ViewerClientError::InvalidSettings
-    )
+fn settings_edit_reload_available(error: &ViewerClientError) -> bool {
+    match error {
+        ViewerClientError::Failed(Failure::InvalidRequest { .. }) => {
+            rejected_settings(error).is_none()
+        }
+        ViewerClientError::Failed(Failure::Settings(
+            SettingsFailure::Stale | SettingsFailure::Invalid { .. },
+        )) => true,
+        _ => false,
+    }
 }
 
 #[component]
@@ -280,5 +304,41 @@ fn SettingsRow(term: String, children: Element) -> Element {
             dt { class: "font-semibold text-ink-2", "{term}" }
             dd { class: "settings-row-value m-0 min-w-0", {children} }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rejected(field: &str) -> ViewerClientError {
+        Failure::InvalidRequest {
+            field: field.to_owned(),
+        }
+        .into()
+    }
+
+    #[test]
+    fn a_rejected_setting_is_corrected_beside_its_control() {
+        let error = rejected("theme");
+
+        assert!(
+            rejected_settings(&error)
+                .and_then(|errors| errors.message(SettingsField::Theme))
+                .is_some()
+        );
+        assert_eq!(
+            settings_edit_error_message(&error),
+            "Correct the highlighted setting and save again."
+        );
+        assert!(!settings_edit_reload_available(&error));
+    }
+
+    #[test]
+    fn a_rejection_outside_the_form_offers_a_reload() {
+        let error = rejected("expected_revision");
+
+        assert_eq!(rejected_settings(&error), None);
+        assert!(settings_edit_reload_available(&error));
     }
 }

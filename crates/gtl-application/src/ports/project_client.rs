@@ -1,16 +1,19 @@
 use std::future::Future;
 
 use gtl_models::{
+    failure::ErrorMeta,
     git::RemoteUrlError,
     paths::{ProjectNameError, RepositoryRootError},
     projects::ProjectRepository,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ProjectClientError {
     #[error(transparent)]
+    #[meta(private(Unavailable))]
     Unavailable(#[from] ProjectCatalogueUnavailableError),
     #[error(transparent)]
+    #[meta(private(DataLoss))]
     InvalidData(#[from] ProjectCatalogueDataError),
 }
 

@@ -66,7 +66,7 @@ impl DiffFindState {
                 match_count_label(result.total_matches),
                 wrapped_label(result.wrapped),
             ),
-            Self::Error(error) => error.message().to_owned(),
+            Self::Error(error) => error.to_string(),
         }
     }
 }
@@ -266,11 +266,11 @@ fn validate_diff_search_result(
     result: ViewerDiffSearchResult,
 ) -> Result<(ViewerDiffSearchResult, Option<(usize, usize)>), ViewerClientError> {
     if workspace.identity != identity || result.identity != identity {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     let result_shape_is_valid = (result.total_matches == 0) == result.active_match.is_none();
     if !result_shape_is_valid {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     let row_target = result
         .active_match
@@ -288,11 +288,12 @@ fn diff_search_match_target(
         .files
         .iter()
         .position(|file| file.summary.id == found.file)
-        .ok_or(ViewerClientError::Internal)?;
+        .ok_or(ViewerClientError::InvalidMessage)?;
     let row_count = workspace.files[file_index].summary.row_count;
-    let row_index = usize::try_from(found.row_index).map_err(|_| ViewerClientError::Internal)?;
+    let row_index =
+        usize::try_from(found.row_index).map_err(|_| ViewerClientError::InvalidMessage)?;
     if row_index >= row_count {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     Ok((file_index, row_index))
 }
@@ -417,11 +418,11 @@ mod tests {
 
         assert_eq!(
             validate_diff_search_result(&workspace, identity, out_of_bounds).unwrap_err(),
-            ViewerClientError::Internal
+            ViewerClientError::InvalidMessage
         );
         assert_eq!(
             validate_diff_search_result(&workspace, identity, missing_match).unwrap_err(),
-            ViewerClientError::Internal
+            ViewerClientError::InvalidMessage
         );
         Ok(())
     }

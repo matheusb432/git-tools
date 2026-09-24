@@ -1,7 +1,12 @@
 use dioxus::prelude::*;
 use dx_story::{stories, story};
 
-use crate::shared::ui::{Button, ButtonVariant, ToastHost, use_toast};
+use crate::shared::ui::{Button, ButtonVariant, ToastHost, ToastKind, use_toast};
+
+const PUSH_REJECTED_DETAIL: &str = "hint: Updates were rejected because the remote contains work that you do not\n\
+    hint: have locally. This is usually caused by another repository pushing to\n\
+    hint: the same ref. If you want to integrate the remote changes, use\n\
+    hint: 'git pull' before pushing again.";
 
 #[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
@@ -19,7 +24,7 @@ fn PreviewToastControl() -> Element {
     }
 }
 
-/// Queue, severity, and dismissal behavior.
+/// Queue, severity, pause, and exit behavior.
 #[story(name = "Interactive queue")]
 fn queue() -> Element {
     rsx! {
@@ -48,6 +53,27 @@ fn ToastControls() -> Element {
                 variant: ButtonVariant::Failure,
                 onclick: move |_| toast.error("The local viewer is unavailable."),
                 "Error"
+            }
+            Button {
+                variant: ButtonVariant::Outline,
+                onclick: move |_| {
+                    toast.ok("Push completed.");
+                    toast.warn("The working tree changed.");
+                    toast.error("The local viewer is unavailable.");
+                },
+                "Queue three"
+            }
+            Button {
+                variant: ButtonVariant::Outline,
+                onclick: move |_| {
+                    toast
+                        .show(
+                            ToastKind::Error,
+                            "The remote has commits that this branch does not. Pull them before pushing.",
+                            Some(PUSH_REJECTED_DETAIL.to_owned()),
+                        );
+                },
+                "With detail"
             }
         }
     }

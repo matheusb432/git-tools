@@ -93,7 +93,7 @@ impl ViewerClient {
         let connection = load_connection().await?;
         validate_viewer_protocol(connection.protocol_version)?;
         if connection.instance_id.is_empty() {
-            return Err(ViewerClientError::Unavailable);
+            return Err(ViewerClientError::Disconnected);
         }
         Ok(Self {
             server_instance_id: connection.instance_id,
@@ -201,7 +201,9 @@ async fn start_stream<Request: Serialize + 'static, Stream: 'static>(
         async move { invoke_with_request(command, request).await.map(own) },
         sender,
     ));
-    receiver.await.map_err(|_| ViewerClientError::Unavailable)?
+    receiver
+        .await
+        .map_err(|_| ViewerClientError::Disconnected)?
 }
 
 pub struct ViewerRowStream {
@@ -322,7 +324,7 @@ where
     Response: DeserializeOwned,
 {
     let arguments = serde_wasm_bindgen::to_value(&RequestArguments { request })
-        .map_err(|_| ViewerClientError::InvalidRequest)?;
+        .map_err(|_| ViewerClientError::InvalidMessage)?;
     invoke(command, arguments).await
 }
 
@@ -334,7 +336,7 @@ where
     Response: DeserializeOwned,
 {
     let arguments = serde_wasm_bindgen::to_value(&StreamArguments { stream_id })
-        .map_err(|_| ViewerClientError::Internal)?;
+        .map_err(|_| ViewerClientError::InvalidMessage)?;
     invoke(command, arguments).await
 }
 
@@ -343,7 +345,7 @@ where
     Response: DeserializeOwned,
 {
     let value = invoke_value(command, arguments).await?;
-    serde_wasm_bindgen::from_value(value).map_err(|_| ViewerClientError::Internal)
+    serde_wasm_bindgen::from_value(value).map_err(|_| ViewerClientError::InvalidMessage)
 }
 
 async fn invoke_row_batch(
@@ -351,40 +353,41 @@ async fn invoke_row_batch(
     stream_id: u32,
 ) -> Result<Vec<ViewerRowStreamItem>, ViewerClientError> {
     let arguments = serde_wasm_bindgen::to_value(&StreamArguments { stream_id })
-        .map_err(|_| ViewerClientError::Internal)?;
+        .map_err(|_| ViewerClientError::InvalidMessage)?;
     let value = invoke_value(command, arguments).await?;
     let bytes = row_bytes(value)?;
-    gtl_wire::proto::row_ipc::decode_batch(&bytes).map_err(|_| ViewerClientError::Internal)
+    gtl_wire::proto::row_ipc::decode_batch(&bytes).map_err(|_| ViewerClientError::InvalidMessage)
 }
 
 fn row_bytes(value: JsValue) -> Result<Vec<u8>, ViewerClientError> {
     let maximum = gtl_wire::proto::row_ipc::ROW_IPC_BATCH_BYTES_MAX;
     if let Some(buffer) = value.dyn_ref::<js_sys::ArrayBuffer>() {
         if buffer.byte_length() as usize > maximum {
-            return Err(ViewerClientError::Internal);
+            return Err(ViewerClientError::InvalidMessage);
         }
         return Ok(js_sys::Uint8Array::new(buffer).to_vec());
     }
     // Tauri uses a numeric byte array on platforms without custom-protocol responses.
     let array = value
         .dyn_into::<js_sys::Array>()
-        .map_err(|_| ViewerClientError::Internal)?;
+        .map_err(|_| ViewerClientError::InvalidMessage)?;
     if array.length() as usize > maximum {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     if !array.iter().all(|byte| {
         byte.as_f64()
             .is_some_and(|byte| byte.fract() == 0.0 && (0.0..=255.0).contains(&byte))
     }) {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     Ok(js_sys::Uint8Array::new(&array).to_vec())
 }
 
 async fn invoke_value(command: &str, arguments: JsValue) -> Result<JsValue, ViewerClientError> {
     let value = invoke_tauri(command, arguments).await.map_err(|value| {
-        let error = serde_wasm_bindgen::from_value(value).unwrap_or(ViewerClientError::Unavailable);
-        if error == ViewerClientError::Unavailable {
+        let error =
+            serde_wasm_bindgen::from_value(value).unwrap_or(ViewerClientError::Disconnected);
+        if error == ViewerClientError::Disconnected {
             ViewerClient::discard_connection();
         }
         error

@@ -4,6 +4,7 @@ use gtl_application::viewer::{
     },
     shell, viewer_diff_file_source,
 };
+use gtl_models::failure::{Failure, Resource, ViewerFailure};
 use gtl_wire::{
     proto, v1,
     viewer::{
@@ -17,7 +18,10 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
-use super::{load_user_settings, parse_identity};
+use super::{
+    super::status::{GrpcResultExt as _, invalid_request, status},
+    load_user_settings, parse_identity,
+};
 use crate::state::AppState;
 
 const ROW_STREAM_BUFFER: usize = 8;
@@ -43,42 +47,42 @@ pub(super) fn start(
 ) -> Result<RowStream, Status> {
     let proto_identity = request
         .identity
-        .ok_or_else(|| Status::invalid_argument("identity is required"))?;
+        .ok_or_else(|| invalid_request("identity"))?;
     let identity = parse_identity(&proto_identity)?;
     let options = load_user_settings(&state)?.viewer_render_options();
     if gtl_application::viewer::project_render_options(options) != identity.render_options {
-        return Err(Status::aborted("viewer identity changed"));
+        return Err(status(&Failure::Changed));
     }
     let snapshot = shell::content_snapshot_for_identity(&state.viewer, identity, options)
-        .map_err(|error| super::viewer_state_error(error, "load viewer rows"))?
-        .ok_or_else(|| Status::aborted("viewer identity changed"))?;
+        .into_grpc()?
+        .ok_or_else(|| status(&Failure::Changed))?;
     if identity.render_options.density == gtl_wire::viewer::ViewerDiffDensity::Full
         && matches!(
             snapshot.view().full_context,
             gtl_application::diffs::FullContextDiffState::Deferred(_)
         )
     {
-        return Err(Status::failed_precondition(
-            "the diff source is still being prepared",
-        ));
+        return Err(status(&ViewerFailure::SourcePreparing));
     }
     let range = request
         .row_range
         .map(|range| ViewerRowRange::try_new(range.start, range.count))
         .transpose()
-        .map_err(|_| Status::invalid_argument("viewer row range is invalid"))?;
+        .map_err(|_| invalid_request("row_range"))?;
     if range.is_some() && request.file_id.is_none() {
-        return Err(Status::invalid_argument("a row range requires one file"));
+        return Err(invalid_request("file_id"));
     }
     let files = match request.file_id {
         Some(requested) => {
             let file: ViewerDiffFileId = requested
                 .try_into()
-                .map_err(|_| Status::invalid_argument("file is required"))?;
+                .map_err(|_| invalid_request("file_id"))?;
             if viewer_diff_file_source(snapshot.view(), &file, identity.render_options.density)
                 .is_none()
             {
-                return Err(Status::not_found("viewer diff file is not available"));
+                return Err(status(&Failure::Gone {
+                    resource: Resource::DiffFile,
+                }));
             }
             vec![file]
         }
@@ -89,10 +93,7 @@ pub(super) fn start(
     let row_stream = ViewerWorkCancellation::default();
     let (sender, receiver) = mpsc::channel(ROW_STREAM_BUFFER);
     let cancel_on_drop = super::cancellation::CancelOnDrop(row_stream.clone());
-    let settings_cancellation = state
-        .viewer_row_streams
-        .current_stream()
-        .map_err(|_| Status::internal("viewer work state is unavailable"))?;
+    let settings_cancellation = state.viewer_row_streams.current_stream().into_grpc()?;
     let writer = StreamWriter {
         settings_cancellation,
         state,
@@ -108,7 +109,7 @@ pub(super) fn start(
         .viewer_row_workers
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("viewer row workers are busy"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         produce_rows(writer, snapshot.view(), files, range);
@@ -143,8 +144,9 @@ fn produce_file_rows(
     else {
         return writer.file_failed(
             file_id,
-            v1::ViewerFileFailureCode::SourceUnavailable,
-            "The diff source is no longer available.",
+            &Failure::Gone {
+                resource: Resource::DiffFile,
+            },
             false,
         );
     };
@@ -154,9 +156,9 @@ fn produce_file_rows(
     };
     let (start_row, end_row) = range.map_or((0, total), |range| (range.start(), range.end()));
     if end_row > total {
-        let _ = writer.sender.blocking_send(Err(Status::out_of_range(
-            "viewer row range is outside the file",
-        )));
+        let _ = writer
+            .sender
+            .blocking_send(Err(invalid_request("row_range")));
         return false;
     }
     writer.next_row = start_row;
@@ -190,8 +192,9 @@ fn produce_file_rows(
             Err(ViewerRowWindowError::InvalidRange) => {
                 return writer.file_failed(
                     file_id,
-                    v1::ViewerFileFailureCode::SourceUnavailable,
-                    "The diff row range is unavailable.",
+                    &Failure::Gone {
+                        resource: Resource::SourceRange,
+                    },
                     false,
                 );
             }
@@ -216,12 +219,7 @@ fn produce_file_rows(
 }
 
 fn report_oversized_row(writer: &mut StreamWriter, file_id: &ViewerDiffFileId) -> bool {
-    writer.file_failed(
-        file_id,
-        v1::ViewerFileFailureCode::RowTooLarge,
-        "A diff row is too large to display.",
-        false,
-    )
+    writer.file_failed(file_id, &ViewerFailure::RowTooLarge.into(), false)
 }
 
 struct StreamWriter {
@@ -271,9 +269,9 @@ impl StreamWriter {
             return false;
         }
         let Some(next_sequence) = self.sequence.checked_add(1) else {
-            let _ = self.sender.blocking_send(Err(Status::resource_exhausted(
-                "viewer row sequence is exhausted",
-            )));
+            let _ = self
+                .sender
+                .blocking_send(Err(status(&ViewerFailure::ResponseTooLarge)));
             return false;
         };
         let count = match &event {
@@ -299,16 +297,14 @@ impl StreamWriter {
     fn file_failed(
         &mut self,
         file_id: &ViewerDiffFileId,
-        code: v1::ViewerFileFailureCode,
-        message: &str,
+        failure: &Failure,
         retryable: bool,
     ) -> bool {
         self.send(v1::stream_viewer_rows_response::Event::FileFailed(
             v1::ViewerFileFailed {
                 file_id: file_id.as_str().to_owned(),
-                code: code as i32,
-                message: message.to_owned(),
                 retryable,
+                failure: Some(gtl_wire::proto::failure::encode_failure(failure)),
             },
         ))
     }

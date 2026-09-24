@@ -52,7 +52,7 @@ pub(super) async fn read(
             .await
             .map_err(ClientDiffFileError::Transport)?
             .ok_or(ClientDiffFileError::Transport(
-                ViewerClientError::Unavailable,
+                ViewerClientError::Disconnected,
             ))?;
         if response.identity != rows.request.identity || response.sequence != sequence {
             return Err(ClientDiffFileError::InvalidResponse);
@@ -160,9 +160,9 @@ impl RowWindow {
                 self.finished = Some(line_number_digits);
             }
             ViewerRowEvent::FileFailed {
-                message, retryable, ..
+                failure, retryable, ..
             } => {
-                return Err(ClientDiffFileError::Server { message, retryable });
+                return Err(ClientDiffFileError::Server { failure, retryable });
             }
             _ => return Err(ClientDiffFileError::InvalidResponse),
         }

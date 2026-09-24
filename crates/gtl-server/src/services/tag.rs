@@ -6,9 +6,7 @@ use gtl_application::{
         add_and_push_tag::{self, AddAndPushTag, AddAndPushTagError},
         add_tag::{self, AddTag, AddTagError},
         bump_tag::{self, BumpTagError, BumpTagOk},
-        dry_run_tag_bump::{
-            self, DryRunTagBump, DryRunTagBumpError, DryRunTagBumpOk, TagBumpPreview,
-        },
+        dry_run_tag_bump::{self, DryRunTagBump, DryRunTagBumpOk, TagBumpPreview},
         label_tag::{self, LabelTag, LabelTagError},
         list_tags::{self, ListTags},
         push_tags::{self, PushTagsError},
@@ -24,7 +22,9 @@ use gtl_wire::v1::{self, tag_service_server::TagService};
 use tonic::{Request, Response, Status};
 
 use super::{
-    absolute_path, repository_root, required, run_blocking, unexpected, user_settings_load_error,
+    absolute_path, repository_root, required, run_blocking,
+    status::{GrpcResultExt as _, invalid_request, status},
+    unexpected,
 };
 use crate::state::AppState;
 
@@ -50,10 +50,7 @@ impl TagService for TagGrpcService {
             dry_run_tag_bump::execute(request, &state.git, &state.user_settings)
         })
         .await?
-        .map_err(|error| match error {
-            DryRunTagBumpError::Settings(error) => user_settings_load_error(error),
-            error => unexpected(error, "plan tag bump"),
-        })?;
+        .into_grpc()?;
 
         Ok(Response::new(plan_response(result)))
     }
@@ -71,7 +68,7 @@ impl TagService for TagGrpcService {
                 .await?;
         let response = match result {
             Ok(result) => execute_response(result),
-            Err(BumpTagError::Settings(error)) => return Err(user_settings_load_error(error)),
+            Err(error @ BumpTagError::Settings(_)) => return Err(status(&error)),
             Err(error) => {
                 let detail = error.to_string();
                 match error {
@@ -109,10 +106,9 @@ impl TagService for TagGrpcService {
                 },
                 &state.git,
             )
-            .map_err(anyhow::Error::from)
+            .map_err(|error| unexpected(error, "list repository tags"))
         })
-        .await?
-        .map_err(|error| unexpected(error, "list repository tags"))?;
+        .await??;
         let outcome = match result {
             ListTagsOk::Listed { groups } => {
                 v1::list_tags_response::Outcome::Listed(v1::TagGroups {
@@ -139,7 +135,7 @@ impl TagService for TagGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(
+            Ok::<_, Status>(
                 match add_tag::execute(
                     AddTag {
                         repo_path,
@@ -153,8 +149,7 @@ impl TagService for TagGrpcService {
                 },
             )
         })
-        .await?
-        .map_err(|error| unexpected(error, "add repository tag"))?;
+        .await??;
 
         Ok(Response::new(result.into()))
     }
@@ -168,13 +163,12 @@ impl TagService for TagGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(match push_tags::execute(&repo_path, &state.git) {
+            Ok::<_, Status>(match push_tags::execute(&repo_path, &state.git) {
                 Ok(outcome) => action_response(&outcome),
                 Err(error) => push_aborted(error),
             })
         })
-        .await?
-        .map_err(|error| unexpected(error, "push repository tags"))?;
+        .await??;
 
         Ok(Response::new(result.into()))
     }
@@ -193,7 +187,7 @@ impl TagService for TagGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(
+            Ok::<_, Status>(
                 match add_and_push_tag::execute(
                     AddAndPushTag {
                         repo_path,
@@ -208,8 +202,7 @@ impl TagService for TagGrpcService {
                 },
             )
         })
-        .await?
-        .map_err(|error| unexpected(error, "add and push repository tag"))?;
+        .await??;
 
         Ok(Response::new(result.into()))
     }
@@ -225,7 +218,7 @@ impl TagService for TagGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(
+            Ok::<_, Status>(
                 match label_tag::execute(
                     LabelTag {
                         repo_path,
@@ -239,8 +232,7 @@ impl TagService for TagGrpcService {
                 },
             )
         })
-        .await?
-        .map_err(|error| unexpected(error, "label repository tag"))?;
+        .await??;
 
         Ok(Response::new(result.into()))
     }
@@ -271,12 +263,8 @@ fn bump_level(level: v1::TagBumpLevel) -> Result<BumpLevel, Status> {
 }
 
 fn semver_component(raw: i32, field: &'static str) -> Result<SemverComponent, Status> {
-    match v1::SemverComponent::try_from(raw)
-        .map_err(|_| Status::invalid_argument(format!("{field} is not recognized")))?
-    {
-        v1::SemverComponent::Unspecified => {
-            Err(Status::invalid_argument(format!("{field} is required")))
-        }
+    match v1::SemverComponent::try_from(raw).map_err(|_| invalid_request(field))? {
+        v1::SemverComponent::Unspecified => Err(invalid_request(field)),
         v1::SemverComponent::Major => Ok(SemverComponent::Major),
         v1::SemverComponent::Minor => Ok(SemverComponent::Minor),
         v1::SemverComponent::Patch => Ok(SemverComponent::Patch),
@@ -284,13 +272,11 @@ fn semver_component(raw: i32, field: &'static str) -> Result<SemverComponent, St
 }
 
 fn tag_slot(index_from_right: u32, field: &'static str) -> Result<TagSlot, Status> {
-    TagSlot::try_new(index_from_right)
-        .map_err(|error| Status::invalid_argument(format!("{field}: {error}")))
+    TagSlot::try_new(index_from_right).map_err(|_| invalid_request(field))
 }
 
 fn pattern_name(raw: String, field: &'static str) -> Result<TagPatternName, Status> {
-    TagPatternName::try_new(raw)
-        .map_err(|error| Status::invalid_argument(format!("{field}: {error}")))
+    TagPatternName::try_new(raw).map_err(|_| invalid_request(field))
 }
 
 fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Status> {
@@ -298,12 +284,12 @@ fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Statu
         repo_path: repository_root(preview.repository_root, "preview.repository_root")?,
         branch: git_head(required(preview.head, "preview.head")?)?,
         target_id: CommitId::try_from(preview.target_commit_id)
-            .map_err(|error| Status::invalid_argument(error.to_string()))?,
+            .map_err(|_| invalid_request("preview.target_commit_id"))?,
         pattern: pattern_name(preview.pattern, "preview.pattern")?,
         template: preview
             .template
             .parse::<TagTemplate>()
-            .map_err(|error| Status::invalid_argument(format!("preview.template: {error}")))?,
+            .map_err(|_| invalid_request("preview.template"))?,
         slot: tag_slot(preview.slot_from_right, "preview.slot_from_right")?,
         base_tag: preview
             .base_tag
@@ -317,7 +303,7 @@ fn tag_bump_preview(preview: v1::TagBumpPreview) -> Result<TagBumpPreview, Statu
             .into_iter()
             .map(RemoteUrl::try_new)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| Status::invalid_argument(error.to_string()))?,
+            .map_err(|_| invalid_request("preview.push_urls"))?,
     })
 }
 
@@ -325,7 +311,7 @@ fn git_head(head: v1::GitHead) -> Result<GitHead, Status> {
     match required(head.state, "preview.head.state")? {
         v1::git_head::State::Branch(branch) => BranchName::try_new(branch)
             .map(GitHead::Branch)
-            .map_err(|_| Status::invalid_argument("preview.head.branch must not be empty")),
+            .map_err(|_| invalid_request("preview.head.branch")),
         v1::git_head::State::Detached(_) => Ok(GitHead::Detached),
     }
 }
@@ -406,13 +392,12 @@ fn execute_response(result: BumpTagOk) -> v1::ExecuteTagBumpResponse {
     }
 }
 
-fn resolve_root(repo_path: std::path::PathBuf, state: &AppState) -> anyhow::Result<RepositoryRoot> {
-    resolve_repository_root::execute(repo_path, &state.git).map_err(anyhow::Error::from)
+fn resolve_root(repo_path: std::path::PathBuf, state: &AppState) -> Result<RepositoryRoot, Status> {
+    resolve_repository_root::execute(repo_path, &state.git).into_grpc()
 }
 
 fn tag_name(raw: String, field: &'static str) -> Result<TagName, Status> {
-    TagName::try_new(raw)
-        .map_err(|_| Status::invalid_argument(format!("{field} must not be empty")))
+    TagName::try_new(raw).map_err(|_| invalid_request(field))
 }
 
 fn wire_group(group: TagGroup) -> v1::TagGroup {
@@ -581,8 +566,12 @@ mod tests {
     #[test]
     fn rejects_an_unspecified_bump_level_at_the_transport_boundary() {
         let error = bump_level(v1::TagBumpLevel { kind: None }).unwrap_err();
-        assert_eq!(error.code(), tonic::Code::InvalidArgument);
-        assert_eq!(error.message(), "level.kind is required");
+        assert_eq!(
+            super::super::status::decoded_failure(&error),
+            Some(gtl_models::failure::Failure::InvalidRequest {
+                field: "level.kind".into()
+            })
+        );
 
         let error = bump_level(v1::TagBumpLevel {
             kind: Some(v1::tag_bump_level::Kind::Component(
@@ -590,8 +579,12 @@ mod tests {
             )),
         })
         .unwrap_err();
-        assert_eq!(error.code(), tonic::Code::InvalidArgument);
-        assert_eq!(error.message(), "level.component is required");
+        assert_eq!(
+            super::super::status::decoded_failure(&error),
+            Some(gtl_models::failure::Failure::InvalidRequest {
+                field: "level.component".into()
+            })
+        );
     }
 
     #[test]

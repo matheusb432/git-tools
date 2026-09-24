@@ -6,6 +6,7 @@
 use gtl_models::{
     artifacts::ArtifactDiffIdentity,
     diffs::ExcludedExtensions,
+    failure::ErrorMeta,
     paths::{ProjectName, RepositoryRoot},
 };
 use serde::{Deserialize, Serialize};
@@ -49,13 +50,16 @@ pub enum RenderDiffSubreposOutcome {
 }
 
 /// Everything that can go wrong rendering recursive multi-repo diff artifacts.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RenderDiffSubreposError {
     #[error(transparent)]
+    #[meta(transparent)]
     InvalidTarget(#[from] DiffTargetRequestError),
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

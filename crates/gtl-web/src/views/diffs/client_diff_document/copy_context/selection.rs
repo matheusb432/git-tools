@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use gtl_models::failure::Failure;
 use gtl_wire::viewer::{
     ReadViewerDiffText, ViewerDiffTextLine, ViewerRowRange, ViewerViewIdentity,
 };
@@ -103,7 +104,7 @@ async fn complete_copy(
             }
         }
         Ok(None) => toast.info("The selection contains no source lines."),
-        Err(error) => toast.error(error.message()),
+        Err(error) => toast.client_error(&error),
     }
 }
 
@@ -304,7 +305,7 @@ async fn read_text(
             .peek()
             .files
             .get(file_index)
-            .ok_or(ViewerClientError::Conflict)?
+            .ok_or(ViewerClientError::Failed(Failure::Changed))?
             .summary
             .clone();
         let rows = selection.rows(file_index, summary.row_count);
@@ -332,10 +333,10 @@ async fn read_lines(
             identity,
             file: file.clone(),
             row_range: ViewerRowRange::try_new(
-                u32::try_from(start).map_err(|_| ViewerClientError::InvalidRequest)?,
-                u32::try_from(count).map_err(|_| ViewerClientError::InvalidRequest)?,
+                u32::try_from(start).map_err(|_| ViewerClientError::InvalidMessage)?,
+                u32::try_from(count).map_err(|_| ViewerClientError::InvalidMessage)?,
             )
-            .map_err(|_| ViewerClientError::InvalidRequest)?,
+            .map_err(|_| ViewerClientError::InvalidMessage)?,
             old_side,
         };
         for ViewerDiffTextLine { line_number, text } in

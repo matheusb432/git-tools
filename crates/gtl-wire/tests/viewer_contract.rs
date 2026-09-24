@@ -104,35 +104,6 @@ fn closed_value_tokens_keep_their_wire_contracts() {
 }
 
 #[test]
-fn viewer_failure_codes_use_full_variant_names() {
-    for (code, name) in [
-        (
-            ViewerFailureCode::RepositoryDirectoryNotFound,
-            "RepositoryDirectoryNotFound",
-        ),
-        (
-            ViewerFailureCode::RepositoryDirectoryNotGitRepository,
-            "RepositoryDirectoryNotGitRepository",
-        ),
-        (ViewerFailureCode::SourceUnavailable, "SourceUnavailable"),
-        (ViewerFailureCode::RenderFailed, "RenderFailed"),
-    ] {
-        let value = serde_json::to_value(code).unwrap();
-
-        assert_eq!(code.as_str(), name);
-        assert_eq!(value, json!(name));
-        assert_eq!(
-            serde_json::from_value::<ViewerFailureCode>(value).unwrap(),
-            code
-        );
-    }
-
-    for abbreviated in ["DirNotFound", "DirNotGitRepo"] {
-        assert!(serde_json::from_value::<ViewerFailureCode>(json!(abbreviated)).is_err());
-    }
-}
-
-#[test]
 fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
     assert_eq!(
         serde_json::to_value(ViewerTabState::Broken).unwrap(),
@@ -141,13 +112,13 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
     assert_eq!(
         serde_json::to_value(ViewerCommitSelection::Error {
             id: commit_id()?,
-            message: "The commit could not be rendered.".into(),
+            failure: gtl_models::failure::ViewerFailure::CommitFailed.into(),
         })
         .unwrap(),
         json!({
             "state": "error",
             "id": COMMIT_ID,
-            "message": "The commit could not be rendered."
+            "failure": {"viewer": "commit_failed"}
         })
     );
     assert_eq!(

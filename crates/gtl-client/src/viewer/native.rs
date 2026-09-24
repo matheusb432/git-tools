@@ -21,7 +21,7 @@ use gtl_wire::{
 };
 
 use super::{ViewerClientError, validate_viewer_protocol};
-use crate::GtlClient;
+use crate::{GtlClient, RequestFailure};
 
 const VIEWER_RESPONSE_MAX_BYTES: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 64 * 1024;
 
@@ -229,13 +229,7 @@ impl ViewerClient {
             .list_viewer_projects(proto::viewer::projects::encode_list(request))
             .await
             .map(tonic::Response::into_inner)
-            .map_err(|status| {
-                if status.code() == tonic::Code::FailedPrecondition {
-                    ViewerClientError::ProjectsUnavailable
-                } else {
-                    decode_status(&status)
-                }
-            })?;
+            .map_err(|status| decode_status(&status))?;
         proto::viewer::projects::decode_projects(response).map_err(Into::into)
     }
 
@@ -248,13 +242,7 @@ impl ViewerClient {
             .discover_project_repositories(proto::viewer::projects::encode_discover(request))
             .await
             .map(tonic::Response::into_inner)
-            .map_err(|status| {
-                if status.code() == tonic::Code::FailedPrecondition {
-                    ViewerClientError::ProjectScanFailed
-                } else {
-                    decode_status(&status)
-                }
-            })?;
+            .map_err(|status| decode_status(&status))?;
         proto::viewer::projects::decode_discovery(response).map_err(Into::into)
     }
 
@@ -311,7 +299,7 @@ impl ViewerClient {
     /// Resolves the local server and connects through its private native endpoint.
     pub async fn connect_local() -> Result<Self, ViewerClientError> {
         let endpoint =
-            LocalEndpoint::from_environment().map_err(|_| ViewerClientError::Unavailable)?;
+            LocalEndpoint::from_environment().map_err(|_| ViewerClientError::Disconnected)?;
         Self::connect(&endpoint).await
     }
 
@@ -319,11 +307,11 @@ impl ViewerClient {
     pub async fn connect(endpoint: &LocalEndpoint) -> Result<Self, ViewerClientError> {
         let native = GtlClient::connect(endpoint)
             .await
-            .map_err(|_| ViewerClientError::Unavailable)?;
+            .map_err(|_| ViewerClientError::Disconnected)?;
         let server_info = native
             .get_viewer_server_info()
             .await
-            .map_err(|_| ViewerClientError::Unavailable)?;
+            .map_err(|_| ViewerClientError::Disconnected)?;
         validate_viewer_protocol(server_info.protocol_version())?;
         let client = ViewerServiceClient::new(native.channel)
             .max_decoding_message_size(VIEWER_RESPONSE_MAX_BYTES);
@@ -572,63 +560,34 @@ impl ViewerVersionStream {
 }
 
 impl From<proto::viewer::ViewerCodecError> for ViewerClientError {
-    fn from(error: proto::viewer::ViewerCodecError) -> Self {
-        match error {
-            proto::viewer::ViewerCodecError::Unrepresentable => Self::InvalidRequest,
-            proto::viewer::ViewerCodecError::InvalidMessage => Self::Internal,
-        }
+    fn from(_: proto::viewer::ViewerCodecError) -> Self {
+        Self::InvalidMessage
     }
 }
 
+/// Decodes the typed failure a gtl server attached to `status`.
 fn decode_status(status: &tonic::Status) -> ViewerClientError {
-    if status.code() == tonic::Code::FailedPrecondition
-        && status
-            .metadata()
-            .get("gtl-error-kind")
-            .is_some_and(|kind| kind == "invalid-user-settings")
-    {
-        return ViewerClientError::InvalidSettings;
-    }
-    match status.code() {
-        tonic::Code::InvalidArgument | tonic::Code::FailedPrecondition => {
-            ViewerClientError::InvalidRequest
-        }
-        tonic::Code::NotFound => ViewerClientError::NotFound,
-        tonic::Code::Aborted | tonic::Code::AlreadyExists => ViewerClientError::Conflict,
-        tonic::Code::ResourceExhausted => ViewerClientError::ResourceExhausted,
-        tonic::Code::Unavailable
-        | tonic::Code::DeadlineExceeded
-        | tonic::Code::Cancelled
-        | tonic::Code::Unauthenticated => ViewerClientError::Unavailable,
-        _ => ViewerClientError::Internal,
+    match RequestFailure::from_status(status) {
+        RequestFailure::Failed(failure) => ViewerClientError::Failed(failure),
+        RequestFailure::Disconnected => ViewerClientError::Disconnected,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::failure::{Failure, PushFailure};
+
     use super::*;
 
     #[test]
-    fn invalid_settings_uses_structured_metadata_instead_of_message_text() {
-        let mut status = tonic::Status::failed_precondition("any diagnostic");
-        assert_eq!(decode_status(&status), ViewerClientError::InvalidRequest);
-        status
-            .metadata_mut()
-            .insert("gtl-error-kind", "invalid-user-settings".parse().unwrap());
-        assert_eq!(decode_status(&status), ViewerClientError::InvalidSettings);
-        assert_eq!(
-            decode_status(&tonic::Status::failed_precondition(
-                "user settings are invalid"
-            )),
-            ViewerClientError::InvalidRequest
-        );
-    }
+    fn statuses_become_viewer_failures_or_disconnection() {
+        let failure = Failure::Push(PushFailure::NothingToPush);
+        let status = proto::failure::encode_status(failure.class(), &failure);
 
-    #[test]
-    fn aborted_edits_are_reported_as_conflicts() {
+        assert_eq!(decode_status(&status), ViewerClientError::Failed(failure));
         assert_eq!(
-            decode_status(&tonic::Status::aborted("stale settings revision")),
-            ViewerClientError::Conflict
+            decode_status(&tonic::Status::unavailable("connection refused")),
+            ViewerClientError::Disconnected
         );
     }
 }

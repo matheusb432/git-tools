@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use gtl_models::failure::{ErrorMeta, Failure, ViewerFailure};
 use gtl_wire::viewer::SetViewerModifiedFiles;
 
 use super::{ViewerState, ViewerStateError, compute_recipe, session::PublishOutcome};
@@ -8,15 +9,19 @@ use crate::{
     recipes::{RecipeOp, RecipeTarget},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum SetModifiedFilesError {
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error("viewer tab is unavailable or a commit selection is pending")]
+    #[meta(failure = ViewerFailure::ModifiedFilesUnavailable)]
     Unavailable,
     #[error("viewer comparison changed")]
+    #[meta(failure = Failure::Changed)]
     Changed,
     #[error(transparent)]
+    #[meta(private(Internal))]
     Compute(#[from] compute_recipe::ComputeRecipeError),
 }
 

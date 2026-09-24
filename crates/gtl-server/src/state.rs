@@ -140,6 +140,12 @@ impl ViewerWorkRequests {
 #[error("viewer work state lock is poisoned")]
 pub(crate) struct ViewerWorkStateError;
 
+impl gtl_models::failure::Classified for ViewerWorkStateError {
+    fn classify(&self) -> gtl_models::failure::Classification {
+        gtl_models::failure::Classification::Private(gtl_models::failure::ErrorClass::Internal)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ViewerWorkRequests;

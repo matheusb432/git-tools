@@ -38,7 +38,6 @@ pub(crate) fn ExtensionFilter(
         IconPopover {
             id: "diff-extension-filters",
             aria_label: label,
-            trigger_test_id: gtl_web_contracts::test_ids::DIFF_EXTENSION_FILTERS_TRIGGER.value(),
             placement: PopoverPlacement::TriggerEnd,
             trigger_size: ButtonSize::Small,
             icon: rsx! {

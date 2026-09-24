@@ -6,17 +6,25 @@ publish.workspace = true
 
 [features]
 default = []
-grpc = ["protobuf", "dep:tonic", "dep:tonic-prost"]
+grpc = [
+  "protobuf",
+  "dep:prost-types",
+  "dep:tonic",
+  "dep:tonic-prost",
+  "dep:tonic-types",
+]
 protobuf = ["dep:prost", "dep:thiserror", "dep:tonic-prost-build"]
 
 [dependencies]
 gtl-models.workspace = true
 nutype = { workspace = true, features = ["serde"] }
 prost = { workspace = true, optional = true }
+prost-types = { workspace = true, optional = true }
 serde.workspace = true
 thiserror = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 tonic-prost = { workspace = true, optional = true }
+tonic-types = { workspace = true, optional = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true, optional = true }

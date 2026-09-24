@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use gtl_models::{
+    failure::ErrorMeta,
     git::{CommitCount, GitHead, GitRange},
     paths::{ProjectName, RepositoryRoot},
     repository::{
@@ -11,9 +12,10 @@ use gtl_models::{
 
 use crate::{ports::GitClient, repositories::find_repositories};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PlanRecursivePushError {
     #[error(transparent)]
+    #[meta(transparent)]
     Discover(#[from] find_repositories::FindRepositoriesError),
 }
 

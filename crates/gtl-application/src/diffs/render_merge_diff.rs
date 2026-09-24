@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use gtl_models::{
     artifacts::ArtifactDiffIdentity,
     diffs::{DiffKind, PinnedRange},
+    failure::ErrorMeta,
     git::GitRevision,
 };
 use serde::{Deserialize, Serialize};
@@ -44,11 +45,13 @@ pub struct RenderMergeDiffOk {
 }
 
 /// Everything that can go wrong rendering a merge-diff.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RenderMergeDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Compute(#[from] compute_merge_diff::ComputeMergeDiffError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

@@ -169,7 +169,7 @@ fn verify_project_selection(settings: &CliFixture) -> Result<()> {
         &["pull", "--id", "NONE"],
         &["diff", "--id", "NONE", "--raw"],
     ] {
-        caller.fails(arguments, 1, &["project was not found"]);
+        caller.fails(arguments, 3, &["This project is no longer available."]);
     }
     assert_eq!(caller.head()?, caller_head);
     assert_eq!(caller.working_tree()?, "?? untouched.txt");
@@ -236,7 +236,7 @@ fn verify_project_batches(
     peer.write_file("unfinished.txt", "Unfinished peer work\n")?;
     let selected_head = selected.head()?;
     let peer_head = peer.head()?;
-    let failure = caller.output_with_exit(&["project", "push", "--all"], 2)?;
+    let failure = caller.output_with_exit(&["project", "push", "--all"], 1)?;
     assert_contains(
         &failure,
         &[

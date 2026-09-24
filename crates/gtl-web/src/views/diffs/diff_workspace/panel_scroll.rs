@@ -7,10 +7,17 @@ pub(in crate::views::diffs) enum Panel {
 }
 
 #[cfg(feature = "desktop")]
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(in crate::views::diffs) struct PanelScrollPosition {
     left: f64,
     top: f64,
+}
+
+#[cfg(all(test, feature = "desktop"))]
+impl PanelScrollPosition {
+    pub(in crate::views::diffs) const fn new(left: f64, top: f64) -> Self {
+        Self { left, top }
+    }
 }
 
 pub(super) struct PanelScroll {

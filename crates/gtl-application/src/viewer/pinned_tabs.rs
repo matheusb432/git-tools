@@ -1,4 +1,7 @@
-use gtl_models::viewer::{ViewerTabKind, ViewerTabState};
+use gtl_models::{
+    failure::{ErrorMeta, Failure, Resource, ViewerFailure},
+    viewer::{ViewerTabKind, ViewerTabState},
+};
 use gtl_wire::viewer::SetViewerTabPinned;
 use rusqlite::{Connection, params};
 
@@ -9,15 +12,19 @@ use super::{
 };
 use crate::recipes::Recipe;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PinnedTabsError {
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error("wait for the snapshot to finish before pinning it")]
+    #[meta(failure = ViewerFailure::SnapshotPending)]
     SnapshotPending,
     #[error("viewer tab is not available")]
+    #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

@@ -5,7 +5,7 @@
 //! `DirNotFound`/`DirNotGitRepo` rejection that `save_live_view`
 //! already surfaces.
 
-use gtl_models::live_views::LiveSource;
+use gtl_models::{failure::ErrorMeta, live_views::LiveSource};
 
 use crate::{
     live_views::save_live_view::LiveViewRejection,
@@ -22,9 +22,10 @@ pub enum ProbeOutcome {
 }
 
 /// Everything that can go wrong probing a live-view source.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ProbeSourceError {
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

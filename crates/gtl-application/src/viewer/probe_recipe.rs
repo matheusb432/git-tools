@@ -1,4 +1,4 @@
-use gtl_models::live_views::LiveSource;
+use gtl_models::{failure::ErrorMeta, live_views::LiveSource};
 
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
@@ -19,9 +19,10 @@ pub enum ProbeRecipeOutcome {
     Broken { state: ViewerTabState },
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ProbeRecipeError {
     #[error(transparent)]
+    #[meta(transparent)]
     Probe(#[from] probe_source::ProbeSourceError),
 }
 
@@ -39,8 +40,7 @@ pub fn execute(
         ProbeOutcome::Ok => ProbeRecipeOutcome::Ready,
         ProbeOutcome::Broken { rejection } => ProbeRecipeOutcome::Broken {
             state: ViewerTabState::Broken {
-                code: rejection.code().into(),
-                reason: rejection.to_string(),
+                failure: rejection.failure(),
             },
         },
     };
@@ -100,8 +100,9 @@ mod tests {
             response,
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
-                    code: "DirNotFound".into(),
-                    reason: "The git repo's directory at `/repos/project` was not found.".into(),
+                    failure: gtl_models::failure::ViewerFailure::SourceDirectoryMissing {
+                        path: "/repos/project".into(),
+                    },
                 },
             }
         );
@@ -125,8 +126,9 @@ mod tests {
             response,
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
-                    code: "DirNotGitRepo".into(),
-                    reason: "The directory `/repos/project` is not a git repository.".into(),
+                    failure: gtl_models::failure::ViewerFailure::SourceNotRepository {
+                        path: "/repos/project".into(),
+                    },
                 },
             }
         );

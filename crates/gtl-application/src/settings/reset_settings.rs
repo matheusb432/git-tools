@@ -1,17 +1,22 @@
 use std::path::PathBuf;
 
+use gtl_models::failure::ErrorMeta;
+
 use crate::{
     ports::{Clock, UserSettingsEditError, UserSettingsRecovery},
     viewer::{ViewerState, ViewerStateError},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ResetSettingsError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsEditError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Clock(#[from] gtl_models::timestamps::TimestampError),
     #[error(transparent)]
+    #[meta(transparent)]
     Viewer(#[from] ViewerStateError),
 }
 

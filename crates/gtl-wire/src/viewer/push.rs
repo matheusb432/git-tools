@@ -1,5 +1,5 @@
 pub use gtl_models::viewer::ViewerPushId;
-use gtl_models::{diffs::CommitId, paths::RepositoryRoot};
+use gtl_models::{diffs::CommitId, failure::Failure, paths::RepositoryRoot};
 use serde::{Deserialize, Serialize};
 
 use super::ViewerViewIdentity;
@@ -31,7 +31,7 @@ pub enum ViewerPushStatus {
     Queued,
     Running,
     Succeeded,
-    Failed { message: String },
+    Failed { failure: Failure },
 }
 
 /// Eligibility for the current selection, checked against the repository's current upstream.
@@ -39,5 +39,8 @@ pub enum ViewerPushStatus {
 pub enum ViewerPushAvailability {
     Available,
     NothingToPush,
-    Unavailable { message: String },
+    /// Git state prevents a push; the failure says why.
+    Blocked {
+        failure: Failure,
+    },
 }

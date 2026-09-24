@@ -318,7 +318,7 @@ pub(in crate::entities::diffs) struct LoadedRowWindow {
 
 pub(in crate::entities::diffs) fn window_too_large() -> ClientDiffFileError {
     ClientDiffFileError::Server {
-        message: "This section contains too much text to display.".to_owned(),
+        failure: gtl_models::failure::ViewerFailure::RangeTooLarge.into(),
         retryable: false,
     }
 }

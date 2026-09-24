@@ -7,24 +7,26 @@ fn is_pruned_dir(name: &str) -> bool {
     PRUNED_DIRS.contains(&name)
 }
 
-/// Distinguishes linked-worktree gitfiles from submodule gitfiles.
-pub(super) fn is_worktree_marker(git_file_contents: &str) -> bool {
+/// Reads the Git directory a `.git` file names, which may be relative to its checkout.
+pub(super) fn gitfile_target(git_file_contents: &str) -> Option<&str> {
     git_file_contents
         .lines()
-        .filter_map(|line| line.strip_prefix("gitdir:"))
-        .any(|target| target.trim().replace('\\', "/").contains("/worktrees/"))
+        .find_map(|line| line.strip_prefix("gitdir:"))
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
 }
 
+/// Never prunes the root, which the caller names explicitly even when it is a linked worktree.
 pub(super) fn should_skip(
     depth: usize,
     name: &str,
     is_linked_worktree: bool,
     scope: RepositoryTraversalScope,
 ) -> bool {
-    if !scope.includes_linked_worktrees() && is_linked_worktree {
-        return true;
+    if depth == 0 {
+        return false;
     }
-    depth > 0 && is_pruned_dir(name)
+    is_pruned_dir(name) || (is_linked_worktree && !scope.includes_linked_worktrees())
 }
 
 #[cfg(test)]
@@ -41,11 +43,17 @@ mod tests {
     }
 
     #[test]
-    fn worktree_marker_detects_worktree_pointer_only() {
-        assert!(is_worktree_marker("gitdir: /repo/.git/worktrees/feature\n"));
-        assert!(!is_worktree_marker("gitdir: /repo/.git/modules/sub\n"));
-        assert!(is_worktree_marker("gitdir: C:\\repo\\.git\\worktrees\\f\n"));
-        assert!(!is_worktree_marker("ref: refs/heads/main\n"));
+    fn gitfile_target_reads_only_the_gitdir_line() {
+        assert_eq!(
+            gitfile_target("gitdir: /repo/.git/worktrees/feature\n"),
+            Some("/repo/.git/worktrees/feature")
+        );
+        assert_eq!(
+            gitfile_target("gitdir: ../.git/modules/sub\n"),
+            Some("../.git/modules/sub")
+        );
+        assert_eq!(gitfile_target("gitdir:\n"), None);
+        assert_eq!(gitfile_target("ref: refs/heads/main\n"), None);
     }
 
     #[test]
@@ -54,6 +62,16 @@ mod tests {
             0,
             "target",
             false,
+            RepositoryTraversalScope::ExcludeLinkedWorktrees
+        ));
+    }
+
+    #[test]
+    fn should_skip_always_scans_the_root_even_when_it_is_a_linked_worktree() {
+        assert!(!should_skip(
+            0,
+            "feature",
+            true,
             RepositoryTraversalScope::ExcludeLinkedWorktrees
         ));
     }

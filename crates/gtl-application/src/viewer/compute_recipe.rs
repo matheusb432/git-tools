@@ -1,3 +1,5 @@
+use gtl_models::failure::ErrorMeta;
+
 #[cfg(test)]
 use crate::recipes;
 use crate::{
@@ -10,11 +12,13 @@ use crate::{
     recipes::{Recipe, RecipeOp, RecipeTarget},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ComputeRecipeError {
     #[error(transparent)]
+    #[meta(transparent)]
     Diff(#[from] compute_diff::ComputeDiffError),
     #[error(transparent)]
+    #[meta(transparent)]
     MergeDiff(#[from] compute_merge_diff::ComputeMergeDiffError),
 }
 

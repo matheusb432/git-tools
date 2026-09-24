@@ -88,7 +88,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
     let failed = load.failed;
     let result = load.status.as_ref().map(Ok).or_else(|| {
         failed.then_some(Err(
-            crate::shared::viewer_client::ViewerClientError::Internal,
+            crate::shared::viewer_client::ViewerClientError::InvalidMessage,
         ))
     });
     let ProjectPresentation {
@@ -297,7 +297,9 @@ fn ProjectChanges(
                         }
                     }
                     if let Some(issue) = issue {
-                        span { class: "text-warn", title: issue.description(),
+                        span {
+                            class: "text-warn",
+                            title: issue.description().into_owned(),
                             TriangleAlert { size: 16 }
                         }
                     } else if local == ProjectSignal::Loading || ahead == ProjectSignal::Loading {

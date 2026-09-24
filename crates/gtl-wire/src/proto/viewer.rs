@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use gtl_models::{
     diffs::{CommitId, DiffLineCount, ExcludedExtensions},
+    failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
@@ -18,6 +19,7 @@ use gtl_models::{
 };
 
 use crate::{
+    proto::failure::{decode_failure, encode_failure},
     v1,
     viewer::{
         EditSettingsRequest, FieldUpdate, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
@@ -26,15 +28,14 @@ use crate::{
         ViewerActiveView, ViewerAppliedExclusions, ViewerCodeLine, ViewerCodeSpan,
         ViewerCommandLine, ViewerCommitCursor, ViewerCommitPage, ViewerCommitSelection,
         ViewerCommitSummary, ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout,
-        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult,
-        ViewerFailureCode, ViewerFeedback, ViewerFileFailureCode, ViewerFileSearchResult,
-        ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerHistoryCopyPayload,
-        ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
-        ViewerProjectDiffExclusions, ViewerProjectSettingsUpdate, ViewerRecipeKind,
-        ViewerRenderOptions, ViewerRowEvent, ViewerRowStreamItem, ViewerShell, ViewerSplitCell,
-        ViewerSplitRow, ViewerStateChanged, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
-        ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow, ViewerUnifiedSourceRow,
-        ViewerUserSettings, ViewerViewIdentity,
+        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
+        ViewerFileSearchResult, ViewerFileStatus, ViewerFileSummary, ViewerFooter,
+        ViewerHistoryCopyPayload, ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage,
+        ViewerPreferences, ViewerProjectDiffExclusions, ViewerProjectSettingsUpdate,
+        ViewerRecipeKind, ViewerRenderOptions, ViewerRowEvent, ViewerRowStreamItem, ViewerShell,
+        ViewerSplitCell, ViewerSplitRow, ViewerStateChanged, ViewerSyntaxClass, ViewerTab,
+        ViewerTabKind, ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow,
+        ViewerUnifiedSourceRow, ViewerUserSettings, ViewerViewIdentity,
     },
 };
 
@@ -47,6 +48,34 @@ pub enum ViewerCodecError {
     /// A protobuf message violates the viewer contract.
     #[error("protobuf message violates the viewer contract")]
     InvalidMessage,
+    /// A named request field violates the viewer contract.
+    #[error("request field `{field}` violates the viewer contract")]
+    InvalidField { field: &'static str },
+}
+
+impl ViewerCodecError {
+    /// Attributes an invalid message to the request field that carried it.
+    #[must_use]
+    pub const fn in_field(self, field: &'static str) -> Self {
+        match self {
+            Self::InvalidMessage => Self::InvalidField { field },
+            other => other,
+        }
+    }
+
+    /// The request field that violates the contract, when the decoder knows it.
+    #[must_use]
+    pub const fn field(self) -> Option<&'static str> {
+        match self {
+            Self::InvalidField { field } => Some(field),
+            Self::Unrepresentable | Self::InvalidMessage => None,
+        }
+    }
+}
+
+/// Attributes a decoding failure to the request field `name`.
+fn field(name: &'static str) -> impl Fn(ViewerCodecError) -> ViewerCodecError {
+    move |error| error.in_field(name)
 }
 
 macro_rules! viewer_tab_codecs {
@@ -186,16 +215,12 @@ fn encode_viewer_active_state(
                 tab_id: u64::from(tab_id),
             })
         }
-        ViewerActiveState::Broken {
-            tab_id,
-            code,
-            message,
-        } => v1::viewer_active_state::State::Broken(encode_viewer_failure(tab_id, code, message)),
-        ViewerActiveState::Error {
-            tab_id,
-            code,
-            message,
-        } => v1::viewer_active_state::State::Error(encode_viewer_failure(tab_id, code, message)),
+        ViewerActiveState::Broken { tab_id, failure } => {
+            v1::viewer_active_state::State::Broken(encode_viewer_failure(tab_id, &failure))
+        }
+        ViewerActiveState::Error { tab_id, failure } => {
+            v1::viewer_active_state::State::Error(encode_viewer_failure(tab_id, &failure))
+        }
         ViewerActiveState::Ready { view } => {
             v1::viewer_active_state::State::Ready(Box::new(v1::ViewerReadyState {
                 view: Some(encode_viewer_active_view(*view)?),
@@ -205,24 +230,10 @@ fn encode_viewer_active_state(
     Ok(v1::ViewerActiveState { state: Some(state) })
 }
 
-fn encode_viewer_failure(
-    tab_id: ViewerTabId,
-    code: ViewerFailureCode,
-    message: String,
-) -> v1::ViewerFailureState {
+fn encode_viewer_failure(tab_id: ViewerTabId, failure: &Failure) -> v1::ViewerFailureState {
     v1::ViewerFailureState {
         tab_id: u64::from(tab_id),
-        code: match code {
-            ViewerFailureCode::RepositoryDirectoryNotFound => {
-                v1::ViewerFailureCode::RepositoryDirectoryNotFound
-            }
-            ViewerFailureCode::RepositoryDirectoryNotGitRepository => {
-                v1::ViewerFailureCode::RepositoryDirectoryNotGitRepository
-            }
-            ViewerFailureCode::SourceUnavailable => v1::ViewerFailureCode::SourceUnavailable,
-            ViewerFailureCode::RenderFailed => v1::ViewerFailureCode::RenderFailed,
-        } as i32,
-        message,
+        failure: Some(encode_failure(failure)),
     }
 }
 
@@ -295,7 +306,7 @@ fn encode_viewer_active_view(
 }
 
 fn encode_viewer_commit_selection(selection: ViewerCommitSelection) -> v1::ViewerCommitSelection {
-    let (state, commit_id, message) = match selection {
+    let (state, commit_id, failure) = match selection {
         ViewerCommitSelection::None => (v1::ViewerCommitSelectionState::None, None, None),
         ViewerCommitSelection::Pending { id } => (
             v1::ViewerCommitSelectionState::Pending,
@@ -307,16 +318,16 @@ fn encode_viewer_commit_selection(selection: ViewerCommitSelection) -> v1::Viewe
             Some(id.to_string()),
             None,
         ),
-        ViewerCommitSelection::Error { id, message } => (
+        ViewerCommitSelection::Error { id, failure } => (
             v1::ViewerCommitSelectionState::Error,
             Some(id.to_string()),
-            Some(message),
+            Some(encode_failure(&failure)),
         ),
     };
     v1::ViewerCommitSelection {
         state: state as i32,
         commit_id,
-        message,
+        failure,
     }
 }
 
@@ -823,94 +834,143 @@ fn encode_bool_field_update(update: &FieldUpdate<bool>) -> Option<v1::BoolFieldU
 pub fn decode_edit_settings_request(
     request: v1::EditSettingsRequest,
 ) -> Result<EditSettingsRequest, ViewerCodecError> {
-    use v1::{
-        density_field_update, extensions_field_update, layout_field_update,
-        project_settings_field_update, theme_field_update,
-    };
     Ok(EditSettingsRequest {
-        ui_scale_percent: decode_viewer_scale_update(request.ui_scale_percent)?,
-        reduce_motion: decode_bool_field_update(request.reduce_motion)?,
-        expected_revision: decode_user_settings_revision(request.expected_revision)?,
-        focus_window_on_diff: decode_bool_field_update(request.focus_window_on_diff)?,
-        files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)?,
-        commits_sidebar_visible: decode_bool_field_update(request.commits_sidebar_visible)?,
-        projects_page_size: decode_projects_page_size_update(request.projects_page_size)?,
-        projects_sort: match request.projects_sort {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                v1::projects_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                v1::projects_sort_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(decode_projects_sort(value)?)
-                }
-            },
-        },
-        projects_view: match request.projects_view {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                v1::projects_view_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                v1::projects_view_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(decode_projects_view(value)?)
-                }
-            },
-        },
-        theme: match request.theme {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                theme_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                theme_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(decode_viewer_theme(value)?)
-                }
-            },
-        },
-        layout: match request.layout {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                layout_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                layout_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(decode_viewer_diff_layout(value)?)
-                }
-            },
-        },
-        density: match request.density {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                density_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                density_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(decode_viewer_diff_density(value)?)
-                }
-            },
-        },
-        wrap_lines: decode_bool_field_update(request.wrap_lines)?,
-        push_confirmation_required: decode_bool_field_update(request.push_confirmation_required)?,
-        default_diff_exclusions: match request.default_diff_exclusions {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                extensions_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                extensions_field_update::Operation::Update(value) => {
-                    FieldUpdate::Update(ExcludedExtensions::new(value.extensions))
-                }
-            },
-        },
-        projects: match request.projects {
-            None => FieldUpdate::Unchanged,
-            Some(value) => match value.operation.ok_or(ViewerCodecError::InvalidMessage)? {
-                project_settings_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-                project_settings_field_update::Operation::Update(value) => FieldUpdate::Update(
-                    value
-                        .projects
-                        .into_iter()
-                        .map(|project| {
-                            Ok(ViewerProjectSettingsUpdate {
-                                project_name: ProjectName::try_new(project.project_name)
-                                    .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                                excluded_from_push_all: project.excluded_from_push_all,
-                                diff_exclusions: ExcludedExtensions::new(project.diff_exclusions),
-                            })
-                        })
-                        .collect::<Result<Vec<_>, ViewerCodecError>>()?,
-                ),
-            },
-        },
+        ui_scale_percent: decode_viewer_scale_update(request.ui_scale_percent)
+            .map_err(field("ui_scale_percent"))?,
+        reduce_motion: decode_bool_field_update(request.reduce_motion)
+            .map_err(field("reduce_motion"))?,
+        expected_revision: decode_user_settings_revision(request.expected_revision)
+            .map_err(field("expected_revision"))?,
+        focus_window_on_diff: decode_bool_field_update(request.focus_window_on_diff)
+            .map_err(field("focus_window_on_diff"))?,
+        files_sidebar_visible: decode_bool_field_update(request.files_sidebar_visible)
+            .map_err(field("files_sidebar_visible"))?,
+        commits_sidebar_visible: decode_bool_field_update(request.commits_sidebar_visible)
+            .map_err(field("commits_sidebar_visible"))?,
+        projects_page_size: decode_projects_page_size_update(request.projects_page_size)
+            .map_err(field("projects_page_size"))?,
+        projects_sort: decode_projects_sort_update(request.projects_sort)
+            .map_err(field("projects_sort"))?,
+        projects_view: decode_projects_view_update(request.projects_view)
+            .map_err(field("projects_view"))?,
+        theme: decode_theme_update(request.theme).map_err(field("theme"))?,
+        layout: decode_layout_update(request.layout).map_err(field("layout"))?,
+        density: decode_density_update(request.density).map_err(field("density"))?,
+        wrap_lines: decode_bool_field_update(request.wrap_lines).map_err(field("wrap_lines"))?,
+        push_confirmation_required: decode_bool_field_update(request.push_confirmation_required)
+            .map_err(field("push_confirmation_required"))?,
+        default_diff_exclusions: decode_exclusions_update(request.default_diff_exclusions)
+            .map_err(field("default_diff_exclusions"))?,
+        projects: decode_project_settings_update(request.projects).map_err(field("projects"))?,
+    })
+}
+
+fn decode_projects_sort_update(
+    update: Option<v1::ProjectsSortFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ProjectsSort>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::projects_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::projects_sort_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_projects_sort(value)?)
+        }
+    })
+}
+
+fn decode_projects_view_update(
+    update: Option<v1::ProjectsViewFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ProjectsViewMode>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::projects_view_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::projects_view_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_projects_view(value)?)
+        }
+    })
+}
+
+fn decode_theme_update(
+    update: Option<v1::ThemeFieldUpdate>,
+) -> Result<FieldUpdate<ViewerTheme>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::theme_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::theme_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_viewer_theme(value)?)
+        }
+    })
+}
+
+fn decode_layout_update(
+    update: Option<v1::LayoutFieldUpdate>,
+) -> Result<FieldUpdate<ViewerDiffLayout>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::layout_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::layout_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_viewer_diff_layout(value)?)
+        }
+    })
+}
+
+fn decode_density_update(
+    update: Option<v1::DensityFieldUpdate>,
+) -> Result<FieldUpdate<ViewerDiffDensity>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::density_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::density_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_viewer_diff_density(value)?)
+        }
+    })
+}
+
+fn decode_exclusions_update(
+    update: Option<v1::ExtensionsFieldUpdate>,
+) -> Result<FieldUpdate<ExcludedExtensions>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::extensions_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::extensions_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(ExcludedExtensions::new(value.extensions))
+        }
+    })
+}
+
+fn decode_project_settings_update(
+    update: Option<v1::ProjectSettingsFieldUpdate>,
+) -> Result<FieldUpdate<Vec<ViewerProjectSettingsUpdate>>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::project_settings_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::project_settings_field_update::Operation::Update(value) => FieldUpdate::Update(
+            value
+                .projects
+                .into_iter()
+                .map(|project| {
+                    Ok(ViewerProjectSettingsUpdate {
+                        project_name: ProjectName::try_new(project.project_name)
+                            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                        excluded_from_push_all: project.excluded_from_push_all,
+                        diff_exclusions: ExcludedExtensions::new(project.diff_exclusions),
+                    })
+                })
+                .collect::<Result<Vec<_>, ViewerCodecError>>()?,
+        ),
     })
 }
 
@@ -1131,7 +1191,12 @@ pub fn decode_watch_viewer_response(
                 Ok(crate::viewer::ViewerLiveCheck {
                     tab_id: ViewerTabId::try_new(check.tab_id)
                         .map_err(|_| ViewerCodecError::InvalidMessage)?,
-                    result: check.error.map_or(Ok(()), Err),
+                    result: match check.failure {
+                        None => Ok(()),
+                        Some(failure) => {
+                            Err(decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?)
+                        }
+                    },
                     elapsed_ms: check.elapsed_ms,
                 })
             })
@@ -1268,31 +1333,12 @@ fn decode_viewer_failure_state(
 ) -> Result<ViewerActiveState, ViewerCodecError> {
     let tab_id =
         ViewerTabId::try_new(failure.tab_id).map_err(|_| ViewerCodecError::InvalidMessage)?;
-    let code = match v1::ViewerFailureCode::try_from(failure.code) {
-        Ok(v1::ViewerFailureCode::RepositoryDirectoryNotFound) => {
-            ViewerFailureCode::RepositoryDirectoryNotFound
-        }
-        Ok(v1::ViewerFailureCode::RepositoryDirectoryNotGitRepository) => {
-            ViewerFailureCode::RepositoryDirectoryNotGitRepository
-        }
-        Ok(v1::ViewerFailureCode::SourceUnavailable) => ViewerFailureCode::SourceUnavailable,
-        Ok(v1::ViewerFailureCode::RenderFailed) => ViewerFailureCode::RenderFailed,
-        Ok(v1::ViewerFailureCode::Unspecified) | Err(_) => {
-            return Err(ViewerCodecError::InvalidMessage);
-        }
-    };
+    let failure =
+        decode_failure(required(failure.failure)?).ok_or(ViewerCodecError::InvalidMessage)?;
     Ok(if broken {
-        ViewerActiveState::Broken {
-            tab_id,
-            code,
-            message: failure.message,
-        }
+        ViewerActiveState::Broken { tab_id, failure }
     } else {
-        ViewerActiveState::Error {
-            tab_id,
-            code,
-            message: failure.message,
-        }
+        ViewerActiveState::Error { tab_id, failure }
     })
 }
 
@@ -1411,7 +1457,10 @@ fn decode_viewer_commit_selection(
         }
         Ok(v1::ViewerCommitSelectionState::Error) => Ok(ViewerCommitSelection::Error {
             id: commit_id()?,
-            message: selection.message.ok_or(ViewerCodecError::InvalidMessage)?,
+            failure: selection
+                .failure
+                .and_then(decode_failure)
+                .ok_or(ViewerCodecError::InvalidMessage)?,
         }),
         Ok(v1::ViewerCommitSelectionState::Unspecified) | Err(_) => {
             Err(ViewerCodecError::InvalidMessage)
@@ -1632,17 +1681,10 @@ fn decode_viewer_row_event(
         }),
         Event::FileFailed(event) => Ok(ViewerRowEvent::FileFailed {
             file: decode_viewer_diff_file_id(event.file_id)?,
-            code: match v1::ViewerFileFailureCode::try_from(event.code) {
-                Ok(v1::ViewerFileFailureCode::SourceUnavailable) => {
-                    ViewerFileFailureCode::SourceUnavailable
-                }
-                Ok(v1::ViewerFileFailureCode::ParseFailed) => ViewerFileFailureCode::ParseFailed,
-                Ok(v1::ViewerFileFailureCode::RowTooLarge) => ViewerFileFailureCode::RowTooLarge,
-                Ok(v1::ViewerFileFailureCode::Unspecified) | Err(_) => {
-                    return Err(ViewerCodecError::InvalidMessage);
-                }
-            },
-            message: event.message,
+            failure: event
+                .failure
+                .and_then(decode_failure)
+                .ok_or(ViewerCodecError::InvalidMessage)?,
             retryable: event.retryable,
         }),
     }

@@ -20,7 +20,7 @@ pub(super) fn WindowHeader() -> Element {
     let mut action = use_action(move |request: WindowAction| async move {
         match gtl_client::window::perform(request).await {
             Ok(()) => revision += 1,
-            Err(error) => toast.error(error.message()),
+            Err(error) => toast.client_error(&error),
         }
         Ok::<(), std::convert::Infallible>(())
     });

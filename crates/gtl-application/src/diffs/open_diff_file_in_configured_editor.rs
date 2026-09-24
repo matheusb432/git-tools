@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use gtl_models::paths::{AbsoluteFilePath, RepositoryRelativePath, RepositoryRoot};
+use gtl_models::{
+    failure::{Classification, Classified, ErrorClass, ExternalDiagnostic, ViewerFailure},
+    paths::{AbsoluteFilePath, RepositoryRelativePath, RepositoryRoot},
+};
 
 use crate::{
     diffs::{FileStatus, View},
@@ -28,6 +31,24 @@ pub enum OpenDiffFileInConfiguredEditorError {
     ConfiguredEditorCommand(String),
     #[error("configured editor open failed: {0}")]
     ConfiguredEditorOpen(String),
+}
+
+impl Classified for OpenDiffFileInConfiguredEditorError {
+    fn classify(&self) -> Classification {
+        let failure = match self {
+            Self::FileNotInCurrentDiff => ViewerFailure::FileNotInDiff,
+            Self::DiffFileDeleted => ViewerFailure::FileDeleted,
+            Self::DiffFileUnavailable => ViewerFailure::FileUnavailable,
+            Self::DiffFileOutsideRepository => ViewerFailure::FileOutsideRepository,
+            Self::FileSystem(_) => return Classification::Private(ErrorClass::Internal),
+            Self::ConfiguredEditorDiscovery(detail)
+            | Self::ConfiguredEditorCommand(detail)
+            | Self::ConfiguredEditorOpen(detail) => ViewerFailure::EditorFailed {
+                diagnostic: ExternalDiagnostic::new(detail),
+            },
+        };
+        Classification::Public(failure.into())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

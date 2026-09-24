@@ -2,31 +2,27 @@ use gtl_application::viewer::push::{
     PushError, PushPlan, create_viewer_push, execute_viewer_push, get_viewer_push,
     get_viewer_push_availability, refresh_push_views,
 };
+use gtl_models::failure::Failure;
 use gtl_wire::{proto, v1, viewer::push::ViewerPushRequest};
 use tonic::{Request, Response, Status};
 
-use super::super::run_blocking;
+use super::super::{
+    run_blocking,
+    status::{ApiResult, GrpcResultExt as _, invalid_request, status},
+};
 use crate::state::AppState;
-
-fn status(error: &PushError) -> Status {
-    match error {
-        PushError::NotFound => Status::not_found(error.to_string()),
-        PushError::Capacity => Status::resource_exhausted(error.to_string()),
-        _ => Status::internal(error.to_string()),
-    }
-}
 
 pub(super) async fn create(
     state: &AppState,
     request: Request<v1::CreateViewerPushRequest>,
-) -> Result<Response<v1::CreateViewerPushResponse>, Status> {
+) -> ApiResult<v1::CreateViewerPushResponse> {
     let request = proto::viewer::push::decode_create(request.into_inner())
-        .map_err(|_| Status::invalid_argument("Invalid push source"))?;
+        .map_err(|_| invalid_request("source"))?;
     let permit = state
         .viewer_push_requests
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("Push preparation is busy"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     let state = state.clone();
     let id = run_blocking(move || {
         let _permit = permit;
@@ -39,7 +35,7 @@ pub(super) async fn create(
         )
     })
     .await?
-    .map_err(|error| status(&error))?;
+    .into_grpc()?;
     Ok(Response::new(v1::CreateViewerPushResponse {
         id: id.to_string(),
     }))
@@ -48,24 +44,21 @@ pub(super) async fn create(
 pub(super) fn get(
     state: &AppState,
     request: Request<v1::GetViewerPushRequest>,
-) -> Result<Response<v1::GetViewerPushResponse>, Status> {
+) -> ApiResult<v1::GetViewerPushResponse> {
     let id = proto::viewer::push::decode_id(&request.into_inner().id)
-        .map_err(|_| Status::invalid_argument("Invalid push ID"))?;
+        .map_err(|_| invalid_request("id"))?;
     let result = get_viewer_push::execute(ViewerPushRequest { id }, &state.viewer_push_operations)
-        .map_err(|error| status(&error))?;
+        .into_grpc()?;
     Ok(Response::new(proto::viewer::push::encode_status(result)))
 }
 
 pub(super) fn start(
     state: &AppState,
     request: Request<v1::StartViewerPushRequest>,
-) -> Result<Response<v1::StartViewerPushResponse>, Status> {
+) -> ApiResult<v1::StartViewerPushResponse> {
     let id = proto::viewer::push::decode_id(&request.into_inner().id)
-        .map_err(|_| Status::invalid_argument("Invalid push ID"))?;
-    state
-        .viewer_push_operations
-        .queue(id)
-        .map_err(|error| status(&error))?;
+        .map_err(|_| invalid_request("id"))?;
+    state.viewer_push_operations.queue(id).into_grpc()?;
     dispatch_ready(state)?;
     Ok(Response::new(v1::StartViewerPushResponse {}))
 }
@@ -75,11 +68,7 @@ fn dispatch_ready(state: &AppState) -> Result<(), Status> {
         let Ok(permit) = state.viewer_push_workers.clone().try_acquire_owned() else {
             return Ok(());
         };
-        let next = state
-            .viewer_push_operations
-            .begin_next()
-            .map_err(|error| status(&error))?;
-        let Some((id, plan)) = next else {
+        let Some((id, plan)) = state.viewer_push_operations.begin_next().into_grpc()? else {
             return Ok(());
         };
         // The admitted operation survives an IPC disconnect or a route change.
@@ -95,8 +84,9 @@ async fn run_push(
 ) {
     let worker_state = state.clone();
     let path = plan.path().clone();
-    let result = run_blocking(move || execute_viewer_push::execute(&plan, &worker_state.git)).await;
-    let result = result.unwrap_or_else(|error| Err(PushError::Git(error.to_string())));
+    let result = run_blocking(move || execute_viewer_push::execute(&plan, &worker_state.git))
+        .await
+        .unwrap_or(Err(PushError::Interrupted));
     let _ = state.viewer_push_operations.finish(id, result);
     if let Ok(work) = refresh_push_views::execute(&path, &state.viewer) {
         for work in work {
@@ -111,14 +101,14 @@ async fn run_push(
 pub(super) async fn availability(
     state: &AppState,
     request: Request<v1::GetViewerPushAvailabilityRequest>,
-) -> Result<Response<v1::GetViewerPushAvailabilityResponse>, Status> {
+) -> ApiResult<v1::GetViewerPushAvailabilityResponse> {
     let identity = proto::viewer::push::decode_availability_request(request.into_inner())
-        .map_err(|_| Status::invalid_argument("Invalid view identity"))?;
+        .map_err(|_| invalid_request("identity"))?;
     let permit = state
         .viewer_push_requests
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("Push preparation is busy"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     let state = state.clone();
     let result = run_blocking(move || {
         let _permit = permit;

@@ -157,15 +157,25 @@ test-web-component-preview *args:
 test-docs:
     @cargo test --locked --doc --workspace
 
-# Run the release-built desktop and browser journeys with a two-hour process bound.
+# Run the release-built desktop journeys in parallel. Arguments select journeys through Nextest, such as `just test-e2e live_diff`.
 [group('quality')]
-test-e2e:
-    @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker
+test-e2e *args:
+    @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker journeys "$@"
 
-# Run the E2E journeys and retain passing screenshots in addition to failure evidence.
+# Run the selected desktop journeys and retain passing screenshots in addition to failure evidence.
 [group('quality')]
-test-e2e-evidences:
-    @TEST_EVIDENCES_OUTPUT_PATH="{{ justfile_directory() }}/.artifacts/e2e" just test-e2e
+test-e2e-evidences *args:
+    @TEST_EVIDENCES_OUTPUT_PATH="{{ justfile_directory() }}/.artifacts/e2e" just test-e2e "$@"
+
+# Check native window focus when the CLI opens diffs into the release viewer.
+[group('quality')]
+test-e2e-native:
+    @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker native
+
+# Run the Playwright offline-artifact and component-preview journeys.
+[group('quality')]
+test-e2e-browser:
+    @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker browser
 
 # Run every Rust target, feature supplement, doctest, drift check, and viewer journey.
 [group('quality')]
@@ -177,6 +187,8 @@ test-all:
     @just test-docs
     @just drift-check
     @just test-e2e
+    @just test-e2e-native
+    @just test-e2e-browser
 
 # Collect Nextest and doctest coverage, then remove the isolated target directory.
 [group('quality')]

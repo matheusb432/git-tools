@@ -266,7 +266,7 @@ async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Res
         .await
         .context("show the immutable push destination")?;
     expect(dialog.get_by_text(
-        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
+        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
         true,
     ))
     .to_be_visible()

@@ -7,10 +7,10 @@ use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{
-    ManagedExit, ManagedOptions, ManagedOutput, ManagedRun,
+    ManagedOptions, ManagedOutput, ManagedRun,
     push_summary::{PushOutcome, PushSummary},
 };
-use crate::server_client::ServerClient;
+use crate::{ExitCode, failure::CommandFailure, server_client::ServerClient};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncOperation {
@@ -76,11 +76,12 @@ struct PushAllReport<'a> {
     excluded: &'a [ProjectName],
 }
 
-fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
+/// Maps a batch outcome: refused rows exit as refused, and any failed row fails the batch.
+fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ExitCode> {
     match exit {
-        v1::ProjectSyncExit::Clean => Ok(ManagedExit::Clean),
-        v1::ProjectSyncExit::Warning => Ok(ManagedExit::Warn),
-        v1::ProjectSyncExit::Failed => Ok(ManagedExit::Fail),
+        v1::ProjectSyncExit::Clean => Ok(ExitCode::Ok),
+        v1::ProjectSyncExit::Warning => Ok(ExitCode::Refused),
+        v1::ProjectSyncExit::Failed => Ok(ExitCode::Failed),
         v1::ProjectSyncExit::Unspecified => {
             anyhow::bail!("gtl-server returned an unspecified project sync exit")
         }
@@ -118,12 +119,7 @@ pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
 }
 
 fn managed_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
-    ManagedRun {
-        exit: ManagedExit::Fail,
-        results: Vec::new(),
-        stdout: String::new(),
-        stderr: crate::error_text(error),
-    }
+    ManagedRun::failed(&CommandFailure::from_error(error), None)
 }
 
 fn finish(

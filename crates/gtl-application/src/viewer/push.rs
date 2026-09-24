@@ -16,12 +16,13 @@ use std::{
 
 use gtl_models::{
     diffs::CommitId,
+    failure::{Classified, ErrorMeta, Failure, PushFailure, Resource},
     git::{BranchName, GitRefName, RemoteName, RemoteUrl},
     paths::RepositoryRoot,
 };
 use gtl_wire::viewer::push::{ViewerPushId, ViewerPushPreview, ViewerPushStatus};
 
-const OPERATIONS_MAX: usize = 32;
+const OPERATIONS_MAX: u32 = 32;
 const REVIEW_LIFETIME: Duration = Duration::from_mins(10);
 
 /// Mutable Git facts needed to check a prepared target before execution.
@@ -76,6 +77,7 @@ impl PushPlan {
             format!("remote.{}.mirror=false", self.repository.remote),
             "push".into(),
             "--atomic".into(),
+            "--porcelain".into(),
             "--no-follow-tags".into(),
             "--recurse-submodules=no".into(),
             "--".into(),
@@ -121,36 +123,23 @@ fn shell_argument(value: &str) -> String {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PushError {
-    #[error("Checkout changed. Review the current branch before pushing.")]
-    CheckoutChanged,
-    #[error(
-        "The selected commit is no longer in this branch's history. Select a current commit or open a new diff."
-    )]
-    CommitRemoved,
-    #[error("The upstream destination changed. Review the push again.")]
-    DestinationChanged,
-    #[error("This branch has no remote upstream. Configure its upstream before pushing.")]
-    NoUpstream,
-    #[error("Check out a branch before pushing.")]
-    Detached,
-    #[error("This remote must have exactly one push URL for an atomic push.")]
-    MultipleDestinations,
-    #[error("There are no unpushed commits through this SHA.")]
-    NothingToPush,
-    #[error("This push review expired. Review the push again.")]
-    Expired,
-    #[error("This push operation is no longer available. Review the push again.")]
-    NotFound,
-    #[error("The push operation history is full. Try again after a push completes.")]
-    Capacity,
-    #[error("Push state is unavailable.")]
-    State,
     #[error(transparent)]
+    #[meta(failure)]
+    Refused(#[from] PushFailure),
+    #[error("the push operation is no longer available")]
+    #[meta(failure = Failure::Gone { resource: Resource::PushOperation })]
+    NotFound,
+    #[error("the push operation registry lock is poisoned")]
+    #[meta(private(Internal))]
+    State,
+    #[error("the push worker stopped before reporting a result")]
+    #[meta(private(Internal))]
+    Interrupted,
+    #[error(transparent)]
+    #[meta(transparent)]
     Source(#[from] super::source::ViewerSourceError),
-    #[error("Git push failed: {0}")]
-    Git(String),
 }
 
 #[derive(Default)]
@@ -185,7 +174,7 @@ impl PushOperationsState {
 impl ViewerPushOperations {
     fn insert(&self, result: Result<PushPlan, PushError>) -> Result<ViewerPushId, PushError> {
         let mut state = self.0.lock().map_err(|_| PushError::State)?;
-        if state.history.len() >= OPERATIONS_MAX {
+        if state.history.len() >= OPERATIONS_MAX as usize {
             let index = state
                 .history
                 .iter()
@@ -195,7 +184,9 @@ impl ViewerPushOperations {
                         ViewerPushStatus::Queued | ViewerPushStatus::Running
                     )
                 })
-                .ok_or(PushError::Capacity)?;
+                .ok_or(PushFailure::HistoryFull {
+                    operations_max: OPERATIONS_MAX,
+                })?;
             state.history.remove(index);
         }
         let id = ViewerPushId::generate();
@@ -207,7 +198,7 @@ impl ViewerPushOperations {
             Err(error) => (
                 None,
                 ViewerPushStatus::Failed {
-                    message: error.to_string(),
+                    failure: error.classify().into_failure(),
                 },
             ),
         };
@@ -234,7 +225,7 @@ impl ViewerPushOperations {
         }
         if state.history[index].created.elapsed() > REVIEW_LIFETIME {
             state.history[index].status = ViewerPushStatus::Failed {
-                message: PushError::Expired.to_string(),
+                failure: PushFailure::ReviewExpired.into(),
             };
             return Ok(());
         }
@@ -288,7 +279,7 @@ impl ViewerPushOperations {
         operation.status = match result {
             Ok(()) => ViewerPushStatus::Succeeded,
             Err(error) => ViewerPushStatus::Failed {
-                message: error.to_string(),
+                failure: error.classify().into_failure(),
             },
         };
         Ok(())

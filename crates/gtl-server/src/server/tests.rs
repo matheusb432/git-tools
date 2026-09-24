@@ -101,10 +101,12 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
             .message()
             .contains("`diff.exclude` must be an array of strings")
     );
-    assert_eq!(
-        error.metadata().get("gtl-error-kind").unwrap(),
-        "invalid-user-settings"
-    );
+    assert!(matches!(
+        gtl_wire::proto::failure::decode_status(&error),
+        gtl_wire::proto::failure::StatusFailure::Decoded(gtl_models::failure::Failure::Settings(
+            gtl_models::failure::SettingsFailure::Invalid { .. }
+        ))
+    ));
     server.stop().await?;
     Ok(())
 }

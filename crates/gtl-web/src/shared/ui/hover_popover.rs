@@ -112,7 +112,6 @@ pub(crate) fn HoverPopover(
             ScrollArea {
                 variant: ScrollAreaVariant::Vertical,
                 class: "hover-popover-content p-3",
-                "data-testid": gtl_web_contracts::test_ids::HOVER_POPOVER_CONTENT.value(),
                 {children}
             }
         }

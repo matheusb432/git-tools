@@ -1,4 +1,5 @@
 use gtl_models::{
+    failure::Failure,
     git::CommitCount,
     projects::comparison::ComparisonBranch,
     repository::{
@@ -15,7 +16,7 @@ pub(super) enum ProjectIssue {
     HeadUnavailable,
     WorkingTreeUnavailable,
     UpstreamMissing,
-    ComparisonUnavailable(String),
+    ComparisonUnavailable(Failure),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,8 +97,8 @@ impl ProjectStatus {
                 count: *commits_ahead,
                 base: Some(project.comparison_branch.clone()),
             },
-            ViewerProjectBranchComparison::Unavailable { reason } => {
-                ProjectSignal::Unavailable(ProjectIssue::ComparisonUnavailable(reason.clone()))
+            ViewerProjectBranchComparison::Unavailable { failure } => {
+                ProjectSignal::Unavailable(ProjectIssue::ComparisonUnavailable(failure.clone()))
             }
         };
         let review = match project.review_class() {

@@ -1,4 +1,8 @@
 pub(crate) mod browser;
+#[cfg(feature = "desktop")]
+pub(crate) mod failure_notice;
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
+pub(crate) mod field_errors;
 #[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) mod file_extension;
 #[cfg(feature = "desktop")]

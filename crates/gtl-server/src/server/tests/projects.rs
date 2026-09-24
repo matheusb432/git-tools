@@ -107,11 +107,14 @@ async fn viewer_discovers_and_imports_repositories_with_independent_row_results(
         v1::ProjectImportOutcome::Restored as i32
     );
     assert_eq!(results[2].outcome, v1::ProjectImportOutcome::Failed as i32);
-    assert!(
+    assert_eq!(
         results[2]
-            .error
-            .as_deref()
-            .is_some_and(|error| !error.is_empty())
+            .failure
+            .clone()
+            .and_then(gtl_wire::proto::failure::decode_failure),
+        Some(gtl_models::failure::Failure::InvalidRequest {
+            field: "project_id".into()
+        })
     );
     let created = projects
         .get_project(v1::GetProjectRequest {

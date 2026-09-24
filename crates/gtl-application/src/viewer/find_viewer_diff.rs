@@ -1,5 +1,6 @@
 //! The `viewer/find_viewer_diff` query: navigate rendered diff-row text on the server.
 
+use gtl_models::failure::{ErrorMeta, ViewerFailure};
 use gtl_wire::viewer::{
     FindViewerDiff, ViewerDiffFileId, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
     ViewerDiffSearchResult,
@@ -13,15 +14,19 @@ use super::{
 };
 use crate::{diffs::View, ports::UserSettingsReader};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum FindViewerDiffError {
     #[error(transparent)]
+    #[meta(transparent)]
     Source(#[from] ViewerSourceError),
     #[error("viewer diff search row index exceeds u32")]
+    #[meta(failure = ViewerFailure::SearchTooLarge)]
     RowIndexExhausted,
     #[error("viewer diff search match count exceeds u64")]
+    #[meta(failure = ViewerFailure::SearchTooLarge)]
     MatchCountExhausted,
     #[error("viewer diff search was cancelled")]
+    #[meta(private(Cancelled))]
     Cancelled,
 }
 

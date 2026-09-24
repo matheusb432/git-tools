@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use dioxus::prelude::*;
 use gtl_models::{
+    failure::Failure,
+    paths::RepositoryRoot,
     repository::status::{RepositoryStatus, StatusChanges, StatusHead},
     timestamps::MachineTimestamp,
 };
@@ -13,14 +15,23 @@ use super::status::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus};
 use crate::shared::{ui::LoadingSpinner, viewer_client::ViewerClientError};
 
 impl ProjectIssue {
-    pub(super) fn description(&self) -> &str {
+    /// Whether a different comparison branch in `project`'s own setting can resolve the issue.
+    pub(super) fn comparison_branch_resolves(&self, project: &RepositoryRoot) -> bool {
+        matches!(
+            self,
+            Self::ComparisonUnavailable(Failure::Project(failure))
+                if failure.comparison_setting().is_some_and(|(owner, _)| owner == project)
+        )
+    }
+
+    pub(super) fn description(&self) -> Cow<'static, str> {
         match self {
-            Self::RequestFailed => "Git status unavailable",
-            Self::RepositoryAbsent => "Repository not found",
-            Self::HeadUnavailable => "Branch status unavailable",
-            Self::WorkingTreeUnavailable => "Working-tree status unavailable",
-            Self::UpstreamMissing => "No upstream configured",
-            Self::ComparisonUnavailable(reason) => reason,
+            Self::RequestFailed => "Git status unavailable".into(),
+            Self::RepositoryAbsent => "Repository not found".into(),
+            Self::HeadUnavailable => "Branch status unavailable".into(),
+            Self::WorkingTreeUnavailable => "Working-tree status unavailable".into(),
+            Self::UpstreamMissing => "No upstream configured".into(),
+            Self::ComparisonUnavailable(failure) => failure.to_string().into(),
         }
     }
 }
@@ -68,7 +79,7 @@ impl ProjectSignal {
                 (count, Some(base)) => format!("{count} commits ahead of {base}").into(),
             },
             Self::Loading => "Loading Git status".into(),
-            Self::Unavailable(issue) => issue.description().into(),
+            Self::Unavailable(issue) => issue.description(),
         }
     }
 }
@@ -81,6 +92,8 @@ pub(super) struct ProjectPresentation<'a> {
     pub(super) ahead: ProjectSignal,
     pub(super) ahead_label: &'static str,
     pub(super) issue: Option<String>,
+    /// The issue names a comparison branch that this project's setting controls.
+    pub(super) comparison_branch_fix: bool,
     pub(super) rendered: Option<String>,
 }
 
@@ -113,6 +126,7 @@ pub(super) fn project_presentation<'a>(
                 ahead: signal,
                 ahead_label: "Branch changes",
                 issue: failed.then(|| "Git status unavailable".to_owned()),
+                comparison_branch_fix: false,
                 rendered,
             };
         }
@@ -144,7 +158,10 @@ pub(super) fn project_presentation<'a>(
         ViewerProjectBranchComparison::Branch { .. }
         | ViewerProjectBranchComparison::Unavailable { .. } => "Branch changes",
     };
-    let issue = status.issue().map(|issue| issue.description().to_owned());
+    let issue = status.issue().map(|issue| issue.description().into_owned());
+    let comparison_branch_fix = status
+        .issue()
+        .is_some_and(|issue| issue.comparison_branch_resolves(&project.path));
     ProjectPresentation {
         branch,
         comparison_base,
@@ -153,6 +170,7 @@ pub(super) fn project_presentation<'a>(
         ahead: status.ahead,
         ahead_label,
         issue,
+        comparison_branch_fix,
         rendered,
     }
 }
@@ -228,7 +246,7 @@ mod tests {
         assert!(!loading.ahead.has_changes());
         assert!(loading.issue.is_none());
         assert!(loading.rendered.is_some());
-        let failed = project_presentation(&project, Some(Err(ViewerClientError::Internal)));
+        let failed = project_presentation(&project, Some(Err(ViewerClientError::InvalidMessage)));
         assert_eq!(failed.review, ProjectReview::StatusUnavailable);
         assert!(!failed.local.is_available());
         assert!(!failed.ahead.has_changes());

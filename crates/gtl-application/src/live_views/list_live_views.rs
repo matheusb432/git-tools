@@ -1,6 +1,7 @@
 //! The `live_views/list` vertical slice: every saved live view, creation order.
 
 use gtl_models::{
+    failure::ErrorMeta,
     live_views::{LiveSource, ParseLiveSourceError},
     paths::ProjectNameError,
     timestamps::MachineTimestamp,
@@ -13,19 +14,23 @@ use crate::live_views::LiveViewRecord;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListLiveViews;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ListLiveViewsError {
     #[error(transparent)]
+    #[meta(private(DataLoss))]
     InvalidSource(#[from] ParseLiveSourceError),
     #[error(transparent)]
+    #[meta(private(DataLoss))]
     InvalidDisplayName(#[from] ProjectNameError),
     #[error("live view `{source_value}` has invalid {field}: {reason}")]
+    #[meta(private(DataLoss))]
     InvalidTimestamp {
         source_value: String,
         field: &'static str,
         reason: String,
     },
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

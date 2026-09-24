@@ -1,4 +1,7 @@
-use gtl_models::viewer::DiffDensity;
+use gtl_models::{
+    failure::{ErrorMeta, Failure, ViewerFailure},
+    viewer::DiffDensity,
+};
 use gtl_wire::viewer::ViewerViewIdentity;
 
 use super::{ViewerState, ViewerStateError, session::ActiveContentSnapshot, shell};
@@ -7,15 +10,19 @@ use crate::{
     ports::{UserSettingsLoadError, UserSettingsReader},
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ViewerSourceError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error("the viewer identity changed")]
+    #[meta(failure = Failure::Changed)]
     Changed,
     #[error("the diff source is still being prepared")]
+    #[meta(failure = ViewerFailure::SourcePreparing)]
     Preparing,
 }
 

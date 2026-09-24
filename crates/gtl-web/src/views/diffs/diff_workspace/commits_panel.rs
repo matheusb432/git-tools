@@ -85,8 +85,8 @@ pub(super) fn WorkspaceCommitsPanel(
                 }
             },
             CommitsPanelHeader { actions }
-            if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
-                CommitSelectionError { message: message.clone() }
+            if let ViewerCommitSelection::Error { failure, .. } = &view.commit_selection {
+                CommitSelectionError { message: failure.to_string() }
             }
             if view.commit_count == 0 {
                 EmptyNotice { class: "m-3 compact:m-2.5", "No commits" }

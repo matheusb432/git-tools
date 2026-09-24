@@ -31,18 +31,12 @@ pub fn run(args: BumpArgs) -> ExitCode {
     } = args;
     let (client, preview) = match prepare_bump(level, pattern, message, push) {
         Ok(prepared) => prepared,
-        Err(error) => {
-            eprintln!("tag bump: {}", crate::error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return crate::failure::fail("tag bump", &error),
     };
 
     let dialog = match confirmation(&preview) {
         Ok(dialog) => dialog,
-        Err(error) => {
-            eprintln!("tag bump: {}", crate::error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return crate::failure::fail("tag bump", &error),
     };
     if dry {
         println!(
@@ -59,10 +53,7 @@ pub fn run(args: BumpArgs) -> ExitCode {
         preview: Some(preview),
     }) {
         Ok(response) => response,
-        Err(error) => {
-            eprintln!("tag bump: {}", crate::error_text(&error));
-            return ExitCode::Internal;
-        }
+        Err(error) => return crate::failure::fail("tag bump", &error),
     };
     match bumped.outcome {
         Some(v1::execute_tag_bump_response::Outcome::Applied(result)) => {
@@ -73,7 +64,7 @@ pub fn run(args: BumpArgs) -> ExitCode {
                 Ok(v1::TagBumpStatus::Failed) => v1::TagActionStatus::Failed,
                 Ok(v1::TagBumpStatus::Unspecified) | Err(_) => {
                     eprintln!("tag bump: server returned an invalid status");
-                    return ExitCode::Internal;
+                    return ExitCode::Failed;
                 }
             };
             super::render_tag_action(&super::TagActionResult {
@@ -84,11 +75,11 @@ pub fn run(args: BumpArgs) -> ExitCode {
         }
         Some(v1::execute_tag_bump_response::Outcome::Rejected(rejection)) => {
             eprintln!("tag bump: {}", rejection.detail);
-            ExitCode::Internal
+            ExitCode::Refused
         }
         None => {
             eprintln!("tag bump: gtl-server returned no tag-bump execution outcome");
-            ExitCode::Internal
+            ExitCode::Failed
         }
     }
 }
@@ -111,7 +102,7 @@ fn prepare_bump(
     let preview = match prepared.outcome {
         Some(v1::plan_tag_bump_response::Outcome::Ready(preview)) => preview,
         Some(v1::plan_tag_bump_response::Outcome::Rejected(rejection)) => {
-            anyhow::bail!(rejection.detail)
+            return Err(crate::failure::Refusal(rejection.detail).into());
         }
         None => anyhow::bail!("gtl-server returned no tag-bump plan outcome"),
     };

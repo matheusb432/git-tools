@@ -242,7 +242,7 @@ async fn query_page(
         cursor,
         sort: Some(sort),
         page_size: ViewerProjectsPageSize::try_new(page_size.into_inner())
-            .map_err(|_| ViewerClientError::Internal)?,
+            .map_err(|_| ViewerClientError::InvalidMessage)?,
     };
     let page = viewer_server::list_projects(request.clone()).await?;
     if page.projects().is_empty()

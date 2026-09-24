@@ -82,7 +82,7 @@ fn server_file_matches(
         );
     }
     if let Some(error) = outcome.error_for(view.identity, query) {
-        return WorkspaceFileMatches::Error(error.message().to_owned());
+        return WorkspaceFileMatches::Error(error.to_string());
     }
     WorkspaceFileMatches::Loading
 }
@@ -164,7 +164,7 @@ fn validate_file_search_result(
     result: ViewerFileSearchResult,
 ) -> Result<HashSet<ViewerDiffFileId>, ViewerClientError> {
     if result.identity != identity {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     let result_count = result.files.len();
     let files = result.files.into_iter().collect::<HashSet<_>>();
@@ -173,7 +173,7 @@ fn validate_file_search_result(
             .iter()
             .any(|file_id| !view.files.iter().any(|file| &file.id == file_id))
     {
-        return Err(ViewerClientError::Internal);
+        return Err(ViewerClientError::InvalidMessage);
     }
     Ok(files)
 }

@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
-use gtl_models::paths::RepositoryRoot;
+use gtl_models::{
+    failure::{Classification, Classified, ErrorClass, RepositoryFailure},
+    paths::RepositoryRoot,
+};
 
 use crate::ports::GitClient;
 
@@ -20,6 +23,20 @@ pub enum ResolveRepositoryRootError {
     /// Git rejected the path or returned no top-level path.
     #[error("{detail}")]
     Rejected { repo_path: PathBuf, detail: String },
+}
+
+impl Classified for ResolveRepositoryRootError {
+    fn classify(&self) -> Classification {
+        match self {
+            Self::Transport { .. } => Classification::Private(ErrorClass::Internal),
+            Self::Rejected { repo_path, .. } => Classification::Public(
+                RepositoryFailure::NotARepository {
+                    path: repo_path.clone(),
+                }
+                .into(),
+            ),
+        }
+    }
 }
 
 /// Resolves a path to the top level of its containing Git repository.

@@ -1,4 +1,10 @@
+use dioxus::CapturedError;
 pub(crate) use gtl_client::ViewerClientError;
+
+/// Recovers the client error that `use_action` captured from a viewer request.
+pub(crate) fn captured_client_error(error: &CapturedError) -> Option<&ViewerClientError> {
+    error.downcast_ref()
+}
 
 #[cfg(target_arch = "wasm32")]
 mod browser {

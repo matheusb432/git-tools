@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::ViewerTabId;
+use crate::failure::{Failure, ViewerFailure};
 
 /// Describes whether a viewer tab can currently provide rendered diff content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,10 +10,10 @@ pub enum ViewerTabState {
     Pending,
     /// Indicates that the tab has a corresponding rendered view.
     Ready,
-    /// Indicates that a known protocol or persistence failure prevents rendering.
-    Broken { code: String, reason: String },
-    /// Indicates that an unexpected runtime failure prevents rendering.
-    Error { reason: String },
+    /// Indicates that the live view source is broken; updates resume when it recovers.
+    Broken { failure: ViewerFailure },
+    /// Indicates that computing or rendering the view failed.
+    Error { failure: Failure },
 }
 
 /// Distinguishes immutable snapshots from regenerating live tabs.

@@ -1,3 +1,4 @@
+use gtl_models::failure::ErrorMeta;
 use gtl_wire::viewer::{ViewerFeedback, ViewerShell};
 
 use super::{
@@ -14,15 +15,19 @@ pub struct GetViewerShellOk {
     pub full_context: Option<ReservedFullContext>,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum GetViewerShellError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(transparent)]
     State(#[from] ViewerStateError),
     #[error(transparent)]
+    #[meta(transparent)]
     Projection(#[from] ProjectViewerShellError),
     #[error(transparent)]
+    #[meta(transparent)]
     CommitReload(#[from] work::ReserveCommitError),
 }
 

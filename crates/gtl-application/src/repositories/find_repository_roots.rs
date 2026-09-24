@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use gtl_models::{
+    failure::{Classification, Classified, ErrorClass, RepositoryFailure},
     paths::RepositoryRoot,
     repository::traversal::{RepositoryTarget, RepositoryTraversalScope},
 };
@@ -36,6 +37,21 @@ pub enum FindRepositoryRootsError {
     /// Reports that Git rejected a discovered repository during top-level resolution.
     #[error("not a git repo: {repo_root}")]
     Rejected { repo_root: RepositoryRoot },
+}
+
+impl Classified for FindRepositoryRootsError {
+    fn classify(&self) -> Classification {
+        match self {
+            Self::Discover(error) => error.classify(),
+            Self::Resolve { .. } => Classification::Private(ErrorClass::Internal),
+            Self::Rejected { repo_root } => Classification::Public(
+                RepositoryFailure::NotARepository {
+                    path: repo_root.as_ref().to_path_buf(),
+                }
+                .into(),
+            ),
+        }
+    }
 }
 
 /// Walk `root` through repository traversal and resolve each repo's `path` to its

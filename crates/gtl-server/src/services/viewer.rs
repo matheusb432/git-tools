@@ -1,6 +1,5 @@
 mod cancellation;
 mod commits;
-mod errors;
 mod file_filters;
 mod files;
 mod history;
@@ -22,7 +21,11 @@ use gtl_application::viewer::{
     close_viewer_tabs::{self, CloseViewerTabs},
     move_viewer_tab, pinned_tabs, set_modified_files, work,
 };
-use gtl_models::{diffs::CommitId, viewer::ViewerTabId};
+use gtl_models::{
+    diffs::CommitId,
+    failure::{Failure, Resource},
+    viewer::ViewerTabId,
+};
 use gtl_wire::{
     proto,
     v1::{self, viewer_service_server::ViewerService},
@@ -32,14 +35,14 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status};
 
 use self::{
-    errors::{
-        close_viewer_tabs_error, map_reserve_commit, map_reserve_recipe, move_viewer_tab_error,
-        viewer_state_error,
-    },
     settings::load_user_settings,
     shell::{parse_identity, project_shell},
 };
-use super::{run_blocking, unexpected};
+use super::{
+    run_blocking,
+    status::{GrpcResultExt as _, invalid_request, status},
+    unexpected,
+};
 use crate::{state::AppState, viewer_runtime};
 
 pub(crate) struct ViewerGrpcService {
@@ -192,9 +195,9 @@ impl ViewerService for ViewerGrpcService {
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| Status::invalid_argument("invalid project ID"))?;
+            .map_err(|_| invalid_request("project_ids"))?;
         let projects = gtl_wire::viewer::projects::ViewerProjectSelection::try_from(projects)
-            .map_err(Status::invalid_argument)?;
+            .map_err(|_| invalid_request("project_ids"))?;
         let live_tab_id = request.live_tab_id.map(tab_id).transpose()?;
         let mut versions = self.state.viewer.subscribe();
         let (sender, receiver) = tokio::sync::mpsc::channel(8);
@@ -256,9 +259,7 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::ActivateViewerTabRequest>,
     ) -> Result<Response<v1::ActivateViewerTabResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        if let Some(work) = work::activate_tab(&self.state.viewer, tab_id)
-            .map_err(|error| map_reserve_recipe(error, "activate viewer tab"))?
-        {
+        if let Some(work) = work::activate_tab(&self.state.viewer, tab_id).into_grpc()? {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::ActivateViewerTabResponse {
@@ -271,8 +272,8 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::MoveViewerTabRequest>,
     ) -> Result<Response<v1::MoveViewerTabResponse>, Status> {
         let request = proto::viewer::decode_move_viewer_tab_request(request.into_inner())
-            .map_err(|_| Status::invalid_argument("move viewer tab request is invalid"))?;
-        move_viewer_tab::execute(request, &self.state.viewer).map_err(move_viewer_tab_error)?;
+            .map_err(|_| invalid_request("move"))?;
+        move_viewer_tab::execute(request, &self.state.viewer).into_grpc()?;
         let state = self.state.clone();
         run_blocking(move || {
             let mut connection = state.database.connection_lock()?;
@@ -305,16 +306,7 @@ impl ViewerService for ViewerGrpcService {
             rename_snapshot::execute(&request, &state.viewer, &mut connection)
         })
         .await?
-        .map_err(|error| match error {
-            RenameSnapshotError::InvalidName => Status::invalid_argument(error.to_string()),
-            RenameSnapshotError::UnknownTab | RenameSnapshotError::HistoryMissing => {
-                Status::not_found(error.to_string())
-            }
-            RenameSnapshotError::NotSnapshot | RenameSnapshotError::NotSaved => {
-                Status::failed_precondition(error.to_string())
-            }
-            error => unexpected(error, "rename snapshot"),
-        })?;
+        .into_grpc()?;
         Ok(Response::new(v1::RenameViewerSnapshotResponse {}))
     }
 
@@ -329,12 +321,14 @@ impl ViewerService for ViewerGrpcService {
         };
         let state = self.state.clone();
         run_blocking(move || {
-            let mut connection = state.database.connection_lock()?;
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(pinned_tabs::PinnedTabsError::Unexpected)?;
             pinned_tabs::execute(request, &state.viewer, &mut connection)
-                .map_err(anyhow::Error::from)
         })
         .await?
-        .map_err(|error| unexpected(error, "pin viewer tab"))?;
+        .into_grpc()?;
         Ok(Response::new(v1::SetViewerTabPinnedResponse {}))
     }
 
@@ -354,7 +348,7 @@ impl ViewerService for ViewerGrpcService {
         })
         .await?
         .map_err(|error| unexpected(error, "open viewer database"))?;
-        if let Some(work) = closed.map_err(close_viewer_tabs_error)? {
+        if let Some(work) = closed.into_grpc()? {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseOtherViewerTabsResponse {}))
@@ -376,7 +370,7 @@ impl ViewerService for ViewerGrpcService {
         })
         .await?
         .map_err(|error| unexpected(error, "open viewer database"))?;
-        if let Some(work) = closed.map_err(close_viewer_tabs_error)? {
+        if let Some(work) = closed.into_grpc()? {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
@@ -389,8 +383,7 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::RefreshViewerTabRequest>,
     ) -> Result<Response<v1::RefreshViewerTabResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        let work = work::reserve_refresh(&self.state.viewer, tab_id)
-            .map_err(|error| map_reserve_recipe(error, "refresh viewer tab"))?;
+        let work = work::reserve_refresh(&self.state.viewer, tab_id).into_grpc()?;
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::RefreshViewerTabResponse {
             shell: Some(project_shell(&self.state, None)?),
@@ -403,10 +396,9 @@ impl ViewerService for ViewerGrpcService {
     ) -> Result<Response<v1::SelectViewerCommitResponse>, Status> {
         let request = request.into_inner();
         let tab_id = tab_id(request.tab_id)?;
-        let commit_id = CommitId::try_from(request.commit_id)
-            .map_err(|_| Status::invalid_argument("commit_id is invalid"))?;
-        let work = work::reserve_commit(&self.state.viewer, tab_id, &commit_id)
-            .map_err(map_reserve_commit)?;
+        let commit_id =
+            CommitId::try_from(request.commit_id).map_err(|_| invalid_request("commit_id"))?;
+        let work = work::reserve_commit(&self.state.viewer, tab_id, &commit_id).into_grpc()?;
         viewer_runtime::spawn_commit(self.state.clone(), work);
         Ok(Response::new(v1::SelectViewerCommitResponse {
             shell: Some(project_shell(&self.state, None)?),
@@ -433,15 +425,7 @@ impl ViewerService for ViewerGrpcService {
             )
         })
         .await?
-        .map_err(|error| match error {
-            viewer::set_modified_files::SetModifiedFilesError::Unavailable => {
-                Status::failed_precondition(error.to_string())
-            }
-            viewer::set_modified_files::SetModifiedFilesError::Changed => {
-                Status::aborted(error.to_string())
-            }
-            error => super::unexpected(error, "show modified files"),
-        })?;
+        .into_grpc()?;
         Ok(Response::new(v1::SetViewerModifiedFilesResponse {}))
     }
 
@@ -450,10 +434,11 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::ClearViewerCommitSelectionRequest>,
     ) -> Result<Response<v1::ClearViewerCommitSelectionResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        let cleared = work::clear_commit_selection(&self.state.viewer, tab_id)
-            .map_err(|error| viewer_state_error(error, "clear viewer commit selection"))?;
+        let cleared = work::clear_commit_selection(&self.state.viewer, tab_id).into_grpc()?;
         if !cleared {
-            return Err(Status::not_found("viewer tab is not available"));
+            return Err(status(&Failure::Gone {
+                resource: Resource::ViewerTab,
+            }));
         }
         Ok(Response::new(v1::ClearViewerCommitSelectionResponse {
             shell: Some(project_shell(&self.state, None)?),
@@ -474,13 +459,13 @@ impl ViewerService for ViewerGrpcService {
         let request = request.into_inner();
         let proto_identity = request
             .identity
-            .ok_or_else(|| Status::invalid_argument("identity is required"))?;
+            .ok_or_else(|| invalid_request("identity"))?;
         let identity = parse_identity(&proto_identity)?;
         let options = load_user_settings(&self.state)?.viewer_render_options();
         let source =
             viewer::shell::commit_source_for_identity(&self.state.viewer, identity, options)
-                .map_err(|error| viewer_state_error(error, "list viewer commits"))?
-                .ok_or_else(|| Status::aborted("viewer identity changed"))?;
+                .into_grpc()?
+                .ok_or_else(|| status(&Failure::Changed))?;
         Ok(Response::new(commits::page(
             proto_identity,
             &source.commits,
@@ -567,5 +552,5 @@ impl ViewerService for ViewerGrpcService {
 }
 
 fn tab_id(raw: u64) -> Result<ViewerTabId, Status> {
-    ViewerTabId::try_new(raw).map_err(|_| Status::invalid_argument("tab_id must be positive"))
+    ViewerTabId::try_new(raw).map_err(|_| invalid_request("tab_id"))
 }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use gtl_models::live_views::LiveSource;
+use gtl_models::{failure::ErrorMeta, live_views::LiveSource};
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, params};
 
 use crate::{
@@ -45,11 +45,26 @@ impl LiveViewRejection {
             Self::DirNotGitRepo { .. } => "DirNotGitRepo",
         }
     }
+
+    /// The typed reason a live view built from this rejection reports.
+    #[must_use]
+    pub fn failure(&self) -> gtl_models::failure::ViewerFailure {
+        use gtl_models::failure::ViewerFailure;
+        match self {
+            Self::DirNotFound { path } => {
+                ViewerFailure::SourceDirectoryMissing { path: path.into() }
+            }
+            Self::DirNotGitRepo { path } => {
+                ViewerFailure::SourceNotRepository { path: path.into() }
+            }
+        }
+    }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum SaveLiveViewError {
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

@@ -8,12 +8,56 @@ use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
 use lucide_dioxus::Check;
 
 use crate::shared::{
+    field_errors::{FieldErrors, FormField},
     ui::{
         Button, ButtonState, ButtonType, FieldLabel, SectionedSurface, SectionedSurfaceBody,
         SectionedSurfaceFooter, SectionedSurfaceHeader, Select, SelectOption,
     },
     viewer_theme::{VIEWER_THEME_OPTIONS, viewer_theme_from_value, viewer_theme_label},
 };
+
+/// An input of the viewer settings form, named after its `EditSettingsRequest` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsField {
+    UiScalePercent,
+    ReduceMotion,
+    Theme,
+    Layout,
+    WrapLines,
+    Density,
+    FocusWindowOnDiff,
+    PushConfirmationRequired,
+}
+
+impl FormField for SettingsField {
+    const ALL: &'static [Self] = &[
+        Self::UiScalePercent,
+        Self::ReduceMotion,
+        Self::Theme,
+        Self::Layout,
+        Self::WrapLines,
+        Self::Density,
+        Self::FocusWindowOnDiff,
+        Self::PushConfirmationRequired,
+    ];
+
+    fn request_field(self) -> &'static str {
+        match self {
+            Self::UiScalePercent => "ui_scale_percent",
+            Self::ReduceMotion => "reduce_motion",
+            Self::Theme => "theme",
+            Self::Layout => "layout",
+            Self::WrapLines => "wrap_lines",
+            Self::Density => "density",
+            Self::FocusWindowOnDiff => "focus_window_on_diff",
+            Self::PushConfirmationRequired => "push_confirmation_required",
+        }
+    }
+
+    fn correction(self) -> &'static str {
+        "Unsupported value. Choose another option."
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewerSettingsSelection {
@@ -48,6 +92,7 @@ pub(crate) fn ViewerSettingsForm(
     pending: bool,
     saved: bool,
     save_error: Option<String>,
+    #[props(default)] field_errors: FieldErrors<SettingsField>,
     reload_available: bool,
     onsubmit: EventHandler<ViewerSettingsSelection>,
     onmodified: EventHandler<()>,
@@ -101,14 +146,14 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-ui-scale",
-                            name: "ui_scale_percent",
+                            name: SettingsField::UiScalePercent.request_field(),
                             aria_label: "Interface size",
                             value: ui_scale_percent().to_string(),
                             options: (100..=300)
                                 .step_by(25)
                                 .map(|value| SelectOption::new(value.to_string(), format!("{value}%")))
                                 .collect(),
-                            error: None,
+                            error: field_errors.message(SettingsField::UiScalePercent),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 if let Some(selected) = event
@@ -131,14 +176,14 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-reduce-motion",
-                            name: "reduce_motion",
+                            name: SettingsField::ReduceMotion.request_field(),
                             aria_label: "Reduced motion",
                             value: if reduce_motion() { "true" } else { "false" },
                             options: vec![
                                 SelectOption::new("false", "System"),
                                 SelectOption::new("true", "Always reduce"),
                             ],
-                            error: None,
+                            error: field_errors.message(SettingsField::ReduceMotion),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 if let Ok(selected) = event.value().parse::<bool>() {
@@ -156,11 +201,11 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-theme",
-                            name: "theme",
+                            name: SettingsField::Theme.request_field(),
                             aria_label: "Theme",
                             value: theme().map_or("", ViewerTheme::as_str),
                             options: theme_options(),
-                            error: None,
+                            error: field_errors.message(SettingsField::Theme),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 let value = event.value();
@@ -185,11 +230,11 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-layout",
-                            name: "layout",
+                            name: SettingsField::Layout.request_field(),
                             aria_label: "Layout",
                             value: layout().as_str(),
                             options: layout_options(),
-                            error: None,
+                            error: field_errors.message(SettingsField::Layout),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 let Some(selected) = parse_layout(&event.value()) else {
@@ -208,12 +253,11 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-wrap-lines",
-                            name: "wrap_lines",
-                            "data-testid": gtl_web_contracts::test_ids::VIEWER_SETTINGS_WRAP_LINES.value(),
+                            name: SettingsField::WrapLines.request_field(),
                             aria_label: "Wrap lines",
                             value: if wrap_lines() { "true" } else { "false" },
                             options: vec![SelectOption::new("false", "Off"), SelectOption::new("true", "On")],
-                            error: None,
+                            error: field_errors.message(SettingsField::WrapLines),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 if let Ok(selected) = event.value().parse::<bool>() {
@@ -231,11 +275,11 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-density",
-                            name: "density",
+                            name: SettingsField::Density.request_field(),
                             aria_label: "View",
                             value: density().as_str(),
                             options: density_options(),
-                            error: None,
+                            error: field_errors.message(SettingsField::Density),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 let Some(selected) = parse_density(&event.value()) else {
@@ -254,11 +298,11 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-focus-window-on-diff",
-                            name: "focus_window_on_diff",
+                            name: SettingsField::FocusWindowOnDiff.request_field(),
                             aria_label: "Focus window when opening a diff",
                             value: if focus_window_on_diff() { "true" } else { "false" },
                             options: vec![SelectOption::new("false", "Off"), SelectOption::new("true", "On")],
-                            error: None,
+                            error: field_errors.message(SettingsField::FocusWindowOnDiff),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 if let Ok(selected) = event.value().parse::<bool>() {
@@ -276,14 +320,14 @@ pub(crate) fn ViewerSettingsForm(
                         }
                         Select {
                             id: "settings-push-confirmation",
-                            name: "push_confirmation_required",
+                            name: SettingsField::PushConfirmationRequired.request_field(),
                             aria_label: "Confirm before CLI push",
                             value: if push_confirmation_required() { "true" } else { "false" },
                             options: vec![
                                 SelectOption::new("true", "Required"),
                                 SelectOption::new("false", "Not required"),
                             ],
-                            error: None,
+                            error: field_errors.message(SettingsField::PushConfirmationRequired),
                             disabled: pending,
                             onchange: move |event: FormEvent| {
                                 if let Ok(selected) = event.value().parse::<bool>() {

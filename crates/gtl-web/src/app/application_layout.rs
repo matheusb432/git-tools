@@ -18,6 +18,7 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
+        failure_notice::is_invalid_settings,
         retry_delay::RetryDelay,
         ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
         viewer_client::{ViewerClientError, discard_viewer_connection},
@@ -31,7 +32,7 @@ pub(crate) enum ViewerShellLoad {
     Error(ViewerClientError),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewerConnection {
     Connecting,
     Connected,
@@ -39,7 +40,7 @@ pub(crate) enum ViewerConnection {
 }
 
 impl ViewerConnection {
-    const fn is_connected(self) -> bool {
+    const fn is_connected(&self) -> bool {
         matches!(self, Self::Connected)
     }
 }
@@ -249,7 +250,10 @@ impl ViewerContext {
             .write()
             .entry(check.tab_id)
             .or_default()
-            .observe(check.result, check.elapsed_ms);
+            .observe(
+                check.result.map_err(ViewerClientError::from),
+                check.elapsed_ms,
+            );
     }
 
     pub(crate) fn shell(self) -> ReadSignal<ViewerShellLoad> {
@@ -323,7 +327,7 @@ impl ViewerContext {
 
     fn schedule_render_command(mut self, command: ViewerRenderCommand) {
         if !self.actions_enabled() {
-            self.toast.error(ViewerClientError::Unavailable.message());
+            self.toast.client_error(&ViewerClientError::Disconnected);
             return;
         }
         let submission = self.render_state.write().commands.submit(command);
@@ -348,7 +352,7 @@ impl ViewerContext {
         };
         match result {
             Ok(shell) => self.replace_shell(shell),
-            Err(error) => self.toast.error(error.message()),
+            Err(error) => self.toast.client_error(&error),
         }
         if let Some((ticket, command)) = next {
             self.start_render_command(ticket, command);
@@ -463,10 +467,10 @@ async fn refresh_shell(
             context.publish_shell(shell);
         }
         Err(error) => {
-            if error != ViewerClientError::InvalidSettings
+            if !is_invalid_settings(&error)
                 && matches!((context.shell)(), ViewerShellLoad::Ready(_))
             {
-                context.toast.error(error.message());
+                context.toast.client_error(&error);
             } else {
                 context.shell.set(ViewerShellLoad::Error(error));
             }
@@ -581,15 +585,15 @@ fn ApplicationLayoutContent() -> Element {
                     },
                 )
                 .await;
-                let error = result.err().unwrap_or(ViewerClientError::Unavailable);
+                let error = result.err().unwrap_or(ViewerClientError::Disconnected);
                 discard_viewer_connection();
-                context.disconnected(error);
+                context.disconnected(error.clone());
                 if let Some(tab_id) = request.live_tab_id {
                     live_errors
                         .write()
                         .entry(tab_id)
                         .or_default()
-                        .observe(Err(error.message().to_owned()), 0);
+                        .observe(Err(error.clone()), 0);
                 }
                 if error == ViewerClientError::ProtocolMismatch {
                     return;
@@ -637,7 +641,7 @@ fn ApplicationLayoutContent() -> Element {
         spawn(async move {
             if let Err(error) = gtl_client::window::set_scale(accessibility.ui_scale_percent).await
             {
-                context.toast.error(error.message());
+                context.toast.client_error(&error);
             }
         });
     }));
@@ -653,7 +657,7 @@ fn ApplicationLayoutContent() -> Element {
                 "inert": (!connection.is_connected()).then_some(""),
                 aria_busy: (!connection.is_connected()).to_string(),
                 div { class: "min-h-0 flex-1 overflow-hidden",
-                    if matches!(&*state, ViewerShellLoad::Error(ViewerClientError::InvalidSettings)) {
+                    if matches!(&*state, ViewerShellLoad::Error(error) if is_invalid_settings(error)) {
                         crate::views::settings_recovery::SettingsRecovery { onretry: move |()| context.refresh(false) }
                     } else {
                         super::projects_host::ProjectsHost {}
@@ -662,7 +666,10 @@ fn ApplicationLayoutContent() -> Element {
                 }
             }
             if !connection.is_connected() {
-                ViewerConnectionNotice { connection, onretry: move |()| context.reconnect() }
+                ViewerConnectionNotice {
+                    connection: connection.clone(),
+                    onretry: move |()| context.reconnect(),
+                }
             }
         }
     }
@@ -671,10 +678,10 @@ fn ApplicationLayoutContent() -> Element {
 #[component]
 fn ViewerConnectionNotice(connection: ViewerConnection, onretry: EventHandler<()>) -> Element {
     let (message, can_retry) = match connection {
-        ViewerConnection::Connecting => ("Connecting to the viewer server…", false),
+        ViewerConnection::Connecting => ("Connecting to the viewer server…".to_owned(), false),
         ViewerConnection::Connected => return rsx! {},
         ViewerConnection::Retrying(error) => (
-            error.message(),
+            error.to_string(),
             error != ViewerClientError::ProtocolMismatch,
         ),
     };

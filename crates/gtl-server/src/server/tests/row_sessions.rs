@@ -320,7 +320,12 @@ async fn receive_native(
     for _ in 0..5 {
         let mut stream = native.stream_rows(request.clone()).await?;
         let first = stream.message().await;
-        if matches!(first, Err(gtl_client::ViewerClientError::ResourceExhausted)) {
+        if matches!(
+            first,
+            Err(gtl_client::ViewerClientError::Failed(
+                gtl_models::failure::Failure::Busy
+            ))
+        ) {
             tokio::time::sleep(Duration::from_millis(20)).await;
             continue;
         }

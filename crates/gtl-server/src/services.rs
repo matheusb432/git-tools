@@ -3,27 +3,26 @@ mod live_view;
 mod project;
 mod repository;
 mod settings;
+mod status;
 mod tag;
 mod viewer;
 
 use std::path::PathBuf;
 
 pub(crate) use diff::DiffGrpcService;
-use gtl_application::{
-    ports::{
-        PlacedArtifact, ProjectClientError, UserSettingsConfigurationError, UserSettingsLoadError,
-    },
-    repositories::resolve_repository_root::ResolveRepositoryRootError,
-    shared::notes,
+use gtl_application::{ports::PlacedArtifact, shared::notes};
+use gtl_models::{
+    failure::{ErrorClass, Failure},
+    paths::RepositoryRoot,
 };
-use gtl_models::paths::RepositoryRoot;
-use gtl_wire::v1;
+use gtl_wire::{proto::failure::encode_status, v1};
 pub(crate) use live_view::LiveViewGrpcService;
 pub(crate) use project::ProjectGrpcService;
 pub(crate) use repository::RepositoryGrpcService;
 pub(crate) use settings::SettingsGrpcService;
+use status::invalid_request;
 pub(crate) use tag::TagGrpcService;
-use tonic::{Code, Status};
+use tonic::Status;
 pub(crate) use viewer::{ViewerGrpcService, ViewerServerInfo};
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {
@@ -55,66 +54,16 @@ pub(crate) fn absolute_path(raw: String, field: &'static str) -> Result<PathBuf,
     if path.is_absolute() {
         Ok(path)
     } else {
-        Err(Status::invalid_argument(format!(
-            "{field} must be an absolute path"
-        )))
+        Err(invalid_request(field))
     }
 }
 
 pub(crate) fn repository_root(raw: String, field: &'static str) -> Result<RepositoryRoot, Status> {
-    RepositoryRoot::try_new(PathBuf::from(raw))
-        .map_err(|_| Status::invalid_argument(format!("{field} must be an absolute path")))
+    RepositoryRoot::try_new(PathBuf::from(raw)).map_err(|_| invalid_request(field))
 }
 
 pub(crate) fn required<T>(value: Option<T>, field: &'static str) -> Result<T, Status> {
-    value.ok_or_else(|| Status::invalid_argument(format!("{field} is required")))
-}
-
-pub(crate) fn project_client_error(error: &ProjectClientError) -> Status {
-    match error {
-        ProjectClientError::Unavailable(_) => project_client_warning(error, Code::Unavailable),
-        ProjectClientError::InvalidData(_) => project_client_failure(error, Code::DataLoss),
-    }
-}
-
-fn project_client_warning(error: &ProjectClientError, code: Code) -> Status {
-    tracing::warn!(error = ?error, grpc_code = ?code, "project catalogue request failed");
-    Status::new(code, error.to_string())
-}
-
-fn project_client_failure(error: &ProjectClientError, code: Code) -> Status {
-    tracing::error!(error = ?error, grpc_code = ?code, "project catalogue request failed");
-    Status::new(code, error.to_string())
-}
-
-pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
-    match error {
-        UserSettingsLoadError::InvalidConfiguration(error) => {
-            invalid_user_settings_configuration(&error, "load user settings")
-        }
-        error @ UserSettingsLoadError::Adapter(_) => unexpected(error, "load user settings"),
-    }
-}
-
-pub(crate) fn invalid_user_settings_configuration(
-    error: &UserSettingsConfigurationError,
-    operation: &'static str,
-) -> Status {
-    let message = error.to_string();
-    tracing::warn!(error = ?error, operation, "user settings are invalid");
-    let mut status = Status::failed_precondition(message);
-    status.metadata_mut().insert(
-        "gtl-error-kind",
-        tonic::metadata::MetadataValue::from_static("invalid-user-settings"),
-    );
-    status
-}
-
-pub(crate) fn repository_resolution_error(error: ResolveRepositoryRootError) -> Status {
-    match error {
-        ResolveRepositoryRootError::Rejected { detail, .. } => Status::failed_precondition(detail),
-        error => unexpected(error, "resolve repository"),
-    }
+    value.ok_or_else(|| invalid_request(field))
 }
 
 pub(crate) async fn run_blocking<T>(
@@ -125,18 +74,13 @@ where
 {
     tokio::task::spawn_blocking(operation)
         .await
-        .map_err(|error| {
-            tracing::error!(error = ?error, "gRPC blocking task failed");
-            Status::internal("server operation failed")
-        })
+        .map_err(|error| unexpected(error, "run blocking task"))
 }
 
-pub(crate) fn unexpected(
-    error: impl std::fmt::Debug + std::fmt::Display,
-    operation: &'static str,
-) -> Status {
+/// Logs an unclassified failure and reports only a generic reason to the caller.
+pub(crate) fn unexpected(error: impl std::fmt::Debug, operation: &'static str) -> Status {
     tracing::error!(error = ?error, operation, "gRPC application operation failed");
-    Status::internal(error.to_string())
+    encode_status(ErrorClass::Internal, &Failure::Unexpected)
 }
 
 #[cfg(test)]
@@ -146,13 +90,15 @@ mod tests {
     use gtl_application::ports::{
         ProjectCatalogueDataError, ProjectCatalogueUnavailableError, ProjectClientError,
     };
+    use gtl_models::failure::Failure;
+    use gtl_wire::proto::failure::{StatusFailure, decode_status};
     use tonic::Code;
 
-    use super::{project_client_error, unexpected};
+    use super::{status::status, unexpected};
 
     #[test]
     fn maps_project_catalogue_failures_by_caller_relevant_semantics() {
-        let cases: [(ProjectClientError, Code, &str); 2] = [
+        let cases: [(ProjectClientError, Code, Failure); 2] = [
             (
                 ProjectCatalogueUnavailableError::Dependency(anyhow::Error::new(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -160,7 +106,7 @@ mod tests {
                 )))
                 .into(),
                 Code::Unavailable,
-                "project catalogue is temporarily unavailable",
+                Failure::Unavailable,
             ),
             (
                 ProjectCatalogueDataError::Dependency(anyhow::Error::new(io::Error::new(
@@ -169,30 +115,31 @@ mod tests {
                 )))
                 .into(),
                 Code::DataLoss,
-                "project catalogue returned invalid data",
+                Failure::Unexpected,
             ),
         ];
 
-        for (error, code, message) in cases {
-            let status = project_client_error(&error);
+        for (error, code, failure) in cases {
+            let status = status(&error);
 
             assert_eq!(status.code(), code);
-            assert_eq!(status.message(), message);
+            assert_eq!(decode_status(&status), StatusFailure::Decoded(failure));
             assert!(!status.message().contains("private"));
         }
     }
 
     #[test]
-    fn unexpected_application_failure_preserves_its_display_message() {
+    fn unexpected_application_failure_hides_its_display_message() {
         let status = unexpected(
             anyhow::anyhow!("read working tree: object database is unavailable"),
             "plan repository push",
         );
 
         assert_eq!(status.code(), Code::Internal);
+        assert!(!status.message().contains("object database"));
         assert_eq!(
-            status.message(),
-            "read working tree: object database is unavailable"
+            decode_status(&status),
+            StatusFailure::Decoded(Failure::Unexpected)
         );
     }
 }

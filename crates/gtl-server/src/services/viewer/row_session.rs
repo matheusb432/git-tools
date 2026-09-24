@@ -1,10 +1,16 @@
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{
+    failure::{ErrorClass, Failure},
+    viewer::ViewerTabId,
+};
 use gtl_wire::v1::{self, stream_viewer_row_session_response::Event};
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt as _, wrappers::ReceiverStream};
 use tonic::Status;
 
-use super::rows;
+use super::{
+    super::status::{invalid_request, private, status},
+    rows,
+};
 use crate::state::AppState;
 
 pub(super) async fn start(
@@ -15,11 +21,16 @@ pub(super) async fn start(
         .viewer_row_sessions
         .clone()
         .try_acquire_owned()
-        .map_err(|_| Status::resource_exhausted("viewer row session capacity is busy"))?;
+        .map_err(|_| status(&Failure::Busy))?;
     let first = tokio::time::timeout(std::time::Duration::from_secs(5), requests.message())
         .await
-        .map_err(|_| Status::deadline_exceeded("viewer row session initialization timed out"))??
-        .ok_or_else(|| Status::invalid_argument("row session requires initial demand"))?;
+        .map_err(|_| {
+            private(
+                ErrorClass::DeadlineExceeded,
+                "viewer row session initialization timed out",
+            )
+        })??
+        .ok_or_else(|| invalid_request("rows"))?;
     let tab = request_tab(&first)?;
     let (sender, receiver) = mpsc::channel(2);
     tokio::spawn(async move {
@@ -34,23 +45,23 @@ pub(super) async fn start(
 
 fn request_tab(request: &v1::StreamViewerRowSessionRequest) -> Result<ViewerTabId, Status> {
     if request.request_id == 0 {
-        return Err(Status::invalid_argument("row demand ID must be positive"));
+        return Err(invalid_request("request_id"));
     }
     let rows = request
         .rows
         .as_ref()
-        .ok_or_else(|| Status::invalid_argument("row demand is required"))?;
-    if rows.row_range.is_none() || rows.file_id.is_none() {
-        return Err(Status::invalid_argument(
-            "row sessions require a bounded file range",
-        ));
+        .ok_or_else(|| invalid_request("rows"))?;
+    if rows.row_range.is_none() {
+        return Err(invalid_request("rows.row_range"));
+    }
+    if rows.file_id.is_none() {
+        return Err(invalid_request("rows.file_id"));
     }
     let identity = rows
         .identity
         .as_ref()
-        .ok_or_else(|| Status::invalid_argument("row identity is required"))?;
-    ViewerTabId::try_new(identity.tab_id)
-        .map_err(|_| Status::invalid_argument("row tab is invalid"))
+        .ok_or_else(|| invalid_request("rows.identity"))?;
+    ViewerTabId::try_new(identity.tab_id).map_err(|_| invalid_request("rows.identity.tab_id"))
 }
 
 async fn run(
@@ -70,7 +81,7 @@ async fn run(
             request = requests.message() => {
                 let Some(request) = request? else { return Ok(()); };
                 if request_tab(&request)? != tab || request.request_id <= request_id {
-                    return Err(Status::invalid_argument("row demand must advance within its tab"));
+                    return Err(invalid_request("request_id"));
                 }
                 request_id = request.request_id;
                 // Release the superseded producer before admitting its replacement.
@@ -80,12 +91,12 @@ async fn run(
             changed = versions.changed() => {
                 if changed.is_err() { return Ok(()); }
                 if !state.viewer.inspect(|session| session.tab(tab).is_some())
-                    .map_err(|_| Status::internal("viewer state is unavailable"))? {
+                    .map_err(|_| private(ErrorClass::Internal, "viewer state is unavailable"))? {
                     return Ok(());
                 }
             }
             permit = sender.reserve(), if pending.is_some() => {
-                let permit = permit.map_err(|_| Status::cancelled("row session disconnected"))?;
+                let permit = permit.map_err(|_| private(ErrorClass::Cancelled, "row session disconnected"))?;
                 if let Some(event) = pending.take() {
                     permit.send(Ok(v1::StreamViewerRowSessionResponse { request_id, event: Some(event) }));
                 }
@@ -107,7 +118,7 @@ fn begin(
 ) -> (Option<rows::RowStream>, Option<Event>) {
     match request
         .rows
-        .ok_or_else(|| Status::invalid_argument("row demand is required"))
+        .ok_or_else(|| invalid_request("rows"))
         .and_then(|request| rows::start(state.clone(), request))
     {
         Ok(stream) => (Some(stream), None),
@@ -116,28 +127,14 @@ fn begin(
 }
 
 fn failure(status: &Status) -> Event {
-    use v1::ViewerRowSessionFailureCode;
-    let code = if status
-        .metadata()
-        .get("gtl-error-kind")
-        .is_some_and(|kind| kind == "invalid-user-settings")
-    {
-        ViewerRowSessionFailureCode::InvalidSettings
-    } else {
-        match status.code() {
-            tonic::Code::InvalidArgument
-            | tonic::Code::FailedPrecondition
-            | tonic::Code::OutOfRange => ViewerRowSessionFailureCode::InvalidRequest,
-            tonic::Code::NotFound => ViewerRowSessionFailureCode::NotFound,
-            tonic::Code::Aborted | tonic::Code::AlreadyExists => {
-                ViewerRowSessionFailureCode::Conflict
-            }
-            tonic::Code::ResourceExhausted => ViewerRowSessionFailureCode::ResourceExhausted,
-            tonic::Code::Unavailable | tonic::Code::Cancelled | tonic::Code::DeadlineExceeded => {
-                ViewerRowSessionFailureCode::Unavailable
-            }
-            _ => ViewerRowSessionFailureCode::Internal,
+    use gtl_wire::proto::failure::{StatusFailure, code_class, decode_status, encode_failure};
+    let failure = match decode_status(status) {
+        StatusFailure::Decoded(failure) => failure,
+        StatusFailure::Unrecognized | StatusFailure::Absent => {
+            Failure::private(code_class(status.code()))
         }
     };
-    Event::Failed(v1::ViewerRowSessionFailure { code: code.into() })
+    Event::Failed(v1::ViewerRowSessionFailure {
+        failure: Some(encode_failure(&failure)),
+    })
 }

@@ -52,22 +52,14 @@ fn bounded_batches<Row>(rows: Vec<Row>) -> impl Iterator<Item = Vec<Row>> {
 pub(crate) enum ClientDiffFileError {
     Transport(ViewerClientError),
     InvalidResponse,
-    Server { message: String, retryable: bool },
+    Server {
+        failure: gtl_models::failure::Failure,
+        retryable: bool,
+    },
 }
 
 #[cfg(feature = "desktop")]
 impl ClientDiffFileError {
-    pub(crate) fn message(&self) -> &str {
-        match self {
-            Self::Transport(ViewerClientError::Unavailable) => "The diff row stream disconnected.",
-            Self::Transport(error) => error.message(),
-            Self::InvalidResponse => {
-                "The server returned invalid diff rows. Retry this view to load it again."
-            }
-            Self::Server { message, .. } => message,
-        }
-    }
-
     pub(crate) const fn retryable(&self) -> bool {
         match self {
             Self::Transport(_) | Self::InvalidResponse => true,
@@ -76,17 +68,30 @@ impl ClientDiffFileError {
     }
 
     const fn retries_automatically(&self) -> bool {
-        matches!(
-            self,
-            Self::Transport(ViewerClientError::Unavailable | ViewerClientError::ResourceExhausted)
-        )
+        match self {
+            Self::Transport(error) => matches!(
+                error.class(),
+                gtl_models::failure::ErrorClass::Unavailable
+                    | gtl_models::failure::ErrorClass::ResourceExhausted
+            ),
+            Self::InvalidResponse | Self::Server { .. } => false,
+        }
     }
 }
 
 #[cfg(feature = "desktop")]
 impl std::fmt::Display for ClientDiffFileError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.message())
+        match self {
+            Self::Transport(ViewerClientError::Disconnected | ViewerClientError::StreamClosed) => {
+                formatter.write_str("The diff row stream disconnected.")
+            }
+            Self::Transport(error) => error.fmt(formatter),
+            Self::InvalidResponse => formatter.write_str(
+                "The server returned invalid diff rows. Retry this view to load it again.",
+            ),
+            Self::Server { failure, .. } => failure.fmt(formatter),
+        }
     }
 }
 

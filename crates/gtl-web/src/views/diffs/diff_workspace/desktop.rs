@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::{
     diffs::CommitId,
+    failure::{Failure, ProjectFailure},
     viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
 use gtl_wire::viewer::{
@@ -26,7 +27,10 @@ use crate::{
             PageNotice, PanelDialog, Skeleton, use_hover_popover, use_toast,
         },
     },
-    views::diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
+    views::{
+        diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
+        projects::{ComparisonBranchEditor, ComparisonEditorTrigger},
+    },
 };
 
 #[component]
@@ -48,7 +52,7 @@ pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
                     WorkspaceLoading {}
                 },
                 ViewerShellLoad::Error(error) => {
-                    let message = error.message();
+                    let message = error.to_string();
                     rsx! {
                         PageNotice {
                             class: "h-full px-5",
@@ -127,42 +131,28 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                     ViewerActiveState::Pending { .. } => rsx! {
                         WorkspaceLoading {}
                     },
-                    ViewerActiveState::Broken { tab_id, code, message } => {
+                    ViewerActiveState::Broken { tab_id, failure } => {
                         let tab_id = *tab_id;
                         rsx! {
                             PageNotice {
                                 class: "h-full px-5",
                                 role: "alert",
-                                title: format!("Render stopped ({})", code.as_str()),
-                                message: message.clone(),
-                                ModifiedFilesButton { tab_id, visible: false }
-                                Button {
-                                    class: "mx-auto mt-4",
-                                    variant: ButtonVariant::Outline,
-                                    onclick: move |_| viewer.refresh_tab(tab_id),
-                                    "Try again"
+                                title: "Live updates paused",
+                                message: failure.to_string(),
+                                div { class: "mx-auto mt-4 flex flex-wrap items-center justify-center gap-2",
+                                    ModifiedFilesButton { tab_id, visible: false }
+                                    Button {
+                                        variant: ButtonVariant::Outline,
+                                        onclick: move |_| viewer.refresh_tab(tab_id),
+                                        "Try again"
+                                    }
                                 }
                             }
                         }
                     }
-                    ViewerActiveState::Error { tab_id, message, .. } => {
-                        let tab_id = *tab_id;
-                        rsx! {
-                            PageNotice {
-                                class: "h-full px-5",
-                                role: "alert",
-                                title: "Render failed",
-                                message: message.clone(),
-                                ModifiedFilesButton { tab_id, visible: false }
-                                Button {
-                                    class: "mx-auto mt-4",
-                                    variant: ButtonVariant::Outline,
-                                    onclick: move |_| viewer.refresh_tab(tab_id),
-                                    "Try again"
-                                }
-                            }
-                        }
-                    }
+                    ViewerActiveState::Error { tab_id, failure } => rsx! {
+                        WorkspaceError { tab_id: *tab_id, failure: failure.clone() }
+                    },
                     ViewerActiveState::Ready { .. } => rsx! {
                         ReadyWorkspace { view, shell }
                     },
@@ -195,7 +185,8 @@ fn ready_active_view(shell: &ViewerShellLoad) -> &ViewerActiveView {
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::viewer::{ViewerActiveState, ViewerFailureCode};
+    use gtl_models::failure::ViewerFailure;
+    use gtl_wire::viewer::ViewerActiveState;
 
     use super::active_view_dom_state;
     use crate::test_support::{TestResult, viewer_active_view, viewer_tab_id};
@@ -216,8 +207,7 @@ mod tests {
         assert_eq!(
             active_view_dom_state(&ViewerActiveState::Error {
                 tab_id,
-                code: ViewerFailureCode::RenderFailed,
-                message: "safe failure".to_owned(),
+                failure: ViewerFailure::RenderFailed.into(),
             }),
             "error"
         );
@@ -318,7 +308,7 @@ fn ReadyWorkspace(
             .map(|tab| tab.kind.is_live())
     });
     let commits_loading = commit_pages.is_loading();
-    let commits_error = commit_pages.error().map(|error| error.message().to_owned());
+    let commits_error = commit_pages.error().map(|error| error.to_string());
     let commits_has_more = commit_pages.has_more();
     let onload_commits = use_callback(move |()| commit_pages.load_next());
 
@@ -334,7 +324,7 @@ fn ReadyWorkspace(
         };
         match result {
             Ok(shell) => viewer.replace_shell(shell),
-            Err(error) => toast.error(error.message()),
+            Err(error) => toast.client_error(&error),
         }
         Ok::<(), std::convert::Infallible>(())
     });
@@ -374,7 +364,7 @@ fn ReadyWorkspace(
             if let Err(error) =
                 viewer_server::open_diff_file(OpenViewerDiffFile { identity, file }).await
             {
-                toast.error(error.message());
+                toast.client_error(&error);
             }
         });
     };
@@ -508,7 +498,6 @@ fn LiveViewWarningPopover(
                 variant: ButtonVariant::Ghost,
                 aria_label: "Live diff update warnings",
                 aria_describedby: id.clone(),
-                "data-testid": gtl_web_contracts::test_ids::LIVE_VIEW_WARNING.value(),
                 span { class: "text-warn", aria_hidden: "true",
                     TriangleAlert { size: 16 }
                 }
@@ -520,14 +509,60 @@ fn LiveViewWarningPopover(
                 placement: HoverPopoverPlacement::Below,
                 p { class: "text-xs font-semibold text-ink", "Recent update errors" }
                 ul { class: "mt-2 grid gap-2 text-xs",
-                    for error in &errors {
-                        li { key: "{error.message}", class: "break-words",
-                            p { "{error.message}" }
-                            if error.occurrences > 1 {
-                                p { class: "mt-0.5 text-ink-3", "Occurred {error.occurrences} times" }
+                    for (index, entry) in errors.iter().enumerate() {
+                        li { key: "{index}", class: "break-words",
+                            p { "{entry.error}" }
+                            if let Some(diagnostic) = entry.error.diagnostic() {
+                                p { class: "mt-0.5 font-mono text-ink-3", "{diagnostic}" }
+                            }
+                            if entry.occurrences > 1 {
+                                p { class: "mt-0.5 text-ink-3", "Occurred {entry.occurrences} times" }
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Explains why the active tab has no view and offers the fixes its failure allows.
+#[component]
+fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
+    let viewer = use_context::<ViewerContext>();
+    let (title, setting) = match &failure {
+        Failure::Project(
+            reason @ (ProjectFailure::ComparisonBranchMissing { .. }
+            | ProjectFailure::NoCommonAncestor { .. }
+            | ProjectFailure::RepositoryUnborn { .. }),
+        ) => (
+            "Comparison unavailable",
+            reason
+                .comparison_setting()
+                .map(|(project, branch)| (project.clone(), branch.clone())),
+        ),
+        _ => ("Render failed", None),
+    };
+    rsx! {
+        PageNotice {
+            class: "h-full px-5",
+            role: "alert",
+            title,
+            message: failure.to_string(),
+            div { class: "mx-auto mt-4 flex flex-wrap items-center justify-center gap-2",
+                ModifiedFilesButton { tab_id, visible: false }
+                if let Some((project, branch)) = setting {
+                    ComparisonBranchEditor {
+                        project,
+                        branch,
+                        trigger: ComparisonEditorTrigger::Labeled,
+                        onsaved: move |()| viewer.refresh_tab(tab_id),
+                    }
+                }
+                Button {
+                    variant: ButtonVariant::Outline,
+                    onclick: move |_| viewer.refresh_tab(tab_id),
+                    "Try again"
                 }
             }
         }
@@ -550,7 +585,7 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
         .await;
         match result {
             Ok(shell) => viewer.replace_shell(shell),
-            Err(error) => toast.error(error.message()),
+            Err(error) => toast.client_error(&error),
         }
         Ok::<(), std::convert::Infallible>(())
     });

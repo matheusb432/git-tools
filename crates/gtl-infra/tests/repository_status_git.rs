@@ -89,6 +89,58 @@ fn status_snapshot_reads_real_branch_upstream_and_changes() {
     );
 }
 
+#[test]
+fn recursive_status_reports_a_linked_worktree_root_and_its_submodules() {
+    let temporary = tempfile::tempdir().unwrap();
+    let submodule_source = temporary.path().join("submodule-source");
+    init_repo(&submodule_source);
+    let repository = temporary.path().join("repository");
+    init_repo(&repository);
+    add_submodule(&repository, &submodule_source, "lib/submodule");
+    let worktree = repository.join(".worktrees/feature");
+    git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    git(
+        &worktree,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+        ],
+    );
+
+    let results = get_recursive_repository_statuses::execute(
+        GetRecursiveRepositoryStatuses {
+            root: worktree.canonicalize().unwrap(),
+            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
+        },
+        &HybridGitClient,
+    )
+    .unwrap();
+
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| (result.name().as_ref(), result.branch_label()))
+            .collect::<Vec<_>>(),
+        [
+            ("feature", Some("feature")),
+            ("lib/submodule", Some("detached"))
+        ]
+    );
+}
+
 fn git(repository: &Path, arguments: &[&str]) {
     let output = Command::new("git")
         .arg("-C")

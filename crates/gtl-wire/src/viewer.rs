@@ -2,6 +2,7 @@
 
 use gtl_models::{
     diffs::{CommitId, DiffLineCount, ExcludedExtensions},
+    failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     settings::UserSettingsRevision,
@@ -18,7 +19,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 35;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 40;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -358,33 +359,13 @@ pub struct ViewerAppliedExclusions {
     pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ViewerFailureCode {
-    RepositoryDirectoryNotFound,
-    RepositoryDirectoryNotGitRepository,
-    SourceUnavailable,
-    RenderFailed,
-}
-
-impl ViewerFailureCode {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::RepositoryDirectoryNotFound => "RepositoryDirectoryNotFound",
-            Self::RepositoryDirectoryNotGitRepository => "RepositoryDirectoryNotGitRepository",
-            Self::SourceUnavailable => "SourceUnavailable",
-            Self::RenderFailed => "RenderFailed",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ViewerCommitSelection {
     None,
     Pending { id: CommitId },
     Ready { id: CommitId },
-    Error { id: CommitId, message: String },
+    Error { id: CommitId, failure: Failure },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,15 +440,15 @@ pub enum ViewerActiveState {
     Pending {
         tab_id: ViewerTabId,
     },
+    /// The live source is broken; updates resume when it recovers.
     Broken {
         tab_id: ViewerTabId,
-        code: ViewerFailureCode,
-        message: String,
+        failure: Failure,
     },
+    /// Computing or rendering the view failed.
     Error {
         tab_id: ViewerTabId,
-        code: ViewerFailureCode,
-        message: String,
+        failure: Failure,
     },
     Ready {
         view: Box<ViewerActiveView>,
@@ -752,13 +733,6 @@ pub struct ViewerFileRows {
     pub line_number_digits: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ViewerFileFailureCode {
-    SourceUnavailable,
-    ParseFailed,
-    RowTooLarge,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewerRowEvent {
     FileStarted {
@@ -783,8 +757,7 @@ pub enum ViewerRowEvent {
     },
     FileFailed {
         file: ViewerDiffFileId,
-        code: ViewerFileFailureCode,
-        message: String,
+        failure: Failure,
         retryable: bool,
     },
 }
@@ -944,7 +917,7 @@ pub struct WatchViewer {
 pub struct ViewerLiveCheck {
     pub tab_id: ViewerTabId,
     pub elapsed_ms: u64,
-    pub result: Result<(), String>,
+    pub result: Result<(), Failure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

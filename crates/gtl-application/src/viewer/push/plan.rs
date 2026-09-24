@@ -1,3 +1,4 @@
+use gtl_models::failure::PushFailure;
 use gtl_wire::viewer::push::CreateViewerPush;
 
 use super::{PushError, PushPlan, ViewerPushGit};
@@ -20,7 +21,7 @@ pub(super) fn prepare(
             let commit = view
                 .commits
                 .first()
-                .ok_or(PushError::NothingToPush)?
+                .ok_or(PushFailure::NothingToPush)?
                 .id
                 .clone();
             (
@@ -32,15 +33,18 @@ pub(super) fn prepare(
     };
     let repository = git.inspect_push(&path)?;
     if branch.is_some_and(|branch| branch.branch() != Some(&repository.branch)) {
-        return Err(PushError::CheckoutChanged);
+        return Err(PushFailure::CheckoutChanged {
+            current: repository.branch,
+        }
+        .into());
     }
     let commit = selected.unwrap_or_else(|| repository.head.clone());
     if !git.contains_commit(&path, &commit, &repository.head)? {
-        return Err(PushError::CommitRemoved);
+        return Err(PushFailure::CommitRemoved { commit }.into());
     }
     let count = git.count_commits(&path, &repository.upstream, &commit)?;
     if count == 0 {
-        return Err(PushError::NothingToPush);
+        return Err(PushFailure::NothingToPush.into());
     }
     Ok(PushPlan {
         path,

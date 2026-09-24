@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dioxus::{core::spawn_forever, prelude::*};
-use gtl_models::{diffs::ExcludedExtensions, viewer::ViewerTabId};
+use gtl_models::{diffs::ExcludedExtensions, failure::Failure, viewer::ViewerTabId};
 use gtl_wire::viewer::{FieldUpdate, file_filters::SetViewerFileFilters};
 
 use crate::{
@@ -19,7 +19,7 @@ const RETAINED_CHANGES_MAX: usize = 64;
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct ChangeTicket(u64);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 enum ChangeStatus {
     Queued,
     Writing,
@@ -158,8 +158,8 @@ impl FileFilterController {
             .read()
             .entries
             .iter()
-            .find_map(|entry| match entry.status {
-                ChangeStatus::Failed(error) if entry.tab_id == tab_id => Some(error),
+            .find_map(|entry| match &entry.status {
+                ChangeStatus::Failed(error) if entry.tab_id == tab_id => Some(error.clone()),
                 _ => None,
             })
     }
@@ -217,9 +217,9 @@ async fn run_changes(controller: &mut FileFilterController) {
         if controller.context.server_instance_id() != server {
             return;
         }
-        let current = controller.changes.write().complete(ticket, result);
+        let current = controller.changes.write().complete(ticket, result.clone());
         if current && let Err(error) = result {
-            controller.toast.error(error.message());
+            controller.toast.client_error(&error);
         }
         controller.context.refresh(false);
     }
@@ -235,7 +235,7 @@ async fn write_change(
     })
     .await?;
     if context.server_instance_id().as_deref() != server {
-        return Err(ViewerClientError::Conflict);
+        return Err(ViewerClientError::Failed(Failure::Changed));
     }
     viewer_server::set_file_filters(SetViewerFileFilters {
         tab_id: change.tab_id,
@@ -289,7 +289,7 @@ mod tests {
             queue.submit(tab, FieldUpdate::Clear, defaults.clone()),
             Some(false)
         );
-        assert!(!queue.complete(first, Err(ViewerClientError::Unavailable)));
+        assert!(!queue.complete(first, Err(ViewerClientError::Disconnected)));
         assert_eq!(queue.displayed(tab, queue.refresh_epoch), Some(&defaults));
         let next = queue.next().ok_or("restore lost")?;
         let restore = queue.begin(next).ok_or("restore unavailable")?;
@@ -314,7 +314,7 @@ mod tests {
             queue.begin(first).ok_or("first tab lost")?.tab_id,
             first_tab
         );
-        queue.complete(first, Err(ViewerClientError::Unavailable));
+        queue.complete(first, Err(ViewerClientError::Disconnected));
         assert_eq!(
             queue.begin(other).ok_or("other tab lost")?.tab_id,
             other_tab

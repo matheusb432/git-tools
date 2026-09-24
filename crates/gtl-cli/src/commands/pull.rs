@@ -26,7 +26,10 @@ pub(crate) fn run(root: &Path, args: ManagedArgs) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        RepoSyncStatus::Skip | RepoSyncStatus::Warn | RepoSyncStatus::Fail => bail!(result.detail),
+        RepoSyncStatus::Skip | RepoSyncStatus::Warn => {
+            Err(crate::failure::Refusal(result.detail).into())
+        }
+        RepoSyncStatus::Fail => bail!(result.detail),
         RepoSyncStatus::Pushed | RepoSyncStatus::WouldPush => {
             bail!("server returned an invalid pull status")
         }

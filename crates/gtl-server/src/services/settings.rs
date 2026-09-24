@@ -1,16 +1,14 @@
-use gtl_application::{
-    ports::UserSettingsEditError,
-    settings::{
-        get_user_settings::{self, GetUserSettings, GetUserSettingsError},
-        set_setting_key::{self, SetSettingKeyError},
-    },
+use gtl_application::settings::{
+    get_user_settings::{self, GetUserSettings},
+    set_setting_key,
 };
-use gtl_models::{settings::SettingKeyValue, viewer::Theme};
+use gtl_models::{failure::SettingsFailure, settings::SettingKeyValue, viewer::Theme};
 use gtl_wire::v1::{self, settings_service_server::SettingsService};
 use tonic::{Request, Response, Status};
 
 use super::{
-    invalid_user_settings_configuration, run_blocking, unexpected, user_settings_load_error,
+    run_blocking,
+    status::{ApiResult, GrpcResultExt as _, invalid_request, status},
 };
 use crate::state::AppState;
 
@@ -29,13 +27,11 @@ impl SettingsService for SettingsGrpcService {
     async fn get_push_confirmation_requirement(
         &self,
         _request: Request<v1::GetPushConfirmationRequirementRequest>,
-    ) -> Result<Response<v1::GetPushConfirmationRequirementResponse>, Status> {
+    ) -> ApiResult<v1::GetPushConfirmationRequirementResponse> {
         let store = self.state.user_settings.clone();
         let result = run_blocking(move || get_user_settings::execute(GetUserSettings, &store))
             .await?
-            .map_err(|error| match error {
-                GetUserSettingsError::Settings(error) => user_settings_load_error(error),
-            })?;
+            .into_grpc()?;
         Ok(Response::new(v1::GetPushConfirmationRequirementResponse {
             push_confirmation_required: result.push_confirmation_required(),
         }))
@@ -44,19 +40,19 @@ impl SettingsService for SettingsGrpcService {
     async fn set_viewer_theme(
         &self,
         request: Request<v1::SetViewerThemeRequest>,
-    ) -> Result<Response<v1::SetViewerThemeResponse>, Status> {
+    ) -> ApiResult<v1::SetViewerThemeResponse> {
         let theme = theme(request.into_inner().theme)?;
         let mut store = self.state.user_settings.clone();
         let path = store
             .path()
-            .ok_or_else(|| Status::failed_precondition("user configuration path is unavailable"))?
+            .ok_or_else(|| status(&SettingsFailure::PathUnavailable))?
             .to_path_buf();
         let viewer = self.state.viewer.clone();
         run_blocking(move || {
             set_setting_key::execute(SettingKeyValue::Theme(theme), &mut store, &viewer)
         })
         .await?
-        .map_err(set_setting_key_error)?;
+        .into_grpc()?;
 
         Ok(Response::new(v1::SetViewerThemeResponse {
             theme: wire_theme(theme) as i32,
@@ -65,27 +61,9 @@ impl SettingsService for SettingsGrpcService {
     }
 }
 
-pub(super) fn set_setting_key_error(error: SetSettingKeyError) -> Status {
-    match error {
-        SetSettingKeyError::Settings(error) => match error {
-            UserSettingsEditError::InvalidConfiguration(error) => {
-                invalid_user_settings_configuration(&error, "set user setting")
-            }
-            UserSettingsEditError::Conflict(_) => {
-                tracing::warn!(error = ?error, "user settings edit was aborted");
-                Status::aborted("user settings edit conflicted with another writer")
-            }
-            UserSettingsEditError::Adapter(error) => unexpected(error, "set user setting"),
-        },
-        SetSettingKeyError::ViewerState(error) => unexpected(error, "set user setting"),
-    }
-}
-
 fn theme(raw: i32) -> Result<Theme, Status> {
-    match v1::ViewerTheme::try_from(raw)
-        .map_err(|_| Status::invalid_argument("theme is not recognized"))?
-    {
-        v1::ViewerTheme::Unspecified => Err(Status::invalid_argument("theme is required")),
+    match v1::ViewerTheme::try_from(raw).map_err(|_| invalid_request("theme"))? {
+        v1::ViewerTheme::Unspecified => Err(invalid_request("theme")),
         v1::ViewerTheme::Dark => Ok(Theme::Dark),
         v1::ViewerTheme::Mirage => Ok(Theme::Mirage),
         v1::ViewerTheme::Glacier => Ok(Theme::Glacier),
@@ -106,38 +84,46 @@ fn wire_theme(theme: Theme) -> v1::ViewerTheme {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use gtl_application::{
+        ports::{UserSettingsConfigurationError, UserSettingsEditConflict},
+        settings::set_setting_key::SetSettingKeyError,
+    };
+    use gtl_models::failure::{Failure, SettingsFailure};
+
+    use super::super::status::{decoded_failure, status};
 
     #[test]
-    fn maps_invalid_loaded_settings_to_failed_precondition() {
-        let status = user_settings_load_error(
-            gtl_application::ports::UserSettingsConfigurationError::new(
-                "/tmp/config.toml".into(),
-                anyhow::anyhow!("bad theme"),
-            )
-            .into(),
-        );
-
-        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
-    }
-
-    #[test]
-    fn maps_settings_state_and_concurrency_failures_deliberately() {
-        let invalid = set_setting_key_error(SetSettingKeyError::Settings(
-            gtl_application::ports::UserSettingsConfigurationError::new(
-                "/tmp/config.toml".into(),
-                anyhow::anyhow!("bad theme"),
-            )
-            .into(),
+    fn maps_settings_state_and_concurrency_failures_to_typed_reasons() {
+        let invalid = status(&SetSettingKeyError::Settings(
+            UserSettingsConfigurationError::new("/tmp/config.toml".into(), anyhow::anyhow!("bad"))
+                .into(),
         ));
         assert_eq!(invalid.code(), tonic::Code::FailedPrecondition);
 
-        let concurrent = set_setting_key_error(SetSettingKeyError::Settings(
-            gtl_application::ports::UserSettingsEditConflict::ConcurrentModification {
+        let concurrent = status(&SetSettingKeyError::Settings(
+            UserSettingsEditConflict::ConcurrentModification {
                 path: "/tmp/config.toml".into(),
             }
             .into(),
         ));
         assert_eq!(concurrent.code(), tonic::Code::Aborted);
+        assert_eq!(
+            decoded_failure(&concurrent),
+            Some(Failure::Settings(SettingsFailure::Stale))
+        );
+
+        let locked = status(&SetSettingKeyError::Settings(
+            UserSettingsEditConflict::LockTimeout {
+                path: "/tmp/config.toml".into(),
+                wait_seconds: 5,
+            }
+            .into(),
+        ));
+        assert_eq!(
+            decoded_failure(&locked),
+            Some(Failure::Settings(SettingsFailure::Locked {
+                wait_seconds: 5
+            }))
+        );
     }
 }

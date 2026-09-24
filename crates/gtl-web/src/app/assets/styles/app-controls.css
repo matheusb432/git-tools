@@ -10,7 +10,7 @@
   th[aria-sort] .control-table-sort { @apply text-acc; }
   .control-table-column { @apply align-middle whitespace-nowrap; }
   .control-data-table-row { @apply border-b border-line text-ink-2 last:border-b-0 even:bg-sunk/30 hover:bg-surface-2 focus-within:bg-surface-2; }
-  .control-field-error { @apply mt-1 h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none; }
+  .control-field-error { @apply mt-1 min-h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none; }
   .control-field-error[data-visible="true"] { @apply opacity-100; }
   .control-field-label { @apply flex flex-1 flex-col text-ink; }
   .control-navigation-bar { @apply z-70 box-content flex shrink-0 items-end border-b border-line bg-surface; }
@@ -60,13 +60,27 @@
     .alert-dialog[data-state="closing"] .alert-dialog-surface,
     .alert-dialog[data-state="closing"]::backdrop { animation: none; }
   }
-  .toast-viewport { @apply pointer-events-none fixed inset-x-3 bottom-12 z-60 max-w-xl; }
-  .toast-card { @apply pointer-events-auto relative w-full overflow-hidden rounded-panel border border-line-2 bg-surface shadow-floating animate-toast-enter motion-reduce:animate-none; }
-  .toast-card[data-ledger="true"] { @apply mt-2; }
-  .toast-content { @apply flex items-center; }
-  .toast-icon { @apply flex shrink-0 items-center justify-center rounded-panel border; }
-  .toast-expiry { @apply absolute inset-x-0 bottom-0 origin-left animate-toast-expiry motion-reduce:animate-none; }
-  .toast-accent { @apply absolute inset-y-0 left-0; }
+  .toast-viewport { @apply pointer-events-none fixed inset-x-3 bottom-12 z-60 flex justify-center; }
+  .toast-stack { @apply pointer-events-auto relative min-w-0 max-w-lg; }
+  .toast-stack-layer { @apply absolute inset-0 origin-top rounded-panel border border-line-2 bg-surface-2; }
+  .toast-stack-layer[data-depth="1"] { opacity: 0.9; transform: translateY(-6px) scale(0.95); }
+  .toast-stack-layer[data-depth="2"] { opacity: 0.55; transform: translateY(-12px) scale(0.9); }
+  .toast-card { @apply relative flex min-h-10 min-w-56 items-start gap-2.5 overflow-hidden rounded-panel border border-line-2 bg-surface py-1 pr-1 pl-3 text-sm leading-5 text-ink shadow-floating; animation: toast-rise 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .toast-card[data-entrance="promote"] { animation-name: toast-promote; }
+  .toast-card[data-state="leaving"] { animation: toast-exit 160ms cubic-bezier(0.4, 0, 1, 1) both; }
+  .toast-icon { @apply mt-2 flex shrink-0; }
+  .toast-body { @apply min-w-0 flex-1 py-1.5; }
+  .toast-message { @apply wrap-anywhere; }
+  .toast-detail { @apply mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap wrap-anywhere text-xs leading-4 text-ink-2; }
+  .toast-waiting-count { @apply shrink-0 py-1.5 text-xs leading-5 tabular-nums text-ink-3; }
+  .toast-timer { @apply absolute inset-x-0 bottom-0 h-0.5 origin-left opacity-70; animation: toast-timer linear both; }
+  .toast-card[data-paused="true"] .toast-timer { animation-play-state: paused; }
+  :root[data-reduce-motion="true"] .toast-timer { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .toast-timer { display: none; }
+  }
+
   .viewer-tab-floating { @apply pointer-events-none fixed inset-auto flex select-none items-center rounded-sm border-0 bg-surface-2 text-ink shadow-floating outline outline-1 outline-acc-line; }
   .icon-popover-quarter-turn { @apply transition-transform duration-150 ease-out group-has-[:popover-open]/icon-popover:rotate-90 motion-reduce:transition-none; }
 }
@@ -91,26 +105,20 @@
   to { opacity: 0; }
 }
 
-@keyframes toast-enter {
-  from {
-    opacity: 0;
-    transform: translateY(0.5rem) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes toast-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
 }
 
-@keyframes toast-expiry {
-  from {
-    transform: scaleX(1);
-  }
+@keyframes toast-promote {
+  from { opacity: 0.5; transform: translateY(-6px) scale(0.95); }
+}
 
-  to {
-    transform: scaleX(0);
-  }
+@keyframes toast-exit {
+  to { opacity: 0; transform: translateY(6px) scale(0.96); }
+}
+
+@keyframes toast-timer {
+  to { transform: scaleX(0); }
 }
 
 @layer components {

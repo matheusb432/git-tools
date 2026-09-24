@@ -1,4 +1,4 @@
-use gtl_models::settings::SettingKeyValue;
+use gtl_models::{failure::ErrorMeta, settings::SettingKeyValue};
 use thiserror::Error;
 
 use super::{UserSettingChange, setting_changes_viewer_rows};
@@ -8,11 +8,13 @@ use crate::{
 };
 
 /// Reports a rejected or failed setting replacement.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, ErrorMeta)]
 pub enum SetSettingKeyError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsEditError),
     #[error(transparent)]
+    #[meta(transparent)]
     ViewerState(#[from] ViewerStateError),
 }
 

@@ -38,6 +38,15 @@ pub struct DuplicateProjectSettingsNameError {
     name: ProjectName,
 }
 
+impl gtl_models::failure::PublicFailure for DuplicateProjectSettingsNameError {
+    fn failure(&self) -> gtl_models::failure::Failure {
+        gtl_models::failure::SettingsFailure::DuplicateProject {
+            name: self.name.clone(),
+        }
+        .into()
+    }
+}
+
 impl DuplicateProjectSettingsNameError {
     /// Returns the repeated project name.
     #[must_use]

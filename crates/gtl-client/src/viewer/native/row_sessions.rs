@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{failure::Failure, viewer::ViewerTabId};
 use gtl_wire::{
     proto, v1,
     viewer::{StreamViewerRows, VIEWER_ROW_SESSIONS_MAX},
@@ -66,8 +66,8 @@ impl RowSessions {
                 .demands
                 .try_send(Demand { request, rows })
                 .map_err(|error| match error {
-                    mpsc::error::TrySendError::Full(_) => ViewerClientError::ResourceExhausted,
-                    mpsc::error::TrySendError::Closed(_) => ViewerClientError::Unavailable,
+                    mpsc::error::TrySendError::Full(_) => ViewerClientError::Failed(Failure::Busy),
+                    mpsc::error::TrySendError::Closed(_) => ViewerClientError::Disconnected,
                 });
         self.entries.push_back(session);
         result?;
@@ -108,13 +108,13 @@ async fn run(mut client: Client, mut demands: mpsc::Receiver<Demand>) {
         tokio::select! {
             biased;
             () = tokio::time::sleep_until(deadline), if current.is_some() => {
-                if let Some(rows) = current.take() { let _ = rows.try_send(Err(ViewerClientError::Unavailable)); }
+                if let Some(rows) = current.take() { let _ = rows.try_send(Err(ViewerClientError::Disconnected)); }
                 return;
             }
             demand = demands.recv() => {
                 let Some(demand) = demand else { return; };
                 let Some(next) = request_id.checked_add(1) else {
-                    let _ = demand.rows.send(Err(ViewerClientError::ResourceExhausted)).await;
+                    let _ = demand.rows.send(Err(ViewerClientError::Failed(Failure::Busy))).await;
                     return;
                 };
                 request_id = next;
@@ -136,7 +136,7 @@ async fn run(mut client: Client, mut demands: mpsc::Receiver<Demand>) {
                     Ok(Some(response)) => {
                         if response.request_id < request_id { continue; }
                         if response.request_id != request_id {
-                            if let Some(rows) = current.take() { let _ = rows.send(Err(ViewerClientError::Internal)).await; }
+                            if let Some(rows) = current.take() { let _ = rows.send(Err(ViewerClientError::InvalidMessage)).await; }
                             return;
                         }
                         match response.event {
@@ -148,13 +148,13 @@ async fn run(mut client: Client, mut demands: mpsc::Receiver<Demand>) {
                                 if let Some(rows) = current.take() { let _ = rows.send(Err(decode_failure(error))).await; }
                             }
                             None => {
-                                if let Some(rows) = current.take() { let _ = rows.send(Err(ViewerClientError::Internal)).await; }
+                                if let Some(rows) = current.take() { let _ = rows.send(Err(ViewerClientError::InvalidMessage)).await; }
                                 return;
                             }
                         }
                     }
                     terminal => {
-                        let error = terminal.err().as_ref().map_or(ViewerClientError::Unavailable, decode_status);
+                        let error = terminal.err().as_ref().map_or(ViewerClientError::Disconnected, decode_status);
                         if let Some(rows) = current.take() { let _ = rows.send(Err(error)).await; }
                         return;
                     }
@@ -172,15 +172,8 @@ fn encode_demand(request_id: u64, request: StreamViewerRows) -> v1::StreamViewer
 }
 
 fn decode_failure(failure: v1::ViewerRowSessionFailure) -> ViewerClientError {
-    use v1::ViewerRowSessionFailureCode;
-    match ViewerRowSessionFailureCode::try_from(failure.code) {
-        Ok(ViewerRowSessionFailureCode::InvalidRequest) => ViewerClientError::InvalidRequest,
-        Ok(ViewerRowSessionFailureCode::NotFound) => ViewerClientError::NotFound,
-        Ok(ViewerRowSessionFailureCode::Conflict) => ViewerClientError::Conflict,
-        Ok(ViewerRowSessionFailureCode::ResourceExhausted) => ViewerClientError::ResourceExhausted,
-        Ok(ViewerRowSessionFailureCode::Unavailable) => ViewerClientError::Unavailable,
-        Ok(ViewerRowSessionFailureCode::InvalidSettings) => ViewerClientError::InvalidSettings,
-        Ok(ViewerRowSessionFailureCode::Internal | ViewerRowSessionFailureCode::Unspecified)
-        | Err(_) => ViewerClientError::Internal,
-    }
+    failure
+        .failure
+        .and_then(proto::failure::decode_failure)
+        .map_or(ViewerClientError::InvalidMessage, ViewerClientError::Failed)
 }

@@ -5,7 +5,7 @@ use crate::paths::{ProjectName, RepositoryRoot};
 /// Controls whether repository traversal descends into linked worktrees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepositoryTraversalScope {
-    /// Traverse repositories while pruning linked worktree subtrees.
+    /// Traverse repositories while pruning linked worktree subtrees below the root.
     ExcludeLinkedWorktrees,
     /// Traverse repositories and linked worktrees.
     IncludeLinkedWorktrees,

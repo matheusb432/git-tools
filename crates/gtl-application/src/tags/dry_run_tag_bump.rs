@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use gtl_models::{
     diffs::CommitId,
+    failure::ErrorMeta,
     git::{GitHead, GitRevision, RemoteName, RemoteUrl, TagName},
     paths::RepositoryRoot,
     tags::{Tag, TagPatternName, TagSlot, TagTemplate},
@@ -56,12 +57,14 @@ pub enum DryRunTagBumpOk {
 }
 
 /// Reports a failure outside the proposal's own decision.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 #[non_exhaustive]
 pub enum DryRunTagBumpError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error("{source}")]
+    #[meta(private(Internal))]
     Unexpected {
         #[source]
         source: anyhow::Error,

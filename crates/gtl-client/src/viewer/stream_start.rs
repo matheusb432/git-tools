@@ -29,7 +29,7 @@ mod tests {
         start: futures_channel::oneshot::Receiver<()>,
         owned: Arc<AtomicUsize>,
     ) -> Result<StreamOwner, ViewerClientError> {
-        start.await.map_err(|_| ViewerClientError::Unavailable)?;
+        start.await.map_err(|_| ViewerClientError::Disconnected)?;
         owned.fetch_add(1, Ordering::SeqCst);
         Ok(StreamOwner(owned))
     }

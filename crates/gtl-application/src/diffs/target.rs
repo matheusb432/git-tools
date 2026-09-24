@@ -1,7 +1,10 @@
 use std::num::NonZeroU32;
 
 pub use gtl_models::diffs::PinnedRange;
-use gtl_models::git::{GitRange, GitRevision};
+use gtl_models::{
+    failure::{Failure, PublicFailure},
+    git::{GitRange, GitRevision},
+};
 use serde::{Deserialize, Serialize};
 
 /// The unchecked request form of a diff target selection.
@@ -32,6 +35,19 @@ pub enum DiffTargetRequestError {
     /// A range selection cannot be empty.
     #[error("Git range must not be empty")]
     EmptyRange,
+}
+
+impl PublicFailure for DiffTargetRequestError {
+    fn failure(&self) -> Failure {
+        let field = match self {
+            Self::LastCountZero => "target.last_commit_count",
+            Self::EmptyRevision => "target.revision",
+            Self::EmptyRange => "target.revision_range",
+        };
+        Failure::InvalidRequest {
+            field: field.to_owned(),
+        }
+    }
 }
 
 /// A validated diff target resolved from an invocation request.

@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use gtl_models::{
+    failure::ErrorMeta,
     paths::RepositoryRelativePath,
     viewer::{self, RenderOptions, Theme, ViewerKeybindings},
 };
 use gtl_wire::viewer::{
-    ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerDiffFileId,
-    ViewerFailureCode, ViewerFeedback, ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind,
-    ViewerTabState, ViewerViewIdentity,
+    ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerDiffFileId, ViewerFeedback,
+    ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerViewIdentity,
 };
 
 use super::{
@@ -20,17 +20,13 @@ use crate::viewer::session::{
     ActiveContentIdentity, ActiveContentSnapshot, CommitSelectionSnapshot, ViewerSession,
 };
 
-const SOURCE_DIRECTORY_NOT_FOUND_MESSAGE: &str = "The configured Git repository directory was not found. Updates resume automatically when it is restored.";
-const SOURCE_NOT_GIT_REPOSITORY_MESSAGE: &str = "The configured directory is not a Git repository. Updates resume automatically when the repository is restored.";
-const SOURCE_UNAVAILABLE_MESSAGE: &str =
-    "The live view source is unavailable. Updates resume automatically when it is restored.";
-const RENDER_FAILED_MESSAGE: &str = "The diff could not be rendered. Please retry.";
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq, ErrorMeta)]
 pub enum ProjectViewerShellError {
     #[error("the active viewer tab is missing")]
+    #[meta(private(Internal))]
     ActiveTabMissing,
     #[error("the active viewer view is unavailable")]
+    #[meta(private(Internal))]
     ActiveViewUnavailable,
 }
 
@@ -138,9 +134,9 @@ fn ready_active_view(
         CommitSelectionSnapshot::Ready { id, .. } => {
             ViewerCommitSelection::Ready { id: id.clone() }
         }
-        CommitSelectionSnapshot::Error { id, reason } => ViewerCommitSelection::Error {
+        CommitSelectionSnapshot::Error { id, failure } => ViewerCommitSelection::Error {
             id: id.clone(),
-            message: reason.clone(),
+            failure: failure.clone(),
         },
     };
     let commit_selection = if modified_files {
@@ -284,23 +280,6 @@ fn to_tab_state(state: &viewer::ViewerTabState) -> ViewerTabState {
     }
 }
 
-fn broken_failure(code: &str) -> (ViewerFailureCode, &'static str) {
-    match code {
-        "DirNotFound" => (
-            ViewerFailureCode::RepositoryDirectoryNotFound,
-            SOURCE_DIRECTORY_NOT_FOUND_MESSAGE,
-        ),
-        "DirNotGitRepo" => (
-            ViewerFailureCode::RepositoryDirectoryNotGitRepository,
-            SOURCE_NOT_GIT_REPOSITORY_MESSAGE,
-        ),
-        _ => (
-            ViewerFailureCode::SourceUnavailable,
-            SOURCE_UNAVAILABLE_MESSAGE,
-        ),
-    }
-}
-
 fn non_ready_active_state(
     tab_id: gtl_models::viewer::ViewerTabId,
     state: &viewer::ViewerTabState,
@@ -308,18 +287,13 @@ fn non_ready_active_state(
     match state {
         viewer::ViewerTabState::Pending => Some(ViewerActiveState::Pending { tab_id }),
         viewer::ViewerTabState::Ready => None,
-        viewer::ViewerTabState::Broken { code, .. } => {
-            let (code, message) = broken_failure(code);
-            Some(ViewerActiveState::Broken {
-                tab_id,
-                code,
-                message: message.into(),
-            })
-        }
-        viewer::ViewerTabState::Error { .. } => Some(ViewerActiveState::Error {
+        viewer::ViewerTabState::Broken { failure } => Some(ViewerActiveState::Broken {
             tab_id,
-            code: ViewerFailureCode::RenderFailed,
-            message: RENDER_FAILED_MESSAGE.into(),
+            failure: failure.clone().into(),
+        }),
+        viewer::ViewerTabState::Error { failure } => Some(ViewerActiveState::Error {
+            tab_id,
+            failure: failure.clone(),
         }),
     }
 }
@@ -351,16 +325,28 @@ mod tests {
     }
 
     #[test]
-    fn failure_projection_does_not_expose_backend_details() {
-        let state = viewer::ViewerTabState::Error {
-            reason: "git failed in /private/repository".into(),
-        };
+    fn failure_states_project_their_typed_reason() {
         let tab_id = gtl_models::viewer::ViewerTabId::try_new(7).unwrap();
+        let broken = viewer::ViewerTabState::Broken {
+            failure: gtl_models::failure::ViewerFailure::SourceUnavailable,
+        };
+        let failed = viewer::ViewerTabState::Error {
+            failure: gtl_models::failure::ViewerFailure::RenderFailed.into(),
+        };
 
-        let projected = non_ready_active_state(tab_id, &state).unwrap();
-        let json = serde_json::to_string(&projected).unwrap();
-
-        assert!(!json.contains("/private/repository"));
-        assert!(json.contains(RENDER_FAILED_MESSAGE));
+        assert_eq!(
+            non_ready_active_state(tab_id, &broken),
+            Some(ViewerActiveState::Broken {
+                tab_id,
+                failure: gtl_models::failure::ViewerFailure::SourceUnavailable.into(),
+            })
+        );
+        assert_eq!(
+            non_ready_active_state(tab_id, &failed),
+            Some(ViewerActiveState::Error {
+                tab_id,
+                failure: gtl_models::failure::ViewerFailure::RenderFailed.into(),
+            })
+        );
     }
 }

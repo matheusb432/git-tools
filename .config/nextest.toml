@@ -13,3 +13,11 @@ max-threads = 1
 [[profile.default.overrides]]
 filter = 'package(gtl-cli) & (binary(diff) | binary(diff_settings) | binary(push) | binary(server_error))'
 test-group = "gtl-cli-process"
+
+# Desktop journeys run through `just test-e2e`, which supplies one desktop session per test thread.
+[profile.e2e]
+status-level = "pass"
+final-status-level = "slow"
+fail-fast = false
+retries = 0
+slow-timeout = { period = "60s", terminate-after = 4 }

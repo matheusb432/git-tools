@@ -32,7 +32,7 @@ fn variants() -> Element {
     }
 }
 
-/// Enabled, disabled, and loading states.
+/// Enabled, disabled, loading, and waiting states.
 #[story]
 fn states() -> Element {
     rsx! {
@@ -40,6 +40,7 @@ fn states() -> Element {
             Button { state: ButtonState::Enabled, "Enabled" }
             Button { state: ButtonState::Disabled, "Disabled" }
             Button { state: ButtonState::Loading, "Saving" }
+            Button { state: ButtonState::Waiting, "Queued" }
         }
     }
 }

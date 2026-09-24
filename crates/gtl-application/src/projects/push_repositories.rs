@@ -3,6 +3,7 @@
 
 use futures_util::{StreamExt as _, stream};
 use gtl_models::{
+    failure::ErrorMeta,
     git::{CommitCount, GitEffectMode, GitRange, RemoteName},
     paths::ProjectName,
     projects::{ProjectRepository, push_ledger::PushLedger},
@@ -26,13 +27,16 @@ pub struct PushRepositoriesOk {
     pub ledger: PushLedger,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PushRepositoriesError {
     #[error(transparent)]
+    #[meta(transparent)]
     ProjectClient(#[from] ProjectClientError),
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

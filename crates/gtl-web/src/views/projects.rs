@@ -9,6 +9,7 @@ mod status;
 mod table;
 mod view_mode;
 
+pub(crate) use comparison_editor::{ComparisonBranchEditor, ComparisonEditorTrigger};
 use dioxus::prelude::*;
 use gtl_models::settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode};
 use gtl_wire::viewer::{ViewerHistoryFilter, projects::ViewerProjectsCursor};
@@ -85,7 +86,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
         .filter(|load| load.instance_id == viewer.server_instance_id())
         .map(|load| &load.result);
     let items = result.and_then(|result| result.as_ref().ok());
-    let error = result.and_then(|result| result.as_ref().err()).copied();
+    let error = result.and_then(|result| result.as_ref().err()).cloned();
     let loading_page = (projects.loading_page)();
     let mode = (presentation.mode)();
     let disabled = !viewer.actions_enabled();
@@ -159,11 +160,11 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                 "data-testid": "projects-content",
                 id: "projects-content",
                 div { class: "mx-auto max-w-7xl",
-                    if let Some(error) = error.or((presentation.error)()) {
+                    if let Some(error) = error.clone().or((presentation.error)()) {
                         div {
                             class: "projects-error mb-4 gap-3 px-3 py-2",
                             role: "alert",
-                            span { class: "min-w-0", "{error.message()} " }
+                            span { class: "min-w-0", "{error} " }
                             Button {
                                 variant: ButtonVariant::Ghost,
                                 size: ButtonSize::Small,

@@ -1,0 +1,306 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+// A typed failure reason. RPC errors carry it as the only detail of a
+// google.rpc.Status; in-band outcomes embed it directly. Clients branch on the
+// reason and render their own text; the status message is English diagnostics.
+message Failure {
+  oneof reason {
+    FailureUnexpected unexpected = 1;
+    FailureUnavailable unavailable = 2;
+    FailureBusy busy = 3;
+    FailureChanged changed = 4;
+    FailureGone gone = 5;
+    FailureInvalidRequest invalid_request = 6;
+    PushFailure push = 20;
+    SettingsFailure settings = 21;
+    ViewerFailure viewer = 22;
+    ProjectFailure project = 23;
+    RepositoryFailure repository = 24;
+  }
+}
+
+message FailureUnexpected {}
+message FailureUnavailable {}
+message FailureBusy {}
+message FailureChanged {}
+
+message FailureGone {
+  FailureResource resource = 1;
+}
+
+enum FailureResource {
+  FAILURE_RESOURCE_UNSPECIFIED = 0;
+  FAILURE_RESOURCE_PUSH_OPERATION = 1;
+  FAILURE_RESOURCE_VIEWER_TAB = 2;
+  FAILURE_RESOURCE_COMMIT = 3;
+  FAILURE_RESOURCE_DIFF_FILE = 4;
+  FAILURE_RESOURCE_SOURCE_RANGE = 5;
+  FAILURE_RESOURCE_SNAPSHOT = 6;
+  FAILURE_RESOURCE_PROJECT = 7;
+}
+
+message FailureInvalidRequest {
+  string field = 1;
+}
+
+message PushFailure {
+  oneof reason {
+    PushFailureNothingToPush nothing_to_push = 1;
+    PushFailureNoUpstream no_upstream = 2;
+    PushFailureDetached detached = 3;
+    PushFailureCheckoutChanged checkout_changed = 4;
+    PushFailureCommitRemoved commit_removed = 5;
+    PushFailureDestinationChanged destination_changed = 6;
+    PushFailureMultipleDestinations multiple_destinations = 7;
+    PushFailureReviewExpired review_expired = 8;
+    PushFailureHistoryFull history_full = 9;
+    PushFailureRejected rejected = 10;
+    PushFailureGitFailed git_failed = 11;
+  }
+}
+
+message PushFailureNothingToPush {}
+
+message PushFailureNoUpstream {
+  string branch = 1;
+}
+
+message PushFailureDetached {}
+
+message PushFailureCheckoutChanged {
+  string current = 1;
+}
+
+message PushFailureCommitRemoved {
+  string commit = 1;
+}
+
+message PushFailureDestinationChanged {}
+
+message PushFailureMultipleDestinations {
+  string remote = 1;
+}
+
+message PushFailureReviewExpired {}
+
+message PushFailureHistoryFull {
+  uint32 operations_max = 1;
+}
+
+message PushFailureRejected {
+  repeated PushRejectedRef refs = 1;
+  string diagnostic = 2;
+}
+
+message PushRejectedRef {
+  string destination = 1;
+  PushRefRejection reason = 2;
+  // Remote message for REMOTE_REJECTED; Git's summary for OTHER.
+  string detail = 3;
+}
+
+enum PushRefRejection {
+  PUSH_REF_REJECTION_UNSPECIFIED = 0;
+  PUSH_REF_REJECTION_FETCH_FIRST = 1;
+  PUSH_REF_REJECTION_NON_FAST_FORWARD = 2;
+  PUSH_REF_REJECTION_REMOTE_REJECTED = 3;
+  PUSH_REF_REJECTION_OTHER = 4;
+}
+
+message PushFailureGitFailed {
+  string diagnostic = 1;
+}
+
+message SettingsFailure {
+  oneof reason {
+    SettingsFailureInvalid invalid = 1;
+    SettingsFailureStale stale = 2;
+    SettingsFailureLocked locked = 3;
+    SettingsFailurePathUnavailable path_unavailable = 4;
+    SettingsFailureDuplicateProject duplicate_project = 5;
+  }
+}
+
+message SettingsFailureInvalid {
+  string path = 1;
+  string diagnostic = 2;
+}
+
+message SettingsFailureStale {}
+
+message SettingsFailureLocked {
+  uint64 wait_seconds = 1;
+}
+
+message SettingsFailurePathUnavailable {}
+
+message SettingsFailureDuplicateProject {
+  string name = 1;
+}
+
+message ViewerFailure {
+  oneof reason {
+    ViewerFailureSourcePreparing source_preparing = 1;
+    ViewerFailureRevealTooLarge reveal_too_large = 2;
+    ViewerFailureSnapshotNameInvalid snapshot_name_invalid = 3;
+    ViewerFailureNotSnapshot not_snapshot = 4;
+    ViewerFailureSnapshotPending snapshot_pending = 5;
+    ViewerFailureModifiedFilesUnavailable modified_files_unavailable = 6;
+    ViewerFailureRangeTooLarge range_too_large = 7;
+    ViewerFailureSearchTooLarge search_too_large = 8;
+    ViewerFailureResponseTooLarge response_too_large = 9;
+    ViewerFailureFileNotInDiff file_not_in_diff = 10;
+    ViewerFailureFileDeleted file_deleted = 11;
+    ViewerFailureFileUnavailable file_unavailable = 12;
+    ViewerFailureFileOutsideRepository file_outside_repository = 13;
+    ViewerFailureEditorFailed editor_failed = 14;
+    ViewerFailureSourceDirectoryMissing source_directory_missing = 15;
+    ViewerFailureSourceNotRepository source_not_repository = 16;
+    ViewerFailureSourceUnavailable source_unavailable = 17;
+    ViewerFailureRenderFailed render_failed = 18;
+    ViewerFailureCommitFailed commit_failed = 19;
+    ViewerFailureRowTooLarge row_too_large = 20;
+  }
+}
+
+message ViewerFailureSourcePreparing {}
+
+message ViewerFailureRevealTooLarge {}
+
+message ViewerFailureSnapshotNameInvalid {
+  uint32 characters_max = 1;
+}
+
+message ViewerFailureNotSnapshot {}
+
+message ViewerFailureSnapshotPending {}
+
+message ViewerFailureModifiedFilesUnavailable {}
+
+message ViewerFailureRangeTooLarge {}
+
+message ViewerFailureSearchTooLarge {}
+
+message ViewerFailureResponseTooLarge {}
+
+message ViewerFailureFileNotInDiff {}
+
+message ViewerFailureFileDeleted {}
+
+message ViewerFailureFileUnavailable {}
+
+message ViewerFailureFileOutsideRepository {}
+
+message ViewerFailureEditorFailed {
+  string diagnostic = 1;
+}
+
+message ViewerFailureSourceDirectoryMissing {
+  string path = 1;
+}
+
+message ViewerFailureSourceNotRepository {
+  string path = 1;
+}
+
+message ViewerFailureSourceUnavailable {}
+
+message ViewerFailureRenderFailed {}
+
+message ViewerFailureCommitFailed {}
+
+message ViewerFailureRowTooLarge {}
+
+message ProjectFailure {
+  oneof reason {
+    ProjectFailureCatalogueUnavailable catalogue_unavailable = 1;
+    ProjectFailureAlreadyExists already_exists = 2;
+    ProjectFailureCatalogueFull catalogue_full = 3;
+    ProjectFailureScanFailed scan_failed = 4;
+    ProjectFailureScanFolderInvalid scan_folder_invalid = 5;
+    ProjectFailureHomeUnavailable home_unavailable = 6;
+    ProjectFailureTooManyRepositories too_many_repositories = 7;
+    ProjectFailureComparisonBranchMissing comparison_branch_missing = 8;
+    ProjectFailureRepositoryUnborn repository_unborn = 9;
+    ProjectFailureNoCommonAncestor no_common_ancestor = 10;
+    ProjectFailureScanStale scan_stale = 11;
+    ProjectFailureAlreadyManaged already_managed = 12;
+    ProjectFailureCommitCountUnavailable commit_count_unavailable = 13;
+  }
+}
+
+message ProjectFailureCatalogueUnavailable {}
+
+message ProjectFailureAlreadyExists {}
+
+message ProjectFailureCatalogueFull {
+  uint32 projects_max = 1;
+}
+
+message ProjectFailureScanFailed {
+  string diagnostic = 1;
+}
+
+message ProjectFailureScanFolderInvalid {
+  ScanFolderProblem problem = 1;
+}
+
+enum ScanFolderProblem {
+  SCAN_FOLDER_PROBLEM_UNSPECIFIED = 0;
+  SCAN_FOLDER_PROBLEM_NOT_ABSOLUTE = 1;
+  SCAN_FOLDER_PROBLEM_NOT_DIRECTORY = 2;
+  SCAN_FOLDER_PROBLEM_NOT_UTF8 = 3;
+}
+
+message ProjectFailureHomeUnavailable {}
+
+message ProjectFailureTooManyRepositories {
+  uint32 repositories_max = 1;
+}
+
+message ProjectFailureComparisonBranchMissing {
+  string path = 1;
+  string branch = 2;
+  // The catalogued project whose setting names the branch; absent when the default applies.
+  optional string project = 3;
+}
+
+message ProjectFailureRepositoryUnborn {
+  string path = 1;
+}
+
+message ProjectFailureNoCommonAncestor {
+  string path = 1;
+  string branch = 2;
+  // The catalogued project whose setting names the branch; absent when the default applies.
+  optional string project = 3;
+}
+
+message ProjectFailureScanStale {}
+
+message ProjectFailureAlreadyManaged {}
+
+message ProjectFailureCommitCountUnavailable {}
+
+message RepositoryFailure {
+  oneof reason {
+    RepositoryFailureNotARepository not_a_repository = 1;
+    RepositoryFailureNoRepositories no_repositories = 2;
+    RepositoryFailureSearchFailed search_failed = 3;
+  }
+}
+
+message RepositoryFailureNotARepository {
+  string path = 1;
+}
+
+message RepositoryFailureNoRepositories {
+  string root = 1;
+}
+
+message RepositoryFailureSearchFailed {
+  string path = 1;
+  string diagnostic = 2;
+}

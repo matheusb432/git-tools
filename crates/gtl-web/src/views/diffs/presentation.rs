@@ -170,3 +170,77 @@ impl DiffPresentation {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{TestResult, viewer_tab_id};
+
+    fn in_presentation(test: impl FnOnce(DiffPresentation) -> TestResult) -> TestResult {
+        let owner = VirtualDom::new(VNode::empty);
+        owner.in_scope(ScopeId::ROOT, || {
+            test(DiffPresentation {
+                tabs: Signal::new(HashMap::new()),
+            })
+        })
+    }
+
+    #[test]
+    fn panel_scroll_returns_each_tab_and_panel_to_its_own_position() -> TestResult {
+        in_presentation(|presentation| {
+            let first = viewer_tab_id(1)?;
+            let second = viewer_tab_id(2)?;
+            let first_files = PanelScrollPosition::new(0.0, 480.0);
+            let first_commits = PanelScrollPosition::new(0.0, 96.0);
+            let second_files = PanelScrollPosition::new(12.0, 1_200.0);
+
+            presentation.set_panel_scroll(first, Panel::Files, first_files);
+            presentation.set_panel_scroll(first, Panel::Commits, first_commits);
+            presentation.set_panel_scroll(second, Panel::Files, second_files);
+
+            assert_eq!(presentation.panel_scroll(first, Panel::Files), first_files);
+            assert_eq!(
+                presentation.panel_scroll(first, Panel::Commits),
+                first_commits
+            );
+            assert_eq!(
+                presentation.panel_scroll(second, Panel::Files),
+                second_files
+            );
+            assert_eq!(
+                presentation.panel_scroll(second, Panel::Commits),
+                PanelScrollPosition::new(0.0, 0.0)
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn panel_scroll_starts_a_new_tab_at_the_origin() -> TestResult {
+        in_presentation(|presentation| {
+            let scrolled = viewer_tab_id(1)?;
+            let opened = viewer_tab_id(2)?;
+            presentation.set_panel_scroll(
+                scrolled,
+                Panel::Files,
+                PanelScrollPosition::new(0.0, 480.0),
+            );
+            presentation.set_panel_scroll(
+                scrolled,
+                Panel::Commits,
+                PanelScrollPosition::new(0.0, 96.0),
+            );
+            presentation.ensure_tab(opened);
+
+            assert_eq!(
+                presentation.panel_scroll(opened, Panel::Files),
+                PanelScrollPosition::new(0.0, 0.0)
+            );
+            assert_eq!(
+                presentation.panel_scroll(opened, Panel::Commits),
+                PanelScrollPosition::new(0.0, 0.0)
+            );
+            Ok(())
+        })
+    }
+}

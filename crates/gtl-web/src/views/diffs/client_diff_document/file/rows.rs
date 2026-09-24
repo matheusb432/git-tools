@@ -78,7 +78,7 @@ pub(in crate::views::diffs::client_diff_document) fn DiffFileLoadState(
         ClientDiffFileState::Complete => rsx! {},
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
-            let message = error.message().to_owned();
+            let message = error.to_string();
             let retryable = error.retryable() && retry_allowed;
             rsx! {
                 DiffFileLoadError { message, retryable, onretry }

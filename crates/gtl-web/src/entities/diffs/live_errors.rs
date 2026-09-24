@@ -1,6 +1,8 @@
+use crate::shared::viewer_client::ViewerClientError;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LiveError {
-    pub message: String,
+    pub error: ViewerClientError,
     pub occurrences: u64,
     pub elapsed_ms_last: u64,
 }
@@ -20,26 +22,26 @@ impl LiveErrors {
         self.recovery_started_ms = None;
     }
 
-    pub(crate) fn observe(&mut self, result: Result<(), String>, elapsed_ms: u64) {
+    pub(crate) fn observe(&mut self, result: Result<(), ViewerClientError>, elapsed_ms: u64) {
         match result {
-            Err(message) => self.record_failure(message, elapsed_ms),
+            Err(error) => self.record_failure(error, elapsed_ms),
             Ok(()) => self.record_success(elapsed_ms),
         }
     }
 
-    fn record_failure(&mut self, message: String, elapsed_ms: u64) {
+    fn record_failure(&mut self, error: ViewerClientError, elapsed_ms: u64) {
         self.interrupt();
         let occurrences = self
             .entries
             .iter()
-            .position(|entry| entry.message == message)
+            .position(|entry| entry.error == error)
             .map_or(1, |index| {
                 self.entries.remove(index).occurrences.saturating_add(1)
             });
         self.entries.insert(
             0,
             LiveError {
-                message,
+                error,
                 occurrences,
                 elapsed_ms_last: elapsed_ms,
             },
@@ -61,17 +63,27 @@ impl LiveErrors {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::failure::Failure;
+
     use super::*;
+
+    /// Builds a distinct error for each label.
+    fn failure(label: &str) -> ViewerClientError {
+        Failure::InvalidRequest {
+            field: label.to_owned(),
+        }
+        .into()
+    }
 
     #[test]
     fn recent_distinct_errors_are_bounded_and_repeats_move_to_front() {
         let mut errors = LiveErrors::default();
         for index in 0..7 {
-            errors.observe(Err(format!("failure {index}")), index);
+            errors.observe(Err(failure(&format!("failure {index}"))), index);
         }
-        errors.observe(Err("failure 3".into()), 10);
+        errors.observe(Err(failure("failure 3")), 10);
         assert_eq!(errors.entries().len(), 5);
-        assert_eq!(errors.entries()[0].message, "failure 3");
+        assert_eq!(errors.entries()[0].error, failure("failure 3"));
         assert_eq!(errors.entries()[0].occurrences, 2);
         assert_eq!(errors.entries()[0].elapsed_ms_last, 10);
     }
@@ -79,7 +91,7 @@ mod tests {
     #[test]
     fn cleanup_requires_a_minute_of_confirmed_recovery() {
         let mut errors = LiveErrors::default();
-        errors.observe(Err("failed".into()), 0);
+        errors.observe(Err(failure("failed")), 0);
         errors.observe(Ok(()), 100_000);
         errors.observe(Ok(()), 159_999);
         assert_eq!(errors.entries().len(), 1);
@@ -90,9 +102,9 @@ mod tests {
     #[test]
     fn failure_or_interruption_restarts_recovery() {
         let mut errors = LiveErrors::default();
-        errors.observe(Err("failed".into()), 0);
+        errors.observe(Err(failure("failed")), 0);
         errors.observe(Ok(()), 2_000);
-        errors.observe(Err("failed again".into()), 59_000);
+        errors.observe(Err(failure("failed again")), 59_000);
         errors.observe(Ok(()), 62_000);
         assert_eq!(errors.entries().len(), 2);
         errors.interrupt();

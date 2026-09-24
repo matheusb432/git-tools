@@ -1,5 +1,5 @@
 use futures_util::{StreamExt as _, stream};
-use gtl_models::git::GitEffectMode;
+use gtl_models::{failure::ErrorMeta, git::GitEffectMode};
 
 use crate::{
     ports::{GitClient, ProjectClient, ProjectClientError},
@@ -15,11 +15,13 @@ pub struct PullRepositoriesOk {
     pub exit: SyncExit,
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PullRepositoriesError {
     #[error(transparent)]
+    #[meta(transparent)]
     ProjectClient(#[from] ProjectClientError),
     #[error(transparent)]
+    #[meta(private(Internal))]
     Unexpected(#[from] anyhow::Error),
 }
 

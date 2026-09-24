@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+gtl-macros.workspace = true
 nutype = { workspace = true, features = ["serde"] }
 serde.workspace = true
 strum.workspace = true
@@ -20,6 +21,8 @@ uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 serde_json.workspace = true
+thiserror.workspace = true
+trybuild = "1.0.121"
 
 [lints]
 workspace = true

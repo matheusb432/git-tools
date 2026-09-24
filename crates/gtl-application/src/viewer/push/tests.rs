@@ -89,6 +89,8 @@ fn capacity_eviction_preserves_queued_and_running_pushes() {
     }
     assert!(matches!(
         full.insert(Ok(plan_at("push-test"))),
-        Err(PushError::Capacity)
+        Err(PushError::Refused(PushFailure::HistoryFull {
+            operations_max: OPERATIONS_MAX
+        }))
     ));
 }

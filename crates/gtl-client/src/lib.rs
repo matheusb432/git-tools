@@ -1,5 +1,7 @@
 //! Private local gRPC client for `gtl-server`.
 
+#[cfg(not(target_arch = "wasm32"))]
+mod request_failure;
 mod viewer;
 pub mod window;
 
@@ -16,6 +18,8 @@ use gtl_wire::v1::{
     settings_service_client::SettingsServiceClient, tag_service_client::TagServiceClient,
     viewer_service_client::ViewerServiceClient,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use request_failure::RequestFailure;
 #[cfg(not(target_arch = "wasm32"))]
 use tonic::{Request, Status, transport::Channel};
 #[cfg(not(target_arch = "wasm32"))]
@@ -55,6 +59,15 @@ impl ConnectError {
             Self::Transport(_) => None,
         }
     }
+
+    /// Decodes why the connection could not be used.
+    #[must_use]
+    pub fn failure(&self) -> RequestFailure {
+        match self {
+            Self::Health(status) => RequestFailure::from_status(status),
+            Self::Transport(_) => RequestFailure::Disconnected,
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,6 +86,18 @@ pub enum ViewerServerInfoError {
     InvalidInstanceId,
     #[error("gtl-server returned an invalid viewer protocol version")]
     InvalidProtocolVersion,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ViewerServerInfoError {
+    /// Decodes the server's failure; `None` means the server answered with invalid values.
+    #[must_use]
+    pub fn failure(&self) -> Option<RequestFailure> {
+        match self {
+            Self::Rpc(status) => Some(RequestFailure::from_status(status)),
+            Self::InvalidInstanceId | Self::InvalidProtocolVersion => None,
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -118,6 +143,12 @@ impl ClientError {
         match self {
             Self::Rpc(status) => status,
         }
+    }
+
+    /// Decodes the typed failure the server reported, or a lost connection.
+    #[must_use]
+    pub fn failure(&self) -> RequestFailure {
+        RequestFailure::from_status(self.status())
     }
 }
 

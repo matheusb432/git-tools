@@ -227,7 +227,7 @@ async fn apply_viewer_route(
             match viewer_server::activate_tab(ViewerTabRequest { tab_id }).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => {
-                    toast.error(error.message());
+                    toast.client_error(&error);
                     navigator.replace(fallback);
                 }
             }
@@ -278,9 +278,10 @@ fn Settings() -> Element {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::failure::ViewerFailure;
     use gtl_wire::viewer::{
-        ViewerFailureCode, ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabKind,
-        ViewerTabState, ViewerTheme,
+        ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabKind, ViewerTabState,
+        ViewerTheme,
     };
 
     use super::*;
@@ -385,8 +386,7 @@ mod tests {
             },
             ViewerActiveState::Error {
                 tab_id,
-                code: ViewerFailureCode::RenderFailed,
-                message: "safe failure".to_owned(),
+                failure: ViewerFailure::RenderFailed.into(),
             },
         ] {
             assert_eq!(Route::for_active(&active), expected);

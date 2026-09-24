@@ -1,10 +1,14 @@
 use dioxus::prelude::*;
-use gtl_models::diffs::ExcludedExtensions;
+use gtl_models::{
+    diffs::ExcludedExtensions,
+    failure::{Failure, SettingsFailure},
+};
 use gtl_wire::viewer::{FieldUpdate, file_filters::UpdateDiffExclusions};
 
 use crate::{
     entities::diffs::viewer_server,
     shared::{
+        failure_notice::client_error_severity,
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, ExtensionExclusionsAction,
             ExtensionExclusionsInput, use_toast,
@@ -29,8 +33,12 @@ pub(super) fn ExclusionEditor(
                 toast.ok("Exclusions saved");
             }
             Err(error) => {
+                toast.show(
+                    client_error_severity(&error),
+                    super::settings_edit_error_message(&error),
+                    None,
+                );
                 failure.set(Some(error));
-                toast.error(super::settings_edit_error_message(error));
             }
         }
         Ok::<(), std::convert::Infallible>(())
@@ -39,7 +47,9 @@ pub(super) fn ExclusionEditor(
     let pending = save.pending();
     let changed = selected != configured;
     let save_failure = failure();
-    let save_error = save_failure.map(super::settings_edit_error_message);
+    let save_error = save_failure
+        .as_ref()
+        .map(super::settings_edit_error_message);
     let selection_for_change = selected.clone();
     let selection_for_save = selected.clone();
     rsx! {
@@ -61,7 +71,11 @@ pub(super) fn ExclusionEditor(
                         role: "alert",
                         "{error}"
                     }
-                    if save_failure == Some(ViewerClientError::Conflict) {
+                    if matches!(
+                        save_failure,
+                        Some(ViewerClientError::Failed(Failure::Settings(SettingsFailure::Stale)))
+                    )
+                    {
                         Button {
                             size: ButtonSize::Small,
                             variant: ButtonVariant::Outline,

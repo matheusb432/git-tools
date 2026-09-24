@@ -72,7 +72,7 @@ impl ViewerIpcState {
             .lock()
             .await
             .clone()
-            .ok_or(ViewerClientError::Unavailable)
+            .ok_or(ViewerClientError::Disconnected)
     }
 
     async fn observe_result<ResultType>(
@@ -80,7 +80,7 @@ impl ViewerIpcState {
         instance_id: &str,
         result: &Result<ResultType, ViewerClientError>,
     ) {
-        if !matches!(result, Err(ViewerClientError::Unavailable)) {
+        if !matches!(result, Err(ViewerClientError::Disconnected)) {
             return;
         }
         let removed = {
@@ -278,7 +278,7 @@ mod stream_commands {
     ) -> Result<tauri::ipc::Response, ViewerClientError> {
         let frames = state.row_streams.next_batch(stream_id).await?;
         let bytes = gtl_wire::proto::row_ipc::encode_batch(&frames)
-            .map_err(|_| ViewerClientError::Internal)?;
+            .map_err(|_| ViewerClientError::InvalidMessage)?;
         Ok(tauri::ipc::Response::new(bytes))
     }
 
@@ -398,7 +398,7 @@ where
         let _start_guard = self.start_gate.lock().await;
         let state = self.state.lock().await;
         if state.entries.len() >= self.limit {
-            return Err(ViewerClientError::ResourceExhausted);
+            return Err(ViewerClientError::busy());
         }
         drop(state);
         let stream = start.await?;
@@ -433,15 +433,15 @@ where
             .entries
             .get(&stream_id)
             .map(|entry| entry.requests.clone())
-            .ok_or(ViewerClientError::NotFound)?;
+            .ok_or(ViewerClientError::StreamClosed)?;
         let (reply, response) = oneshot::channel();
         if requests.send(reply).await.is_err() {
             self.remove(stream_id).await;
-            return Err(ViewerClientError::NotFound);
+            return Err(ViewerClientError::StreamClosed);
         }
         let Ok(result) = response.await else {
             self.remove(stream_id).await;
-            return Err(ViewerClientError::NotFound);
+            return Err(ViewerClientError::StreamClosed);
         };
         if !matches!(&result, Ok(items) if !items.is_empty()) {
             self.remove(stream_id).await;
@@ -452,7 +452,7 @@ where
     async fn cancel(&self, stream_id: u32) -> Result<(), ViewerClientError> {
         self.remove(stream_id)
             .await
-            .ok_or(ViewerClientError::NotFound)
+            .ok_or(ViewerClientError::StreamClosed)
     }
 
     async fn cancel_all(&self) {
@@ -617,7 +617,7 @@ mod tests {
 
         assert_eq!(
             registry.start(PendingStream).await,
-            Err(ViewerClientError::ResourceExhausted)
+            Err(ViewerClientError::busy())
         );
         registry.cancel(1).await.unwrap();
         assert!(registry.start(PendingStream).await.is_ok());
@@ -635,7 +635,7 @@ mod tests {
             .start_with(start_pending_transport(transport_started))
             .await;
 
-        assert_eq!(result, Err(ViewerClientError::ResourceExhausted));
+        assert_eq!(result, Err(ViewerClientError::busy()));
         assert!(!started.load(Ordering::Acquire));
         registry.cancel_all().await;
     }
@@ -654,7 +654,7 @@ mod tests {
         assert_eq!(registry.next_batch(stream_id).await, Ok(Vec::new()));
         assert_eq!(
             registry.next_batch(stream_id).await,
-            Err(ViewerClientError::NotFound)
+            Err(ViewerClientError::StreamClosed)
         );
         assert!(
             registry
@@ -676,11 +676,11 @@ mod tests {
 
         assert_eq!(
             registry.next_batch(stream_id).await,
-            Err(ViewerClientError::NotFound)
+            Err(ViewerClientError::StreamClosed)
         );
         assert_eq!(
             registry.cancel(stream_id).await,
-            Err(ViewerClientError::NotFound)
+            Err(ViewerClientError::StreamClosed)
         );
     }
 
@@ -695,7 +695,7 @@ mod tests {
                     Ok(Some(3)),
                     Ok(Some(4)),
                     Ok(Some(5)),
-                    Err(ViewerClientError::Unavailable),
+                    Err(ViewerClientError::Disconnected),
                 ]),
             })
             .await
@@ -705,11 +705,11 @@ mod tests {
         assert_eq!(registry.next_batch(stream_id).await, Ok(vec![5]));
         assert_eq!(
             registry.next_batch(stream_id).await,
-            Err(ViewerClientError::Unavailable)
+            Err(ViewerClientError::Disconnected)
         );
         assert_eq!(
             registry.next_batch(stream_id).await,
-            Err(ViewerClientError::NotFound)
+            Err(ViewerClientError::StreamClosed)
         );
     }
 

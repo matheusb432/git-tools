@@ -77,9 +77,10 @@ fn truncated_extra_and_incompatible_frames_are_rejected() {
         0,
         Event::FileFailed(v1::ViewerFileFailed {
             file_id: "file-0".to_owned(),
-            code: v1::ViewerFileFailureCode::SourceUnavailable.into(),
-            message: "source changed".to_owned(),
             retryable: true,
+            failure: Some(crate::proto::failure::encode_failure(
+                &gtl_models::failure::Failure::Changed,
+            )),
         }),
     ))
     .unwrap();

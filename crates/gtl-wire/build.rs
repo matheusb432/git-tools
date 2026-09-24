@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "proto/gtl/v1/common.proto",
         "proto/gtl/v1/diff.proto",
+        "proto/gtl/v1/failure.proto",
         "proto/gtl/v1/live_view.proto",
         "proto/gtl/v1/project.proto",
         "proto/gtl/v1/repository.proto",
@@ -15,6 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(cfg!(feature = "grpc"))
         .build_server(cfg!(feature = "grpc"))
         .boxed(".gtl.v1.ViewerActiveState.state.ready")
+        .boxed(".gtl.v1.ViewerProjectStatusUpdate.result.status")
         .file_descriptor_set_path(std::env::var("OUT_DIR")? + "/gtl_descriptor.bin")
         .compile_protos(&protos, &["proto"])?;
 

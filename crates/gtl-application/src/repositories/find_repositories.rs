@@ -5,6 +5,7 @@ mod rules;
 use std::path::{Path, PathBuf};
 
 use gtl_models::{
+    failure::{Classification, Classified, ErrorClass, ExternalDiagnostic, RepositoryFailure},
     paths::{ProjectName, RepositoryRoot},
     repository::traversal::{RepositoryTarget, RepositoryTraversalScope},
 };
@@ -38,6 +39,23 @@ pub enum FindRepositoriesError {
         #[source]
         source: gtl_models::paths::RepositoryRootError,
     },
+}
+
+impl Classified for FindRepositoriesError {
+    fn classify(&self) -> Classification {
+        let (path, diagnostic) = match self {
+            Self::Walk { root, source } => (root, source.to_string()),
+            Self::Resolve { path, source } => (path, source.to_string()),
+            Self::InvalidRoot { .. } => return Classification::Private(ErrorClass::Internal),
+        };
+        Classification::Public(
+            RepositoryFailure::SearchFailed {
+                path: path.clone(),
+                diagnostic: ExternalDiagnostic::new(&diagnostic),
+            }
+            .into(),
+        )
+    }
 }
 
 /// Walk `root` and label each discovered repository relative to it.
@@ -99,18 +117,23 @@ fn is_skipped(entry: &DirEntry, scope: RepositoryTraversalScope) -> bool {
     rules::should_skip(entry.depth(), name, is_worktree, scope)
 }
 
+// Git gives only a linked worktree's administrative directory a `commondir` file. Submodule Git
+// directories lack it even when stored under a worktree's administrative directory.
 fn is_linked_worktree(directory: &Path) -> bool {
     let git_path = directory.join(".git");
     if !git_path.is_file() {
         return false;
     }
-    std::fs::read_to_string(&git_path).is_ok_and(|content| rules::is_worktree_marker(&content))
+    std::fs::read_to_string(&git_path).is_ok_and(|content| {
+        rules::gitfile_target(&content)
+            .is_some_and(|target| directory.join(target).join("commondir").is_file())
+    })
 }
 
-/// Checks the same repository marker rule used by the default recursive scan.
+/// Checks whether a scan rooted at `directory` reports the directory itself.
 #[must_use]
 pub fn is_discoverable_repository(directory: &Path) -> bool {
-    directory.is_dir() && directory.join(".git").exists() && !is_linked_worktree(directory)
+    directory.is_dir() && directory.join(".git").exists()
 }
 
 fn repo_label(root: &Path, repo_path: &RepositoryRoot) -> ProjectName {
@@ -192,7 +215,7 @@ mod tests {
         utils::make_repository(&root.join("api"));
         utils::make_linked_worktree(
             &root.join("api/.worktrees/feature"),
-            "/abs/api/.git/worktrees/feature",
+            &root.join("api/.git/worktrees/feature"),
         );
 
         let repositories = find_repositories::execute(FindRepositories {
@@ -206,12 +229,45 @@ mod tests {
     }
 
     #[test]
+    fn scans_a_linked_worktree_root_and_its_submodules_but_not_nested_worktrees() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let administrative_directory = root.join("api/.git/worktrees/feature");
+        let worktree = root.join("api/.worktrees/feature");
+        utils::make_repository(&root.join("api"));
+        utils::make_linked_worktree(&worktree, &administrative_directory);
+        utils::make_submodule(
+            &worktree.join("lib/submodule"),
+            &administrative_directory.join("modules/lib/submodule"),
+        );
+        utils::make_linked_worktree(
+            &worktree.join(".worktrees/nested"),
+            &root.join("api/.git/worktrees/nested"),
+        );
+
+        let repositories = find_repositories::execute(FindRepositories {
+            root: worktree.clone(),
+            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
+        })
+        .unwrap();
+
+        assert_eq!(
+            repositories
+                .iter()
+                .map(|repository| repository.path.as_ref())
+                .collect::<Vec<_>>(),
+            [worktree.as_path(), worktree.join("lib/submodule").as_path()]
+        );
+        assert!(is_discoverable_repository(&worktree));
+    }
+
+    #[test]
     fn includes_linked_worktrees_when_requested() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("api"));
         let worktree = root.join("api/.worktrees/feature");
-        utils::make_linked_worktree(&worktree, "/abs/api/.git/worktrees/feature");
+        utils::make_linked_worktree(&worktree, &root.join("api/.git/worktrees/feature"));
 
         let repositories = find_repositories::execute(FindRepositories {
             root: root.clone(),
@@ -260,7 +316,10 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().canonicalize().unwrap();
         utils::make_repository(&root.join("api"));
-        utils::make_linked_worktree(&root.join("submodule"), "/repo/.git/modules/submodule");
+        utils::make_submodule(
+            &root.join("api/lib/submodule"),
+            &root.join("api/.git/modules/lib/submodule"),
+        );
 
         let repositories = find_repositories::execute(FindRepositories {
             root: root.clone(),
@@ -273,7 +332,10 @@ mod tests {
                 .iter()
                 .map(|repository| repository.path.as_ref())
                 .collect::<Vec<_>>(),
-            [root.join("api").as_path(), root.join("submodule").as_path()]
+            [
+                root.join("api").as_path(),
+                root.join("api/lib/submodule").as_path()
+            ]
         );
     }
 

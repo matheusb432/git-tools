@@ -1,6 +1,9 @@
 //! Revalidates and applies one exact tag-bump proposal.
 
-use gtl_models::git::{GitRevision, TagName};
+use gtl_models::{
+    failure::ErrorMeta,
+    git::{GitRevision, TagName},
+};
 
 use super::{
     BumpLevel, DryRunTagBumpOk, TagBumpPreview,
@@ -25,12 +28,14 @@ pub enum BumpTagOk {
 }
 
 /// Reports a failure outside the proposal's own decision while applying it.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 #[non_exhaustive]
 pub enum BumpTagError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsLoadError),
     #[error("{source}")]
+    #[meta(private(Internal))]
     Unexpected {
         progress: TagOperationProgress,
         #[source]

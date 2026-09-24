@@ -28,7 +28,7 @@ macro_rules! viewer_request {
         pub(crate) fn $name(
             _request: $request,
         ) -> impl std::future::Future<Output = Result<$response, ViewerClientError>> {
-            std::future::ready(Err(ViewerClientError::Unavailable))
+            std::future::ready(Err(ViewerClientError::Disconnected))
         }
     };
 }
@@ -44,7 +44,7 @@ macro_rules! viewer_query {
         #[cfg(not(target_arch = "wasm32"))]
         pub(crate) fn $name()
         -> impl std::future::Future<Output = Result<$response, ViewerClientError>> {
-            std::future::ready(Err(ViewerClientError::Unavailable))
+            std::future::ready(Err(ViewerClientError::Disconnected))
         }
     };
 }
@@ -161,7 +161,7 @@ where
     while let Some(event) = stream.message().await? {
         on_event(event);
     }
-    Err(ViewerClientError::Unavailable)
+    Err(ViewerClientError::Disconnected)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -174,7 +174,7 @@ where
     Ready: Fn(String) + 'static,
     Handler: Fn(ViewerStateChanged) + 'static,
 {
-    std::future::ready(Err(ViewerClientError::Unavailable))
+    std::future::ready(Err(ViewerClientError::Disconnected))
 }
 
 viewer_request!(update_project, UpdateViewerProject, (), update_project);

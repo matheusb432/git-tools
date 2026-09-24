@@ -1,3 +1,4 @@
+use gtl_models::failure::ErrorMeta;
 use thiserror::Error;
 
 use crate::{
@@ -5,11 +6,13 @@ use crate::{
     viewer::{ViewerState, ViewerStateError},
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, ErrorMeta)]
 pub enum EditSettingsError {
     #[error(transparent)]
+    #[meta(transparent)]
     Settings(#[from] UserSettingsEditError),
     #[error(transparent)]
+    #[meta(transparent)]
     ViewerState(#[from] ViewerStateError),
 }
 

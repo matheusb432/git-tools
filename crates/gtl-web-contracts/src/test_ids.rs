@@ -32,22 +32,12 @@ macro_rules! define_test_id {
 }
 
 define_test_id!(CHANGED_FILES_PANEL, "changed-files-panel");
-define_test_id!(
-    DIFF_EXTENSION_FILTERS_TRIGGER,
-    "diff-extension-filters-trigger"
-);
 define_test_id!(COMMITS_PANEL, "commits-panel");
-define_test_id!(HOVER_POPOVER_CONTENT, "hover-popover-content");
 define_test_id!(HISTORY_ENTRY_OPEN, "history-entry-open");
-define_test_id!(LIVE_VIEW_WARNING, "live-view-warning");
 define_test_id!(TOAST, "toast");
 define_test_id!(TOAST_DISMISS, "toast-dismiss");
-define_test_id!(TOAST_LEDGER, "toast-ledger");
-define_test_id!(TOAST_VIEWPORT, "toast-viewport");
 define_test_id!(VIEWER_HISTORY_OPEN, "viewer-history-open");
 define_test_id!(VIEWER_MENU_TRIGGER, "viewer-menu-trigger");
 define_test_id!(VIEWER_TAB_CLOSE, "viewer-tab-close");
 define_test_id!(VIEWER_TAB_OVERFLOW_MENU, "viewer-tab-overflow-menu");
 define_test_id!(VIEWER_TAB_OVERFLOW_TRIGGER, "viewer-tab-overflow-trigger");
-
-define_test_id!(VIEWER_SETTINGS_WRAP_LINES, "viewer-settings-wrap-lines");

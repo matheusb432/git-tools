@@ -9,8 +9,7 @@ use gtl_application::{
             set_project_status::{self, SetProjectStatus},
         },
         get_project_repository::{self, GetProjectRepository},
-        pull_repositories::{self, PullRepositoriesError},
-        push_repositories::{self, PushRepositoriesError},
+        pull_repositories, push_repositories,
     },
     repositories::get_repository_statuses,
 };
@@ -24,8 +23,9 @@ use gtl_wire::v1::{self, project_service_server::ProjectService};
 use tonic::{Request, Response, Status};
 
 use super::{
-    project_client_error, repository::status_results, run_blocking, unexpected,
-    user_settings_load_error,
+    repository::status_results,
+    run_blocking,
+    status::{GrpcResultExt as _, invalid_request},
 };
 use crate::state::AppState;
 
@@ -52,7 +52,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            create_project::execute(&request, &mut connection).map_err(catalogue::error)
+            create_project::execute(&request, &mut connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::CreateProjectResponse {
@@ -68,14 +68,14 @@ impl ProjectService for ProjectGrpcService {
             .into_inner()
             .project_id
             .try_into()
-            .map_err(catalogue::invalid)?;
+            .map_err(|_| invalid_request("project_id"))?;
         let state = self.state.clone();
         let project = run_blocking(move || {
             let connection = state
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            get_project::execute(&id, &connection).map_err(catalogue::error)
+            get_project::execute(&id, &connection).into_grpc()
         })
         .await??;
         Ok(Response::new(catalogue::get_response(project)))
@@ -90,7 +90,7 @@ impl ProjectService for ProjectGrpcService {
                 .into_inner()
                 .project_id
                 .try_into()
-                .map_err(catalogue::invalid)?,
+                .map_err(|_| invalid_request("project_id"))?,
         };
         let state = self.state.clone();
         let repository = run_blocking(move || {
@@ -98,7 +98,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            get_project_repository::execute(&request, &connection).map_err(catalogue::error)
+            get_project_repository::execute(&request, &connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::GetProjectRepositoryResponse {
@@ -116,7 +116,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            list_active_projects::execute((), &connection).map_err(catalogue::error)
+            list_active_projects::execute((), &connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::ListActiveProjectsResponse {
@@ -130,7 +130,10 @@ impl ProjectService for ProjectGrpcService {
     ) -> Result<Response<v1::PauseProjectResponse>, Status> {
         let request = request.into_inner();
         let request = SetProjectStatus {
-            id: request.project_id.try_into().map_err(catalogue::invalid)?,
+            id: request
+                .project_id
+                .try_into()
+                .map_err(|_| invalid_request("project_id"))?,
             status: ProjectStatus::Paused,
             mode: catalogue::mode(request.mode)?,
         };
@@ -140,7 +143,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            set_project_status::execute(&request, &mut connection).map_err(catalogue::error)
+            set_project_status::execute(&request, &mut connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::PauseProjectResponse {
@@ -154,7 +157,10 @@ impl ProjectService for ProjectGrpcService {
     ) -> Result<Response<v1::ResumeProjectResponse>, Status> {
         let request = request.into_inner();
         let request = SetProjectStatus {
-            id: request.project_id.try_into().map_err(catalogue::invalid)?,
+            id: request
+                .project_id
+                .try_into()
+                .map_err(|_| invalid_request("project_id"))?,
             status: ProjectStatus::Active,
             mode: catalogue::mode(request.mode)?,
         };
@@ -164,7 +170,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            set_project_status::execute(&request, &mut connection).map_err(catalogue::error)
+            set_project_status::execute(&request, &mut connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::ResumeProjectResponse {
@@ -182,9 +188,9 @@ impl ProjectService for ProjectGrpcService {
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(catalogue::invalid)?;
+            .map_err(|_| invalid_request("project_ids"))?;
         let request = SetProjectMembership {
-            ids: ProjectIds::try_new(ids).map_err(catalogue::invalid)?,
+            ids: ProjectIds::try_new(ids).map_err(|_| invalid_request("project_ids"))?,
             membership: ProjectMembership::Managed,
             mode: catalogue::mode(request.mode)?,
         };
@@ -194,7 +200,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            set_project_membership::execute(&request, &mut connection).map_err(catalogue::error)
+            set_project_membership::execute(&request, &mut connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::ManageProjectsResponse {
@@ -212,9 +218,9 @@ impl ProjectService for ProjectGrpcService {
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(catalogue::invalid)?;
+            .map_err(|_| invalid_request("project_ids"))?;
         let request = SetProjectMembership {
-            ids: ProjectIds::try_new(ids).map_err(catalogue::invalid)?,
+            ids: ProjectIds::try_new(ids).map_err(|_| invalid_request("project_ids"))?,
             membership: ProjectMembership::Unmanaged,
             mode: catalogue::mode(request.mode)?,
         };
@@ -224,7 +230,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            set_project_membership::execute(&request, &mut connection).map_err(catalogue::error)
+            set_project_membership::execute(&request, &mut connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::UnmanageProjectsResponse {
@@ -245,7 +251,7 @@ impl ProjectService for ProjectGrpcService {
             &state.user_settings,
         )
         .await
-        .map_err(push_error)?;
+        .into_grpc()?;
 
         Ok(Response::new(push_response(
             result.selected,
@@ -265,7 +271,7 @@ impl ProjectService for ProjectGrpcService {
             &state.projects,
         )
         .await
-        .map_err(pull_error)?;
+        .into_grpc()?;
 
         Ok(Response::new(
             sync_response(result.results, result.exit).into(),
@@ -281,7 +287,7 @@ impl ProjectService for ProjectGrpcService {
             .projects
             .list_projects()
             .await
-            .map_err(|error| project_client_error(&error))?
+            .into_grpc()?
             .into_iter()
             .map(|repo| RepositoryTarget {
                 label: repo.name,
@@ -302,21 +308,6 @@ const fn effect_mode(dry_run: bool) -> GitEffectMode {
         GitEffectMode::DryRun
     } else {
         GitEffectMode::Apply
-    }
-}
-
-fn push_error(error: PushRepositoriesError) -> Status {
-    match error {
-        PushRepositoriesError::ProjectClient(error) => project_client_error(&error),
-        PushRepositoriesError::Settings(error) => user_settings_load_error(error),
-        PushRepositoriesError::Unexpected(error) => unexpected(error, "push project repositories"),
-    }
-}
-
-fn pull_error(error: PullRepositoriesError) -> Status {
-    match error {
-        PullRepositoriesError::ProjectClient(error) => project_client_error(&error),
-        PullRepositoriesError::Unexpected(error) => unexpected(error, "pull project repositories"),
     }
 }
 
@@ -381,6 +372,7 @@ pub(super) fn sync_result(result: RepoSyncResult) -> v1::RepositorySyncResult {
 
 #[cfg(test)]
 mod tests {
+    use gtl_application::projects::push_repositories::PushRepositoriesError;
     use gtl_models::git::BranchName;
 
     use super::*;
@@ -408,7 +400,7 @@ mod tests {
 
     #[test]
     fn invalid_push_settings_map_to_failed_precondition() {
-        let status = push_error(PushRepositoriesError::Settings(
+        let status = super::super::status::status(&PushRepositoriesError::Settings(
             gtl_application::ports::UserSettingsConfigurationError::new(
                 "/tmp/config.toml".into(),
                 anyhow::anyhow!("bad project settings"),
@@ -418,8 +410,15 @@ mod tests {
 
         assert_eq!(status.code(), tonic::Code::FailedPrecondition);
         assert_eq!(
-            status.message(),
-            "user settings at /tmp/config.toml are invalid: bad project settings"
+            super::super::status::decoded_failure(&status),
+            Some(gtl_models::failure::Failure::Settings(
+                gtl_models::failure::SettingsFailure::Invalid {
+                    path: "/tmp/config.toml".into(),
+                    diagnostic: gtl_models::failure::ExternalDiagnostic::new(
+                        "bad project settings"
+                    ),
+                }
+            ))
         );
     }
 }

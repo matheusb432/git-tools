@@ -1,5 +1,6 @@
 //! The `viewer/read_viewer_diff_text` query: copy bounded source ranges without rendering.
 
+use gtl_models::failure::{ErrorMeta, Failure, Resource, ViewerFailure};
 use gtl_wire::viewer::{ReadViewerDiffText, VIEWER_ROW_MAX_ENCODED_BYTES, ViewerDiffTextLine};
 
 use super::{
@@ -10,13 +11,16 @@ use super::{
 };
 use crate::{diffs::View, ports::UserSettingsReader};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ReadViewerDiffTextError {
     #[error(transparent)]
+    #[meta(transparent)]
     Source(#[from] ViewerSourceError),
     #[error("the requested source range is unavailable")]
+    #[meta(failure = Failure::Gone { resource: Resource::SourceRange })]
     Unavailable,
     #[error("the requested source text exceeds the response limit")]
+    #[meta(failure = ViewerFailure::RangeTooLarge)]
     TooLarge,
 }
 

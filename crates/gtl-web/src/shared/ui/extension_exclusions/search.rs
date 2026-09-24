@@ -6,10 +6,7 @@ use super::ExtensionExclusionsAction;
 use crate::shared::{
     browser,
     file_extension::FileExtension,
-    ui::{
-        Button, ButtonLayout, ButtonSize, ButtonVariant, FieldError, TextInput,
-        TextInputLabelVisibility,
-    },
+    ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, TextInput, TextInputLabelVisibility},
 };
 
 const SUGGESTIONS_MAX: usize = 12;
@@ -53,7 +50,6 @@ pub(super) fn ExtensionSearch(
     } else {
         FileExtension::parse(&query_value).err().map(str::to_owned)
     };
-    let error_id = format!("{input_id}-error");
     let focus_selected_input_id = input_id.clone();
     let select = use_callback(move |action: ExtensionExclusionsAction| {
         if disabled {
@@ -112,8 +108,7 @@ pub(super) fn ExtensionSearch(
                 aria_expanded: "true",
                 aria_controls: results_id.clone(),
                 aria_activedescendant: active_id,
-                aria_invalid: error.is_some().then_some("true"),
-                aria_describedby: error.is_some().then_some(error_id.clone()),
+                error,
                 disabled,
                 oninput: move |event: FormEvent| {
                     query.set(event.value());
@@ -134,9 +129,6 @@ pub(super) fn ExtensionSearch(
                     },
                     X { size: 14 }
                 }
-            }
-            if error.is_some() {
-                FieldError { id: error_id, message: error }
             }
         }
         div {

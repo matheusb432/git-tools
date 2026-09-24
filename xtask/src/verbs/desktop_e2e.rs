@@ -1,5 +1,6 @@
-//! Hermetic viewer journeys. Linux uses an isolated Xvfb/Openbox/stalonetray/D-Bus session for
-//! the native lifecycle, then runs the `WebDriver` journeys in the same sandbox.
+//! Hermetic viewer suites. On Linux, every desktop test process owns an isolated
+//! Xvfb/Openbox/stalonetray/D-Bus session: the native suite uses one, and the `WebDriver`
+//! journeys run in parallel with one session per Nextest slot.
 
 use std::{
     env,
@@ -14,9 +15,10 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
+use serde::{Deserialize, Serialize};
 
 use super::{build, status_notifier::StatusNotifierWatcher};
-use crate::cli::BuildTarget;
+use crate::cli::{BuildTarget, DesktopE2eSuite};
 
 mod native;
 mod playwright;
@@ -28,8 +30,27 @@ const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
 const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
 const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";
 const EVIDENCE_OUTPUT_PATH_DEFAULT: &str = ".artifacts/e2e";
+const DESKTOP_SLOTS_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_DESKTOP_SLOTS";
+const NEXTEST_SLOT_ENVIRONMENT_VARIABLE: &str = "NEXTEST_TEST_GLOBAL_SLOT";
+const JOURNEY_SLOT_COUNT: usize = 4;
 const CAPTURED_COMMAND_BYTES_MAX: usize = 8 * 1024;
-const DOM_PHASE_OUTPUT_BYTES_MAX: usize = 8 * 1024 * 1024;
+const SCROLL_BENCHMARK_OUTPUT_BYTES_MAX: usize = 8 * 1024 * 1024;
+const SCROLL_BENCHMARK_TEST_ARGUMENTS: &[&str] = &[
+    "test",
+    "-p",
+    "gtl-desktop-e2e",
+    "--features",
+    "e2e",
+    "--test",
+    "viewer",
+    "--",
+    "desktop_scroll_baseline::production_viewer_scrolls_large_diff_workloads",
+    "--exact",
+    "--ignored",
+    "--nocapture",
+    "--test-threads",
+    "1",
+];
 const SCROLL_BENCHMARK_ENVIRONMENT_VARIABLE_NAMES: &[&str] = &[
     "GTL_DESKTOP_SCROLL_REPORT_PATH",
     "GTL_DESKTOP_SCROLL_LAUNCHES",
@@ -219,6 +240,13 @@ impl IsolatedEnv {
         self.pairs.push((name, value.as_ref().to_os_string()));
     }
 
+    fn get(&self, name: &str) -> Option<&OsStr> {
+        self.pairs
+            .iter()
+            .find(|(current, _)| current == name)
+            .map(|(_, value)| value.as_os_str())
+    }
+
     pub(super) fn apply(&self, command: &mut Command) {
         command.env_clear().envs(self.pairs.iter().cloned());
     }
@@ -348,20 +376,16 @@ pub(crate) fn run_scroll_benchmark() -> Result<()> {
     let environment = scroll_benchmark_environment(&sandbox)?;
     let result = run_linux_session(&sandbox, environment, |environment| {
         let host_environment = HostCargoEnvironment::capture()?;
-        run_dom_phase(
-            &sandbox,
-            environment,
-            &host_environment,
-            DomJourney::DesktopScrollBenchmark,
-        )
+        run_scroll_benchmark_phase(&sandbox, environment, &host_environment)
     });
-    let logs_result = preserve_logs(&sandbox);
+    let logs_result = preserve_logs(&sandbox, "desktop-scroll-benchmark");
     result?;
     logs_result
 }
 
 pub(crate) fn run_runtime(executable: &Path, arguments: &[OsString]) -> Result<()> {
-    let mut command = runtime_command(executable, arguments);
+    let slot = DesktopSlot::assigned()?;
+    let mut command = runtime_command(executable, arguments, slot.as_ref());
     let status = command
         .status()
         .with_context(|| format!("run isolated E2E executable {}", executable.display()))?;
@@ -374,13 +398,57 @@ pub(crate) fn run_runtime(executable: &Path, arguments: &[OsString]) -> Result<(
     Ok(())
 }
 
-fn runtime_command(executable: &Path, arguments: &[OsString]) -> Command {
+fn runtime_command(
+    executable: &Path,
+    arguments: &[OsString],
+    slot: Option<&DesktopSlot>,
+) -> Command {
     let mut command = Command::new(executable);
     command.args(arguments).env("GTL_E2E_RUNTIME_ISOLATED", "1");
     for name in ["CARGO_HOME", "RUSTUP_HOME", "SSH_AUTH_SOCK"] {
         command.env_remove(name);
     }
+    if let Some(slot) = slot {
+        command
+            .env("DISPLAY", &slot.display)
+            .env("DBUS_SESSION_BUS_ADDRESS", &slot.dbus_session_bus_address);
+    }
     command
+}
+
+/// The desktop session a Nextest slot's test process uses.
+#[derive(Debug, Serialize, Deserialize)]
+struct DesktopSlot {
+    display: String,
+    dbus_session_bus_address: String,
+}
+
+impl DesktopSlot {
+    fn path(directory: &Path, slot: &OsStr) -> PathBuf {
+        directory.join(slot).with_extension("json")
+    }
+
+    /// Reads the slot Nextest assigned to this test process, if the journey run published slots.
+    fn assigned() -> Result<Option<Self>> {
+        let (Some(directory), Some(slot)) = (
+            env::var_os(DESKTOP_SLOTS_ENVIRONMENT_VARIABLE),
+            env::var_os(NEXTEST_SLOT_ENVIRONMENT_VARIABLE),
+        ) else {
+            return Ok(None);
+        };
+        let path = Self::path(Path::new(&directory), &slot);
+        let contents =
+            fs::read(&path).with_context(|| format!("read desktop slot {}", path.display()))?;
+        serde_json::from_slice(&contents)
+            .with_context(|| format!("decode desktop slot {}", path.display()))
+            .map(Some)
+    }
+
+    fn write(&self, directory: &Path, slot: usize) -> Result<()> {
+        let path = Self::path(directory, OsStr::new(&slot.to_string()));
+        fs::write(&path, serde_json::to_vec(self)?)
+            .with_context(|| format!("write desktop slot {}", path.display()))
+    }
 }
 
 fn cargo_runner_config(executable: &Path) -> String {
@@ -390,129 +458,236 @@ fn cargo_runner_config(executable: &Path) -> String {
     )
 }
 
-/// Build and run the platform desktop E2E workflow.
-pub(crate) fn run() -> Result<()> {
+/// Build the release artifacts and run one hermetic desktop E2E suite.
+pub(crate) fn run(suite: DesktopE2eSuite, nextest_arguments: &[OsString]) -> Result<()> {
+    ensure!(
+        suite == DesktopE2eSuite::Journeys || nextest_arguments.is_empty(),
+        "only the journey suite accepts Nextest arguments"
+    );
     build::run(BuildTarget::Both)?;
 
     let sandbox = Sandbox::create()?;
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
-    let result = match std::env::consts::OS {
-        "linux" => run_linux(&sandbox),
-        "windows" => run_browser_phases(&sandbox, &sandbox.environment(&sandbox.dom_data)),
-        unsupported => bail!(
-            "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
+    let result = match (suite, std::env::consts::OS) {
+        (DesktopE2eSuite::Journeys, "linux") => run_journeys(&sandbox, nextest_arguments),
+        (DesktopE2eSuite::Native, "linux") => run_linux_session(
+            &sandbox,
+            sandbox.environment(&sandbox.native_data),
+            |environment| native::run(&sandbox, environment),
         ),
+        (DesktopE2eSuite::Browser, "linux" | "windows") => run_browser(&sandbox),
+        (suite, unsupported) => {
+            bail!("the {suite:?} desktop E2E suite is not configured for {unsupported}")
+        }
     };
-    let logs_result = preserve_logs(&sandbox);
+    let logs_result = preserve_logs(&sandbox, suite.log_directory_name());
     result?;
     logs_result
 }
 
-fn run_linux(sandbox: &Sandbox) -> Result<()> {
-    run_linux_session(
-        sandbox,
-        sandbox.environment(&sandbox.native_data),
-        |environment| {
-            native::run(sandbox, environment).and_then(|()| {
-                let mut dom_environment = environment.clone();
-                dom_environment.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
-                dom_environment.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
-                run_browser_phases(sandbox, &dom_environment)
-            })
-        },
-    )
+impl DesktopE2eSuite {
+    const fn log_directory_name(self) -> &'static str {
+        match self {
+            Self::Journeys => "desktop-e2e-journeys",
+            Self::Native => "desktop-e2e-native",
+            Self::Browser => "desktop-e2e-browser",
+        }
+    }
+}
+
+/// Runs the `WebDriver` journeys through Nextest, one desktop session per test slot.
+fn run_journeys(sandbox: &Sandbox, nextest_arguments: &[OsString]) -> Result<()> {
+    let mut environment = sandbox.environment(&sandbox.dom_data);
+    environment.set("NO_AT_BRIDGE", "1");
+    let slot_directory = sandbox.root.join("desktop-slots");
+    fs::create_dir_all(&slot_directory)
+        .with_context(|| format!("create desktop slots {}", slot_directory.display()))?;
+    let mut sessions = Vec::with_capacity(JOURNEY_SLOT_COUNT);
+    for slot in 0..JOURNEY_SLOT_COUNT {
+        let session = DesktopSession::start(sandbox, &format!("slot-{slot}"), environment.clone())?;
+        session.slot()?.write(&slot_directory, slot)?;
+        sessions.push(session);
+    }
+    environment.set(DESKTOP_SLOTS_ENVIRONMENT_VARIABLE, &slot_directory);
+
+    let host_environment = HostCargoEnvironment::capture()?;
+    let mut command = Command::new("cargo");
+    command
+        .args(["nextest", "run", "--config"])
+        .arg(&sandbox.cargo_runner_config)
+        .args([
+            "--locked",
+            "-p",
+            "gtl-desktop-e2e",
+            "--features",
+            "e2e",
+            "--test",
+            "viewer",
+            "--profile",
+            "e2e",
+            "--test-threads",
+        ])
+        .arg(JOURNEY_SLOT_COUNT.to_string())
+        .args(nextest_arguments)
+        .current_dir(".")
+        .stdin(Stdio::null());
+    seed_hostile_git_environment(&mut command, &sandbox.root);
+    environment.apply_cargo(&mut command, &host_environment);
+    let status = command.status().context("run desktop E2E journeys")?;
+    if !status.success() {
+        for session in &sessions {
+            session.capture_diagnostics(sandbox);
+        }
+        bail!("desktop E2E journeys failed");
+    }
+    Ok(())
 }
 
 fn run_linux_session<T>(
     sandbox: &Sandbox,
-    mut environment: IsolatedEnv,
+    environment: IsolatedEnv,
     operation: impl FnOnce(&IsolatedEnv) -> Result<T>,
 ) -> Result<T> {
-    let display = available_display(90..190)
-        .context("no free isolated X display number in the 90..190 range")?;
-    let display_value = format!(":{display}");
-    fs::write(sandbox.root.join("display"), &display_value)?;
-    environment.set("DISPLAY", &display_value);
-    environment.set("NO_AT_BRIDGE", "1");
-
-    let _xvfb = ManagedChild::spawn(
-        "Xvfb",
-        "Xvfb",
-        &[
-            &display_value,
-            "-screen",
-            "0",
-            "1280x900x24",
-            "-nolisten",
-            "tcp",
-            "-noreset",
-        ],
-        &environment,
-        &sandbox.root,
-        &sandbox.logs.join("xvfb.log"),
-    )?;
-    retry("Xvfb readiness", READY_TIMEOUT, || {
-        command_success(
-            &environment,
-            "xdpyinfo",
-            &["-display", &display_value],
-            &sandbox.root,
-        )
-    })?;
-
-    let (_dbus, _tray_watcher) = start_private_dbus(sandbox, &mut environment)?;
-
-    let _openbox = ManagedChild::spawn(
-        "Openbox",
-        "openbox",
-        &["--sm-disable"],
-        &environment,
-        &sandbox.root,
-        &sandbox.logs.join("openbox.log"),
-    )?;
-    retry("Openbox readiness", READY_TIMEOUT, || {
-        output(
-            &environment,
-            "xprop",
-            &["-root", "_NET_SUPPORTING_WM_CHECK"],
-            &sandbox.root,
-        )
-        .is_ok_and(|result| result.status.success())
-    })?;
-
-    let _tray = ManagedChild::spawn(
-        "stalonetray",
-        "stalonetray",
-        &[
-            "--geometry",
-            "8x1+0+0",
-            "--icon-size",
-            "24",
-            "--window-type",
-            "dock",
-            "--skip-taskbar",
-            "--no-shrink",
-        ],
-        &environment,
-        &sandbox.root,
-        &sandbox.logs.join("stalonetray.log"),
-    )?;
-    retry("stalonetray readiness", READY_TIMEOUT, || {
-        find_window(&environment, "^stalonetray$").is_ok()
-    })?;
-
-    let result = operation(&environment);
+    let session = DesktopSession::start(sandbox, "desktop", environment)?;
+    let result = operation(&session.environment);
     if result.is_err() {
-        capture_diagnostics(sandbox, &environment);
+        session.capture_diagnostics(sandbox);
     }
     result
 }
 
+/// One isolated X display with its window manager, tray, and private D-Bus session.
+///
+/// Fields drop in declaration order, which stops the processes in reverse start order.
+struct DesktopSession {
+    label: String,
+    environment: IsolatedEnv,
+    _tray: ManagedChild,
+    _openbox: ManagedChild,
+    _tray_watcher: StatusNotifierWatcher,
+    _dbus: ManagedChild,
+    _xvfb: ManagedChild,
+}
+
+impl DesktopSession {
+    fn start(sandbox: &Sandbox, label: &str, mut environment: IsolatedEnv) -> Result<Self> {
+        let display = available_display(90..190)
+            .context("no free isolated X display number in the 90..190 range")?;
+        let display_value = format!(":{display}");
+        environment.set("DISPLAY", &display_value);
+        environment.set("NO_AT_BRIDGE", "1");
+
+        let xvfb = ManagedChild::spawn(
+            "Xvfb",
+            "Xvfb",
+            &[
+                &display_value,
+                "-screen",
+                "0",
+                "1280x900x24",
+                "-nolisten",
+                "tcp",
+                "-noreset",
+            ],
+            &environment,
+            &sandbox.root,
+            &sandbox.logs.join(format!("{label}-xvfb.log")),
+        )?;
+        retry("Xvfb readiness", READY_TIMEOUT, || {
+            command_success(
+                &environment,
+                "xdpyinfo",
+                &["-display", &display_value],
+                &sandbox.root,
+            )
+        })?;
+
+        let (dbus, tray_watcher) = start_private_dbus(sandbox, label, &mut environment)?;
+
+        let openbox = ManagedChild::spawn(
+            "Openbox",
+            "openbox",
+            &["--sm-disable"],
+            &environment,
+            &sandbox.root,
+            &sandbox.logs.join(format!("{label}-openbox.log")),
+        )?;
+        retry("Openbox readiness", READY_TIMEOUT, || {
+            output(
+                &environment,
+                "xprop",
+                &["-root", "_NET_SUPPORTING_WM_CHECK"],
+                &sandbox.root,
+            )
+            .is_ok_and(|result| result.status.success())
+        })?;
+
+        let tray = ManagedChild::spawn(
+            "stalonetray",
+            "stalonetray",
+            &[
+                "--geometry",
+                "8x1+0+0",
+                "--icon-size",
+                "24",
+                "--window-type",
+                "dock",
+                "--skip-taskbar",
+                "--no-shrink",
+            ],
+            &environment,
+            &sandbox.root,
+            &sandbox.logs.join(format!("{label}-stalonetray.log")),
+        )?;
+        retry("stalonetray readiness", READY_TIMEOUT, || {
+            find_window(&environment, "^stalonetray$").is_ok()
+        })?;
+
+        Ok(Self {
+            label: label.to_owned(),
+            environment,
+            _tray: tray,
+            _openbox: openbox,
+            _tray_watcher: tray_watcher,
+            _dbus: dbus,
+            _xvfb: xvfb,
+        })
+    }
+
+    fn slot(&self) -> Result<DesktopSlot> {
+        let value = |name| {
+            self.environment
+                .get(name)
+                .and_then(OsStr::to_str)
+                .map(str::to_owned)
+                .with_context(|| format!("desktop session {} has no {name}", self.label))
+        };
+        Ok(DesktopSlot {
+            display: value("DISPLAY")?,
+            dbus_session_bus_address: value("DBUS_SESSION_BUS_ADDRESS")?,
+        })
+    }
+
+    fn capture_diagnostics(&self, sandbox: &Sandbox) {
+        for (name, program, args) in [
+            ("xprop-root.log", "xprop", vec!["-root"]),
+            ("xwininfo-root.log", "xwininfo", vec!["-root", "-tree"]),
+        ] {
+            if let Ok(result) = output(&self.environment, program, &args, &sandbox.root) {
+                let mut bytes = result.stdout;
+                bytes.extend_from_slice(&result.stderr);
+                let _ = fs::write(sandbox.logs.join(format!("{}-{name}", self.label)), bytes);
+            }
+        }
+    }
+}
+
 fn start_private_dbus(
     sandbox: &Sandbox,
+    label: &str,
     env: &mut IsolatedEnv,
 ) -> Result<(ManagedChild, StatusNotifierWatcher)> {
-    let address_file = sandbox.root.join("dbus-address");
+    let address_file = sandbox.root.join(format!("{label}-dbus-address"));
     let script = "printf '%s' \"$DBUS_SESSION_BUS_ADDRESS\" > \"$1\"; exec sleep 2147483647";
     let child = ManagedChild::spawn(
         "private D-Bus session",
@@ -527,7 +702,7 @@ fn start_private_dbus(
         ],
         env,
         &sandbox.root,
-        &sandbox.logs.join("dbus.log"),
+        &sandbox.logs.join(format!("{label}-dbus.log")),
     )?;
     retry("private D-Bus address", READY_TIMEOUT, || {
         fs::read_to_string(&address_file).is_ok_and(|value| !value.trim().is_empty())
@@ -539,40 +714,40 @@ fn start_private_dbus(
     Ok((child, watcher))
 }
 
-fn run_dom_phase(
+fn run_scroll_benchmark_phase(
     sandbox: &Sandbox,
     env: &IsolatedEnv,
     host_environment: &HostCargoEnvironment,
-    journey: DomJourney,
 ) -> Result<()> {
-    let log = sandbox.logs.join(journey.log_name());
+    let log = sandbox.logs.join("desktop-scroll-benchmark.log");
     let mut command = Command::new("cargo");
     command
         .arg("--config")
         .arg(&sandbox.cargo_runner_config)
-        .args(journey.arguments())
+        .args(SCROLL_BENCHMARK_TEST_ARGUMENTS)
         .current_dir(".");
     seed_hostile_git_environment(&mut command, &sandbox.root);
     env.apply_cargo(&mut command, host_environment);
-    let result = command.output().context("run Thirtyfour viewer E2E")?;
+    let result = command
+        .output()
+        .context("run the desktop scroll benchmark")?;
     ensure_captured_output_bound(
         &result,
-        DOM_PHASE_OUTPUT_BYTES_MAX,
-        "viewer Thirtyfour DOM phase",
+        SCROLL_BENCHMARK_OUTPUT_BYTES_MAX,
+        "desktop scroll benchmark",
     )?;
     let mut bytes = result.stdout;
     bytes.extend_from_slice(&result.stderr);
     fs::write(&log, &bytes)?;
     if !result.status.success() {
         std::io::stderr().write_all(&bytes)?;
-        bail!("viewer Thirtyfour DOM phase failed");
+        bail!("desktop scroll benchmark failed");
     }
     Ok(())
 }
 
-fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
+fn run_browser(sandbox: &Sandbox) -> Result<()> {
     let host_environment = HostCargoEnvironment::capture()?;
-    run_dom_phase(sandbox, env, &host_environment, DomJourney::Regression)?;
     let browser_environment = sandbox.environment(&sandbox.browser_data);
     let _server = start_server(
         sandbox,
@@ -647,54 +822,6 @@ fn ensure_captured_output_bound(output: &Output, maximum: usize, label: &str) ->
         "{label} output exceeded {maximum} bytes per stream"
     );
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug)]
-enum DomJourney {
-    Regression,
-    DesktopScrollBenchmark,
-}
-
-impl DomJourney {
-    const fn arguments(self) -> &'static [&'static str] {
-        match self {
-            Self::Regression => &[
-                "test",
-                "-p",
-                "gtl-desktop-e2e",
-                "--features",
-                "e2e",
-                "--test",
-                "viewer",
-                "--",
-                "--test-threads",
-                "1",
-            ],
-            Self::DesktopScrollBenchmark => &[
-                "test",
-                "-p",
-                "gtl-desktop-e2e",
-                "--features",
-                "e2e",
-                "--test",
-                "viewer",
-                "--",
-                "desktop_scroll_baseline::production_viewer_scrolls_large_diff_workloads",
-                "--exact",
-                "--ignored",
-                "--nocapture",
-                "--test-threads",
-                "1",
-            ],
-        }
-    }
-
-    const fn log_name(self) -> &'static str {
-        match self {
-            Self::Regression => "thirtyfour.log",
-            Self::DesktopScrollBenchmark => "desktop-scroll-benchmark.log",
-        }
-    }
 }
 
 fn start_server(
@@ -883,25 +1010,12 @@ fn retry_value<T>(
     bail!("timed out waiting for {label}")
 }
 
-fn capture_diagnostics(sandbox: &Sandbox, env: &IsolatedEnv) {
-    for (name, program, args) in [
-        ("xprop-root.log", "xprop", vec!["-root"]),
-        ("xwininfo-root.log", "xwininfo", vec!["-root", "-tree"]),
-    ] {
-        if let Ok(result) = output(env, program, &args, &sandbox.root) {
-            let mut bytes = result.stdout;
-            bytes.extend_from_slice(&result.stderr);
-            let _ = fs::write(sandbox.logs.join(name), bytes);
-        }
-    }
-}
-
-fn preserve_logs(sandbox: &Sandbox) -> Result<()> {
-    let destination = Path::new(".artifacts/logs/desktop-e2e");
+fn preserve_logs(sandbox: &Sandbox, directory_name: &str) -> Result<()> {
+    let destination = Path::new(".artifacts/logs").join(directory_name);
     if destination.exists() {
-        fs::remove_dir_all(destination).context("replace previous desktop E2E logs")?;
+        fs::remove_dir_all(&destination).context("replace previous desktop E2E logs")?;
     }
-    fs::create_dir_all(destination)?;
+    fs::create_dir_all(&destination)?;
     for entry in fs::read_dir(&sandbox.logs)? {
         let entry = entry?;
         if entry.file_type()?.is_file() {
@@ -1137,6 +1251,7 @@ mod tests {
         let command = runtime_command(
             Path::new("/repo/target/debug/deps/viewer"),
             &[OsString::from("--test-threads"), OsString::from("1")],
+            None,
         );
         let values = command.get_envs().collect::<Vec<_>>();
 

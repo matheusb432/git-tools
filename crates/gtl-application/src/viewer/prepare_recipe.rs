@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use gtl_models::failure::ErrorMeta;
+
 use super::{
     ViewerTabKind, ViewerTabState,
     complete_recipe_computation::{self, CompleteRecipeComputation, CompleteRecipeComputationOk},
@@ -40,11 +42,13 @@ pub enum PrepareRecipeOk {
 }
 
 /// Failure while probing or computing a recipe.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum PrepareRecipeError {
     #[error(transparent)]
+    #[meta(transparent)]
     Probe(#[from] probe_recipe::ProbeRecipeError),
     #[error(transparent)]
+    #[meta(transparent)]
     Compute(#[from] compute_recipe::ComputeRecipeError),
 }
 

@@ -147,7 +147,14 @@ impl StreamValidator {
             stream_viewer_rows_response::Event::FileFailed(failed) => {
                 Err(StreamValidationError::FileFailure {
                     file_id: failed.file_id.clone(),
-                    message: failed.message.clone(),
+                    message: failed
+                        .failure
+                        .clone()
+                        .and_then(gtl_wire::proto::failure::decode_failure)
+                        .map_or_else(
+                            || "unknown failure".to_owned(),
+                            |failure| failure.to_string(),
+                        ),
                 })
             }
         }

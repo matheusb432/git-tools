@@ -1,4 +1,4 @@
-use gtl_models::diffs::Commit;
+use gtl_models::{diffs::Commit, failure::ViewerFailure};
 use gtl_wire::{
     v1,
     viewer::{
@@ -9,17 +9,17 @@ use gtl_wire::{
 use prost::Message as _;
 use tonic::Status;
 
+use super::super::status::{invalid_request, status};
+
 pub(super) fn page(
     proto_identity: v1::ViewerViewIdentity,
     commits: &[Commit],
     cursor: Option<u32>,
 ) -> Result<v1::ListViewerCommitsResponse, Status> {
-    let cursor = usize::try_from(cursor.unwrap_or_default())
-        .map_err(|_| Status::invalid_argument("cursor is invalid"))?;
+    let cursor =
+        usize::try_from(cursor.unwrap_or_default()).map_err(|_| invalid_request("cursor"))?;
     if cursor > commits.len() {
-        return Err(Status::invalid_argument(
-            "cursor is outside the commit list",
-        ));
+        return Err(invalid_request("cursor"));
     }
     let mut response = v1::ListViewerCommitsResponse {
         identity: Some(proto_identity),
@@ -42,9 +42,7 @@ pub(super) fn page(
             projected.body_omitted = true;
             entry_bytes = commit_entry_bytes(&projected);
             if encoded_bytes + entry_bytes > VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES {
-                return Err(Status::resource_exhausted(
-                    "one commit summary exceeds the viewer page limit",
-                ));
+                return Err(status(&ViewerFailure::ResponseTooLarge));
             }
         }
         encoded_bytes += entry_bytes;
@@ -54,7 +52,7 @@ pub(super) fn page(
     response.next_cursor = (index < commits.len())
         .then(|| u32::try_from(index))
         .transpose()
-        .map_err(|_| Status::resource_exhausted("commit cursor exceeds u32"))?;
+        .map_err(|_| status(&ViewerFailure::ResponseTooLarge))?;
     Ok(response)
 }
 

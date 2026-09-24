@@ -13,7 +13,7 @@ pub async fn set_scale(
 pub fn set_scale(
     _scale: gtl_wire::window::ViewerScalePercent,
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
-    std::future::ready(Err(ViewerClientError::Unavailable))
+    std::future::ready(Err(ViewerClientError::Disconnected))
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
@@ -28,12 +28,12 @@ pub async fn perform(action: WindowAction) -> Result<(), ViewerClientError> {
 
 #[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
 pub fn state() -> impl std::future::Future<Output = Result<WindowState, ViewerClientError>> {
-    std::future::ready(Err(ViewerClientError::Unavailable))
+    std::future::ready(Err(ViewerClientError::Disconnected))
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
 pub fn perform(
     _action: WindowAction,
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
-    std::future::ready(Err(ViewerClientError::Unavailable))
+    std::future::ready(Err(ViewerClientError::Disconnected))
 }

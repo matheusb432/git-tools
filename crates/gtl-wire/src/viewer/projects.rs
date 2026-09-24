@@ -55,7 +55,7 @@ pub struct ProjectImportResult {
 pub enum ProjectImportOutcome {
     Created,
     Restored,
-    Failed(String),
+    Failed(gtl_models::failure::Failure),
 }
 
 #[nutype::nutype(
@@ -171,7 +171,7 @@ pub enum ViewerProjectBranchComparison {
         commits_ahead: gtl_models::git::CommitCount,
     },
     Unavailable {
-        reason: String,
+        failure: gtl_models::failure::Failure,
     },
 }
 
