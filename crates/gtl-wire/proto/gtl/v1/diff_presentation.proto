@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+
+message ViewerOpened {}
+message ViewerUnavailable {}
+
+message DiffPresentation {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    ViewerOpened viewer_opened = 2;
+    Artifact rendered = 3;
+    Empty empty = 4;
+    ViewerUnavailable viewer_unavailable = 5;
+  }
+}

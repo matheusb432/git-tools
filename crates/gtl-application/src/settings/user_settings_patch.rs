@@ -94,6 +94,8 @@ impl IntoIterator for ProjectSettingsUpdates {
 pub struct UserSettingsPatch {
     pub ui_scale_percent: UserSettingsFieldUpdate<gtl_models::settings::ViewerScalePercent>,
     pub reduce_motion: UserSettingsFieldUpdate<bool>,
+    pub language: UserSettingsFieldUpdate<gtl_models::settings::ViewerLanguage>,
+    pub date_format: UserSettingsFieldUpdate<gtl_models::settings::ViewerDateFormat>,
     /// Rejects the edit when the serialized document changed after it was loaded.
     pub expected_revision: Option<UserSettingsRevision>,
     pub diff_exclusions: Option<DiffExclusionsUpdate>,

@@ -18,9 +18,11 @@ use gtl_models::{
     diffs::CommitId,
     failure::{Classified, ErrorMeta, Failure, PushFailure, Resource},
     git::{BranchName, GitRefName, RemoteName, RemoteUrl},
-    paths::RepositoryRoot,
+    paths::{ProjectName, RepositoryRoot},
 };
-use gtl_wire::viewer::push::{ViewerPushId, ViewerPushPreview, ViewerPushStatus};
+use gtl_wire::viewer::push::{
+    ViewerPushCommandArgument, ViewerPushId, ViewerPushPreview, ViewerPushStatus,
+};
 
 const OPERATIONS_MAX: u32 = 32;
 const REVIEW_LIFETIME: Duration = Duration::from_mins(10);
@@ -31,6 +33,7 @@ pub struct PushRepository {
     pub branch: BranchName,
     pub remote: RemoteName,
     pub destination: GitRefName,
+    pub destination_branch: BranchName,
     pub url: RemoteUrl,
     pub head: CommitId,
     pub upstream: CommitId,
@@ -54,10 +57,16 @@ pub trait ViewerPushGit: Send + Sync {
     fn push_commit(&self, plan: &PushPlan) -> Result<(), PushError>;
 }
 
+/// Looks up a catalogue title without holding a database lock during Git work.
+pub trait ViewerPushProject: Send + Sync {
+    fn project_name(&self, path: &RepositoryRoot) -> anyhow::Result<Option<ProjectName>>;
+}
+
 /// Only application preparation constructs this immutable execution target.
 #[derive(Debug, Clone)]
 pub struct PushPlan {
     path: RepositoryRoot,
+    project: Option<ProjectName>,
     repository: PushRepository,
     commit: CommitId,
     count: u64,
@@ -72,18 +81,10 @@ impl PushPlan {
     /// These exact arguments are shared by the preview and the process adapter.
     #[must_use]
     pub fn arguments(&self) -> Vec<String> {
-        vec![
-            "-c".into(),
-            format!("remote.{}.mirror=false", self.repository.remote),
-            "push".into(),
-            "--atomic".into(),
-            "--porcelain".into(),
-            "--no-follow-tags".into(),
-            "--recurse-submodules=no".into(),
-            "--".into(),
-            self.repository.remote.to_string(),
-            format!("{}:{}", self.commit, self.repository.destination),
-        ]
+        self.push_arguments()
+            .into_iter()
+            .flat_map(|(_, values)| values)
+            .collect()
     }
 
     fn preview(&self) -> ViewerPushPreview {
@@ -91,15 +92,11 @@ impl PushPlan {
         arguments.extend(self.arguments());
         ViewerPushPreview {
             repository: self.path.clone(),
-            destination: format!(
-                "{}/{}",
-                self.repository.remote,
-                self.repository
-                    .destination
-                    .as_ref()
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(self.repository.destination.as_ref())
-            ),
+            project: self.project.clone(),
+            branch: self.repository.branch.clone(),
+            remote_branch: self.repository.destination_branch.clone(),
+            remote: self.repository.remote.clone(),
+            remote_url: self.repository.url.clone(),
             commit: self.commit.clone(),
             count: self.count,
             command: arguments
@@ -107,7 +104,107 @@ impl PushPlan {
                 .map(|value| shell_argument(value))
                 .collect::<Vec<_>>()
                 .join(" "),
+            command_arguments: [
+                ViewerPushCommandArgument::Git,
+                ViewerPushCommandArgument::WorkingDirectory,
+            ]
+            .into_iter()
+            .chain(
+                self.push_arguments()
+                    .into_iter()
+                    .map(|(argument, _)| argument),
+            )
+            .collect(),
         }
+    }
+
+    fn push_arguments(&self) -> Vec<(ViewerPushCommandArgument, Vec<String>)> {
+        let mut parts = vec![
+            (
+                ViewerPushCommandArgument::DisableMirroring,
+                vec![
+                    "-c".into(),
+                    format!("remote.{}.mirror=false", self.repository.remote),
+                ],
+            ),
+            (ViewerPushCommandArgument::Push, vec!["push".into()]),
+        ];
+        if PushProvider::from_url(&self.repository.url).supports_atomic() {
+            parts.push((ViewerPushCommandArgument::Atomic, vec!["--atomic".into()]));
+        }
+        parts.extend([
+            (
+                ViewerPushCommandArgument::Porcelain,
+                vec!["--porcelain".into()],
+            ),
+            (
+                ViewerPushCommandArgument::NoFollowTags,
+                vec!["--no-follow-tags".into()],
+            ),
+            (
+                ViewerPushCommandArgument::NoRecurseSubmodules,
+                vec!["--recurse-submodules=no".into()],
+            ),
+            (
+                ViewerPushCommandArgument::OptionSeparator,
+                vec!["--".into()],
+            ),
+            (
+                ViewerPushCommandArgument::Remote,
+                vec![self.repository.remote.to_string()],
+            ),
+            (
+                ViewerPushCommandArgument::CommitRef,
+                vec![format!("{}:{}", self.commit, self.repository.destination)],
+            ),
+        ]);
+        parts
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PushProvider {
+    GitHub,
+    GitLab,
+    AzureDevOps,
+    BitbucketCloud,
+    Codeberg,
+    Unknown,
+}
+
+impl PushProvider {
+    fn from_url(url: &RemoteUrl) -> Self {
+        let raw = url.as_ref();
+        let authority = if let Some((_, rest)) = raw.split_once("://") {
+            rest.split('/').next().unwrap_or("")
+        } else if let Some((_, rest)) = raw.rsplit_once('@') {
+            rest.split(':').next().unwrap_or("")
+        } else {
+            ""
+        };
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host)
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match host.as_str() {
+            "github.com" => Self::GitHub,
+            "gitlab.com" => Self::GitLab,
+            "bitbucket.org" => Self::BitbucketCloud,
+            "codeberg.org" => Self::Codeberg,
+            "dev.azure.com" | "ssh.dev.azure.com" | "visualstudio.com" => Self::AzureDevOps,
+            host if host.ends_with(".visualstudio.com") => Self::AzureDevOps,
+            _ => Self::Unknown,
+        }
+    }
+
+    const fn supports_atomic(self) -> bool {
+        matches!(
+            self,
+            Self::GitHub | Self::GitLab | Self::BitbucketCloud | Self::Codeberg
+        )
     }
 }
 
@@ -128,6 +225,9 @@ pub enum PushError {
     #[error(transparent)]
     #[meta(failure)]
     Refused(#[from] PushFailure),
+    #[error("could not identify the push project")]
+    #[meta(private(Internal))]
+    ProjectLookup(#[source] anyhow::Error),
     #[error("the push operation is no longer available")]
     #[meta(failure = Failure::Gone { resource: Resource::PushOperation })]
     NotFound,

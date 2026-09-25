@@ -1,9 +1,12 @@
 use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
-use crate::shared::ui::scroll_area::{
-    browser::use_scrollbars,
-    scrollbar::{ScrollbarPlacement, ScrollbarRails},
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::scroll_area::{
+        browser::use_scrollbars,
+        scrollbar::{ScrollbarPlacement, ScrollbarRails},
+    },
 };
 
 #[component]
@@ -23,7 +26,10 @@ pub(super) fn DiffRowsScrollArea(
                 id: id.clone(),
                 class: "diff-rows text-sm leading-5",
                 style,
-                aria_label: "{layout.as_str()} {density.as_str()} diff rows",
+                aria_label: t!(
+                    use_language(), "diff-rows-label", layout = layout.as_str(), density = density
+                    .as_str()
+                ),
                 "data-layout": layout.as_str(),
                 "data-density": density.as_str(),
                 onresize: move |_| scroll.measure(),

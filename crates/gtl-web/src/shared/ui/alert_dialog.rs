@@ -7,6 +7,7 @@ use super::{
     Button, ButtonSize, ButtonState, ButtonVariant, SectionedSurface, SectionedSurfaceBody,
     SectionedSurfaceFooter, SectionedSurfaceHeader, dialog::use_dialog,
 };
+use crate::shared::i18n::{t, use_language};
 
 const ALERT_DIALOG_CLOSE_DURATION: Duration = Duration::from_millis(120);
 
@@ -36,6 +37,22 @@ impl AlertDialogVariant {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AlertDialogSize {
+    #[default]
+    Standard,
+    Wide,
+}
+
+impl AlertDialogSize {
+    const fn value(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Wide => "wide",
+        }
+    }
+}
+
 #[component]
 pub(crate) fn AlertDialog(
     id: String,
@@ -45,12 +62,14 @@ pub(crate) fn AlertDialog(
     description: String,
     confirm_label: String,
     #[props(default)] variant: AlertDialogVariant,
+    #[props(default)] size: AlertDialogSize,
     #[props(default)] confirm_state: ButtonState,
     #[props(default)] cancel_disabled: bool,
     onconfirm: EventHandler<()>,
     oncancel: EventHandler<()>,
     children: Option<Element>,
 ) -> Element {
+    let language = use_language();
     let phase = use_dialog(&id, &trigger_id, open, ALERT_DIALOG_CLOSE_DURATION);
 
     let title_id = format!("{id}-title");
@@ -66,6 +85,7 @@ pub(crate) fn AlertDialog(
             aria_describedby: description_id.clone(),
             "data-state": phase().value(),
             "data-variant": variant.value(),
+            "data-size": size.value(),
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
                     event.prevent_default();
@@ -101,8 +121,8 @@ pub(crate) fn AlertDialog(
                         size: ButtonSize::IconTouch,
                         variant: ButtonVariant::Ghost,
                         state: if cancel_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
-                        aria_label: "Close dialog",
-                        title: "Close dialog",
+                        aria_label: t!(language, "dialog-close"),
+                        title: t!(language, "dialog-close"),
                         onclick: move |_| oncancel.call(()),
                         span { aria_hidden: "true",
                             X { size: 20 }
@@ -126,7 +146,7 @@ pub(crate) fn AlertDialog(
                         state: if cancel_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
                         "data-dialog-initial-focus": "true",
                         onclick: move |_| oncancel.call(()),
-                        "Cancel"
+                        {t!(language, "dialog-cancel")}
                     }
                     Button {
                         size: ButtonSize::Medium,

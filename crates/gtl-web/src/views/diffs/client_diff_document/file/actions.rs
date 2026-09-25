@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
 use lucide_dioxus::ExternalLink;
 
 use crate::shared::{
     browser,
+    i18n::{t, use_language},
     ui::{
         Button, ButtonSize, ButtonVariant, IconPopover, MENU_ACTION_HOST_CLASSES,
         MenuActionContent, popover::PopoverPlacement,
@@ -58,7 +60,7 @@ fn DiffPathCopyMenu(
             onclick: move |event: MouseEvent| event.stop_propagation(),
             IconPopover {
                 id: popover_id.clone(),
-                aria_label: "Copy file path",
+                aria_label: t!(use_language(), "copy-file-path"),
                 placement: PopoverPlacement::TriggerEnd,
                 icon: rsx! {
                     CopyMark {}
@@ -114,11 +116,11 @@ impl CopyState {
         }
     }
 
-    const fn message(self) -> &'static str {
+    fn message(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Idle => "",
-            Self::Copied => "Copied",
-            Self::Failed => "Failed",
+            Self::Idle => String::new(),
+            Self::Copied => t!(language, "copy-copied"),
+            Self::Failed => t!(language, "copy-failed"),
         }
     }
 }
@@ -130,17 +132,17 @@ enum DiffPathCopyKind {
 }
 
 impl DiffPathCopyKind {
-    const fn label(self) -> &'static str {
+    fn label(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Relative => "Relative path",
-            Self::Absolute => "Absolute path",
+            Self::Relative => t!(language, "copy-relative-path"),
+            Self::Absolute => t!(language, "copy-absolute-path"),
         }
     }
 
-    const fn aria_label(self) -> &'static str {
+    fn aria_label(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Relative => "Copy relative path",
-            Self::Absolute => "Copy absolute path",
+            Self::Relative => t!(language, "copy-relative-path-action"),
+            Self::Absolute => t!(language, "copy-absolute-path-action"),
         }
     }
 
@@ -179,6 +181,7 @@ fn DiffPathCopyAction(
     popover_id: String,
     artifact_enhancement: bool,
 ) -> Element {
+    let language = use_language();
     let feedback = use_copy_feedback(payload);
     let artifact_copy = artifact_enhancement.then_some(kind.artifact_value());
     let icon = match kind {
@@ -194,7 +197,7 @@ fn DiffPathCopyAction(
         button {
             class: MENU_ACTION_HOST_CLASSES,
             r#type: "button",
-            aria_label: kind.aria_label(),
+            aria_label: kind.aria_label(language),
             "data-gtl-copy": artifact_copy,
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
@@ -202,7 +205,7 @@ fn DiffPathCopyAction(
                 feedback.copy.call(());
                 browser::hide_popover(&popover_id);
             },
-            MenuActionContent { icon, label: kind.label(),
+            MenuActionContent { icon, label: kind.label(language),
                 CopyActionFeedback { state: (feedback.state)(), artifact_enhancement }
             }
         }
@@ -221,7 +224,7 @@ fn CopyActionFeedback(state: CopyState, artifact_enhancement: bool) -> Element {
             aria_atomic: "true",
             "data-state": state.value(),
             "data-gtl-copy-feedback": artifact_feedback,
-            {state.message()}
+            {state.message(use_language())}
         }
     }
 }
@@ -241,12 +244,13 @@ fn OpenInTextEditorAction(
     file_id: ViewerDiffFileId,
     onopen: EventHandler<ViewerDiffFileId>,
 ) -> Element {
+    let language = use_language();
     rsx! {
         Button {
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,
-            aria_label: "Open in text editor",
-            title: "Open in text editor",
+            aria_label: t!(language, "diff-open-in-editor"),
+            title: t!(language, "diff-open-in-editor"),
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();

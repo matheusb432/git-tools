@@ -1,15 +1,18 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
 use lucide_dioxus::{File, ListFilter};
 
 use super::{DiffWorkspaceContext, file_search::WorkspaceFileMatches, use_workspace_context};
-use crate::shared::ui::{
-    Button, ButtonSize, ButtonVariant, ScrollArea, SearchPanel, SearchPanelPlacement, TextInput,
-    TextInputLabelVisibility,
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::{
+        Button, ButtonSize, ButtonVariant, ScrollArea, SearchPanel, SearchPanelPlacement,
+        TextInput, TextInputLabelVisibility,
+    },
 };
 
 const PATH_FILTER_INPUT_ID: &str = "viewer-path-filter";
-const PATH_FILTER_LABEL: &str = "Filter files by path";
 
 pub(super) fn open_path_filter(mut workspace: DiffWorkspaceContext) {
     workspace.path_filter_open.set(true);
@@ -25,14 +28,15 @@ fn close_path_filter(mut workspace: DiffWorkspaceContext) {
 
 #[component]
 pub(super) fn PathFilterTrigger(artifact_view_id: Option<String>) -> Element {
+    let language = use_language();
     let workspace = use_workspace_context();
     rsx! {
         Button {
             class: "mobile:size-11",
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,
-            aria_label: PATH_FILTER_LABEL,
-            title: PATH_FILTER_LABEL,
+            aria_label: t!(language, "path-filter-label"),
+            title: t!(language, "path-filter-label"),
             aria_expanded: (workspace.path_filter_open)().to_string(),
             "data-gtl-action": artifact_view_id.map(|_| "open-path-filter"),
             onclick: move |_| open_path_filter(workspace),
@@ -48,6 +52,7 @@ pub(super) fn PathFilter(
     onnavigate: EventHandler<String>,
     artifact_view_id: Option<String>,
 ) -> Element {
+    let language = use_language();
     let mut workspace = use_workspace_context();
     let mut selected = use_signal(|| None::<ViewerDiffFileId>);
     let artifact = artifact_view_id.is_some();
@@ -95,7 +100,7 @@ pub(super) fn PathFilter(
         .map(|id| format!("{results_id}-{}", id.as_str()));
     rsx! {
         SearchPanel {
-            label: PATH_FILTER_LABEL,
+            label: t!(language, "path-filter-label"),
             placement: SearchPanelPlacement::WorkspaceCenter,
             hidden: !open,
             "data-gtl-path-filter": artifact.then_some(""),
@@ -104,10 +109,10 @@ pub(super) fn PathFilter(
             div { class: "p-2",
                 TextInput {
                     id: input_id,
-                    label: PATH_FILTER_LABEL,
+                    label: t!(language, "path-filter-label"),
                     label_visibility: TextInputLabelVisibility::Hidden,
                     value: (workspace.file_filter)(),
-                    placeholder: PATH_FILTER_LABEL,
+                    placeholder: t!(language, "path-filter-label"),
                     role: "combobox",
                     aria_autocomplete: "list",
                     aria_expanded: open.to_string(),
@@ -124,7 +129,7 @@ pub(super) fn PathFilter(
                 id: results_id.clone(),
                 class: "relative max-h-[min(24rem,50vh)] overflow-y-auto px-1 pb-1",
                 role: "listbox",
-                aria_label: "Matching files",
+                aria_label: t!(language, "path-filter-results"),
                 for file in files {
                     PathFilterOption {
                         key: "{file.id.as_str()}",
@@ -136,7 +141,10 @@ pub(super) fn PathFilter(
                     }
                 }
             }
-            if let Some(message) = (!artifact).then(|| matches_message(&matches)).flatten() {
+            if let Some(message) = (!artifact)
+                .then(|| matches_message(&matches, language))
+                .flatten()
+            {
                 p { class: "px-3 pb-3 text-xs text-ink-3", role: "status", "{message}" }
             }
             if artifact {
@@ -145,7 +153,7 @@ pub(super) fn PathFilter(
                     hidden: !files.is_empty(),
                     role: "status",
                     "data-gtl-path-filter-empty": "",
-                    "No files match"
+                    {t!(language, "path-filter-empty")}
                 }
             }
         }
@@ -203,13 +211,17 @@ fn selected_file<'a>(
     files.get(selected_file_index(files, selected))
 }
 
-fn matches_message(matches: &WorkspaceFileMatches) -> Option<&str> {
+fn matches_message(matches: &WorkspaceFileMatches, language: ViewerLanguage) -> Option<String> {
     match matches {
-        WorkspaceFileMatches::Ready(files) => files.is_empty().then_some("No files match"),
+        WorkspaceFileMatches::Ready(files) => {
+            files.is_empty().then(|| t!(language, "path-filter-empty"))
+        }
         #[cfg(feature = "desktop")]
-        WorkspaceFileMatches::Loading => Some("Searching files..."),
+        WorkspaceFileMatches::Loading => Some(t!(language, "path-filter-searching")),
         #[cfg(feature = "desktop")]
-        WorkspaceFileMatches::Error(message) => Some(message),
+        WorkspaceFileMatches::Error(error) => Some(
+            crate::shared::failure_notice::client_error_message(error, language),
+        ),
     }
 }
 

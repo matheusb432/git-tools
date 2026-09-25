@@ -1,15 +1,20 @@
-//! Presents typed failures: severity per reason, the English message, and verbatim detail.
+//! Presents typed failures: severity per reason, the localized message, and verbatim detail.
 //!
-//! The message comes from the failure's `Display`, rendered here from typed data rather than
-//! from server text. A localized catalog keyed by the same variants replaces it for i18n.
+//! Messages come from the catalog keyed by each reason, never from server text.
 
-use gtl_models::failure::{
-    Failure, ProjectFailure, PushFailure, RepositoryFailure, SettingsFailure, ViewerFailure,
+use dioxus::CapturedError;
+use gtl_models::{
+    failure::{
+        Failure, ProjectFailure, PushFailure, RepositoryFailure, SettingsFailure, ViewerFailure,
+    },
+    settings::ViewerLanguage,
 };
 
 use super::{
-    ui::{ToastHandle, ToastKind},
-    viewer_client::ViewerClientError,
+    failure_message::failure_message,
+    i18n::t,
+    ui::{ToastHandle, ToastKind, ToastText},
+    viewer_client::{ViewerClientError, captured_client_error},
 };
 
 /// How urgently the viewer reports `failure`.
@@ -116,6 +121,26 @@ pub(crate) const fn client_error_severity(error: &ViewerClientError) -> ToastKin
     }
 }
 
+/// Explains a viewer client error in `language`.
+pub(crate) fn client_error_message(error: &ViewerClientError, language: ViewerLanguage) -> String {
+    match error {
+        ViewerClientError::ProtocolMismatch => t!(language, "client-error-protocol-mismatch"),
+        ViewerClientError::Disconnected => t!(language, "client-error-disconnected"),
+        ViewerClientError::InvalidMessage => t!(language, "client-error-invalid-message"),
+        ViewerClientError::StreamClosed => t!(language, "client-error-stream-closed"),
+        ViewerClientError::Desktop { .. } => t!(language, "client-error-desktop"),
+        ViewerClientError::Failed(failure) => failure_message(failure, language),
+    }
+}
+
+/// Explains an action error that captured a viewer client error in `language`.
+pub(crate) fn captured_error_message(error: &CapturedError, language: ViewerLanguage) -> String {
+    captured_client_error(error).map_or_else(
+        || error.to_string(),
+        |error| client_error_message(error, language),
+    )
+}
+
 /// Whether the settings file itself is invalid, which routes the viewer to settings recovery.
 pub(crate) const fn is_invalid_settings(error: &ViewerClientError) -> bool {
     matches!(
@@ -127,9 +152,10 @@ pub(crate) const fn is_invalid_settings(error: &ViewerClientError) -> bool {
 impl ToastHandle {
     /// Shows `failure` with its severity, message, and any verbatim diagnostic.
     pub(crate) fn failure(self, failure: &Failure) {
+        let message = failure.clone();
         self.show(
             failure_severity(failure),
-            failure.to_string(),
+            ToastText::localized(move |language| failure_message(&message, language)),
             failure
                 .diagnostic()
                 .filter(|diagnostic| !diagnostic.is_empty())
@@ -139,9 +165,10 @@ impl ToastHandle {
 
     /// Shows a viewer client error with its severity, message, and any verbatim diagnostic.
     pub(crate) fn client_error(self, error: &ViewerClientError) {
+        let message = error.clone();
         self.show(
             client_error_severity(error),
-            error.to_string(),
+            ToastText::localized(move |language| client_error_message(&message, language)),
             error
                 .diagnostic()
                 .filter(|diagnostic| !diagnostic.is_empty())

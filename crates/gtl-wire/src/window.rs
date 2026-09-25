@@ -9,6 +9,19 @@ pub enum WindowAction {
     Close,
 }
 
+/// Tray menu labels in the viewer's display language.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrayLabels {
+    pub show: String,
+    pub quit: String,
+}
+
+/// Opens the native folder picker with a title in the viewer's display language.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PickProjectFolder {
+    pub title: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WindowState {
     pub custom_titlebar: bool,

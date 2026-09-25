@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package gtl.v1;
 
-import "gtl/v1/repository.proto";
+import "gtl/v1/repository_status.proto";
+import "gtl/v1/repository_sync.proto";
 
 service ProjectService {
   // Creates one active managed project and returns its ID.

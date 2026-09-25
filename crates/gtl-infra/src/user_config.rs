@@ -531,6 +531,10 @@ excluded_from_push_all = true
                 gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
             ),
             reduce_motion: UserSettingsFieldUpdate::Update(true),
+            language: UserSettingsFieldUpdate::Update(gtl_models::settings::ViewerLanguage::PtBr),
+            date_format: UserSettingsFieldUpdate::Update(
+                gtl_models::settings::ViewerDateFormat::Relative,
+            ),
             expected_revision: None,
             diff_exclusions: None,
             focus_window_on_diff: UserSettingsFieldUpdate::Update(false),
@@ -568,6 +572,14 @@ excluded_from_push_all = true
         let settings = store.load().unwrap();
         assert_eq!(settings.accessibility().ui_scale_percent.into_inner(), 200);
         assert!(settings.accessibility().reduce_motion);
+        assert_eq!(
+            settings.language(),
+            gtl_models::settings::ViewerLanguage::PtBr
+        );
+        assert_eq!(
+            settings.date_format(),
+            gtl_models::settings::ViewerDateFormat::Relative
+        );
         assert_eq!(settings.theme(), None);
         assert_eq!(
             settings.viewer_render_options(),
@@ -646,6 +658,92 @@ excluded_from_push_all = true
             "ui_scale_percent = -100",
             "ui_scale_percent = '200'",
             "reduce_motion = 'true'",
+        ] {
+            std::fs::write(&path, invalid).unwrap();
+            assert!(
+                TomlSettingsStore::new(Some(path.clone())).load().is_err(),
+                "accepted {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn language_persists_its_tag_clears_to_english_and_rejects_unknown_tags() {
+        use gtl_models::settings::ViewerLanguage;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(store.load().unwrap().language(), ViewerLanguage::EnUs);
+        store
+            .edit(UserSettingsPatch {
+                language: UserSettingsFieldUpdate::Update(ViewerLanguage::PtBr),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("language = \"pt-BR\"")
+        );
+        let reloaded = TomlSettingsStore::new(Some(path.clone())).load().unwrap();
+        assert_eq!(reloaded.language(), ViewerLanguage::PtBr);
+        store
+            .edit(UserSettingsPatch {
+                language: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(store.load().unwrap().language(), ViewerLanguage::EnUs);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# retained\ntheme = \"dark\"\n"
+        );
+        for invalid in ["language = 'pt-br'", "language = 'fr'", "language = 1"] {
+            std::fs::write(&path, invalid).unwrap();
+            assert!(
+                TomlSettingsStore::new(Some(path.clone())).load().is_err(),
+                "accepted {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn date_format_persists_its_token_clears_to_iso_and_rejects_unknown_tokens() {
+        use gtl_models::settings::ViewerDateFormat;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(store.load().unwrap().date_format(), ViewerDateFormat::Iso);
+        store
+            .edit(UserSettingsPatch {
+                date_format: UserSettingsFieldUpdate::Update(ViewerDateFormat::DayFirst),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("date_format = \"day_first\"")
+        );
+        let reloaded = TomlSettingsStore::new(Some(path.clone())).load().unwrap();
+        assert_eq!(reloaded.date_format(), ViewerDateFormat::DayFirst);
+        store
+            .edit(UserSettingsPatch {
+                date_format: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(store.load().unwrap().date_format(), ViewerDateFormat::Iso);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# retained\ntheme = \"dark\"\n"
+        );
+        for invalid in [
+            "date_format = 'Relative'",
+            "date_format = 'locale'",
+            "date_format = 1",
         ] {
             std::fs::write(&path, invalid).unwrap();
             assert!(

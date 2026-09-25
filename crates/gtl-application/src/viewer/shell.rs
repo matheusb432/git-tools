@@ -5,7 +5,8 @@ use std::sync::Arc;
 use gtl_models::{
     failure::ErrorMeta,
     paths::RepositoryRelativePath,
-    viewer::{self, RenderOptions, Theme, ViewerKeybindings},
+    settings::UserSettings,
+    viewer::{self, RenderOptions},
 };
 use gtl_wire::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerDiffFileId, ViewerFeedback,
@@ -33,13 +34,10 @@ pub enum ProjectViewerShellError {
 /// Projects one short-lived snapshot of the viewer shell.
 pub fn project(
     session: &mut ViewerSession,
-    options: RenderOptions,
-    theme: Theme,
-    keybindings: ViewerKeybindings,
-    sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    accessibility: gtl_models::settings::ViewerAccessibility,
+    settings: &UserSettings,
     feedback: Option<ViewerFeedback>,
 ) -> Result<ViewerShell, ProjectViewerShellError> {
+    let options = settings.viewer_render_options();
     let tabs = session
         .tabs()
         .map(|entry| ViewerTab {
@@ -92,11 +90,13 @@ pub fn project(
         tabs,
         active,
         preferences: ViewerPreferences {
-            accessibility,
-            sidebars,
-            theme: project_theme(theme),
+            accessibility: settings.accessibility(),
+            language: settings.language(),
+            date_format: settings.date_format(),
+            sidebars: settings.sidebar_visibility(),
+            theme: project_theme(settings.theme().unwrap_or_default()),
             render_options: project_render_options(options),
-            keybindings,
+            keybindings: settings.viewer_keybindings(),
         },
         feedback,
     })

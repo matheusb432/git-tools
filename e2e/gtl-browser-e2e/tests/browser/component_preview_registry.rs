@@ -3,7 +3,7 @@ use std::env;
 use anyhow::{Context as _, ensure};
 use playwright_rs::{
     expect,
-    protocol::{AriaRole, GetByRoleOptions, GotoOptions, Page, SelectOption, WaitUntil},
+    protocol::{AriaRole, GetByRoleOptions, GotoOptions, Locator, Page, SelectOption, WaitUntil},
 };
 
 use crate::{harness::browser::operation, support};
@@ -261,22 +261,11 @@ async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Res
         .to_have_attribute("data-variant", "alert")
         .await
         .context("use the warning treatment for the push confirmation")?;
-    expect(dialog.get_by_text("origin/main", true))
-        .to_be_visible()
-        .await
-        .context("show the immutable push destination")?;
-    expect(dialog.get_by_text(
-        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
-        true,
-    ))
-    .to_be_visible()
-    .await
-    .context("show the exact push command")?;
-
     expect(page.locator(".alert-dialog-actions button:first-child"))
         .to_be_focused()
         .await
         .context("focus the safe action first")?;
+    assert_push_command_details(page, &dialog).await?;
     page.keyboard().press("Escape", None).await?;
     expect(dialog)
         .to_be_hidden()
@@ -325,6 +314,48 @@ async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Res
         .to_be_visible()
         .await
         .context("keep the pending dialog open when cancellation is disabled")
+}
+
+async fn assert_push_command_details(page: &Page, dialog: &Locator) -> anyhow::Result<()> {
+    expect(dialog.get_by_text("git@github.com:example/git-tools.git", false))
+        .to_be_visible()
+        .await
+        .context("show the push remote URL")?;
+    expect(dialog.get_by_text(
+        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
+        true,
+    ))
+    .to_be_visible()
+    .await
+    .context("show the exact push command")?;
+    dialog
+        .get_by_role(
+            AriaRole::Button,
+            Some(
+                GetByRoleOptions::default()
+                    .name("Explain command")
+                    .exact(true),
+            ),
+        )
+        .hover(None)
+        .await
+        .context("inspect the command explanation")?;
+    expect(page.locator("#viewer-push-command-help:popover-open"))
+        .to_be_visible()
+        .await
+        .context("show command help inside the modal dialog")?;
+    dialog
+        .get_by_role(
+            AriaRole::Heading,
+            Some(
+                GetByRoleOptions::default()
+                    .name("Push 2 commits?")
+                    .exact(true),
+            ),
+        )
+        .hover(None)
+        .await?;
+    Ok(())
 }
 
 async fn navigate(page: &Page, url: &str, label: &str) -> anyhow::Result<()> {

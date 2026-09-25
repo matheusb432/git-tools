@@ -6,12 +6,17 @@ use super::ExtensionFilter;
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
     entities::diffs::viewer_server,
-    shared::ui::{Button, ButtonSize, ButtonVariant, ExtensionExclusionsAction},
+    shared::{
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
+        ui::{Button, ButtonSize, ButtonVariant, ExtensionExclusionsAction},
+    },
     views::diffs::file_filter_changes::FileFilterController,
 };
 
 #[component]
 pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters() -> Element {
+    let language = use_language();
     let workspace = super::super::use_workspace_context();
     let context = use_context::<ViewerContext>();
     let controller = use_context::<FileFilterController>();
@@ -75,7 +80,7 @@ pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters() -> Element {
             onrestore: move |()| controller.submit(tab_id, FieldUpdate::Clear, defaults.clone()),
             if let Some(error) = error {
                 div { class: "extension-filter-error", role: "alert",
-                    p { "{error}" }
+                    p { {client_error_message(&error, language)} }
                     Button {
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Ghost,
@@ -83,7 +88,7 @@ pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters() -> Element {
                             controller.retry(tab_id);
                             filters.restart();
                         },
-                        "Retry"
+                        {t!(language, "action-retry")}
                     }
                 }
             }

@@ -33,9 +33,13 @@ pub(crate) use diff_history::history_navigation;
 use gtl_wire::viewer::ViewerRecipeKind;
 pub(crate) use rows::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
 #[cfg(feature = "desktop")]
-pub(crate) const fn recipe_kind_label(kind: ViewerRecipeKind) -> &'static str {
+pub(crate) fn recipe_kind_label(
+    kind: ViewerRecipeKind,
+    language: gtl_models::settings::ViewerLanguage,
+) -> String {
+    use crate::shared::i18n::t;
     match kind {
-        ViewerRecipeKind::Diff => "Diff",
-        ViewerRecipeKind::MergeDiff => "Merge diff",
+        ViewerRecipeKind::Diff => t!(language, "history-kind-diff"),
+        ViewerRecipeKind::MergeDiff => t!(language, "history-kind-merge-diff"),
     }
 }

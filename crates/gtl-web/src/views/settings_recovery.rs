@@ -1,16 +1,20 @@
 use dioxus::{core::spawn_forever, prelude::*};
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ResetSettings, ViewerSettingsRecovery};
 
 use crate::{
     app::application_layout::ViewerContext,
     entities::diffs::viewer_server,
     shared::{
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
         ui::{Button, ButtonVariant, PageNotice, ScrollArea, ToastHandle, use_toast},
         viewer_client::ViewerClientError,
     },
 };
 
 fn use_settings_reset(onretry: EventHandler<()>) -> (ReadSignal<bool>, Callback<String>) {
+    let language = use_language();
     let mut pending = use_signal(|| false);
     let toast = use_toast();
     let viewer = use_context::<ViewerContext>();
@@ -25,6 +29,7 @@ fn use_settings_reset(onretry: EventHandler<()>) -> (ReadSignal<bool>, Callback<
             onretry,
             viewer,
             toast,
+            language,
         ));
     });
     (pending.into(), reset)
@@ -36,6 +41,7 @@ async fn reset_settings(
     onretry: EventHandler<()>,
     viewer: ViewerContext,
     toast: ToastHandle,
+    language: ViewerLanguage,
 ) {
     let result = viewer_server::reset_settings(request).await;
     let mounted = if let Ok(mut pending) = pending.try_write() {
@@ -51,7 +57,11 @@ async fn reset_settings(
             return;
         }
     };
-    toast.ok(format!("Settings reset. Backup: {}", result.backup_path));
+    toast.ok(t!(
+        language,
+        "settings-recovery-reset-done",
+        path = result.backup_path
+    ));
     if mounted {
         onretry.call(());
     } else {
@@ -85,20 +95,21 @@ fn SettingsRecoveryNotice(
     onreset: EventHandler<String>,
     onretry: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     rsx! {
         ScrollArea { class: "h-full",
             PageNotice {
                 class: "min-h-full px-4 py-6",
                 role: "alert",
-                aria_label: "Settings recovery",
-                title: "User settings are invalid",
-                message: "Repair the file and retry, or restore defaults. Reset saves the original file as config.yyyymmdd-hhmmss-backup.toml before replacing it. Backup timestamps use UTC.",
+                aria_label: t!(language, "settings-recovery-label"),
+                title: t!(language, "settings-recovery-title"),
+                message: t!(language, "settings-recovery-message"),
                 match &recovery {
                     None => rsx! {
-                        p { role: "status", "Loading settings details..." }
+                        p { role: "status", {t!(language, "settings-recovery-loading")} }
                     },
                     Some(Err(error)) => rsx! {
-                        p { "{error}" }
+                        p { {client_error_message(error, language)} }
                     },
                     Some(Ok(recovery)) => rsx! {
                         p { class: "settings-recovery-path mt-4 font-mono", "{recovery.configuration_path}" }
@@ -113,13 +124,13 @@ fn SettingsRecoveryNotice(
                                     move |_| onreset.call(revision.clone())
                                 },
                                 if pending {
-                                    "Backing up and resetting..."
+                                    {t!(language, "settings-recovery-resetting")}
                                 } else {
-                                    "Back up and reset settings"
+                                    {t!(language, "settings-recovery-reset")}
                                 }
                             }
                         } else {
-                            p { class: "mt-3 text-ink-2", "The settings file is valid now. Retry to continue." }
+                            p { class: "mt-3 text-ink-2", {t!(language, "settings-recovery-valid")} }
                         }
                     },
                 }
@@ -128,7 +139,7 @@ fn SettingsRecoveryNotice(
                     variant: ButtonVariant::Outline,
                     disabled: pending,
                     onclick: move |_| onretry.call(()),
-                    "Retry"
+                    {t!(language, "action-retry")}
                 }
             }
         }

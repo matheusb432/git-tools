@@ -1,11 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows, ViewerFileSummary};
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
-    shared::ui::{Button, ButtonSize, ButtonVariant, ScrollArea, scroll_area::ScrollAreaVariant},
+    shared::{
+        i18n::{t, use_language_provider},
+        ui::{Button, ButtonSize, ButtonVariant, ScrollArea, scroll_area::ScrollAreaVariant},
+    },
     views::diffs::ArtifactDiffWorkspace,
 };
 
@@ -97,10 +101,14 @@ pub enum StaticArtifactViewError {
     Missing { file: String },
 }
 
+/// Renders the artifact body with its copy in `language`.
 #[must_use]
-pub fn render_static_artifact_body(views: Vec<StaticArtifactView>) -> String {
+pub fn render_static_artifact_body(
+    views: Vec<StaticArtifactView>,
+    language: ViewerLanguage,
+) -> String {
     dioxus_ssr::render_element(rsx! {
-        StaticArtifactDocument { views }
+        StaticArtifactDocument { views, language }
     })
 }
 
@@ -110,11 +118,13 @@ pub const fn static_artifact_enhancement_script() -> &'static str {
 }
 
 #[component]
-fn StaticArtifactDocument(views: Vec<StaticArtifactView>) -> Element {
+fn StaticArtifactDocument(views: Vec<StaticArtifactView>, language: ViewerLanguage) -> Element {
+    let provided_language = use_signal(|| language);
+    use_language_provider(provided_language.into());
     if views.is_empty() {
         return rsx! {
             main { class: "artifact-empty h-screen px-5",
-                h1 { class: "font-semibold", "No diffs in this artifact" }
+                h1 { class: "font-semibold", {t!(language, "artifact-empty")} }
             }
         };
     }
@@ -124,12 +134,19 @@ fn StaticArtifactDocument(views: Vec<StaticArtifactView>) -> Element {
         main {
             class: "viewer-shell h-screen min-h-0",
             "data-gtl-artifact-ready": "true",
+            // The enhancer writes these labels, so feedback follows the artifact's language.
+            "data-gtl-label-expand-all": t!(language, "titlebar-expand-all"),
+            "data-gtl-label-collapse-all": t!(language, "titlebar-collapse-all"),
+            "data-gtl-label-copied": t!(language, "copy-copied"),
+            "data-gtl-label-copy-failed": t!(language, "copy-failed"),
+            "data-gtl-label-copied-context": t!(language, "copy-context"),
+            "data-gtl-label-copied-context-lines": t!(language, "copy-context-lines", lines = "{lines}"),
             if has_tabs {
                 ScrollArea {
                     variant: ScrollAreaVariant::Rail,
                     class: "flex-none border-b border-line bg-surface-2",
                     role: "tablist",
-                    aria_label: "Subrepo diffs",
+                    aria_label: t!(language, "artifact-subrepo-diffs"),
                     div { class: "artifact-tabs gap-1.5 px-3 py-2.5",
                         for (index, artifact) in views.iter().enumerate() {
                             {
@@ -255,7 +272,7 @@ mod tests {
                 },
             ],
         )?;
-        let html = render_static_artifact_body(vec![artifact]);
+        let html = render_static_artifact_body(vec![artifact], ViewerLanguage::EnUs);
 
         let first_position = html
             .find("first-marker")

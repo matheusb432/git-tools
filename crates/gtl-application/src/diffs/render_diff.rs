@@ -148,6 +148,7 @@ pub fn execute(
     let settings = app_settings.load()?;
     let render_options = settings.viewer_render_options();
     let theme = settings.theme();
+    let language = settings.language();
     let top = git.top_level(&cwd)?;
     let store_root = super::artifacts::root(top.as_ref());
     let excluded = settings
@@ -163,6 +164,7 @@ pub fn execute(
                 range,
                 render_options,
                 theme,
+                language,
                 excluded_extensions: excluded.clone(),
             },
         )?
@@ -198,7 +200,7 @@ pub fn execute(
         });
     }
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, render_options, theme)?;
+    let html = renderer.build_html(&view, render_options, theme, language)?;
 
     let meta = ArtifactMeta {
         repo_root: top.clone(),
@@ -214,6 +216,7 @@ pub fn execute(
         title: view.title.clone(),
         render_options,
         theme,
+        language,
         excluded_extensions: excluded.clone(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -298,6 +301,7 @@ mod tests {
             },
             render_options: RenderOptions::DEFAULT,
             theme: None,
+            language: gtl_models::settings::ViewerLanguage::default(),
             excluded_extensions: ExcludedExtensions::default(),
         }
     }

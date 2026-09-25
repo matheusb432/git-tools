@@ -21,6 +21,8 @@ use crate::{process, task::Step};
 
 const DIST_DIRECTORY: &str = "crates/gtl-web/dist";
 const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
+const CANDIDATE_DIRECTORY: &str = "crates/gtl-web/dist/.candidate";
+const CANDIDATE_PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/.candidate/public";
 const SOURCE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.source-fingerprint";
 const BUNDLE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.bundle-fingerprint";
 const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
@@ -93,6 +95,8 @@ const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
     "--package",
     "gtl-web",
     "--locked",
+    "--out-dir",
+    CANDIDATE_DIRECTORY,
 ];
 const SERVE_ARGUMENTS: &[&str] = &[
     "serve",
@@ -351,9 +355,9 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
         inputs_after == inputs_before,
         "Dioxus Web inputs changed during asset generation or bundling; retry the build"
     );
-    verify_bundle_files(root)?;
+    verify_bundle_files(&root.join(CANDIDATE_PUBLIC_DIRECTORY))?;
+    let bundle = publish_candidate_bundle(root)?;
     let fingerprint = source_fingerprint(root)?;
-    let bundle = bundle_fingerprint(root)?;
     write_fingerprint(root, SOURCE_FINGERPRINT_PATH, &fingerprint)?;
     write_fingerprint(root, BUNDLE_FINGERPRINT_PATH, &bundle)?;
     verify_staged_bundle(root)
@@ -388,7 +392,8 @@ pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
 }
 
 pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
-    verify_bundle_files(root)?;
+    let public = root.join(PUBLIC_DIRECTORY);
+    verify_bundle_files(&public)?;
     let marker_path = root.join(SOURCE_FINGERPRINT_PATH);
     let recorded = fs::read_to_string(&marker_path)
         .with_context(|| format!("read {}", marker_path.display()))?;
@@ -401,21 +406,47 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
     let recorded_bundle = fs::read_to_string(&bundle_marker)
         .with_context(|| format!("read {}", bundle_marker.display()))?;
     ensure!(
-        recorded_bundle.trim() == bundle_fingerprint(root)?,
+        recorded_bundle.trim() == bundle_fingerprint(&public)?,
         "staged Dioxus Web assets changed after bundling; run `just web build`"
     );
     Ok(())
 }
 
+/// Publishes the candidate bundle as the staged public directory and returns its fingerprint.
+///
+/// Cargo tracks the viewer's embedded frontend by modification time, so an identical candidate
+/// leaves the staged files untouched to keep the desktop build fresh.
+fn publish_candidate_bundle(root: &Path) -> Result<String> {
+    let public = root.join(PUBLIC_DIRECTORY);
+    let candidate = root.join(CANDIDATE_PUBLIC_DIRECTORY);
+    let candidate_fingerprint = bundle_fingerprint(&candidate)?;
+    // An unreadable staged bundle is replaced like a changed one.
+    let staged_fingerprint = public
+        .is_dir()
+        .then(|| bundle_fingerprint(&public).ok())
+        .flatten();
+    if staged_fingerprint.as_ref() != Some(&candidate_fingerprint) {
+        if public.exists() {
+            fs::remove_dir_all(&public).with_context(|| format!("remove {}", public.display()))?;
+        }
+        fs::rename(&candidate, &public)
+            .with_context(|| format!("move {} to {}", candidate.display(), public.display()))?;
+    }
+    let candidate_directory = root.join(CANDIDATE_DIRECTORY);
+    fs::remove_dir_all(&candidate_directory)
+        .with_context(|| format!("remove {}", candidate_directory.display()))?;
+    Ok(candidate_fingerprint)
+}
+
 fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
-    let dist = root.join(DIST_DIRECTORY);
-    let web_crate = root.join("crates/gtl-web");
+    let candidate = root.join(CANDIDATE_DIRECTORY);
     ensure!(
-        dist.starts_with(&web_crate),
-        "Dioxus staging path must remain inside crates/gtl-web"
+        candidate.starts_with(root.join(DIST_DIRECTORY)),
+        "Dioxus candidate path must remain inside crates/gtl-web/dist"
     );
-    if dist.exists() {
-        fs::remove_dir_all(&dist).with_context(|| format!("remove {}", dist.display()))?;
+    if candidate.exists() {
+        fs::remove_dir_all(&candidate)
+            .with_context(|| format!("remove {}", candidate.display()))?;
     }
 
     let internal = target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY);
@@ -430,15 +461,14 @@ fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_bundle_files(root: &Path) -> Result<()> {
-    let public = root.join(PUBLIC_DIRECTORY);
+fn verify_bundle_files(public: &Path) -> Result<()> {
     let index = public.join("index.html");
     ensure!(
         index.is_file() && index.metadata()?.len() > 0,
         "staged Dioxus Web bundle is missing a non-empty {}",
         index.display()
     );
-    let files = collect_tree_files(&public)?;
+    let files = collect_tree_files(public)?;
     verify_bounded_bundle_files(&files, BUNDLE_FILE_BYTES_MAX, BUNDLE_BYTES_MAX)?;
     for extension in ["css", "js", "wasm"] {
         ensure!(
@@ -578,14 +608,13 @@ fn fingerprint_sources(root: &Path, include_generated: bool) -> Result<String> {
     Ok(fingerprint)
 }
 
-fn bundle_fingerprint(root: &Path) -> Result<String> {
-    let public = root.join(PUBLIC_DIRECTORY);
-    let mut files = collect_tree_files(&public)?;
+fn bundle_fingerprint(public: &Path) -> Result<String> {
+    let mut files = collect_tree_files(public)?;
     files.sort();
     let mut digest = Sha256::new();
     for path in files {
         let relative = path
-            .strip_prefix(&public)
+            .strip_prefix(public)
             .with_context(|| format!("staged asset escaped public root: {}", path.display()))?;
         digest.update(relative.to_string_lossy().as_bytes());
         digest.update([0]);
@@ -682,14 +711,12 @@ mod tests {
         }
     }
 
-    fn stage_fresh_bundle(root: &Path) {
-        let public = root.join(PUBLIC_DIRECTORY);
-        fs::create_dir_all(&public).unwrap();
+    fn write_bundle(public: &Path, application_script: &str) {
         for (name, contents) in [
             ("index.html", "<html></html>"),
             ("assets/app-icon-dxhone.svg", "icon"),
             ("assets/focus-trap-dxhone.js", "focus"),
-            ("assets/gtl-web-dxhone.js", "app"),
+            (application_script, "app"),
             ("assets/gtl-web_bg-dxhone.wasm", "wasm"),
             ("assets/tailwind-dxhone.css", "body{}"),
         ] {
@@ -697,8 +724,13 @@ mod tests {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, contents).unwrap();
         }
+    }
+
+    fn stage_fresh_bundle(root: &Path) {
+        let public = root.join(PUBLIC_DIRECTORY);
+        write_bundle(&public, "assets/gtl-web-dxhone.js");
         let fingerprint = source_fingerprint(root).unwrap();
-        let bundle = bundle_fingerprint(root).unwrap();
+        let bundle = bundle_fingerprint(&public).unwrap();
         write_fingerprint(root, SOURCE_FINGERPRINT_PATH, &fingerprint).unwrap();
         write_fingerprint(root, BUNDLE_FINGERPRINT_PATH, &bundle).unwrap();
     }
@@ -711,7 +743,7 @@ mod tests {
         fs::create_dir_all(&public).unwrap();
         fs::write(public.join("index.html"), "<html></html>").unwrap();
 
-        let error = verify_bundle_files(root.path()).unwrap_err().to_string();
+        let error = verify_bundle_files(&public).unwrap_err().to_string();
 
         assert!(error.contains("has no non-empty .css asset"), "{error}");
     }
@@ -772,7 +804,9 @@ mod tests {
         )
         .unwrap();
 
-        let error = verify_bundle_files(root.path()).unwrap_err().to_string();
+        let error = verify_bundle_files(&root.path().join(PUBLIC_DIRECTORY))
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("unexpected or stale assets"), "{error}");
     }
@@ -800,23 +834,71 @@ mod tests {
     }
 
     #[test]
+    fn identical_candidate_keeps_the_staged_bundle_files() {
+        let root = tempfile::tempdir().unwrap();
+        let public = root.path().join(PUBLIC_DIRECTORY);
+        write_bundle(&public, "assets/gtl-web-dxhone.js");
+        write_bundle(
+            &root.path().join(CANDIDATE_PUBLIC_DIRECTORY),
+            "assets/gtl-web-dxhone.js",
+        );
+        let index = public.join("index.html");
+        let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        File::options()
+            .write(true)
+            .open(&index)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+
+        let fingerprint = publish_candidate_bundle(root.path()).unwrap();
+
+        assert_eq!(fingerprint, bundle_fingerprint(&public).unwrap());
+        assert_eq!(index.metadata().unwrap().modified().unwrap(), modified);
+        assert!(!root.path().join(CANDIDATE_DIRECTORY).exists());
+    }
+
+    #[test]
+    fn changed_candidate_replaces_the_staged_bundle() {
+        let root = tempfile::tempdir().unwrap();
+        let public = root.path().join(PUBLIC_DIRECTORY);
+        write_bundle(&public, "assets/gtl-web-dxhold.js");
+        write_bundle(
+            &root.path().join(CANDIDATE_PUBLIC_DIRECTORY),
+            "assets/gtl-web-dxhnew.js",
+        );
+
+        let fingerprint = publish_candidate_bundle(root.path()).unwrap();
+
+        assert_eq!(fingerprint, bundle_fingerprint(&public).unwrap());
+        assert!(public.join("assets/gtl-web-dxhnew.js").is_file());
+        assert!(!public.join("assets/gtl-web-dxhold.js").exists());
+        assert!(!root.path().join(CANDIDATE_DIRECTORY).exists());
+    }
+
+    #[test]
     fn release_output_cleanup_is_bounded_to_the_desktop_dioxus_application() {
         let root = tempfile::tempdir().unwrap();
         let target = root.path().join("target");
-        let staged = root.path().join(PUBLIC_DIRECTORY).join("old.js");
+        let staged = root.path().join(PUBLIC_DIRECTORY).join("current.js");
+        let candidate = root.path().join(CANDIDATE_PUBLIC_DIRECTORY).join("old.js");
         let desktop_internal = target
             .join(DESKTOP_INTERNAL_RELEASE_DIRECTORY)
             .join("public/assets/old.js");
         let neighbor = target.join("dx/other-package/keep");
-        for path in [&staged, &desktop_internal, &neighbor] {
+        for path in [&staged, &candidate, &desktop_internal, &neighbor] {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, "old").unwrap();
         }
 
         clean_desktop_release_outputs(root.path(), &target).unwrap();
 
-        assert!(!root.path().join(DIST_DIRECTORY).exists());
+        assert!(!root.path().join(CANDIDATE_DIRECTORY).exists());
         assert!(!target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY).exists());
+        assert!(
+            staged.exists(),
+            "the staged bundle is replaced only on publish"
+        );
         assert!(
             neighbor.exists(),
             "unrelated target output must be preserved"
@@ -833,7 +915,9 @@ mod tests {
                 "--release",
                 "--package",
                 "gtl-web",
-                "--locked"
+                "--locked",
+                "--out-dir",
+                CANDIDATE_DIRECTORY
             ]
         );
         assert_eq!(TAILWIND_ARGUMENTS[3], "@tailwindcss/cli");

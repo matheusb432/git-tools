@@ -100,6 +100,8 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
+            language: gtl_models::settings::ViewerLanguage::PtBr,
+            date_format: gtl_models::settings::ViewerDateFormat::Relative,
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: gtl_wire::viewer::ViewerRenderOptions {
@@ -160,6 +162,8 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
+            language: gtl_models::settings::ViewerLanguage::PtBr,
+            date_format: gtl_models::settings::ViewerDateFormat::Relative,
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: viewer_identity().unwrap().render_options,
@@ -226,6 +230,8 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                     state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
                 }),
                 preferences: Some(v1::ViewerPreferences {
+                    language: v1::ViewerLanguage::EnUs as i32,
+                    date_format: v1::ViewerDateFormat::Iso as i32,
                     accessibility: Some(v1::ViewerAccessibility {
                         ui_scale_percent: 100,
                         reduce_motion: false,
@@ -495,6 +501,8 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
             ui_scale_percent: gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
             reduce_motion: true,
         },
+        language: gtl_models::settings::ViewerLanguage::PtBr,
+        date_format: gtl_models::settings::ViewerDateFormat::MonthFirst,
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x22; 32]),
         focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
@@ -548,6 +556,8 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             gtl_models::settings::ViewerScalePercent::try_new(300).unwrap(),
         ),
         reduce_motion: FieldUpdate::Update(true),
+        language: FieldUpdate::Update(gtl_models::settings::ViewerLanguage::PtBr),
+        date_format: FieldUpdate::Clear,
         expected_revision: Some(gtl_models::settings::UserSettingsRevision::from_digest(
             [0x33; 32],
         )),
@@ -584,6 +594,17 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             files_sidebar_visible: wrap_lines.clone(),
             commits_sidebar_visible: wrap_lines.clone(),
             wrap_lines,
+            ..request.clone()
+        };
+        assert_eq!(
+            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            request
+        );
+    }
+
+    for date_format in gtl_models::settings::ViewerDateFormat::ALL {
+        let request = EditSettingsRequest {
+            date_format: FieldUpdate::Update(*date_format),
             ..request.clone()
         };
         assert_eq!(

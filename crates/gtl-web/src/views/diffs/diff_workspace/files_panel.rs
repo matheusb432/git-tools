@@ -5,7 +5,10 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
 use crate::{
-    shared::ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
+    shared::{
+        i18n::{t, use_language},
+        ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
+    },
     views::diffs::{
         DiffFileStatus, DiffLineChangeBadge, DiffLineChangeKind, file_status_text_class,
     },
@@ -103,7 +106,7 @@ pub(super) fn FilesPanel(
             FilesPanelHeading { file_count: model.file_count, artifact_view_id }
             FilesPanelSummary { totals: model.totals }
             if model.file_count == 0 {
-                EmptyNotice { "No changed files" }
+                EmptyNotice { {t!(use_language(), "files-empty")} }
             } else {
                 {render_file_tree(&model.tree, false, onnavigate, artifact_enhancement)}
             }
@@ -113,12 +116,12 @@ pub(super) fn FilesPanel(
 
 #[component]
 fn FilesPanelHeading(file_count: usize, artifact_view_id: Option<String>) -> Element {
-    let file_label = super::file_label(file_count);
+    let language = use_language();
     rsx! {
         div { class: "mx-1 mb-2 flex items-baseline justify-between gap-2",
-            h2 { class: "font-semibold text-ink", "Files" }
+            h2 { class: "font-semibold text-ink", {t!(language, "workspace-files")} }
             div { class: "flex items-center gap-1",
-                span { class: "text-xs text-ink-3", "{file_count} {file_label}" }
+                span { class: "text-xs text-ink-3", {t!(language, "files-count", count = file_count)} }
                 super::path_filter::PathFilterTrigger { artifact_view_id }
             }
         }

@@ -17,7 +17,7 @@ pub(super) enum WorkspaceFileMatches {
     #[cfg(feature = "desktop")]
     Loading,
     #[cfg(feature = "desktop")]
-    Error(String),
+    Error(ViewerClientError),
 }
 
 impl WorkspaceFileMatches {
@@ -82,7 +82,7 @@ fn server_file_matches(
         );
     }
     if let Some(error) = outcome.error_for(view.identity, query) {
-        return WorkspaceFileMatches::Error(error.to_string());
+        return WorkspaceFileMatches::Error(error.clone());
     }
     WorkspaceFileMatches::Loading
 }

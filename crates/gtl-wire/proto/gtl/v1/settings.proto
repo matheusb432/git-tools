@@ -2,23 +2,14 @@ syntax = "proto3";
 
 package gtl.v1;
 
+import "gtl/v1/viewer_theme.proto";
+
 service SettingsService {
   rpc GetPushConfirmationRequirement(GetPushConfirmationRequirementRequest) returns (GetPushConfirmationRequirementResponse);
   rpc SetViewerTheme(SetViewerThemeRequest) returns (SetViewerThemeResponse);
 }
 
 message GetPushConfirmationRequirementRequest {}
-
-enum ViewerTheme {
-  reserved 1, 3, 6, 8;
-  reserved "VIEWER_THEME_LIGHT", "VIEWER_THEME_HEARTH", "VIEWER_THEME_NOIR", "VIEWER_THEME_VERDANT";
-  VIEWER_THEME_UNSPECIFIED = 0;
-  VIEWER_THEME_DARK = 2;
-  VIEWER_THEME_MIRAGE = 4;
-  VIEWER_THEME_GLACIER = 5;
-  VIEWER_THEME_GRAPHITE = 7;
-  VIEWER_THEME_CARBON = 9;
-}
 
 message GetPushConfirmationRequirementResponse {
   bool push_confirmation_required = 1;

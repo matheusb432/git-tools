@@ -5,6 +5,7 @@ use gtl_models::{
     artifacts::{ArtifactByteSize, ArtifactDiffIdentity, RepositoryStoreId},
     diffs::{CommitId, ExcludedExtensions, PinnedRange},
     paths::{ProjectName, RepositoryRoot},
+    settings::ViewerLanguage,
     timestamps::MachineTimestamp,
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
@@ -18,9 +19,14 @@ fn density_default() -> String {
     RenderOptions::DEFAULT.density().to_string()
 }
 
+/// Sidecars written before artifacts were localized describe English artifacts.
+fn language_default() -> String {
+    ViewerLanguage::EnUs.as_str().to_owned()
+}
+
 /// Bumped when the renderer's HTML output changes materially so range reuse never serves an
 /// artifact rendered by an older renderer.
-pub const RENDERER_VERSION: u32 = 5;
+pub const RENDERER_VERSION: u32 = 6;
 
 /// Metadata stored alongside each artifact as `<hash>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +54,9 @@ pub(crate) struct Sidecar {
     /// predate theme metadata and must not satisfy range reuse.
     #[serde(default)]
     pub(crate) theme_recorded: bool,
+    /// BCP 47 tag of the artifact's copy language.
+    #[serde(default = "language_default")]
+    pub(crate) language: String,
     /// Renderer version that produced this artifact, compared against
     /// [`RENDERER_VERSION`] to gate range reuse. Missing (pre-feature)
     /// sidecars default to `0`. Content reuse in `place` refreshes a stale
@@ -82,6 +91,7 @@ pub struct ArtifactMetadata {
     pub byte_size: ArtifactByteSize,
     pub render_options: RenderOptions,
     pub theme: ArtifactThemeMetadata,
+    pub language: ViewerLanguage,
     pub renderer_version: u32,
     pub excluded_extensions: ExcludedExtensions,
 }
@@ -128,6 +138,10 @@ impl Sidecar {
         };
         let generated_at = MachineTimestamp::try_from(self.generated_at)
             .context("sidecar has an invalid generation timestamp")?;
+        let language = self
+            .language
+            .parse::<ViewerLanguage>()
+            .context("sidecar has an invalid language")?;
 
         Ok(ArtifactMetadata {
             repo_id,
@@ -141,6 +155,7 @@ impl Sidecar {
             byte_size: ArtifactByteSize::new(self.byte_size),
             render_options: RenderOptions::new(layout, density),
             theme,
+            language,
             renderer_version: self.renderer_version,
             excluded_extensions: ExcludedExtensions::new(self.excluded_extensions),
         })
@@ -176,6 +191,7 @@ impl Sidecar {
             density: metadata.render_options.density().to_string(),
             theme,
             theme_recorded,
+            language: metadata.language.as_str().to_owned(),
             renderer_version: metadata.renderer_version,
             excluded_extensions: metadata.excluded_extensions.extensions().to_vec(),
         }
@@ -222,6 +238,7 @@ mod tests {
             density: DiffDensity::Full.to_string(),
             theme: Some("dark".into()),
             theme_recorded: true,
+            language: "pt-BR".into(),
             renderer_version: RENDERER_VERSION,
             excluded_extensions: vec![".MD".into(), "md".into()],
         }
@@ -236,6 +253,18 @@ mod tests {
             assert_eq!(metadata.theme, ArtifactThemeMetadata::Unrecorded);
             assert_eq!(metadata.repo_name.as_str(), "git-tools");
         }
+    }
+
+    #[test]
+    fn sidecars_without_a_language_describe_english_artifacts() {
+        let mut json = serde_json::to_value(valid_sidecar()).unwrap();
+        json.as_object_mut().unwrap().remove("language");
+        let sidecar: Sidecar = serde_json::from_value(json).unwrap();
+
+        assert_eq!(
+            sidecar.try_into_metadata().unwrap().language,
+            ViewerLanguage::EnUs
+        );
     }
 
     #[test]
@@ -256,6 +285,7 @@ mod tests {
             density: DiffDensity::Full.to_string(),
             theme: Some("dark".into()),
             theme_recorded: true,
+            language: "pt-BR".into(),
             renderer_version: RENDERER_VERSION,
             excluded_extensions: vec!["md".into()],
         };

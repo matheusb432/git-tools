@@ -81,6 +81,12 @@ impl MachineTimestamp {
         )
     }
 
+    /// Returns the recorded instant, independent of its offset.
+    #[must_use]
+    pub const fn instant(&self) -> Timestamp {
+        self.instant
+    }
+
     /// Decodes Unix seconds and records the timestamp in UTC.
     pub fn from_unix_seconds(seconds: i64) -> Result<Self, TimestampError> {
         Timestamp::from_second(seconds)

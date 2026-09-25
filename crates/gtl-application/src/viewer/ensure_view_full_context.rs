@@ -298,19 +298,21 @@ mod tests {
         Ok(())
     }
 
+    fn settings_with_density(density: DiffDensity) -> gtl_models::settings::UserSettings {
+        gtl_models::settings::UserSettings::new(
+            None,
+            RenderOptions::new(DiffLayout::Unified, density),
+            gtl_models::viewer::ViewerKeybindings::default(),
+            true,
+            gtl_models::diffs::DiffExclusions::default(),
+            gtl_models::settings::PushAllExclusions::default(),
+        )
+    }
+
     fn shell_for(state: &ViewerState, density: DiffDensity) -> gtl_wire::viewer::ViewerShell {
         state
             .inspect(|session| {
-                shell::project(
-                    session,
-                    RenderOptions::new(DiffLayout::Unified, density),
-                    super::super::Theme::Dark,
-                    gtl_models::viewer::ViewerKeybindings::default(),
-                    gtl_models::viewer::ViewerSidebarVisibility::default(),
-                    gtl_models::settings::ViewerAccessibility::default(),
-                    None,
-                )
-                .unwrap()
+                shell::project(session, &settings_with_density(density), None).unwrap()
             })
             .unwrap()
     }

@@ -1600,20 +1600,20 @@ mod tests {
                 .content_id(options),
             expected_id
         );
-        let active = crate::viewer::shell::project(
-            &mut session,
+        let settings = gtl_models::settings::UserSettings::new(
+            None,
             super::super::RenderOptions::new(
                 super::super::DiffLayout::Unified,
                 super::super::DiffDensity::Full,
             ),
-            super::super::Theme::Dark,
             gtl_models::viewer::ViewerKeybindings::default(),
-            gtl_models::viewer::ViewerSidebarVisibility::default(),
-            gtl_models::settings::ViewerAccessibility::default(),
-            None,
-        )
-        .unwrap()
-        .active;
+            true,
+            gtl_models::diffs::DiffExclusions::default(),
+            gtl_models::settings::PushAllExclusions::default(),
+        );
+        let active = crate::viewer::shell::project(&mut session, &settings, None)
+            .unwrap()
+            .active;
         assert!(
             matches!(active, gtl_wire::viewer::ViewerActiveState::Ready { view } if view.content_id == expected_id)
         );

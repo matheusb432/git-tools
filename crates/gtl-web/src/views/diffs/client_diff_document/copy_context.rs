@@ -1,5 +1,9 @@
 use std::fmt;
 
+use gtl_models::settings::ViewerLanguage;
+
+use crate::shared::i18n::t;
+
 #[cfg(feature = "desktop")]
 mod selection;
 #[cfg(feature = "desktop")]
@@ -53,24 +57,49 @@ impl SelectedDiffLines {
             .line_range
             .map(|range| format!(", lines: {range}"))
             .unwrap_or_default();
-        let status = self.line_range.map_or_else(
-            || "Copied with context".to_owned(),
-            |range| format!("Copied with context - lines {range}"),
-        );
         Some(ContextualizedCopy {
             text: format!(
                 "{comment_leader} * {path}{line_range}\n{}",
                 self.lines.join("\n")
             ),
-            status,
+            status: ContextCopyStatus::File(self.line_range),
         })
     }
 }
 
+/// Copied source under a file-context header, and what the copy reports.
+///
+/// The header keeps one format in every display language, so tools that read
+/// pasted context do not depend on the viewer's language.
 #[derive(Debug, PartialEq, Eq)]
 struct ContextualizedCopy {
     text: String,
-    status: String,
+    status: ContextCopyStatus,
+}
+
+/// What a context copy reports once the clipboard holds it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextCopyStatus {
+    /// One file, with its line range when every copied line is numbered.
+    File(Option<SelectedLineRange>),
+    /// Several files.
+    Files(usize),
+}
+
+impl ContextCopyStatus {
+    #[cfg_attr(
+        not(feature = "desktop"),
+        expect(dead_code, reason = "offline artifacts copy through their enhancer")
+    )]
+    fn message(self, language: ViewerLanguage) -> String {
+        match self {
+            Self::File(None) => t!(language, "copy-context"),
+            Self::File(Some(range)) => {
+                t!(language, "copy-context-lines", lines = range.to_string())
+            }
+            Self::Files(count) => t!(language, "copy-context-files", count = count),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -87,7 +116,10 @@ mod tests {
             selected.with_context("src/main.rs", "//"),
             Some(ContextualizedCopy {
                 text: "// * src/main.rs, lines: 12..13\nlet first = 1;\nlet second = 2;".to_owned(),
-                status: "Copied with context - lines 12..13".to_owned(),
+                status: ContextCopyStatus::File(Some(SelectedLineRange {
+                    first: 12,
+                    last: 13
+                })),
             })
         );
     }
@@ -101,7 +133,7 @@ mod tests {
             selected.with_context("scripts/run.sh", "#"),
             Some(ContextualizedCopy {
                 text: "# * scripts/run.sh, lines: 7\necho ready".to_owned(),
-                status: "Copied with context - lines 7".to_owned(),
+                status: ContextCopyStatus::File(Some(SelectedLineRange { first: 7, last: 7 })),
             })
         );
     }

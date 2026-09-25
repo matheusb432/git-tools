@@ -32,6 +32,7 @@ pub(super) async fn create(
             &state.viewer,
             &state.user_settings,
             &state.git,
+            &state.projects,
         )
     })
     .await?

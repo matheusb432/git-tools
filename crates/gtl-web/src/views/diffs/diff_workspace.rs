@@ -34,6 +34,7 @@ use super::{
 };
 #[cfg(feature = "component-preview")]
 use crate::shared::browser;
+use crate::shared::i18n::{t, use_language};
 #[cfg(feature = "artifact")]
 use crate::shared::ui::FloatingNotice;
 #[cfg(any(feature = "artifact", feature = "component-preview"))]
@@ -187,6 +188,7 @@ fn WorkspaceMobileNavigation(
     oncommits: EventHandler<MouseEvent>,
     commits_actions: Option<Element>,
 ) -> Element {
+    let language = use_language();
     let navigation_classes = if preview_visible {
         "diff-workspace-mobile-navigation"
     } else {
@@ -195,7 +197,9 @@ fn WorkspaceMobileNavigation(
     let artifact_action = artifact.then_some("open-dialog");
 
     rsx! {
-        nav { class: navigation_classes, aria_label: "Viewer panels",
+        nav {
+            class: navigation_classes,
+            aria_label: t!(language, "workspace-panels"),
             Button {
                 id: files_trigger_id,
                 class: "flex min-h-11 min-w-0 justify-center gap-2 rounded-none border-0 border-r px-3 focus-visible:-outline-offset-2",
@@ -203,7 +207,7 @@ fn WorkspaceMobileNavigation(
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Ghost,
                 state: if file_count > 0 { ButtonState::Enabled } else { ButtonState::Disabled },
-                aria_label: "Changed files",
+                aria_label: t!(language, "workspace-changed-files"),
                 aria_controls: files_panel_id,
                 aria_expanded: files_open.to_string(),
                 aria_haspopup: "dialog",
@@ -214,7 +218,7 @@ fn WorkspaceMobileNavigation(
                     aria_hidden: "true",
                     Files { size: 20 }
                 }
-                span { class: "font-semibold", "Files" }
+                span { class: "font-semibold", {t!(language, "workspace-files")} }
                 CountBadge { count: file_count }
             }
             Button {
@@ -224,7 +228,7 @@ fn WorkspaceMobileNavigation(
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Ghost,
                 state: if commit_count > 0 { ButtonState::Enabled } else { ButtonState::Disabled },
-                aria_label: "Commits",
+                aria_label: t!(language, "workspace-commits"),
                 aria_controls: commits_panel_id,
                 aria_expanded: commits_open.to_string(),
                 aria_haspopup: "dialog",
@@ -235,7 +239,7 @@ fn WorkspaceMobileNavigation(
                     aria_hidden: "true",
                     GitCommitHorizontal { size: 20 }
                 }
-                span { class: "font-semibold", "Commits" }
+                span { class: "font-semibold", {t!(language, "workspace-commits")} }
             }
             if let Some(actions) = commits_actions {
                 div { class: "flex items-center pr-1", {actions} }
@@ -272,6 +276,7 @@ pub(crate) fn PreviewDiffWorkspace(
     #[props(default)] initial_search: PreviewDiffSearch,
     keybindings: ViewerKeybindings,
 ) -> Element {
+    let language = use_language();
     let markup = ArtifactViewMarkup::new(view.identity.tab_id);
     for file in &mut view.files {
         file.anchor_id = markup.file_target_id(&file.id);
@@ -382,7 +387,7 @@ pub(crate) fn PreviewDiffWorkspace(
                 id: "preview-mobile-files-panel",
                 trigger_id: "preview-mobile-files-trigger",
                 open: mobile_panel() == Some(PreviewMobilePanel::Files),
-                title: "Changed files",
+                title: t!(language, "workspace-changed-files"),
                 onclose: move |()| mobile_panel.set(None),
                 FilesPanel { onnavigate }
             }
@@ -390,7 +395,7 @@ pub(crate) fn PreviewDiffWorkspace(
                 id: "preview-mobile-commits-panel",
                 trigger_id: "preview-mobile-commits-trigger",
                 open: mobile_panel() == Some(PreviewMobilePanel::Commits),
-                title: "Commits",
+                title: t!(language, "workspace-commits"),
                 onclose: move |()| mobile_panel.set(None),
                 WorkspaceCommitsPanel {
                     details_popover_id_prefix: "preview-mobile-commits-panel",
@@ -423,13 +428,13 @@ pub(crate) fn PreviewDiffWorkspace(
                 PreviewViewTitlebar { onfindall: open_all_files_search }
                 aside {
                     class: "diff-workspace-panel min-h-0 diff-workspace-files-panel",
-                    aria_label: "Changed files",
+                    aria_label: t!(language, "workspace-changed-files"),
                     FilesPanel { onnavigate }
                 }
                 StaticDiffDocument { workspace, overlay: search_overlay }
                 aside {
                     class: "diff-workspace-panel min-h-0 diff-workspace-commits-panel",
-                    aria_label: "Commits",
+                    aria_label: t!(language, "workspace-commits"),
                     WorkspaceCommitsPanel {
                         details_popover_id_prefix: "preview-desktop-commits-panel",
                         onselect: onselect_commit,
@@ -483,6 +488,7 @@ pub(crate) fn ArtifactDiffWorkspace(
     mut view: ViewerActiveView,
     mut workspace: ClientDiffWorkspace,
 ) -> Element {
+    let language = use_language();
     let markup = ArtifactViewMarkup::new(view.identity.tab_id);
     for file in &mut view.files {
         file.anchor_id = markup.file_target_id(&file.id);
@@ -539,7 +545,7 @@ pub(crate) fn ArtifactDiffWorkspace(
             id: files_dialog,
             trigger_id: files_trigger,
             open: false,
-            title: "Changed files",
+            title: t!(language, "workspace-changed-files"),
             onclose: move |()| {},
             artifact_view_id: Some(markup.view_id()),
             FilesPanel {
@@ -551,7 +557,7 @@ pub(crate) fn ArtifactDiffWorkspace(
             id: commits_dialog.clone(),
             trigger_id: commits_trigger,
             open: false,
-            title: "Commits",
+            title: t!(language, "workspace-commits"),
             onclose: move |()| {},
             artifact_view_id: Some(markup.view_id()),
             WorkspaceCommitsPanel { details_popover_id_prefix: commits_dialog, artifact: true }
@@ -642,10 +648,6 @@ enum MobilePanel {
 }
 
 // TODO: refactor these to cleaner, intl compatible shape
-const fn file_label(count: usize) -> &'static str {
-    if count == 1 { "file" } else { "files" }
-}
-
 #[cfg(all(test, feature = "artifact"))]
 mod artifact_tests {
     use dioxus::prelude::*;

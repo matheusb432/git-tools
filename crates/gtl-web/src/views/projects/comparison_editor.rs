@@ -13,7 +13,9 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
+        failure_notice::client_error_message,
         field_errors::{FieldErrors, FormField},
+        i18n::{t, use_language},
         ui::{
             Button, ButtonSize, ButtonState, ButtonType, ButtonVariant, IconPopover, TextInput,
             popover::{PopoverPlacement, PopoverSurface},
@@ -47,8 +49,8 @@ impl FormField for ComparisonField {
         "comparison_branch"
     }
 
-    fn correction(self) -> &'static str {
-        "Enter a local branch name, such as main or release/next."
+    fn correction(self, language: gtl_models::settings::ViewerLanguage) -> String {
+        t!(language, "projects-comparison-branch-correction")
     }
 }
 
@@ -79,7 +81,11 @@ pub(crate) fn ComparisonBranchEditor(
         ComparisonEditorTrigger::Icon => comparison_popover_id(&project),
         ComparisonEditorTrigger::Labeled => format!("{}-action", comparison_popover_id(&project)),
     };
-    let label = format!("Comparison branch: {branch}");
+    let label = t!(
+        use_language(),
+        "projects-comparison-branch-value",
+        branch = branch.to_string()
+    );
     let form = rsx! {
         ComparisonBranchForm {
             project,
@@ -114,7 +120,7 @@ pub(crate) fn ComparisonBranchEditor(
                     icon: rsx! {
                         GitCompare { size: 15 }
                     },
-                    "Change comparison branch"
+                    {t!(use_language(), "projects-change-comparison-branch")}
                 }
                 PopoverSurface {
                     id: popover_id,
@@ -147,7 +153,7 @@ struct ComparisonBranchEdit {
     draft: ReadSignal<Option<String>>,
     pending: Memo<bool>,
     field_errors: Memo<FieldErrors<ComparisonField>>,
-    form_error: Memo<Option<String>>,
+    form_error: Memo<Option<ViewerClientError>>,
     change: Callback<String>,
     save: Callback<()>,
 }
@@ -222,13 +228,15 @@ fn use_comparison_branch_edit(
         }),
         form_error: use_memo(move || {
             server_error()
+                .as_ref()
+                .and_then(captured_client_error)
                 .filter(|error| {
-                    captured_client_error(error)
-                        .and_then(ViewerClientError::failure)
+                    error
+                        .failure()
                         .and_then(FieldErrors::<ComparisonField>::from_failure)
                         .is_none()
                 })
-                .map(|error| error.to_string())
+                .cloned()
         }),
         change,
         save,
@@ -244,6 +252,7 @@ fn ComparisonBranchForm(
     active: bool,
     onsaved: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let edit = use_comparison_branch_edit(&project, &branch, &popover_id, active, onsaved);
     let value = (edit.draft)().unwrap_or_else(|| branch.to_string());
     let pending = (edit.pending)();
@@ -257,16 +266,20 @@ fn ComparisonBranchForm(
             },
             TextInput {
                 id: "{popover_id}-branch",
-                label: "Comparison branch",
+                label: t!(language, "projects-comparison-branch"),
                 value,
                 disabled: disabled || pending,
                 maxlength: "1024",
-                error: (edit.field_errors)().message(ComparisonField::Branch),
+                error: (edit.field_errors)().message(ComparisonField::Branch, language),
                 oninput: move |event: FormEvent| (edit.change)(event.value()),
-                supporting_content: rsx! { "Used when the current branch has no upstream." },
+                supporting_content: rsx! {
+                    {t!(language, "projects-comparison-branch-hint")}
+                },
             }
             if let Some(error) = form_error {
-                p { class: "text-xs break-words text-del", role: "alert", "{error}" }
+                p { class: "text-xs break-words text-del", role: "alert",
+                    {client_error_message(&error, language)}
+                }
             }
             div { class: "flex justify-end",
                 Button {
@@ -274,7 +287,7 @@ fn ComparisonBranchForm(
                     size: ButtonSize::Small,
                     variant: ButtonVariant::Outline,
                     state: if pending { ButtonState::Loading } else if disabled || (edit.draft)().is_none() { ButtonState::Disabled } else { ButtonState::Enabled },
-                    "Save comparison"
+                    {t!(language, "projects-comparison-save")}
                 }
             }
         }

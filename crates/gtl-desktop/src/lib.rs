@@ -2,6 +2,7 @@
 
 use viewer_ipc::{viewer_get_file_filters, viewer_set_file_filters, viewer_update_diff_exclusions};
 mod project_picker;
+mod tray_labels;
 mod viewer_ipc;
 mod window_activation;
 mod window_controls;
@@ -35,7 +36,9 @@ use viewer_ipc::{
 };
 use window_launch::WindowLaunch;
 
-const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
+/// Names the viewer in its window title and tray tooltip; a product name reads the same in every
+/// language, so neither changes after the viewer learns its language.
+const PRODUCT_NAME: &str = "git-tools";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
 const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (390.0, 480.0);
 
@@ -185,7 +188,7 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
     }
     let launch = WindowLaunch::from_arguments(std::env::args_os());
     let window = WebviewWindowBuilder::new(app, "main", main_window_url(launch.opens_diff()))
-        .title(MAIN_WINDOW_TITLE)
+        .title(PRODUCT_NAME)
         .decorations(!cfg!(target_os = "windows"))
         .resizable(true)
         .shadow(true)
@@ -199,13 +202,15 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
     if launch.focuses_window() {
         focus_main(&window);
     }
+    // The viewer replaces these labels with localized ones through `desktop_tray_labels`.
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
+    app.manage(tray_labels::TrayMenuItems { show, quit });
     let builder = TrayIconBuilder::new()
         .icon(tauri::include_image!("icons/tray.png"))
         .menu(&menu)
-        .tooltip("git-tools diff viewer")
+        .tooltip(PRODUCT_NAME)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
@@ -217,6 +222,13 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
         });
     builder.build(app)?;
     Ok(())
+}
+
+/// Returns the application context that `build.rs` generates.
+// Clippy lints `include!`d code as local source, so it would reject Tauri's generated context.
+#[allow(clippy::all, clippy::pedantic, clippy::restriction)]
+fn tauri_context() -> tauri::Context<tauri::Wry> {
+    tauri::tauri_build_context!()
 }
 
 /// Builds and runs the Tauri shell.
@@ -234,6 +246,7 @@ pub fn run() -> anyhow::Result<()> {
             window_controls::desktop_window_action,
             viewer_connect,
             project_picker::desktop_pick_project_folder,
+            tray_labels::command::desktop_tray_labels,
             viewer_create_push,
             viewer_get_push,
             viewer_get_push_availability,
@@ -288,7 +301,7 @@ pub fn run() -> anyhow::Result<()> {
         }))
         .setup(setup_viewer)
         .on_window_event(handle_window_event)
-        .run(tauri::generate_context!())?;
+        .run(tauri_context())?;
     Ok(())
 }
 
@@ -306,7 +319,7 @@ mod tests {
 
     #[test]
     fn programmatic_main_window_contract_is_pinned() {
-        assert_eq!(MAIN_WINDOW_TITLE, "git-tools diff viewer");
+        assert_eq!(PRODUCT_NAME, "git-tools");
         assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
         assert_eq!(MAIN_WINDOW_MIN_SIZE, (390.0, 480.0));
         assert!(matches!(

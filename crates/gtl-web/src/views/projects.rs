@@ -26,6 +26,8 @@ use crate::{
     app::application_layout::ViewerContext,
     shared::{
         browser,
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
         ui::{
             Button, ButtonSize, ButtonVariant, PageNotice, PanelDialog, ScrollArea, Select,
             SelectOption, Skeleton,
@@ -39,6 +41,7 @@ const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
 pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
+    let language = use_language();
     let mut selection =
         use_signal(|| None::<(ProjectsPageSize, ProjectsSort, ViewerProjectsCursor)>);
     let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
@@ -118,7 +121,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     id: "projects-heading",
                     tabindex: "-1",
                     class: "projects-title text-xl font-semibold tracking-tight",
-                    "Projects"
+                    {t!(language, "navigation-projects")}
                 }
                 div { class: "projects-header-actions ml-auto gap-3",
                     Button {
@@ -127,7 +130,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         size: ButtonSize::Small,
                         state: if disabled { crate::shared::ui::ButtonState::Disabled } else { crate::shared::ui::ButtonState::Enabled },
                         onclick: move |_| importing.set(true),
-                        "Add projects"
+                        {t!(language, "projects-add")}
                     }
                     SnapshotHistoryButton {}
                     ProjectsViewToggle { presentation }
@@ -137,7 +140,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                 PanelDialog {
                     id: "project-snapshots-dialog",
                     trigger_id: trigger,
-                    title: "Snapshots",
+                    title: t!(language, "projects-snapshots-title"),
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
                     open: true,
                     onclose: move |()| snapshots.set(None),
@@ -148,7 +151,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                 PanelDialog {
                     id: "project-import-dialog",
                     trigger_id: "project-import-trigger",
-                    title: "Add projects",
+                    title: t!(language, "projects-add"),
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
                     open: true,
                     onclose: move |()| importing.set(false),
@@ -164,13 +167,13 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         div {
                             class: "projects-error mb-4 gap-3 px-3 py-2",
                             role: "alert",
-                            span { class: "min-w-0", "{error} " }
+                            span { class: "min-w-0", "{client_error_message(&error, language)} " }
                             Button {
                                 variant: ButtonVariant::Ghost,
                                 size: ButtonSize::Small,
                                 class: "ml-auto text-warn hover:text-ink active:text-ink",
                                 onclick: move |_| try_again(()),
-                                "Try again"
+                                {t!(language, "action-try-again")}
                             }
                         }
                     }
@@ -178,12 +181,12 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         None if error.is_some() => rsx! {
                             PageNotice {
                                 class: "min-h-64",
-                                title: "Projects unavailable",
-                                message: "Check the project catalogue and try again.",
+                                title: t!(language, "projects-unavailable"),
+                                message: t!(language, "projects-unavailable-message"),
                             }
                         },
                         None => rsx! {
-                            div { class: PROJECT_GRID_CLASSES, aria_label: "Loading projects",
+                            div { class: PROJECT_GRID_CLASSES, aria_label: t!(language, "projects-loading"),
                                 for index in 0..6 {
                                     Skeleton { key: "{index}", class: "h-52 rounded-panel" }
                                 }
@@ -192,8 +195,8 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         Some([]) => rsx! {
                             PageNotice {
                                 class: "min-h-64",
-                                title: "No managed projects",
-                                message: "Projects managed in Git Tools appear here.",
+                                title: t!(language, "projects-empty"),
+                                message: t!(language, "projects-empty-message"),
                             }
                         },
                         Some(items) if mode == ProjectsViewMode::Table => rsx! {
@@ -206,7 +209,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                             }
                         },
                         Some(items) => rsx! {
-                            div { class: PROJECT_GRID_CLASSES, aria_label: "Managed projects",
+                            div {
+                                class: PROJECT_GRID_CLASSES,
+                                aria_label: t!(language, "projects-table-caption"),
                                 for project in items.iter() {
                                     ProjectCard { key: "{project.id}", project: project.clone(), disabled }
                                 }
@@ -218,7 +223,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
             if total > 0 {
                 Pagination {
                     position,
-                    label: "Projects",
+                    label: t!(language, "navigation-projects"),
                     disabled: loading_page || disabled,
                     onselect: move |navigation| {
                         let cursor = match navigation {
@@ -241,11 +246,13 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         browser::scroll_element_to_start("projects-content");
                     },
                     div { class: "flex items-center gap-2",
-                        label { class: "shrink-0", r#for: "projects-page-size", "Per page" }
+                        label { class: "shrink-0", r#for: "projects-page-size",
+                            {t!(language, "projects-per-page")}
+                        }
                         div { class: "w-20",
                             Select {
                                 id: "projects-page-size",
-                                aria_label: "Projects per page",
+                                aria_label: t!(language, "projects-per-page-label"),
                                 variant: SelectVariant::Toolbar,
                                 value: page_size.to_string(),
                                 options: [10, 15, 30]
@@ -277,6 +284,7 @@ struct OpenSnapshots(Callback<(ViewerHistoryFilter, String)>);
 
 #[component]
 fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Element {
+    let language = use_language();
     let open = use_context::<OpenSnapshots>();
     let id = project.as_ref().map_or_else(
         || "all-snapshots".to_owned(),
@@ -292,8 +300,14 @@ fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Ele
         },
     );
     let label = project.as_ref().map_or_else(
-        || "All snapshots".to_owned(),
-        |name| format!("Snapshots for {name}"),
+        || t!(language, "projects-all-snapshots"),
+        |name| {
+            t!(
+                language,
+                "projects-snapshots-for",
+                project = name.to_string()
+            )
+        },
     );
     let filter = project.map_or(ViewerHistoryFilter::All, |name| {
         ViewerHistoryFilter::Project { name }

@@ -31,6 +31,7 @@ const CURRENT_REPORT: &str = ".artifacts/benchmarks/grpc-transport/current.json"
 const BASELINE_REPORT: &str = ".artifacts/benchmarks/grpc-transport/baseline.json";
 const RPC: &str = "gtl.v1.SettingsService.GetPushConfirmationRequirement";
 const PROTO: &str = "crates/gtl-wire/proto/gtl/v1/settings.proto";
+const PROTO_IMPORT_PATH: &str = "crates/gtl-wire/proto";
 const SETTINGS: &str = "[push]\nconfirm = true\n";
 const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
@@ -208,6 +209,8 @@ impl Paths {
 #[serde(deny_unknown_fields)]
 struct GhzConfig {
     proto: PathBuf,
+    #[serde(rename = "import-paths")]
+    import_paths: Vec<PathBuf>,
     call: String,
     total: usize,
     #[serde(rename = "skipFirst")]
@@ -230,6 +233,7 @@ fn compatibility(paths: &Paths, workload: Workload) -> Result<Compatibility> {
     .context("decode tracked ghz config")?;
     ensure!(
         config.proto == Path::new(PROTO)
+            && config.import_paths == [Path::new(PROTO_IMPORT_PATH)]
             && config.call == RPC
             && config.total == workload.total_request_count
             && config.skip_first == workload.warmup_request_count

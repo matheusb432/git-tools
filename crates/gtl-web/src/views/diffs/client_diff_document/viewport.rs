@@ -1,4 +1,7 @@
-use crate::shared::ui::ScrollArea;
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::ScrollArea,
+};
 mod browser;
 pub(in crate::views::diffs) mod geometry;
 
@@ -289,7 +292,7 @@ pub(super) fn DiffViewport(
             class: "diff-document-scroll h-full min-h-0",
             style: "overflow-anchor: none;",
             role: "region",
-            aria_label: "Rendered diff for {title}",
+            aria_label: t!(use_language(), "diff-rendered-for", title = title.as_str()),
             aria_busy: is_loading.to_string(),
             "data-gtl-diff-document": "",
             "data-wrap-lines": identity.render_options.wrap_lines.to_string(),

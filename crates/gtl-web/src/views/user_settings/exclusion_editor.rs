@@ -9,6 +9,7 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         failure_notice::client_error_severity,
+        i18n::{t, use_language},
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, ExtensionExclusionsAction,
             ExtensionExclusionsInput, use_toast,
@@ -22,6 +23,7 @@ pub(super) fn ExclusionEditor(
     configured: ExcludedExtensions,
     onchanged: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let mut draft = use_signal(|| None::<ExcludedExtensions>);
     let mut failure = use_signal(|| None::<ViewerClientError>);
     let toast = use_toast();
@@ -30,12 +32,12 @@ pub(super) fn ExclusionEditor(
             Ok(()) => {
                 failure.set(None);
                 onchanged.call(());
-                toast.ok("Exclusions saved");
+                toast.ok(t!(language, "settings-exclusions-saved"));
             }
             Err(error) => {
                 toast.show(
                     client_error_severity(&error),
-                    super::settings_edit_error_message(&error),
+                    super::settings_edit_error_message(&error, language),
                     None,
                 );
                 failure.set(Some(error));
@@ -49,7 +51,7 @@ pub(super) fn ExclusionEditor(
     let save_failure = failure();
     let save_error = save_failure
         .as_ref()
-        .map(super::settings_edit_error_message);
+        .map(|error| super::settings_edit_error_message(error, language));
     let selection_for_change = selected.clone();
     let selection_for_save = selected.clone();
     rsx! {
@@ -84,7 +86,7 @@ pub(super) fn ExclusionEditor(
                                 failure.set(None);
                                 onchanged.call(());
                             },
-                            "Reload exclusions"
+                            {t!(language, "settings-exclusions-reload")}
                         }
                     }
                 }
@@ -102,7 +104,7 @@ pub(super) fn ExclusionEditor(
                             expected: Some(configured.clone()),
                         });
                     },
-                    "Save"
+                    {t!(language, "settings-exclusions-save")}
                 }
             }
         }

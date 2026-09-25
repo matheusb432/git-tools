@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
 use dx_story::{stories, story};
 
-use crate::shared::ui::{AlertDialog, AlertDialogVariant, Button, ButtonState, ButtonVariant};
+use crate::shared::ui::{
+    AlertDialog, AlertDialogSize, AlertDialogVariant, Button, ButtonState, ButtonVariant,
+};
 
 const PUSH_COMMIT_SHA: &str = "a101a101a101a101a101a101a101a101a101a101";
 
@@ -85,12 +87,31 @@ fn error() -> Element {
 fn push_confirmation() -> Element {
     let preview = gtl_wire::viewer::push::ViewerPushPreview {
         repository: std::path::PathBuf::from("/workspace/tools/git-tools").try_into()?,
-        destination: "origin/main".into(),
+        project: Some("git-tools".to_owned().try_into()?),
+        branch: "main".to_owned().try_into()?,
+        remote_branch: "main".to_owned().try_into()?,
+        remote: "origin".to_owned().try_into()?,
+        remote_url: "git@github.com:example/git-tools.git"
+            .to_owned()
+            .try_into()?,
         commit: PUSH_COMMIT_SHA.parse()?,
         count: 2,
         command: format!(
             "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin {PUSH_COMMIT_SHA}:refs/heads/main",
         ),
+        command_arguments: vec![
+            gtl_wire::viewer::push::ViewerPushCommandArgument::Git,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::WorkingDirectory,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::DisableMirroring,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::Push,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::Atomic,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::Porcelain,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::NoFollowTags,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::NoRecurseSubmodules,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::OptionSeparator,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::Remote,
+            gtl_wire::viewer::push::ViewerPushCommandArgument::CommitRef,
+        ],
     };
     rsx! {
         AlertDialogStory {
@@ -98,6 +119,7 @@ fn push_confirmation() -> Element {
             trigger_label: "Review push",
             trigger_variant: ButtonVariant::Primary,
             variant: AlertDialogVariant::Alert,
+            size: AlertDialogSize::Wide,
             title: "Push 2 commits?",
             description: "Only commits through the selected SHA will be pushed. Newer commits remain local.",
             confirm_label: "Push 2 commits",
@@ -143,6 +165,7 @@ fn AlertDialogStory(
     trigger_label: String,
     trigger_variant: ButtonVariant,
     variant: AlertDialogVariant,
+    #[props(default)] size: AlertDialogSize,
     title: String,
     description: String,
     confirm_label: String,
@@ -172,6 +195,7 @@ fn AlertDialogStory(
                 description,
                 confirm_label,
                 variant,
+                size,
                 oncancel: move |()| {
                     open.set(false);
                     outcome.set(canceled_outcome.clone());

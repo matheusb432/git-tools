@@ -3,6 +3,7 @@ syntax = "proto3";
 package gtl.v1;
 
 import "gtl/v1/common.proto";
+import "gtl/v1/diff_presentation.proto";
 
 service DiffService {
   rpc PresentDiff(PresentDiffRequest) returns (PresentDiffResponse);
@@ -55,20 +56,6 @@ message PresentSubrepositoryDiffsRequest {
 
 message PresentProjectRepositoryDiffsRequest {
   string root = 1;
-}
-
-message ViewerOpened {}
-message ViewerUnavailable {}
-
-message DiffPresentation {
-  repeated Note notes = 1;
-
-  oneof outcome {
-    ViewerOpened viewer_opened = 2;
-    Artifact rendered = 3;
-    Empty empty = 4;
-    ViewerUnavailable viewer_unavailable = 5;
-  }
 }
 
 message PresentDiffResponse {

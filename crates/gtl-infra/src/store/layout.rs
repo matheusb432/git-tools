@@ -148,7 +148,7 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Find an existing artifact for a pure commit range rendered under the same
-/// layout, density, theme, and exclusion set. Returns `None` on a miss and
+/// layout, density, theme, language, and exclusion set. Returns `None` on a miss and
 /// scans the flat store's validated sidecar projections.
 #[must_use]
 pub fn lookup_by_range(
@@ -161,6 +161,7 @@ pub fn lookup_by_range(
             && artifact.metadata.identity.matches_commit_range(&key.range)
             && artifact.metadata.render_options == key.render_options
             && artifact.metadata.theme == ArtifactThemeMetadata::Recorded(key.theme)
+            && artifact.metadata.language == key.language
             && artifact.metadata.renderer_version == RENDERER_VERSION
             && artifact.metadata.excluded_extensions == key.excluded_extensions
         {
@@ -267,6 +268,7 @@ mod tests {
             density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
+            language: "en-US".into(),
             renderer_version: RENDERER_VERSION,
             excluded_extensions: Vec::new(),
         }
@@ -280,6 +282,7 @@ mod tests {
             },
             render_options: RenderOptions::DEFAULT,
             theme: None,
+            language: gtl_models::settings::ViewerLanguage::EnUs,
             excluded_extensions: ExcludedExtensions::default(),
         }
     }
@@ -568,6 +571,29 @@ mod tests {
             )
             .is_none(),
             "sidecars without theme metadata must not satisfy range reuse"
+        );
+    }
+
+    #[test]
+    fn lookup_by_range_requires_the_same_language() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut portuguese = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        portuguese.language = "pt-BR".to_owned();
+        place(tmp.path(), "repo0000", "<html>pt</html>", &portuguese).unwrap();
+        let portuguese_key = ArtifactRangeKey {
+            language: gtl_models::settings::ViewerLanguage::PtBr,
+            ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
+        };
+
+        assert!(lookup_by_range(tmp.path(), "repo0000", &portuguese_key).is_some());
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
+            )
+            .is_none(),
+            "a Portuguese artifact must not serve an English render"
         );
     }
 

@@ -32,6 +32,7 @@ pub struct ComputeMergeDiffOk {
     pub diff_range: GitDiffSpec,
     pub render_options: gtl_models::viewer::RenderOptions,
     pub theme: Option<Theme>,
+    pub language: gtl_models::settings::ViewerLanguage,
     pub excluded_extensions: ExcludedExtensions,
 }
 
@@ -87,6 +88,7 @@ pub fn execute(
         diff_range: built.diff_range,
         render_options: settings.viewer_render_options(),
         theme: settings.theme(),
+        language: settings.language(),
         excluded_extensions,
     })
 }

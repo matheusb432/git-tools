@@ -44,6 +44,8 @@ pub fn settings_patch(
     Ok(UserSettingsPatch {
         ui_scale_percent: application_field_update(request.ui_scale_percent, |value| value),
         reduce_motion: application_field_update(request.reduce_motion, |value| value),
+        language: application_field_update(request.language, |value| value),
+        date_format: application_field_update(request.date_format, |value| value),
         expected_revision: request.expected_revision,
         diff_exclusions: None,
         focus_window_on_diff: application_field_update(request.focus_window_on_diff, |value| value),
@@ -116,6 +118,8 @@ pub fn project_settings(
     let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
         accessibility: settings.accessibility(),
+        language: settings.language(),
+        date_format: settings.date_format(),
         revision,
         focus_window_on_diff: settings.focus_window_on_diff(),
         sidebars: settings.sidebar_visibility(),

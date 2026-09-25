@@ -5,13 +5,21 @@ use gtl_wire::viewer::{
 };
 
 use super::{PushButton, PushController};
-use crate::entities::diffs::viewer_server;
+use crate::{
+    entities::diffs::viewer_server,
+    shared::{
+        failure_message::failure_message,
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
+    },
+};
 
 #[component]
 pub(crate) fn ViewPushButton(
     identity: ReadSignal<ViewerViewIdentity>,
     disabled: ReadSignal<bool>,
 ) -> Element {
+    let language = use_language();
     let controller = use_context::<PushController>();
     let key = use_memo(move || {
         (
@@ -39,13 +47,15 @@ pub(crate) fn ViewPushButton(
             .and_then(|(_, result)| result.clone())
     });
     let title = match current() {
-        Some(Ok(ViewerPushAvailability::Available)) => "Push".to_owned(),
+        Some(Ok(ViewerPushAvailability::Available)) => t!(language, "push-button"),
         Some(Ok(ViewerPushAvailability::NothingToPush)) => {
-            "No unpushed commits through this SHA".to_owned()
+            t!(language, "push-availability-nothing")
         }
-        Some(Ok(ViewerPushAvailability::Blocked { failure })) => failure.to_string(),
-        Some(Err(error)) => error.to_string(),
-        None => "Checking for unpushed commits".to_owned(),
+        Some(Ok(ViewerPushAvailability::Blocked { failure })) => {
+            failure_message(&failure, language)
+        }
+        Some(Err(error)) => client_error_message(&error, language),
+        None => t!(language, "push-availability-checking"),
     };
     rsx! {
         PushButton {
@@ -54,7 +64,7 @@ pub(crate) fn ViewPushButton(
                 identity: identity(),
             },
             disabled: !matches!(current(), Some(Ok(ViewerPushAvailability::Available))),
-            title,
+            title: Some(title),
         }
     }
 }

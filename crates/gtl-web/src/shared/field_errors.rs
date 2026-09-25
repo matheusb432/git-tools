@@ -1,6 +1,8 @@
 //! Field-level validation messages shared by client parsing and server rejections.
 
-use gtl_models::failure::Failure;
+use gtl_models::{failure::Failure, settings::ViewerLanguage};
+
+use super::failure_message::failure_message;
 
 /// One input of a form, named after the request field the server validates.
 pub(crate) trait FormField: Copy + Eq + 'static {
@@ -18,13 +20,29 @@ pub(crate) trait FormField: Copy + Eq + 'static {
     fn request_field(self) -> &'static str;
 
     /// Explains how to correct a rejected value.
-    fn correction(self) -> &'static str;
+    fn correction(self, language: ViewerLanguage) -> String;
+}
+
+/// Why one input was rejected, formatted in the displayed language when it renders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FieldError {
+    /// The input's own correction.
+    Correction,
+    #[cfg_attr(
+        all(not(feature = "desktop"), not(test)),
+        expect(
+            dead_code,
+            reason = "component previews show errors without server failures"
+        )
+    )]
+    /// A server failure that explains this input.
+    Failure(Failure),
 }
 
 /// Validation messages for one form, keyed by its inputs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FieldErrors<F> {
-    entries: Vec<(F, String)>,
+    entries: Vec<(F, FieldError)>,
 }
 
 impl<F> Default for FieldErrors<F> {
@@ -73,24 +91,39 @@ impl<F: FormField> FieldErrors<F> {
 
     /// Records the input's own correction.
     pub(crate) fn reject(&mut self, input: F) {
-        self.insert(input, input.correction());
+        self.record(input, FieldError::Correction);
     }
 
-    /// Records `message` for `input`, replacing an earlier one.
-    pub(crate) fn insert(&mut self, input: F, message: impl Into<String>) {
+    #[cfg_attr(
+        all(not(feature = "desktop"), not(test)),
+        expect(
+            dead_code,
+            reason = "component previews show errors without server failures"
+        )
+    )]
+    /// Records `failure` as the reason `input` was rejected, replacing an earlier one.
+    pub(crate) fn reject_with(&mut self, input: F, failure: Failure) {
+        self.record(input, FieldError::Failure(failure));
+    }
+
+    fn record(&mut self, input: F, error: FieldError) {
         self.clear(input);
-        self.entries.push((input, message.into()));
+        self.entries.push((input, error));
     }
 
     pub(crate) fn clear(&mut self, input: F) {
         self.entries.retain(|(recorded, _)| *recorded != input);
     }
 
-    pub(crate) fn message(&self, input: F) -> Option<String> {
+    /// Formats the rejection recorded for `input` in `language`.
+    pub(crate) fn message(&self, input: F, language: ViewerLanguage) -> Option<String> {
         self.entries
             .iter()
             .find(|(recorded, _)| *recorded == input)
-            .map(|(_, message)| message.clone())
+            .map(|(recorded, error)| match error {
+                FieldError::Correction => recorded.correction(language),
+                FieldError::Failure(failure) => failure_message(failure, language),
+            })
     }
 
     #[cfg_attr(
@@ -125,11 +158,12 @@ mod tests {
             }
         }
 
-        fn correction(self) -> &'static str {
-            match self {
+        fn correction(self, language: ViewerLanguage) -> String {
+            let correction = match self {
                 Self::Name => "Enter a name.",
                 Self::Branch => "Enter a local branch name.",
-            }
+            };
+            format!("{correction} ({language})")
         }
     }
 
@@ -141,10 +175,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            errors.message(ExampleField::Branch).as_deref(),
-            Some("Enter a local branch name.")
+            errors
+                .message(ExampleField::Branch, ViewerLanguage::PtBr)
+                .as_deref(),
+            Some("Enter a local branch name. (pt-BR)")
         );
-        assert_eq!(errors.message(ExampleField::Name), None);
+        assert_eq!(
+            errors.message(ExampleField::Name, ViewerLanguage::PtBr),
+            None
+        );
     }
 
     #[test]
@@ -166,13 +205,15 @@ mod tests {
         assert_eq!(errors.parse(ExampleField::Name, Ok::<_, ()>(3)), Some(3));
         assert_eq!(errors.parse(ExampleField::Branch, Err::<u8, _>(())), None);
         assert_eq!(
-            errors.message(ExampleField::Branch).as_deref(),
-            Some("Enter a local branch name.")
+            errors
+                .message(ExampleField::Branch, ViewerLanguage::EnUs)
+                .as_deref(),
+            Some("Enter a local branch name. (en-US)")
         );
-        errors.insert(ExampleField::Branch, "Branch is missing.");
+        errors.reject_with(ExampleField::Branch, Failure::Busy);
         assert_eq!(
-            errors.message(ExampleField::Branch).as_deref(),
-            Some("Branch is missing.")
+            errors.message(ExampleField::Branch, ViewerLanguage::EnUs),
+            Some(Failure::Busy.to_string())
         );
         errors.clear(ExampleField::Branch);
         assert!(errors.is_empty());

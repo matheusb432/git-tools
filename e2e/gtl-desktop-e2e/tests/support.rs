@@ -28,7 +28,7 @@ pub async fn context_click_element(
                 "search",
                 "--onlyvisible",
                 "--name",
-                "^git-tools diff viewer$",
+                "^git-tools$",
                 "mousemove",
                 "--window",
                 "%1",

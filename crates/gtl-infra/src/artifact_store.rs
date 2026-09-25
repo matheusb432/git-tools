@@ -40,6 +40,7 @@ impl ArtifactStore for StoreArtifacts {
             byte_size: ArtifactByteSize::new(byte_size),
             render_options: meta.render_options,
             theme: crate::store::ArtifactThemeMetadata::Recorded(meta.theme),
+            language: meta.language,
             renderer_version: crate::store::RENDERER_VERSION,
             excluded_extensions: meta.excluded_extensions.clone(),
         };
@@ -109,6 +110,7 @@ mod tests {
             title: "diff".into(),
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             theme: Some(Theme::Dark),
+            language: gtl_models::settings::ViewerLanguage::PtBr,
             excluded_extensions: ExcludedExtensions::default(),
         };
 
@@ -122,6 +124,7 @@ mod tests {
 
         assert_eq!(sidecar.layout, "split");
         assert_eq!(sidecar.density, "full");
+        assert_eq!(sidecar.language, "pt-BR");
     }
 
     #[test]
@@ -145,6 +148,7 @@ mod tests {
             density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
+            language: "en-US".into(),
             renderer_version: crate::store::RENDERER_VERSION,
         };
         let metadata = sidecar.try_into_metadata().unwrap();

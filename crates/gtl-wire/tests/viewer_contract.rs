@@ -171,13 +171,10 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
     assert_eq!(value["active"]["view"]["commits"][0]["id"], COMMIT_ID);
     assert_eq!(
-        value["active"]["view"]["commits"][0]["date"],
-        "2026-08-09 10:00"
-    );
-    assert_eq!(
-        value["active"]["view"]["commits"][0]["iso"],
+        value["active"]["view"]["commits"][0]["committed_at"],
         "2026-08-09T10:00:00Z"
     );
+    assert!(value.pointer("/active/view/commits/0/date").is_none());
     assert!(value.pointer("/active/view/commits/0/sha").is_none());
     assert!(
         value
@@ -261,6 +258,8 @@ fn semantic_shell() -> TestResult<ViewerShell> {
         },
         preferences: ViewerPreferences {
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
+            language: gtl_models::settings::ViewerLanguage::default(),
+            date_format: gtl_models::settings::ViewerDateFormat::default(),
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
             render_options: identity.render_options,
@@ -279,20 +278,6 @@ fn commit_selection_requests_reject_invalid_commit_ids() {
         }))
         .is_err()
     );
-}
-
-#[test]
-fn commit_summary_rejects_a_display_value_inconsistent_with_its_machine_timestamp() {
-    let summary = serde_json::from_value::<ViewerCommitSummary>(json!({
-        "id": COMMIT_ID,
-        "subject": "subject",
-        "body": "",
-        "date": "2026-08-09 11:00",
-        "iso": "2026-08-09T10:00:00Z",
-        "is_merge": false
-    }));
-
-    assert!(summary.is_err());
 }
 
 #[test]
@@ -338,6 +323,8 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
     };
     let settings = ViewerUserSettings {
         accessibility: gtl_models::settings::ViewerAccessibility::default(),
+        language: gtl_models::settings::ViewerLanguage::default(),
+        date_format: gtl_models::settings::ViewerDateFormat::default(),
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x11; 32]),
         focus_window_on_diff: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {

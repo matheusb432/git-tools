@@ -22,6 +22,9 @@ use crate::{
     entities::diffs::{use_viewer_commit_pages, viewer_server},
     shared::{
         browser,
+        failure_message::failure_message,
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover, HoverPopoverPlacement,
             PageNotice, PanelDialog, Skeleton, use_hover_popover, use_toast,
@@ -35,35 +38,38 @@ use crate::{
 
 #[component]
 pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let shell = viewer.shell();
     let activating = matches!(&*shell.read(), ViewerShellLoad::Ready(state)
         if tab_id.is_some() && tab_id != active_tab_id(&state.active));
 
     rsx! {
-        document::Title { "Viewer - git-tools" }
+        document::Title { {t!(language, "document-title-viewer")} }
         main {
             class: "diff-workspace-main h-full min-h-0",
             aria_busy: activating.to_string(),
             "inert": activating.then_some(""),
-            h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
+            h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1",
+                {t!(language, "workspace-heading")}
+            }
             match &*shell.read() {
                 ViewerShellLoad::Loading => rsx! {
                     WorkspaceLoading {}
                 },
                 ViewerShellLoad::Error(error) => {
-                    let message = error.to_string();
+                    let message = client_error_message(error, language);
                     rsx! {
                         PageNotice {
                             class: "h-full px-5",
                             role: "alert",
-                            title: "Viewer state is unavailable",
+                            title: t!(language, "workspace-unavailable"),
                             message,
                             Button {
                                 class: "mx-auto mt-4",
                                 variant: ButtonVariant::Outline,
                                 onclick: move |_| viewer.reconnect(),
-                                "Try again"
+                                {t!(language, "action-try-again")}
                             }
                         }
                     }
@@ -78,11 +84,12 @@ pub(crate) fn DiffWorkspaceView(tab_id: Option<ViewerTabId>) -> Element {
 
 #[component]
 fn WorkspaceLoading() -> Element {
+    let language = use_language();
     rsx! {
         div {
             class: "diff-workspace-loading h-full min-h-0",
             role: "status",
-            aria_label: "Loading viewer",
+            aria_label: t!(language, "workspace-loading"),
             div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
                 Skeleton { class: "h-7 w-32" }
                 Skeleton { class: "h-7 w-40" }
@@ -96,13 +103,14 @@ fn WorkspaceLoading() -> Element {
                 Skeleton { class: "h-full rounded-none" }
                 Skeleton { class: "hidden h-full rounded-none xl:block" }
             }
-            span { class: "sr-only", "Loading viewer" }
+            span { class: "sr-only", {t!(language, "workspace-loading")} }
         }
     }
 }
 
 #[component]
 fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let view = use_hook(move || shell.map(ready_active_view));
     let shell_state = shell.read();
@@ -114,15 +122,15 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
             id: "viewer-active-view",
             class: "diff-workspace-shell h-full min-h-0",
             role: "tabpanel",
-            aria_label: "Active diff",
+            aria_label: t!(language, "workspace-active-diff"),
             "data-viewer-state": active_view_dom_state(&shell_state.active),
             div { class: "diff-workspace-shell-content min-h-0",
                 match &shell_state.active {
                     ViewerActiveState::Empty => rsx! {
                         PageNotice {
                             class: "h-full px-5",
-                            title: "No diff is open",
-                            message: "Run a git-tools diff command to open a snapshot or live view.",
+                            title: t!(language, "workspace-empty"),
+                            message: t!(language, "workspace-empty-message"),
                             icon: rsx! {
                                 FileDiff { size: 22 }
                             },
@@ -137,14 +145,14 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                             PageNotice {
                                 class: "h-full px-5",
                                 role: "alert",
-                                title: "Live updates paused",
-                                message: failure.to_string(),
+                                title: t!(language, "workspace-live-paused"),
+                                message: failure_message(failure, language),
                                 div { class: "mx-auto mt-4 flex flex-wrap items-center justify-center gap-2",
                                     ModifiedFilesButton { tab_id, visible: false }
                                     Button {
                                         variant: ButtonVariant::Outline,
                                         onclick: move |_| viewer.refresh_tab(tab_id),
-                                        "Try again"
+                                        {t!(language, "action-try-again")}
                                     }
                                 }
                             }
@@ -220,6 +228,7 @@ fn ReadyWorkspace(
     view: ReadSignal<ViewerActiveView>,
     shell: ReadSignal<ViewerShellLoad>,
 ) -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
@@ -308,7 +317,9 @@ fn ReadyWorkspace(
             .map(|tab| tab.kind.is_live())
     });
     let commits_loading = commit_pages.is_loading();
-    let commits_error = commit_pages.error().map(|error| error.to_string());
+    let commits_error = commit_pages
+        .error()
+        .map(|error| client_error_message(&error, language));
     let commits_has_more = commit_pages.has_more();
     let onload_commits = use_callback(move |()| commit_pages.load_next());
 
@@ -414,8 +425,8 @@ fn ReadyWorkspace(
                     if file_count == 0 {
                         PageNotice {
                             class: "h-full min-h-48 px-5",
-                            title: "No changes",
-                            message: "No changes in this comparison. Updates appear automatically when HEAD changes.",
+                            title: t!(language, "workspace-no-changes"),
+                            message: t!(language, "workspace-no-changes-message"),
                         }
                     } else {
                         ClientDiffDocument { onopen }
@@ -437,7 +448,7 @@ fn ReadyWorkspace(
             id: "mobile-files-panel",
             trigger_id: "mobile-files-trigger",
             open: mobile_panel() == Some(MobilePanel::Files),
-            title: "Changed files",
+            title: t!(language, "workspace-changed-files"),
             onclose: move |()| mobile_panel.set(None),
             FilesPanel { onnavigate }
         }
@@ -446,7 +457,7 @@ fn ReadyWorkspace(
             id: "mobile-commits-panel",
             trigger_id: "mobile-commits-trigger",
             open: mobile_panel() == Some(MobilePanel::Commits),
-            title: "Commits",
+            title: t!(language, "workspace-commits"),
             onclose: move |()| mobile_panel.set(None),
             WorkspaceCommitsPanel {
                 details_popover_id_prefix: "mobile-commits-panel",
@@ -481,6 +492,7 @@ fn LiveViewWarningPopover(
     tab_id: ViewerTabId,
     errors: Vec<crate::entities::diffs::live_errors::LiveError>,
 ) -> Element {
+    let language = use_language();
     let id = format!("live-view-{tab_id}-errors");
     let anchor = format!("--{id}");
     let hover = use_hover_popover(id.clone());
@@ -496,7 +508,7 @@ fn LiveViewWarningPopover(
                 class: "mobile:size-11",
                 size: ButtonSize::IconSmall,
                 variant: ButtonVariant::Ghost,
-                aria_label: "Live diff update warnings",
+                aria_label: t!(language, "workspace-live-warnings"),
                 aria_describedby: id.clone(),
                 span { class: "text-warn", aria_hidden: "true",
                     TriangleAlert { size: 16 }
@@ -505,18 +517,22 @@ fn LiveViewWarningPopover(
             HoverPopover {
                 id,
                 anchor_name: anchor.clone(),
-                aria_label: "Live diff update warnings",
+                aria_label: t!(language, "workspace-live-warnings"),
                 placement: HoverPopoverPlacement::Below,
-                p { class: "text-xs font-semibold text-ink", "Recent update errors" }
+                p { class: "text-xs font-semibold text-ink",
+                    {t!(language, "workspace-live-recent-errors")}
+                }
                 ul { class: "mt-2 grid gap-2 text-xs",
                     for (index, entry) in errors.iter().enumerate() {
                         li { key: "{index}", class: "break-words",
-                            p { "{entry.error}" }
+                            p { {client_error_message(&entry.error, language)} }
                             if let Some(diagnostic) = entry.error.diagnostic() {
                                 p { class: "mt-0.5 font-mono text-ink-3", "{diagnostic}" }
                             }
                             if entry.occurrences > 1 {
-                                p { class: "mt-0.5 text-ink-3", "Occurred {entry.occurrences} times" }
+                                p { class: "mt-0.5 text-ink-3",
+                                    {t!(language, "workspace-live-occurrences", count = entry.occurrences)}
+                                }
                             }
                         }
                     }
@@ -529,6 +545,7 @@ fn LiveViewWarningPopover(
 /// Explains why the active tab has no view and offers the fixes its failure allows.
 #[component]
 fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let (title, setting) = match &failure {
         Failure::Project(
@@ -536,19 +553,19 @@ fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
             | ProjectFailure::NoCommonAncestor { .. }
             | ProjectFailure::RepositoryUnborn { .. }),
         ) => (
-            "Comparison unavailable",
+            t!(language, "projects-review-comparison-unavailable"),
             reason
                 .comparison_setting()
                 .map(|(project, branch)| (project.clone(), branch.clone())),
         ),
-        _ => ("Render failed", None),
+        _ => (t!(language, "tab-state-failed"), None),
     };
     rsx! {
         PageNotice {
             class: "h-full px-5",
             role: "alert",
             title,
-            message: failure.to_string(),
+            message: failure_message(&failure, language),
             div { class: "mx-auto mt-4 flex flex-wrap items-center justify-center gap-2",
                 ModifiedFilesButton { tab_id, visible: false }
                 if let Some((project, branch)) = setting {
@@ -562,7 +579,7 @@ fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
                 Button {
                     variant: ButtonVariant::Outline,
                     onclick: move |_| viewer.refresh_tab(tab_id),
-                    "Try again"
+                    {t!(language, "action-try-again")}
                 }
             }
         }
@@ -571,6 +588,7 @@ fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
 
 #[component]
 fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
     let mut action = use_action(move |visible: bool| async move {
@@ -598,9 +616,9 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
             icon: rsx! {
                 lucide_dioxus::FilePenLine { size: 16 }
             },
-            aria_label: "Modified files",
+            aria_label: t!(language, "workspace-modified-files"),
             aria_pressed: visible.to_string(),
-            title: "Inspect current staged, unstaged, and untracked changes against HEAD",
+            title: t!(language, "workspace-modified-files-hint"),
             onclick: move |_| {
                 if !action.pending() {
                     action.call(!visible);

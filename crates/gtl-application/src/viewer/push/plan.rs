@@ -48,6 +48,7 @@ pub(super) fn prepare(
     }
     Ok(PushPlan {
         path,
+        project: None,
         repository,
         commit,
         count,

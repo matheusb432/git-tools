@@ -13,12 +13,14 @@ use gtl_wire::viewer::{
 use crate::{
     app::{
         application_router::{Route, use_viewer_routes},
+        displayed_language::DisplayedLanguage,
         window_header::WindowHeader,
     },
     entities::diffs::viewer_server,
     shared::{
         browser,
-        failure_notice::is_invalid_settings,
+        failure_notice::{client_error_message, is_invalid_settings},
+        i18n::{t, use_language},
         retry_delay::RetryDelay,
         ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
         viewer_client::{ViewerClientError, discard_viewer_connection},
@@ -287,7 +289,9 @@ impl ViewerContext {
         };
         self.shell_requests.write().order = order;
         self.cancel_shell_request();
-        if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
+        if let Some(notification) =
+            viewer_feedback_toast(shell.feedback.as_ref(), shell.preferences.language)
+        {
             self.toast.warn(notification);
         }
         self.publish_shell(shell);
@@ -315,6 +319,7 @@ impl ViewerContext {
             retained.commit_selection = incoming.commit_selection.clone();
             *incoming = retained;
         }
+        DisplayedLanguage::show_configured(shell.preferences.language);
         let next = ViewerShellLoad::Ready(shell);
         if *self.shell.peek() != next {
             self.shell.set(next);
@@ -394,6 +399,7 @@ impl ViewerContext {
     }
 
     fn disconnected(mut self, error: ViewerClientError) {
+        DisplayedLanguage::show_default_when_unknown();
         self.connection.set(ViewerConnection::Retrying(error));
     }
 
@@ -461,7 +467,9 @@ async fn refresh_shell(
                 return;
             };
             context.shell_requests.write().order = order;
-            if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
+            if let Some(notification) =
+                viewer_feedback_toast(shell.feedback.as_ref(), shell.preferences.language)
+            {
                 context.toast.warn(notification);
             }
             context.publish_shell(shell);
@@ -472,6 +480,7 @@ async fn refresh_shell(
             {
                 context.toast.client_error(&error);
             } else {
+                DisplayedLanguage::show_default_when_unknown();
                 context.shell.set(ViewerShellLoad::Error(error));
             }
         }
@@ -509,7 +518,15 @@ fn ApplicationLayoutContent() -> Element {
         toast,
         live_errors,
     };
+    let displayed_language = use_context::<DisplayedLanguage>();
     use_context_provider(|| context);
+    let date_format = use_memo(move || match &*shell.read() {
+        ViewerShellLoad::Ready(shell) => shell.preferences.date_format,
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
+            gtl_models::settings::ViewerDateFormat::default()
+        }
+    });
+    crate::shared::date_display::use_date_display_provider(date_format.into());
     crate::views::diffs::use_diff_presentation_provider();
     crate::views::diffs::file_filter_changes::use_file_filter_changes_provider();
     crate::views::projects::cache::use_status_cache_provider();
@@ -636,6 +653,19 @@ fn ApplicationLayoutContent() -> Element {
             gtl_models::settings::ViewerAccessibility::default()
         }
     };
+    let language = use_language();
+    use_effect(use_reactive((&language,), move |(language,)| {
+        let labels = gtl_wire::window::TrayLabels {
+            show: t!(language, "tray-show"),
+            quit: t!(language, "tray-quit"),
+        };
+        spawn(async move {
+            if let Err(error) = gtl_client::window::set_tray_labels(labels).await {
+                context.toast.client_error(&error);
+            }
+        });
+    }));
+
     use_effect(use_reactive((&accessibility,), move |(accessibility,)| {
         browser::apply_reduced_motion(accessibility.reduce_motion);
         spawn(async move {
@@ -649,6 +679,7 @@ fn ApplicationLayoutContent() -> Element {
     rsx! {
         div {
             class: "viewer-shell h-screen antialiased",
+            class: if !displayed_language.is_known() { "invisible" },
             "data-theme": theme.as_str(),
             WindowHeader {}
             crate::views::push::PushDialogHost {}
@@ -677,59 +708,55 @@ fn ApplicationLayoutContent() -> Element {
 
 #[component]
 fn ViewerConnectionNotice(connection: ViewerConnection, onretry: EventHandler<()>) -> Element {
+    let language = use_language();
     let (message, can_retry) = match connection {
-        ViewerConnection::Connecting => ("Connecting to the viewer server…".to_owned(), false),
+        ViewerConnection::Connecting => (t!(language, "connection-connecting"), false),
         ViewerConnection::Connected => return rsx! {},
-        ViewerConnection::Retrying(error) => (
-            error.to_string(),
-            error != ViewerClientError::ProtocolMismatch,
-        ),
+        ViewerConnection::Retrying(error) => {
+            let can_retry = error != ViewerClientError::ProtocolMismatch;
+            let message = client_error_message(&error, language);
+            let message = if can_retry {
+                t!(language, "connection-retrying", message = message)
+            } else {
+                message
+            };
+            (message, can_retry)
+        }
     };
 
     rsx! {
         div {
             class: "viewer-connection-notice mx-auto w-fit gap-3 px-4 py-2",
             role: if can_retry { "alert" } else { "status" },
-            p {
-                if can_retry {
-                    "{message} Retrying automatically."
-                } else {
-                    "{message}"
-                }
-            }
+            p { "{message}" }
             if can_retry {
                 Button {
                     size: ButtonSize::Small,
                     variant: ButtonVariant::Outline,
                     onclick: move |_| onretry.call(()),
-                    "Try now"
+                    {t!(language, "connection-try-now")}
                 }
             }
         }
     }
 }
 
-fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<String> {
+fn viewer_feedback_toast(
+    feedback: Option<&ViewerFeedback>,
+    language: gtl_models::settings::ViewerLanguage,
+) -> Option<String> {
     match feedback? {
         ViewerFeedback::TabClosed => None,
-        ViewerFeedback::SnapshotRecipesSkipped { labels } => {
-            let message = if labels.is_empty() {
-                "Skipped snapshot diffs with no commits or changed files.".to_owned()
-            } else {
-                let noun = diff_noun(labels.len());
-                format!(
-                    "Skipped {} {noun} with no commits or changed files: {}.",
-                    labels.len(),
-                    labels.join(", ")
-                )
-            };
-            Some(message)
+        ViewerFeedback::SnapshotRecipesSkipped { labels } if labels.is_empty() => {
+            Some(t!(language, "feedback-snapshots-skipped"))
         }
+        ViewerFeedback::SnapshotRecipesSkipped { labels } => Some(t!(
+            language,
+            "feedback-snapshots-skipped-named",
+            count = labels.len(),
+            labels = labels.join(", "),
+        )),
     }
-}
-
-const fn diff_noun(count: usize) -> &'static str {
-    if count == 1 { "diff" } else { "diffs" }
 }
 
 #[cfg(test)]
@@ -800,6 +827,8 @@ mod tests {
             },
             preferences: ViewerPreferences {
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
+                language: gtl_models::settings::ViewerLanguage::default(),
+                date_format: gtl_models::settings::ViewerDateFormat::default(),
                 sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: super::ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {
@@ -1031,7 +1060,10 @@ mod tests {
     #[test]
     fn tab_close_feedback_never_becomes_a_toast() {
         assert_eq!(
-            viewer_feedback_toast(Some(&ViewerFeedback::TabClosed)),
+            viewer_feedback_toast(
+                Some(&ViewerFeedback::TabClosed),
+                gtl_models::settings::ViewerLanguage::EnUs
+            ),
             None
         );
     }
@@ -1057,7 +1089,7 @@ mod tests {
         };
 
         assert_eq!(
-            viewer_feedback_toast(Some(&feedback)),
+            viewer_feedback_toast(Some(&feedback), gtl_models::settings::ViewerLanguage::EnUs),
             Some("Skipped 2 diffs with no commits or changed files: api, web.".to_owned())
         );
     }

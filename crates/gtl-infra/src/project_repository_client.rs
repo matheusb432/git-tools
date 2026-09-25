@@ -3,9 +3,16 @@ use gtl_application::{
         ProjectCatalogueDataError, ProjectCatalogueUnavailableError, ProjectClient,
         ProjectClientError,
     },
-    projects::catalogue::{ProjectCatalogueError, list_active_projects},
+    projects::{
+        catalogue::{ProjectCatalogueError, list_active_projects},
+        find_project_by_repository,
+    },
+    viewer::push::ViewerPushProject,
 };
-use gtl_models::{paths::ProjectName, projects::ProjectRepository};
+use gtl_models::{
+    paths::{ProjectName, RepositoryRoot},
+    projects::ProjectRepository,
+};
 
 use crate::app_state::SqliteAppState;
 
@@ -64,5 +71,12 @@ impl ProjectRepositoryClient {
 impl ProjectClient for ProjectRepositoryClient {
     async fn list_projects(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
         Self::list_projects(self).await
+    }
+}
+
+impl ViewerPushProject for ProjectRepositoryClient {
+    fn project_name(&self, path: &RepositoryRoot) -> anyhow::Result<Option<ProjectName>> {
+        let connection = self.database.connection_lock()?;
+        find_project_by_repository::project_name(path, &connection)
     }
 }

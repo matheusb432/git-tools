@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
 use super::{ScrollAreaVariant, browser::ScrollbarController};
+use crate::shared::i18n::{t, use_language};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScrollbarPlacement {
@@ -69,10 +70,11 @@ pub(crate) fn ScrollbarRails(
 
 #[component]
 fn ScrollbarRail(axis: ScrollAxis, placement: ScrollbarPlacement) -> Element {
+    let language = use_language();
     let label = match (placement, axis) {
-        (ScrollbarPlacement::FileBottom, _) => "Scroll diff horizontally",
-        (_, ScrollAxis::Horizontal) => "Scroll horizontally",
-        (_, ScrollAxis::Vertical) => "Scroll vertically",
+        (ScrollbarPlacement::FileBottom, _) => t!(language, "scrollbar-diff-horizontal"),
+        (_, ScrollAxis::Horizontal) => t!(language, "scrollbar-horizontal"),
+        (_, ScrollAxis::Vertical) => t!(language, "scrollbar-vertical"),
     };
     rsx! {
         span {

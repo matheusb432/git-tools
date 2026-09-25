@@ -5,7 +5,10 @@ use lucide_dioxus::{Activity, FileText};
 
 use crate::{
     app::application_router::Route,
-    shared::ui::{ButtonLayout, ButtonSize, ButtonVariant, button_classes},
+    shared::{
+        i18n::{t, use_language},
+        ui::{ButtonLayout, ButtonSize, ButtonVariant, button_classes},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,9 +24,10 @@ pub(super) fn ProjectComparisonAction(
     shape: ProjectActionShape,
     disabled: bool,
 ) -> Element {
+    let language = use_language();
     let label = match mode {
-        ViewerProjectDiffMode::Snapshot => "Create snapshot",
-        ViewerProjectDiffMode::Live => "Open live",
+        ViewerProjectDiffMode::Snapshot => t!(language, "projects-create-snapshot"),
+        ViewerProjectDiffMode::Live => t!(language, "projects-open-live"),
     };
     let classes = button_classes(
         ButtonLayout::Inline,
@@ -54,7 +58,7 @@ pub(super) fn ProjectComparisonAction(
                 to: Route::project_diff(&path, mode),
                 draggable: "false",
                 class: classes,
-                title: label,
+                title: label.clone(),
                 aria_label: label,
                 {content}
             }
@@ -63,7 +67,7 @@ pub(super) fn ProjectComparisonAction(
                 r#type: "button",
                 disabled: true,
                 class: classes,
-                title: label,
+                title: label.clone(),
                 aria_label: label,
                 {content}
             }

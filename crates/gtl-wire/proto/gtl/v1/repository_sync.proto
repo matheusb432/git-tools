@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+enum RepositorySyncStatus {
+  REPOSITORY_SYNC_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_SYNC_STATUS_SKIP = 1;
+  REPOSITORY_SYNC_STATUS_UP_TO_DATE = 2;
+  REPOSITORY_SYNC_STATUS_PUSHED = 3;
+  REPOSITORY_SYNC_STATUS_WOULD_PUSH = 4;
+  REPOSITORY_SYNC_STATUS_PULLED = 5;
+  REPOSITORY_SYNC_STATUS_WOULD_PULL = 6;
+  REPOSITORY_SYNC_STATUS_WARNING = 7;
+  REPOSITORY_SYNC_STATUS_FAILED = 8;
+}
+
+message RepositorySyncResult {
+  string project_name = 1;
+  optional string branch = 2;
+  RepositorySyncStatus status = 3;
+  string detail = 4;
+}

@@ -12,6 +12,8 @@ use crate::{
     },
     entities::diffs::viewer_server,
     shared::{
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
         ui::{Button, ButtonVariant, PageNotice},
         viewer_client::ViewerClientError,
     },
@@ -72,6 +74,7 @@ pub(crate) fn ProjectDiffView(
     path: Option<RepositoryRoot>,
     mode: ViewerProjectDiffMode,
 ) -> Element {
+    let language = use_language();
     let mut opening = use_project_diff(path.as_ref(), mode);
     rsx! {
         main { class: "h-full",
@@ -80,17 +83,19 @@ pub(crate) fn ProjectDiffView(
                     PageNotice {
                         class: "h-full",
                         role: "alert",
-                        title: "Could not open comparison",
-                        message: error.to_string(),
-                        Button { variant: ButtonVariant::Outline, onclick: move |_| opening.restart(), "Try again" }
+                        title: t!(language, "project-diff-failed"),
+                        message: client_error_message(error, language),
+                        Button { variant: ButtonVariant::Outline, onclick: move |_| opening.restart(),
+                            {t!(language, "action-try-again")}
+                        }
                     }
                 },
                 _ => rsx! {
                     PageNotice {
                         class: "h-full",
                         role: "status",
-                        title: "Opening mode",
-                        message: "Loading diff...",
+                        title: t!(language, "project-diff-opening"),
+                        message: t!(language, "project-diff-loading"),
                     }
                 },
             }

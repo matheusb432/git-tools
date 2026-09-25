@@ -18,12 +18,13 @@ async fn saved_viewer_settings_apply_and_survive_restart() -> Result<()> {
             select_value(driver, "settings-theme", "carbon").await?;
             select_value(driver, "settings-layout", "split").await?;
             select_value(driver, "settings-density", "full").await?;
+            select_value(driver, "settings-language", "pt-BR").await?;
             support::click(driver, By::Css("button[type='submit']")).await?;
-            support::visible(driver, By::Css("html[data-theme='carbon']")).await?;
+            support::visible(driver, By::Css("html[data-theme='carbon'][lang='pt-BR']")).await?;
 
             session.restart().await?;
             let driver = session.driver();
-            support::visible(driver, By::Css("html[data-theme='carbon']")).await?;
+            support::visible(driver, By::Css("html[data-theme='carbon'][lang='pt-BR']")).await?;
             fixture.forward()?;
             support::wait_for_active_diff(driver, "settings-review", "alpha-one-shot-marker")
                 .await?;

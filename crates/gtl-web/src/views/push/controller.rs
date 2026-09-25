@@ -1,7 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use dioxus::{core::spawn_forever, prelude::*};
-use gtl_models::{failure::Failure, paths::RepositoryRoot, viewer::ViewerTabId};
+use gtl_models::{
+    failure::Failure, paths::RepositoryRoot, settings::ViewerLanguage, viewer::ViewerTabId,
+};
 use gtl_wire::viewer::push::{
     CreateViewerPush, ViewerPushPreview, ViewerPushRequest, ViewerPushStatus,
 };
@@ -11,7 +13,12 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
-        ui::{AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, ToastHandle, use_toast},
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
+        ui::{
+            AlertDialog, AlertDialogSize, Button, ButtonSize, ButtonState, ButtonVariant,
+            ToastHandle, ToastText, use_toast,
+        },
         viewer_client::ViewerClientError,
     },
 };
@@ -21,7 +28,7 @@ enum PushPhase {
     Preparing,
     Review {
         request: ViewerPushRequest,
-        preview: ViewerPushPreview,
+        preview: Box<ViewerPushPreview>,
     },
 }
 
@@ -54,7 +61,29 @@ enum PushOperationPhase {
     Starting,
     Queued,
     Running,
-    Unresolved(String),
+    Unresolved(PushUnresolved),
+}
+
+/// Why the viewer cannot tell how a confirmed push ended.
+#[derive(Clone)]
+enum PushUnresolved {
+    /// Reading the push status failed.
+    StatusUnreadable(ViewerClientError),
+    /// The push outlasted the viewer's status checks.
+    StatusPending,
+}
+
+impl PushUnresolved {
+    fn message(&self, language: ViewerLanguage) -> String {
+        match self {
+            Self::StatusUnreadable(error) => t!(
+                language,
+                "push-status-unreadable",
+                error = client_error_message(error, language)
+            ),
+            Self::StatusPending => t!(language, "push-status-pending"),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -214,10 +243,14 @@ impl PushController {
     fn report(mut self, report: PushReport) {
         self.refresh.with_mut(|epoch| *epoch += 1);
         match report {
-            PushReport::Completed => self.toast.ok("Push completed."),
+            PushReport::Completed => self.toast.ok(ToastText::localized(|language| {
+                t!(language, "push-completed")
+            })),
             PushReport::Failed(failure) => self.toast.failure(&failure),
             PushReport::Client(error) => self.toast.client_error(&error),
-            PushReport::NotStarted => self.toast.warn("The push did not start. Review it again."),
+            PushReport::NotStarted => self.toast.warn(ToastText::localized(|language| {
+                t!(language, "push-not-started")
+            })),
         }
         self.viewer.refresh(false);
     }
@@ -226,14 +259,16 @@ impl PushController {
         self.dismiss();
     }
 
-    fn unresolved(mut self, source: &PushSourceKey, ticket: u64, message: String) {
+    fn unresolved(mut self, source: &PushSourceKey, ticket: u64, reason: PushUnresolved) {
         if !self.current_operation(source, ticket) {
             return;
         }
         if let Some(operation) = self.operations.write().get_mut(source) {
-            operation.phase = PushOperationPhase::Unresolved(message.clone());
+            operation.phase = PushOperationPhase::Unresolved(reason.clone());
         }
-        self.toast.warn(message);
+        self.toast.warn(ToastText::localized(move |language| {
+            reason.message(language)
+        }));
     }
 
     fn set_operation_phase(
@@ -276,7 +311,7 @@ async fn run_operation(
 
 #[derive(Debug, PartialEq)]
 struct PushButtonPresentation {
-    label: &'static str,
+    label: String,
     title: String,
     state: ButtonState,
     unresolved: bool,
@@ -287,7 +322,8 @@ fn push_button_presentation(
     operation: Option<&PushOperationPhase>,
     preparing: bool,
     unavailable: bool,
-    title: String,
+    title: Option<String>,
+    language: ViewerLanguage,
 ) -> PushButtonPresentation {
     let idle_state = if preparing {
         ButtonState::Loading
@@ -298,28 +334,32 @@ fn push_button_presentation(
     };
     match operation {
         Some(PushOperationPhase::Queued) => PushButtonPresentation {
-            label: "Push",
-            title: "Waiting to push commits...".to_owned(),
+            label: t!(language, "push-button"),
+            title: t!(language, "push-waiting"),
             state: ButtonState::Waiting,
             unresolved: false,
         },
         Some(PushOperationPhase::Starting | PushOperationPhase::Running) => {
             PushButtonPresentation {
-                label: "Push",
-                title: "Pushing commits...".to_owned(),
+                label: t!(language, "push-button"),
+                title: t!(language, "push-running"),
                 state: ButtonState::Loading,
                 unresolved: false,
             }
         }
-        Some(PushOperationPhase::Unresolved(message)) => PushButtonPresentation {
-            label: "Check result",
-            title: format!("Check push result: {message}"),
+        Some(PushOperationPhase::Unresolved(reason)) => PushButtonPresentation {
+            label: t!(language, "push-check-result"),
+            title: t!(
+                language,
+                "push-check-result-title",
+                message = reason.message(language)
+            ),
             state: idle_state,
             unresolved: true,
         },
         None => PushButtonPresentation {
-            label: "Push",
-            title,
+            label: t!(language, "push-button"),
+            title: title.unwrap_or_else(|| t!(language, "push-button")),
             state: idle_state,
             unresolved: false,
         },
@@ -332,8 +372,9 @@ pub(crate) fn PushButton(
     source: CreateViewerPush,
     #[props(default)] disabled: bool,
     #[props(default)] icon_only: bool,
-    #[props(default = "Push".to_owned())] title: String,
+    title: Option<String>,
 ) -> Element {
+    let language = use_language();
     let controller = use_context::<PushController>();
     let source_key = PushSourceKey::from(&source);
     let dialog = controller.dialog.read();
@@ -354,6 +395,7 @@ pub(crate) fn PushButton(
         preparing,
         unavailable,
         title,
+        language,
     );
     let trigger = id.clone();
     rsx! {
@@ -363,7 +405,7 @@ pub(crate) fn PushButton(
             variant: if icon_only { ButtonVariant::Accent } else { ButtonVariant::Secondary },
             class: "mobile:size-11 mobile:p-0",
             state,
-            aria_label: label,
+            aria_label: label.clone(),
             title,
             icon: rsx! {
                 if unresolved {
@@ -382,6 +424,7 @@ pub(crate) fn PushButton(
 
 #[component]
 pub(crate) fn PushDialogHost() -> Element {
+    let language = use_language();
     let mut controller = use_context::<PushController>();
     use_effect(move || {
         let instance = controller.viewer.server_instance_id();
@@ -411,22 +454,18 @@ pub(crate) fn PushDialogHost() -> Element {
     match dialog.phase {
         PushPhase::Preparing => rsx! {},
         PushPhase::Review { preview, .. } => {
-            let commits = if preview.count == 1 {
-                "1 commit".to_owned()
-            } else {
-                format!("{} commits", preview.count)
-            };
             rsx! {
                 AlertDialog {
                     id: "viewer-push-confirmation",
                     trigger_id: dialog.trigger,
                     open: true,
-                    title: format!("Push {commits}?"),
-                    description: "Only commits through the selected SHA will be pushed. Newer commits remain local.",
-                    confirm_label: format!("Push {commits}"),
+                    size: AlertDialogSize::Wide,
+                    title: t!(language, "push-dialog-title", count = preview.count),
+                    description: t!(language, "push-dialog-description"),
+                    confirm_label: t!(language, "push-dialog-confirm", count = preview.count),
                     onconfirm: move |()| controller.confirm(),
                     oncancel: move |()| controller.close(),
-                    super::PushConfirmationDetails { preview }
+                    super::PushConfirmationDetails { preview: *preview }
                 }
             }
         }
@@ -442,7 +481,13 @@ async fn prepare(controller: &PushController, ticket: u64, source: CreateViewerP
     .await;
     match result {
         Ok((request, ViewerPushStatus::Review(preview))) => {
-            controller.set_dialog_phase(ticket, PushPhase::Review { request, preview });
+            controller.set_dialog_phase(
+                ticket,
+                PushPhase::Review {
+                    request,
+                    preview: Box::new(preview),
+                },
+            );
         }
         Ok((_, ViewerPushStatus::Failed { failure })) => {
             controller.finish_dialog(ticket, PushReport::Failed(failure));
@@ -490,33 +535,41 @@ async fn observe(
                 controller.set_operation_phase(&source, ticket, PushOperationPhase::Running);
             }
             Err(error) => {
-                controller.unresolved(&source, ticket, format!("{error} The push may still be running. Use the push button to check its result."));
+                controller.unresolved(&source, ticket, PushUnresolved::StatusUnreadable(error));
                 return;
             }
         }
         dioxus_sdk_time::sleep(Duration::from_millis(500)).await;
     }
-    controller.unresolved(
-        &source,
-        ticket,
-        "The push result is not available yet. Use the push button to check its result.".into(),
-    );
+    controller.unresolved(&source, ticket, PushUnresolved::StatusPending);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn idle_title() -> String {
-        "Push to origin".to_owned()
+    const IDLE_TITLE: &str = "Push to origin";
+
+    fn presentation(
+        operation: Option<&PushOperationPhase>,
+        preparing: bool,
+        unavailable: bool,
+    ) -> PushButtonPresentation {
+        push_button_presentation(
+            operation,
+            preparing,
+            unavailable,
+            Some(IDLE_TITLE.to_owned()),
+            ViewerLanguage::EnUs,
+        )
     }
 
     #[test]
     fn a_queued_push_waits_behind_other_pushes() {
         assert_eq!(
-            push_button_presentation(Some(&PushOperationPhase::Queued), false, true, idle_title()),
+            presentation(Some(&PushOperationPhase::Queued), false, true),
             PushButtonPresentation {
-                label: "Push",
+                label: "Push".to_owned(),
                 title: "Waiting to push commits...".to_owned(),
                 state: ButtonState::Waiting,
                 unresolved: false,
@@ -528,9 +581,9 @@ mod tests {
     fn a_starting_or_running_push_is_busy() {
         for phase in [PushOperationPhase::Starting, PushOperationPhase::Running] {
             assert_eq!(
-                push_button_presentation(Some(&phase), false, true, idle_title()),
+                presentation(Some(&phase), false, true),
                 PushButtonPresentation {
-                    label: "Push",
+                    label: "Push".to_owned(),
                     title: "Pushing commits...".to_owned(),
                     state: ButtonState::Loading,
                     unresolved: false,
@@ -542,10 +595,10 @@ mod tests {
     #[test]
     fn preparing_a_push_is_busy_and_keeps_the_idle_title() {
         assert_eq!(
-            push_button_presentation(None, true, true, idle_title()),
+            presentation(None, true, true),
             PushButtonPresentation {
-                label: "Push",
-                title: idle_title(),
+                label: "Push".to_owned(),
+                title: IDLE_TITLE.to_owned(),
                 state: ButtonState::Loading,
                 unresolved: false,
             }
@@ -554,13 +607,13 @@ mod tests {
 
     #[test]
     fn an_unresolved_push_offers_to_check_its_result() {
-        let phase = PushOperationPhase::Unresolved("The push may still be running.".to_owned());
+        let phase = PushOperationPhase::Unresolved(PushUnresolved::StatusPending);
 
         assert_eq!(
-            push_button_presentation(Some(&phase), false, false, idle_title()),
+            presentation(Some(&phase), false, false),
             PushButtonPresentation {
-                label: "Check result",
-                title: "Check push result: The push may still be running.".to_owned(),
+                label: "Check result".to_owned(),
+                title: "Check push result: The push result is not available yet. Use the push button to check its result.".to_owned(),
                 state: ButtonState::Enabled,
                 unresolved: true,
             }
@@ -569,13 +622,7 @@ mod tests {
 
     #[test]
     fn an_idle_push_follows_availability() {
-        assert_eq!(
-            push_button_presentation(None, false, false, idle_title()).state,
-            ButtonState::Enabled
-        );
-        assert_eq!(
-            push_button_presentation(None, false, true, idle_title()).state,
-            ButtonState::Disabled
-        );
+        assert_eq!(presentation(None, false, false).state, ButtonState::Enabled);
+        assert_eq!(presentation(None, false, true).state, ButtonState::Disabled);
     }
 }

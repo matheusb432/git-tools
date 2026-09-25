@@ -22,7 +22,12 @@ impl ViewerRenderBenchmark {
 
     pub(super) fn render_raw_artifact(&self, options: RenderOptions) -> String {
         require(
-            gtl_artifacts::build_html(&self.view, options, Some(Theme::Dark)),
+            gtl_artifacts::build_html(
+                &self.view,
+                options,
+                Some(Theme::Dark),
+                gtl_models::settings::ViewerLanguage::EnUs,
+            ),
             "rendering the raw benchmark artifact",
         )
     }

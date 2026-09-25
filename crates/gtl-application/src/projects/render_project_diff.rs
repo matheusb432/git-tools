@@ -84,7 +84,8 @@ pub fn execute(
     let title = dated_title(&generated_at, "diff-artifact all");
     let render_options = settings.viewer_render_options();
     let theme = settings.theme();
-    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme)?;
+    let language = settings.language();
+    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme, language)?;
     let meta = ArtifactMeta {
         repo_root: root,
         repo_name: ProjectName::try_from("all").map_err(anyhow::Error::from)?,
@@ -95,6 +96,7 @@ pub fn execute(
         title: title.clone(),
         render_options,
         theme,
+        language,
         excluded_extensions: ExcludedExtensions::default(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -314,12 +316,11 @@ diff --git a/notes.md b/notes.md\n\
             .unwrap()
             .html;
 
-        assert!(
-            first_html.contains("repo-a:mirage:unified:compact:1|repo-b:mirage:unified:compact:2")
-        );
-        assert!(
-            second_html
-                .contains("repo-a:glacier:unified:compact:2|repo-b:glacier:unified:compact:1")
-        );
+        assert!(first_html.contains(
+            "repo-a:en-US:mirage:unified:compact:1|repo-b:en-US:mirage:unified:compact:2"
+        ));
+        assert!(second_html.contains(
+            "repo-a:en-US:glacier:unified:compact:2|repo-b:en-US:glacier:unified:compact:1"
+        ));
     }
 }

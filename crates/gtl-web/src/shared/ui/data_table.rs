@@ -3,6 +3,7 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use lucide_dioxus::{ArrowDown, ArrowUp, ArrowUpDown};
 
 use super::ScrollArea;
+use crate::shared::i18n::{t, use_language};
 
 #[component]
 pub(crate) fn DataTable(caption: String, header: Element, children: Element) -> Element {
@@ -53,14 +54,18 @@ pub(crate) fn TableSortHeading(
     #[props(default)] disabled: bool,
     onsort: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
+    let column = label.as_str();
     let (aria_sort, title) = match direction {
-        Some(TableSortDirection::Ascending) => {
-            (Some("ascending"), format!("Sort {label} descending"))
-        }
-        Some(TableSortDirection::Descending) => {
-            (Some("descending"), format!("Sort {label} ascending"))
-        }
-        None => (None, format!("Sort by {label}")),
+        Some(TableSortDirection::Ascending) => (
+            Some("ascending"),
+            t!(language, "table-sort-descending", column = column),
+        ),
+        Some(TableSortDirection::Descending) => (
+            Some("descending"),
+            t!(language, "table-sort-ascending", column = column),
+        ),
+        None => (None, t!(language, "table-sort-by", column = column)),
     };
     rsx! {
         TableHeading { aria_sort,

@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use gtl_models::git::{GitHead, GitRevision};
+use gtl_models::{
+    git::{GitHead, GitRevision},
+    settings::ViewerLanguage,
+};
 use gtl_wire::viewer::ViewerAppliedExclusions;
 use lucide_dioxus::ChevronsDownUp;
 #[cfg(feature = "component-preview")]
@@ -7,6 +10,7 @@ use lucide_dioxus::Search;
 
 use crate::shared::{
     browser,
+    i18n::{t, use_language},
     ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant},
 };
 
@@ -18,6 +22,7 @@ pub(super) fn ViewTitlebar(
     live_actions: Option<Element>,
     artifact_view_id: Option<String>,
 ) -> Element {
+    let language = use_language();
     let workspace = super::use_workspace_context();
     let view = workspace.view.read();
     rsx! {
@@ -26,7 +31,7 @@ pub(super) fn ViewTitlebar(
                 RepositoryIdentity { repository_name: view.repository_name.clone() }
             }
             if view.modified_files {
-                span { class: "text-xs text-acc", "Working tree · HEAD" }
+                span { class: "text-xs text-acc", {t!(language, "titlebar-working-tree")} }
             } else {
                 BranchRange {
                     branch: view.branch.clone(),
@@ -99,17 +104,18 @@ pub(super) fn PreviewViewTitlebar(
 #[cfg(feature = "component-preview")]
 #[component]
 fn FindAllFilesButton(onfindall: EventHandler<()>) -> Element {
+    let language = use_language();
     rsx! {
         Button {
             size: ButtonSize::Small,
             variant: ButtonVariant::Outline,
-            aria_label: "Search code in all files",
-            title: "Search code in all files",
+            aria_label: t!(language, "titlebar-find-all"),
+            title: t!(language, "titlebar-find-all"),
             onclick: move |_| onfindall.call(()),
             span { class: "inline-flex flex-none", aria_hidden: "true",
                 Search { size: 15 }
             }
-            span { "All files" }
+            span { {t!(language, "titlebar-all-files")} }
         }
     }
 }
@@ -148,12 +154,13 @@ pub(super) fn BranchRange(
 
 #[component]
 fn ExclusionsBadge(exclusions: ViewerAppliedExclusions) -> Element {
+    let language = use_language();
     rsx! {
         Badge {
             class: "flex-none cursor-help whitespace-nowrap px-2 py-0.5 text-xs font-semibold",
             variant: BadgeVariant::Deletion,
-            title: exclusion_tooltip(&exclusions),
-            {exclusion_label(&exclusions)}
+            title: exclusion_tooltip(&exclusions, language),
+            {exclusion_label(&exclusions, language)}
         }
     }
 }
@@ -163,6 +170,7 @@ fn CollapseFilesButton(
     artifact_view_id: Option<String>,
     #[props(default)] preview_mobile: bool,
 ) -> Element {
+    let language = use_language();
     let mut workspace = super::use_workspace_context();
     let files_folded = (workspace.files_folded)().unwrap_or(false);
     let button_size = if preview_mobile {
@@ -171,14 +179,19 @@ fn CollapseFilesButton(
         ButtonSize::Small
     };
     let icon_size = if preview_mobile { 18 } else { 14 };
+    let fold_label = if files_folded {
+        t!(language, "titlebar-expand-all")
+    } else {
+        t!(language, "titlebar-collapse-all")
+    };
 
     rsx! {
         Button {
             class: "mobile:size-11 mobile:p-0",
             size: button_size,
             variant: ButtonVariant::Outline,
-            aria_label: if files_folded { "Expand all" } else { "Collapse all" },
-            title: if files_folded { "Expand all" } else { "Collapse all" },
+            aria_label: fold_label.clone(),
+            title: fold_label.clone(),
             "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
             onclick: move |_| {
                 let folded = !files_folded;
@@ -204,29 +217,27 @@ fn CollapseFilesButton(
             span {
                 class: if preview_mobile { "hidden" } else { "mobile:hidden" },
                 "data-gtl-files-label": artifact_view_id.as_ref().map(|_| ""),
-                if files_folded {
-                    "Expand all"
-                } else {
-                    "Collapse all"
-                }
+                {fold_label}
             }
         }
     }
 }
 
-fn exclusion_label(exclusions: &ViewerAppliedExclusions) -> String {
-    let hidden_count = exclusions.hidden_paths.len();
-    let extension_label = if exclusions.extensions.is_empty() {
-        "configured".to_owned()
-    } else {
-        exclusions.extensions.extensions().join(", ")
-    };
-    let file_label = super::file_label(hidden_count);
-    format!("{hidden_count} {file_label} hidden · {extension_label}")
+fn exclusion_label(exclusions: &ViewerAppliedExclusions, language: ViewerLanguage) -> String {
+    let count = exclusions.hidden_paths.len();
+    if exclusions.extensions.is_empty() {
+        return t!(language, "titlebar-hidden-files-configured", count = count);
+    }
+    t!(
+        language,
+        "titlebar-hidden-files",
+        count = count,
+        extensions = exclusions.extensions.extensions().join(", ")
+    )
 }
 
-fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions) -> String {
-    let mut tooltip = String::from("Hidden by git-tools config diff.exclude:");
+fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions, language: ViewerLanguage) -> String {
+    let mut tooltip = t!(language, "titlebar-hidden-tooltip");
     for path in &exclusions.hidden_paths {
         tooltip.push('\n');
         tooltip.push_str(path.to_string_lossy().as_ref());
@@ -249,5 +260,44 @@ fn ExtensionsControl(artifact: bool, exclusions: Option<ViewerAppliedExclusions>
                 ExclusionsBadge { exclusions }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_models::{diffs::ExcludedExtensions, settings::ViewerLanguage};
+    use gtl_wire::viewer::ViewerAppliedExclusions;
+
+    use super::exclusion_label;
+    use crate::test_support::{TestResult, repository_relative_path};
+
+    #[test]
+    fn hidden_files_label_names_the_extensions_or_the_configuration() -> TestResult {
+        let hidden_paths = vec![
+            repository_relative_path("Cargo.lock")?,
+            repository_relative_path("web/yarn.lock")?,
+        ];
+        let by_configuration = ViewerAppliedExclusions {
+            extensions: ExcludedExtensions::default(),
+            hidden_paths: hidden_paths.clone(),
+        };
+        let by_extension = ViewerAppliedExclusions {
+            extensions: ExcludedExtensions::new(["lock"]),
+            hidden_paths,
+        };
+
+        assert_eq!(
+            exclusion_label(&by_configuration, ViewerLanguage::EnUs),
+            "2 files hidden · configured"
+        );
+        assert_eq!(
+            exclusion_label(&by_configuration, ViewerLanguage::PtBr),
+            "2 arquivos ocultos pela configuração"
+        );
+        assert_eq!(
+            exclusion_label(&by_extension, ViewerLanguage::PtBr),
+            "2 arquivos ocultos · lock"
+        );
+        Ok(())
     }
 }

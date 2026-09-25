@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use gtl_models::{
     failure::{Failure, ProjectFailure},
     projects::catalogue::{ProjectId, ProjectTitle},
+    settings::ViewerLanguage,
 };
 use gtl_wire::viewer::projects::{
     DiscoverProjectRepositories, DiscoveredProjectRepository, ImportProjectRepositories,
@@ -14,7 +15,10 @@ use super::loading::Projects;
 use crate::{
     entities::diffs::viewer_server,
     shared::{
+        failure_message::failure_message,
+        failure_notice::captured_error_message,
         field_errors::{FieldErrors, FormField},
+        i18n::{t, use_language},
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, TextInput,
             TextInputLabelVisibility,
@@ -36,8 +40,8 @@ impl FormField for ScanField {
         "root"
     }
 
-    fn correction(self) -> &'static str {
-        "Enter a folder to scan."
+    fn correction(self, language: ViewerLanguage) -> String {
+        t!(language, "projects-import-folder-correction")
     }
 }
 
@@ -55,7 +59,7 @@ fn scan_field_errors(error: &ViewerClientError) -> Option<FieldErrors<ScanField>
             | ProjectFailure::TooManyRepositories { .. },
         ) => {
             let mut errors = FieldErrors::default();
-            errors.insert(ScanField::Root, failure.to_string());
+            errors.reject_with(ScanField::Root, failure.clone());
             Some(errors)
         }
         _ => None,
@@ -79,10 +83,10 @@ impl FormField for ImportRowField {
         }
     }
 
-    fn correction(self) -> &'static str {
+    fn correction(self, language: ViewerLanguage) -> String {
         match self {
-            Self::ProjectId => "Use 2 to 4 uppercase letters.",
-            Self::Title => "Enter a project title.",
+            Self::ProjectId => t!(language, "projects-import-id-correction"),
+            Self::Title => t!(language, "projects-import-title-correction"),
         }
     }
 }
@@ -221,6 +225,7 @@ fn suggested_id(name: &str, used: &mut BTreeSet<String>) -> String {
 
 #[component]
 pub(super) fn ImportProjectsDialog() -> Element {
+    let language = use_language();
     let projects = use_context::<Projects>();
     let mut root = use_signal(String::new);
     let mut rows = use_signal(Vec::<ImportRow>::new);
@@ -236,7 +241,7 @@ pub(super) fn ImportProjectsDialog() -> Element {
         Ok::<(), ViewerClientError>(())
     });
     let mut picker = use_action(move |()| async move {
-        let picked = pick_folder().await?;
+        let picked = pick_folder(t!(language, "projects-import-picker-title")).await?;
         if let Some(path) = picked {
             root.set(path.clone());
             rows.set(Vec::new());
@@ -274,17 +279,17 @@ pub(super) fn ImportProjectsDialog() -> Element {
         .filter(|_| scan_field_errors.is_empty())
         .or(picker_error)
         .or(import_error)
-        .map(|error| error.to_string());
+        .map(|error| captured_error_message(&error, language));
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-col gap-4",
             div { class: "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end",
                 TextInput {
                     id: "project-import-root",
-                    label: "Folder to scan",
+                    label: t!(language, "projects-import-folder"),
                     value: root(),
-                    error: scan_field_errors.message(ScanField::Root),
-                    placeholder: "~/my-projects or /path/to/projects",
+                    error: scan_field_errors.message(ScanField::Root, language),
+                    placeholder: t!(language, "projects-import-folder-placeholder"),
                     disabled: busy,
                     oninput: move |event: FormEvent| {
                         root.set(event.value());
@@ -299,7 +304,7 @@ pub(super) fn ImportProjectsDialog() -> Element {
                     variant: ButtonVariant::Outline,
                     state: if busy { ButtonState::Disabled } else { ButtonState::Enabled },
                     onclick: move |_| picker.call(()),
-                    "Choose folder"
+                    {t!(language, "projects-import-choose-folder")}
                 }
                 Button {
                     state: if busy || root().trim().is_empty() { ButtonState::Disabled } else { ButtonState::Enabled },
@@ -309,19 +314,21 @@ pub(super) fn ImportProjectsDialog() -> Element {
                         scanned.set(false);
                         scan.call(path);
                     },
-                    "Scan"
+                    {t!(language, "projects-import-scan")}
                 }
             }
             if let Some(error) = error {
                 p { class: "text-sm text-del", role: "alert", "{error}" }
             }
             if scan.pending() {
-                p { class: "text-sm text-ink-2", role: "status", "Scanning folders…" }
+                p { class: "text-sm text-ink-2", role: "status",
+                    {t!(language, "projects-import-scanning")}
+                }
             }
             if !rows().is_empty() {
                 div { class: "flex items-center justify-between gap-3 border-b border-line pb-2",
                     p { class: "text-sm text-ink-2",
-                        "{rows().len()} repositories found · {selected} selected"
+                        {t!(language, "projects-import-found", found = rows().len(), selected = selected)}
                     }
                     Button {
                         variant: ButtonVariant::Ghost,
@@ -339,9 +346,9 @@ pub(super) fn ImportProjectsDialog() -> Element {
                             });
                         },
                         if selected == available && available > 0 {
-                            "Deselect all"
+                            {t!(language, "projects-import-deselect-all")}
                         } else {
-                            "Select all"
+                            {t!(language, "projects-import-select-all")}
                         }
                     }
                 }
@@ -350,9 +357,9 @@ pub(super) fn ImportProjectsDialog() -> Element {
                 if rows().is_empty() && !scan.pending() {
                     p { class: "py-8 text-center text-sm text-ink-2",
                         if scanned() {
-                            "No Git repositories found in this folder."
+                            {t!(language, "projects-import-none-found")}
                         } else {
-                            "Choose a folder to find Git repositories. Results start unchecked."
+                            {t!(language, "projects-import-empty")}
                         }
                     }
                 }
@@ -369,9 +376,7 @@ pub(super) fn ImportProjectsDialog() -> Element {
                 }
             }
             div { class: "flex items-center justify-between gap-3 border-t border-line pt-3",
-                p { class: "text-xs text-ink-2",
-                    "Only selected repositories are added. Each result is reported separately."
-                }
+                p { class: "text-xs text-ink-2", {t!(language, "projects-import-footer")} }
                 Button {
                     state: if busy || selected == 0 { ButtonState::Disabled } else { ButtonState::Enabled },
                     onclick: move |_| {
@@ -382,7 +387,7 @@ pub(super) fn ImportProjectsDialog() -> Element {
                                 });
                         }
                     },
-                    "Add {selected} selected"
+                    {t!(language, "projects-import-add", selected = selected)}
                 }
             }
         }
@@ -416,16 +421,17 @@ fn ProjectImportRow(
     mut rows: Signal<Vec<ImportRow>>,
     disabled: bool,
 ) -> Element {
+    let language = use_language();
     let available = row.available();
     let state = match &row.outcome {
-        Some(ProjectImportOutcome::Created) => "Created",
-        Some(ProjectImportOutcome::Restored) => "Restored",
-        Some(ProjectImportOutcome::Failed(_)) => "Failed",
+        Some(ProjectImportOutcome::Created) => t!(language, "projects-import-created"),
+        Some(ProjectImportOutcome::Restored) => t!(language, "projects-import-restored"),
+        Some(ProjectImportOutcome::Failed(_)) => t!(language, "projects-import-failed"),
         None => match row.state {
-            ProjectDiscoveryState::New => "New",
-            ProjectDiscoveryState::Active(_) => "Active project",
-            ProjectDiscoveryState::Paused(_) => "Paused project",
-            ProjectDiscoveryState::Unmanaged(_) => "Unmanaged · Restore",
+            ProjectDiscoveryState::New => t!(language, "projects-import-new"),
+            ProjectDiscoveryState::Active(_) => t!(language, "projects-import-active"),
+            ProjectDiscoveryState::Paused(_) => t!(language, "projects-import-paused"),
+            ProjectDiscoveryState::Unmanaged(_) => t!(language, "projects-import-unmanaged"),
         },
     };
     let editable = matches!(row.state, ProjectDiscoveryState::New) && available;
@@ -440,7 +446,7 @@ fn ProjectImportRow(
                         class: "mt-1 size-4 accent-acc",
                         checked: row.selected,
                         disabled: disabled || !available,
-                        aria_label: "Select {row.path}",
+                        aria_label: t!(language, "projects-import-select-row", path = row.path.as_str()),
                         onclick: move |_| rows.with_mut(|rows| rows[index].selected = !rows[index].selected),
                     }
                     span { class: "min-w-0",
@@ -456,12 +462,12 @@ fn ProjectImportRow(
                 div { class: "mt-3 grid gap-3 pl-7 sm:grid-cols-[7rem_minmax(0,1fr)]",
                     TextInput {
                         id: "project-import-{index}-id",
-                        label: "Project ID for {row.label}",
+                        label: t!(language, "projects-import-id-label", project = row.label.as_str()),
                         label_visibility: TextInputLabelVisibility::Hidden,
                         value: row.project_id,
                         maxlength: "4",
                         disabled: disabled || !editable,
-                        error: row.field_errors.message(ImportRowField::ProjectId),
+                        error: row.field_errors.message(ImportRowField::ProjectId, language),
                         oninput: move |event: FormEvent| {
                             rows.with_mut(|rows| {
                                 rows[index].project_id = event.value().to_ascii_uppercase();
@@ -472,11 +478,11 @@ fn ProjectImportRow(
                     }
                     TextInput {
                         id: "project-import-{index}-title",
-                        label: "Project title for {row.label}",
+                        label: t!(language, "projects-import-title-label", project = row.label.as_str()),
                         label_visibility: TextInputLabelVisibility::Hidden,
                         value: row.title,
                         disabled: disabled || !editable,
-                        error: row.field_errors.message(ImportRowField::Title),
+                        error: row.field_errors.message(ImportRowField::Title, language),
                         oninput: move |event: FormEvent| {
                             rows.with_mut(|rows| {
                                 rows[index].title = event.value();
@@ -491,19 +497,23 @@ fn ProjectImportRow(
                 .outcome
                 .filter(|_| row.field_errors.is_empty())
             {
-                p { class: "mt-2 pl-7 text-xs text-del", role: "alert", "{failure}" }
+                p { class: "mt-2 pl-7 text-xs text-del", role: "alert",
+                    {failure_message(&failure, language)}
+                }
             }
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn pick_folder() -> Result<Option<String>, ViewerClientError> {
-    gtl_client::pick_project_folder().await
+async fn pick_folder(title: String) -> Result<Option<String>, ViewerClientError> {
+    gtl_client::pick_project_folder(title).await
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn pick_folder() -> impl std::future::Future<Output = Result<Option<String>, ViewerClientError>> {
+fn pick_folder(
+    _title: String,
+) -> impl std::future::Future<Output = Result<Option<String>, ViewerClientError>> {
     std::future::ready(Err(ViewerClientError::Disconnected))
 }
 
@@ -532,13 +542,13 @@ mod tests {
         assert!(
             rows[0]
                 .field_errors
-                .message(ImportRowField::ProjectId)
+                .message(ImportRowField::ProjectId, ViewerLanguage::EnUs)
                 .is_some()
         );
         assert!(
             rows[0]
                 .field_errors
-                .message(ImportRowField::Title)
+                .message(ImportRowField::Title, ViewerLanguage::EnUs)
                 .is_some()
         );
         assert!(rows[1].field_errors.is_empty());
@@ -572,7 +582,7 @@ mod tests {
         assert!(
             rows[0]
                 .field_errors
-                .message(ImportRowField::ProjectId)
+                .message(ImportRowField::ProjectId, ViewerLanguage::EnUs)
                 .is_some()
         );
     }

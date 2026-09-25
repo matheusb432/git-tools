@@ -57,7 +57,7 @@ mod viewer_theme_picker;
     expect(unused_imports, reason = "reserved for the viewer push feature")
 )]
 #[cfg(feature = "interactive-ui")]
-pub(crate) use alert_dialog::{AlertDialog, AlertDialogVariant};
+pub(crate) use alert_dialog::{AlertDialog, AlertDialogSize, AlertDialogVariant};
 pub(crate) use badge::{Badge, BadgeVariant};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use button::ButtonType;
@@ -101,10 +101,10 @@ pub(crate) use skeleton::Skeleton;
 pub(crate) use text_input::TextInput;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use text_input::TextInputLabelVisibility;
-#[cfg(feature = "desktop")]
-pub(crate) use toast::ToastHandle;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use toast::ToastKind;
+#[cfg(feature = "desktop")]
+pub(crate) use toast::{ToastHandle, ToastText};
 #[cfg(feature = "interactive-ui")]
 pub(crate) use toast::{ToastHost, use_toast};
 #[cfg(feature = "interactive-ui")]
@@ -122,7 +122,7 @@ pub(crate) use viewer_theme_picker::ViewerThemePicker;
 
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod hover_popover;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) use hover_popover::HoverPopoverPlacement;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) use hover_popover::{HoverPopover, use_hover_popover};

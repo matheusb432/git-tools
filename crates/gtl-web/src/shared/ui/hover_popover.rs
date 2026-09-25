@@ -80,7 +80,7 @@ fn end(mut state: Signal<HoverState>, pointer: bool, id: &str) {
 pub(crate) enum HoverPopoverPlacement {
     #[default]
     Left,
-    #[cfg(feature = "desktop")]
+    #[cfg(any(feature = "desktop", feature = "component-preview"))]
     Below,
 }
 
@@ -96,7 +96,7 @@ pub(crate) fn HoverPopover(
         HoverPopoverPlacement::Left => {
             "-translate-x-2 [position-area:left_span-bottom] [position-try-fallbacks:flip-inline]"
         }
-        #[cfg(feature = "desktop")]
+        #[cfg(any(feature = "desktop", feature = "component-preview"))]
         HoverPopoverPlacement::Below => {
             "translate-y-1 [position-area:bottom_span-left] [position-try-fallbacks:flip-block]"
         }

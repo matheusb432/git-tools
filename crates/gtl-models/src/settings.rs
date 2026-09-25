@@ -76,6 +76,130 @@ pub struct ViewerAccessibility {
     pub reduce_motion: bool,
 }
 
+/// Selects the language of the viewer and of the offline artifacts it renders.
+///
+/// The persisted token is the variant's BCP 47 language tag.
+///
+/// # Examples
+///
+/// ```
+/// use gtl_models::settings::ViewerLanguage;
+///
+/// assert_eq!("pt-BR".parse(), Ok(ViewerLanguage::PtBr));
+/// assert_eq!(ViewerLanguage::default().as_str(), "en-US");
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, strum::VariantArray)]
+pub enum ViewerLanguage {
+    #[default]
+    EnUs,
+    PtBr,
+}
+
+impl ViewerLanguage {
+    /// Every supported language, in declaration order.
+    pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    /// Returns the BCP 47 language tag that persists and identifies this language.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::EnUs => "en-US",
+            Self::PtBr => "pt-BR",
+        }
+    }
+}
+
+impl std::fmt::Display for ViewerLanguage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for ViewerLanguage {
+    type Err = ParseViewerLanguageError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|language| language.as_str() == raw)
+            .ok_or_else(|| ParseViewerLanguageError {
+                value: raw.to_owned(),
+            })
+    }
+}
+
+impl serde::Serialize for ViewerLanguage {
+    fn serialize<SerializerType>(
+        &self,
+        serializer: SerializerType,
+    ) -> Result<SerializerType::Ok, SerializerType::Error>
+    where
+        SerializerType: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ViewerLanguage {
+    fn deserialize<DeserializerType>(
+        deserializer: DeserializerType,
+    ) -> Result<Self, DeserializerType::Error>
+    where
+        DeserializerType: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(DeserializerType::Error::custom)
+    }
+}
+
+/// Reports a language tag that names no supported viewer language.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown viewer language `{value}`; expected `en-US` or `pt-BR`")]
+pub struct ParseViewerLanguageError {
+    value: String,
+}
+
+/// Selects how the viewer displays dates.
+///
+/// The viewer shows every format in the local time zone. Offline artifacts ignore
+/// this setting and keep [`Self::Iso`] in each timestamp's recorded offset.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+    strum::EnumString,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum ViewerDateFormat {
+    /// `2026-06-28 13:45`
+    #[default]
+    Iso,
+    /// `28/06/2026 13:45`
+    DayFirst,
+    /// `06/28/2026 1:45 PM`
+    MonthFirst,
+    /// `3 hours ago` within the last seven days, and [`Self::Iso`] otherwise.
+    Relative,
+}
+
+impl ViewerDateFormat {
+    /// Every supported format, in declaration order.
+    pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
+}
+
 /// SHA-256 identity of one exact serialized user-settings document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UserSettingsRevision([u8; 32]);
@@ -202,6 +326,8 @@ impl PushAllExclusions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSettings {
     accessibility: ViewerAccessibility,
+    language: ViewerLanguage,
+    date_format: ViewerDateFormat,
     focus_window_on_diff: bool,
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
@@ -228,6 +354,8 @@ impl UserSettings {
     ) -> Self {
         Self {
             accessibility: ViewerAccessibility::default(),
+            language: ViewerLanguage::default(),
+            date_format: ViewerDateFormat::default(),
             focus_window_on_diff: true,
             theme,
             viewer_render_options,
@@ -251,6 +379,29 @@ impl UserSettings {
     #[must_use]
     pub const fn accessibility(&self) -> ViewerAccessibility {
         self.accessibility
+    }
+
+    #[must_use]
+    pub fn with_language(self, language: ViewerLanguage) -> Self {
+        Self { language, ..self }
+    }
+
+    #[must_use]
+    pub const fn language(&self) -> ViewerLanguage {
+        self.language
+    }
+
+    #[must_use]
+    pub fn with_date_format(self, date_format: ViewerDateFormat) -> Self {
+        Self {
+            date_format,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn date_format(&self) -> ViewerDateFormat {
+        self.date_format
     }
 
     #[must_use]
@@ -369,6 +520,25 @@ mod tests {
             );
         }
         assert!(serde_json::from_str::<super::ProjectsPageSize>("\"15\"").is_err());
+    }
+
+    #[test]
+    fn viewer_language_serializes_as_its_exact_language_tag() {
+        for language in super::ViewerLanguage::ALL {
+            let json = serde_json::to_value(language).unwrap();
+            assert_eq!(json, serde_json::json!(language.as_str()));
+            assert_eq!(
+                serde_json::from_value::<super::ViewerLanguage>(json).unwrap(),
+                *language
+            );
+        }
+        for invalid in ["pt-br", "en", "fr", ""] {
+            assert!(invalid.parse::<super::ViewerLanguage>().is_err());
+            assert!(
+                serde_json::from_value::<super::ViewerLanguage>(serde_json::json!(invalid))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

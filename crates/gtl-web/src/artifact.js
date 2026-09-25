@@ -3,6 +3,8 @@
 
   const root = document.querySelector("[data-gtl-artifact-ready='true']");
   if (root === null) return;
+  // The renderer localizes these labels into the artifact's language.
+  const labels = root.dataset;
 
   const feedbackTimers = new WeakMap();
   const copyContextFeedbackTimers = new WeakMap();
@@ -308,10 +310,10 @@
       )
     ) {
       const label = control.querySelector("[data-gtl-files-label]");
-      if (label !== null) {
-        label.textContent = folded ? "Expand all" : "Collapse all";
-      }
-      const accessibleLabel = folded ? "Expand all" : "Collapse all";
+      const accessibleLabel = folded
+        ? labels.gtlLabelExpandAll
+        : labels.gtlLabelCollapseAll;
+      if (label !== null) label.textContent = accessibleLabel;
       control.setAttribute("aria-label", accessibleLabel);
       control.setAttribute("title", accessibleLabel);
     }
@@ -531,8 +533,8 @@
     );
     if (feedback === null || feedback === undefined) return;
     feedback.textContent = lineRange === undefined
-      ? "Copied with context"
-      : "Copied with context - lines " + lineRange;
+      ? labels.gtlLabelCopiedContext
+      : labels.gtlLabelCopiedContextLines.replace("{lines}", lineRange);
     feedback.hidden = false;
     const previousTimer = copyContextFeedbackTimers.get(feedback);
     if (previousTimer !== undefined) clearTimeout(previousTimer);
@@ -590,9 +592,9 @@
     if (feedback === null) return false;
     feedback.dataset.state = state;
     feedback.textContent = state === "success"
-      ? "Copied"
+      ? labels.gtlLabelCopied
       : state === "failure"
-      ? "Failed"
+      ? labels.gtlLabelCopyFailed
       : "";
     return true;
   }

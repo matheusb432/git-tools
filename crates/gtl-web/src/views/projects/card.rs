@@ -9,10 +9,16 @@ use super::{
         ProjectPresentation, ProjectSignalGlyph, ReviewStatusDot, project_presentation,
     },
 };
-use crate::shared::ui::no_data::NoData;
+use crate::shared::{
+    date_display::use_date_display,
+    i18n::{t, use_language},
+    ui::no_data::NoData,
+};
 
 #[component]
 pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
+    let language = use_language();
+    let date_display = use_date_display();
     let status = super::loading::use_project_status(&project);
     let load = (status.state)();
     let loading = load.status.is_none() && !load.failed;
@@ -31,8 +37,22 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
         ahead_label,
         issue,
         comparison_branch_fix,
-        rendered,
-    } = project_presentation(&project, result);
+    } = project_presentation(&project, result, language);
+    let rendered = project.last_rendered_at.as_ref().map(|rendered_at| {
+        let date = date_display.show(rendered_at, language);
+        let style = if date.relative {
+            "relative"
+        } else {
+            "absolute"
+        };
+        let label = t!(
+            language,
+            "projects-rendered",
+            time = date.text,
+            style = style
+        );
+        (label, date.exact)
+    });
     rsx! {
         article {
             class: "project-card min-w-0 gap-3 p-4",
@@ -60,8 +80,8 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                         crate::shared::ui::Button {
                             variant: crate::shared::ui::ButtonVariant::Ghost,
                             size: crate::shared::ui::ButtonSize::IconSmall,
-                            aria_label: "Retry Git status for {project.name}",
-                            title: "Retry Git status",
+                            aria_label: t!(language, "projects-retry-status-for", project = project.name.to_string()),
+                            title: t!(language, "projects-retry-status"),
                             onclick: move |_| (status.retry)(()),
                             lucide_dioxus::RefreshCw { size: 14 }
                         }
@@ -71,7 +91,7 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
             p { class: "project-card-meta h-4 min-w-0 gap-1.5 text-xs",
                 if let Some(branch) = branch {
                     GitBranch { size: 13, class: "shrink-0 text-ink-3" }
-                    span { class: "truncate", title: branch, "{branch}" }
+                    span { class: "truncate", title: branch.to_string(), "{branch}" }
                 } else if loading {
                     crate::shared::ui::Skeleton { class: "h-3 w-20" }
                 } else {
@@ -79,13 +99,17 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                 }
                 if let Some(base) = comparison_base {
                     GitCompare { size: 13, class: "ml-2 shrink-0 text-ink-3" }
-                    span { class: "truncate", title: "Comparison branch", "{base}" }
+                    span {
+                        class: "truncate",
+                        title: t!(language, "projects-comparison-branch"),
+                        "{base}"
+                    }
                 }
             }
             div { class: "flex min-h-4 flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-2",
                 span { class: "flex items-center gap-2",
                     ProjectSignalGlyph { signal: local.clone() }
-                    "Local changes"
+                    {t!(language, "comparison-local-changes")}
                 }
                 span { class: "flex items-center gap-2",
                     ProjectSignalGlyph { signal: ahead.clone() }
@@ -118,16 +142,16 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
                             popovertarget: comparison_popover_id(&project.path),
                             popovertargetaction: "show",
                             disabled,
-                            "Change comparison branch"
+                            {t!(language, "projects-change-comparison-branch")}
                         }
                     }
                 }
             }
             p { class: "truncate text-xs text-ink-3",
-                if let Some(rendered) = rendered {
-                    span { title: "Last rendered", "Rendered {rendered}" }
+                if let Some((label, exact)) = rendered {
+                    span { title: exact, "{label}" }
                 } else {
-                    "Never rendered"
+                    {t!(language, "projects-never-rendered")}
                 }
             }
         }

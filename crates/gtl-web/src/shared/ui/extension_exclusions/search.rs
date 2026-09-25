@@ -6,6 +6,7 @@ use super::ExtensionExclusionsAction;
 use crate::shared::{
     browser,
     file_extension::FileExtension,
+    i18n::{t, use_language},
     ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, TextInput, TextInputLabelVisibility},
 };
 
@@ -22,6 +23,7 @@ pub(super) fn ExtensionSearch(
     onchange: EventHandler<ExtensionExclusionsAction>,
     onclose: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let mut query = use_signal(String::new);
     let mut active = use_signal(|| 0_usize);
     let focus_input_id = input_id.clone();
@@ -48,7 +50,9 @@ pub(super) fn ExtensionSearch(
     let error = if query_value.is_empty() || !matches.is_empty() || create.is_some() {
         None
     } else {
-        FileExtension::parse(&query_value).err().map(str::to_owned)
+        FileExtension::parse(&query_value)
+            .err()
+            .map(|_| t!(language, "extensions-invalid"))
     };
     let focus_selected_input_id = input_id.clone();
     let select = use_callback(move |action: ExtensionExclusionsAction| {
@@ -95,10 +99,10 @@ pub(super) fn ExtensionSearch(
             }
             TextInput {
                 id: input_id.clone(),
-                label: "Search or add an extension",
+                label: t!(language, "extensions-search"),
                 label_visibility: TextInputLabelVisibility::Hidden,
                 class: "pl-9 pr-8",
-                placeholder: "Search or add…",
+                placeholder: t!(language, "extensions-search-placeholder"),
                 value: query_value,
                 maxlength: "255",
                 autocomplete: "off",
@@ -120,7 +124,7 @@ pub(super) fn ExtensionSearch(
                     class: "extension-filter-search-clear",
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Ghost,
-                    aria_label: "Clear extension search",
+                    aria_label: t!(language, "extensions-clear-search"),
                     disabled,
                     onclick: move |_| {
                         query.set(String::new());
@@ -134,7 +138,7 @@ pub(super) fn ExtensionSearch(
         div {
             id: results_id.clone(),
             role: "listbox",
-            aria_label: "Extensions to exclude",
+            aria_label: t!(language, "extensions-options"),
             aria_multiselectable: "true",
             class: "extension-filter-results",
             onmousedown: move |event| event.prevent_default(),
@@ -148,9 +152,9 @@ pub(super) fn ExtensionSearch(
                                 role: "presentation",
                                 class: "extension-filter-group",
                                 if available.contains(&extension) {
-                                    "In this diff"
+                                    {t!(language, "extensions-in-diff")}
                                 } else {
-                                    "Other exclusions"
+                                    {t!(language, "extensions-other")}
                                 }
                             }
                         }
@@ -182,7 +186,7 @@ pub(super) fn ExtensionSearch(
             }
         }
         if matches.len() > SUGGESTIONS_MAX {
-            p { class: "text-xs text-ink-3", "Search to find more extensions" }
+            p { class: "text-xs text-ink-3", {t!(language, "extensions-more")} }
         }
     }
 }
@@ -197,6 +201,7 @@ fn ExtensionOption(
     disabled: bool,
     onselect: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     rsx! {
         Button {
             id: format!("{results_id}-{index}"),
@@ -207,7 +212,7 @@ fn ExtensionOption(
             aria_selected: selected.to_string(),
             tabindex: "-1",
             "data-active": active.to_string(),
-            aria_label: "Exclude .{extension}",
+            aria_label: t!(language, "extensions-exclude-named", extension = extension.as_str()),
             disabled,
             onclick: move |_| onselect.call(()),
             code { class: "min-w-0 flex-1 truncate", ".{extension}" }
@@ -246,7 +251,11 @@ fn CreateExtension(
     disabled: bool,
     onselect: EventHandler<FileExtension>,
 ) -> Element {
-    let label = format!("Add .{}", extension.as_str());
+    let label = t!(
+        use_language(),
+        "extensions-add",
+        extension = extension.as_str()
+    );
     rsx! {
         div { class: "col-span-2",
             Button {

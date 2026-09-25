@@ -1,3 +1,4 @@
+use crate::shared::i18n::{t, use_language};
 #[cfg(feature = "artifact")]
 use crate::shared::ui::ScrollArea;
 #[cfg(feature = "desktop")]
@@ -78,25 +79,26 @@ fn DiffSourcePreparation(
     tab_id: ViewerTabId,
 ) -> Element {
     use crate::shared::ui::{Button, ButtonVariant, PageNotice};
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     match state {
         gtl_wire::viewer::ViewerRowSourceState::Pending => rsx! {
             div {
                 class: "flex h-full items-center justify-center text-sm text-ink-3",
                 role: "status",
-                "Preparing diff…"
+                {t!(language, "diff-preparing")}
             }
         },
         gtl_wire::viewer::ViewerRowSourceState::Failed => rsx! {
             PageNotice {
                 class: "h-full px-5",
                 role: "alert",
-                title: "Diff source is unavailable",
-                message: "Refresh this tab to try loading its diff again.",
+                title: t!(language, "diff-source-unavailable"),
+                message: t!(language, "diff-source-unavailable-message"),
                 Button {
                     variant: ButtonVariant::Outline,
                     onclick: move |_| viewer.refresh_tab(tab_id),
-                    "Refresh"
+                    {t!(language, "diff-refresh")}
                 }
             }
         },
@@ -127,7 +129,7 @@ fn LoadedDiffDocument(
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
-            aria_label: "Rendered diff",
+            aria_label: t!(use_language(), "diff-rendered"),
             // Dioxus reconciles keys in lists; each tab owns these hook lifetimes.
             for identity in [identity] {
                 find::DiffFindBar {
@@ -204,7 +206,7 @@ pub(crate) fn StaticDiffDocument(
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
-            aria_label: "Rendered diff",
+            aria_label: t!(use_language(), "diff-rendered"),
             if let Some(overlay) = overlay {
                 {overlay}
             }
@@ -252,7 +254,7 @@ fn DiffDocumentBody(
         ScrollArea {
             class: "diff-document-scroll h-full min-h-0 print:overflow-visible",
             role: "region",
-            aria_label: "Rendered diff for {title}",
+            aria_label: t!(use_language(), "diff-rendered-for", title = title.as_str()),
             aria_busy: is_loading.to_string(),
             "data-gtl-diff-document": "",
             "data-wrap-lines": identity.render_options.wrap_lines.to_string(),

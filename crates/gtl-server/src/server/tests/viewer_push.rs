@@ -175,8 +175,21 @@ async fn confirmation_pins_sha_and_upstream_while_new_commits_and_dirty_files_st
     };
     assert_eq!(preview.commit.as_ref(), fixture.latest);
     assert_eq!(preview.count, 2);
-    assert_eq!(preview.destination, "origin/main");
-    assert!(preview.command.contains("push --atomic"));
+    assert_eq!(preview.project, None);
+    assert_eq!(preview.branch.as_ref(), "feature");
+    assert_eq!(preview.remote_branch.as_ref(), "main");
+    assert_eq!(preview.remote.as_ref(), "origin");
+    assert_eq!(
+        preview.remote_url.as_ref(),
+        fixture.remote.to_str().ok_or("remote path")?
+    );
+    assert!(preview.command.contains("push --porcelain"));
+    assert!(!preview.command.contains("--atomic"));
+    assert!(
+        !preview
+            .command_arguments
+            .contains(&gtl_wire::viewer::push::ViewerPushCommandArgument::Atomic)
+    );
     assert!(preview.command.contains("'\\''"));
     assert!(
         preview
@@ -207,6 +220,39 @@ async fn confirmation_pins_sha_and_upstream_while_new_commits_and_dirty_files_st
         fixture.latest
     );
     fixture.server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn confirmation_uses_catalogue_project_title_when_available() -> TestResult {
+    let mut fixture = Fixture::new().await?;
+    let mut projects =
+        v1::project_service_client::ProjectServiceClient::new(fixture.server.native_channel());
+    projects
+        .create_project(v1::CreateProjectRequest {
+            project_id: "PUSH".into(),
+            project: Some(v1::ProjectCreation {
+                title: "Named project".into(),
+                source: Some(v1::ProjectSource {
+                    source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
+                        path: fixture.repository.to_string_lossy().into_owned(),
+                    })),
+                }),
+                git_remote: None,
+                color: None,
+                groups: Vec::new(),
+                include_in_full_export: None,
+            }),
+        })
+        .await?;
+    let request = fixture.prepare().await?;
+    let ViewerPushStatus::Review(preview) = fixture.status(request).await? else {
+        return Err("expected review".into());
+    };
+    assert_eq!(
+        preview.project.as_ref().map(AsRef::as_ref),
+        Some("Named project")
+    );
     Ok(())
 }
 
@@ -334,21 +380,18 @@ async fn a_new_revert_does_not_invalidate_the_reviewed_ancestor() -> TestResult 
 }
 
 #[tokio::test]
-async fn atomic_support_is_required_and_git_rejections_are_relayed() -> TestResult {
+async fn unknown_remote_pushes_without_atomic_support() -> TestResult {
     let mut fixture = Fixture::new().await?;
     git(
         &fixture.remote,
         &["config", "receive.advertiseAtomic", "false"],
     )?;
     let request = fixture.prepare().await?;
-    let ViewerPushStatus::Failed {
-        failure: Failure::Push(PushFailure::GitFailed { diagnostic }),
-    } = fixture.start(request).await?
-    else {
-        return Err("expected atomic rejection".into());
-    };
-    assert!(diagnostic.as_str().contains("atomic"));
-    assert_eq!(git(&fixture.remote, &["rev-parse", "main"])?, fixture.base);
+    assert_eq!(fixture.start(request).await?, ViewerPushStatus::Succeeded);
+    assert_eq!(
+        git(&fixture.remote, &["rev-parse", "main"])?,
+        fixture.latest
+    );
     fixture.server.stop().await?;
     Ok(())
 }

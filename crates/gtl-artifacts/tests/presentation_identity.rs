@@ -81,6 +81,7 @@ fn artifact_meta(repo_root: &RepositoryRoot, render_options: RenderOptions) -> A
         title: "diff".into(),
         render_options,
         theme: None,
+        language: gtl_models::settings::ViewerLanguage::EnUs,
         excluded_extensions: ExcludedExtensions::default(),
     }
 }
@@ -93,6 +94,7 @@ fn artifact_range_key(render_options: RenderOptions) -> ArtifactRangeKey {
         },
         render_options,
         theme: None,
+        language: gtl_models::settings::ViewerLanguage::EnUs,
         excluded_extensions: ExcludedExtensions::default(),
     }
 }
@@ -106,10 +108,20 @@ fn presentation_options_have_distinct_artifact_identities() {
     let options_default = RenderOptions::DEFAULT;
     let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
     let html_default = ArtifactRenderer
-        .build_html(&view, options_default, None)
+        .build_html(
+            &view,
+            options_default,
+            None,
+            gtl_models::settings::ViewerLanguage::EnUs,
+        )
         .unwrap();
     let html_split_full = ArtifactRenderer
-        .build_html(&view, options_split_full, None)
+        .build_html(
+            &view,
+            options_split_full,
+            None,
+            gtl_models::settings::ViewerLanguage::EnUs,
+        )
         .unwrap();
 
     assert_ne!(html_default, html_split_full);

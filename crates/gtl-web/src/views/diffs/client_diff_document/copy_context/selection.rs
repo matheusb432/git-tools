@@ -7,12 +7,13 @@ use gtl_wire::viewer::{
 };
 use wasm_bindgen::{JsCast as _, closure::Closure};
 
-use super::{ContextualizedCopy, SelectedDiffLines};
+use super::{ContextCopyStatus, ContextualizedCopy, SelectedDiffLines};
 use crate::{
     entities::diffs::{ClientDiffWorkspace, viewer_server},
     shared::{
         browser,
-        ui::{ToastHandle, use_toast},
+        i18n::t,
+        ui::{ToastHandle, ToastText, use_toast},
         viewer_client::ViewerClientError,
     },
 };
@@ -98,12 +99,12 @@ async fn complete_copy(
     match result {
         Ok(Some(text)) => {
             if browser::copy_text(&text.text).await {
-                toast.ok(text.status);
+                toast.ok(copy_status_toast(text.status));
             } else {
-                toast.error("Could not copy the selected text.");
+                toast.error(localized_toast(SelectionCopyMessage::Failed));
             }
         }
-        Ok(None) => toast.info("The selection contains no source lines."),
+        Ok(None) => toast.info(localized_toast(SelectionCopyMessage::Empty)),
         Err(error) => toast.client_error(&error),
     }
 }
@@ -141,16 +142,36 @@ fn handle_copy(
                 .is_some_and(|data| data.set_data("text/plain", &text.text).is_ok())
             {
                 event.prevent_default();
-                toast.ok(text.status);
+                toast.ok(copy_status_toast(text.status));
             }
         }
         Ok(None) => {}
         Err(()) => {
             event.prevent_default();
-            toast.info("Copying selected source…");
+            toast.info(localized_toast(SelectionCopyMessage::Pending));
             defer.call(selection);
         }
     }
+}
+
+fn copy_status_toast(status: ContextCopyStatus) -> ToastText {
+    ToastText::localized(move |language| status.message(language))
+}
+
+/// Formats one argument-free selection message when its toast renders.
+fn localized_toast(message: SelectionCopyMessage) -> ToastText {
+    ToastText::localized(move |language| match message {
+        SelectionCopyMessage::Failed => t!(language, "copy-selection-failed"),
+        SelectionCopyMessage::Empty => t!(language, "copy-selection-empty"),
+        SelectionCopyMessage::Pending => t!(language, "copy-selection-pending"),
+    })
+}
+
+#[derive(Clone, Copy)]
+enum SelectionCopyMessage {
+    Failed,
+    Empty,
+    Pending,
 }
 
 fn selection(workspace: &ClientDiffWorkspace) -> Option<Selection> {
@@ -356,7 +377,7 @@ fn join_sections(mut sections: Vec<ContextualizedCopy>) -> Option<Contextualized
         return None;
     }
     Some(ContextualizedCopy {
-        status: format!("Copied with context - {} files", sections.len()),
+        status: ContextCopyStatus::Files(sections.len()),
         text: sections
             .into_iter()
             .map(|section| section.text)

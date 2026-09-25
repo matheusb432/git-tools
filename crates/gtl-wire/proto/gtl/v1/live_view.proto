@@ -3,7 +3,7 @@ syntax = "proto3";
 package gtl.v1;
 
 import "gtl/v1/common.proto";
-import "gtl/v1/diff.proto";
+import "gtl/v1/diff_presentation.proto";
 
 service LiveViewService {
   rpc SaveAndPresentLiveView(SaveAndPresentLiveViewRequest) returns (SaveAndPresentLiveViewResponse);

@@ -1,7 +1,10 @@
 mod exclusion_editor;
 
 use dioxus::prelude::*;
-use gtl_models::failure::{Failure, SettingsFailure};
+use gtl_models::{
+    failure::{Failure, SettingsFailure},
+    settings::ViewerLanguage,
+};
 use gtl_wire::viewer::{ViewerRenderOptions, ViewerTheme, ViewerUserSettings};
 use lucide_dioxus::{FileCog, Settings};
 
@@ -9,8 +12,9 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
-        failure_notice::{client_error_severity, is_invalid_settings},
+        failure_notice::{client_error_message, client_error_severity, is_invalid_settings},
         field_errors::FieldErrors,
+        i18n::{t, use_language},
         ui::{
             Button, ButtonVariant, PageNotice, ScrollArea, SectionedSurface, SectionedSurfaceBody,
             SectionedSurfaceHeader, Skeleton, use_toast,
@@ -25,6 +29,7 @@ use crate::{
 
 #[component]
 pub(crate) fn UserSettingsView() -> Element {
+    let language = use_language();
     let mut settings = use_resource(viewer_server::get_settings);
 
     use_effect(move || {
@@ -34,7 +39,7 @@ pub(crate) fn UserSettingsView() -> Element {
     let load = settings.read();
 
     rsx! {
-        document::Title { "Settings - git-tools" }
+        document::Title { {t!(language, "document-title-settings")} }
         main { class: "settings-page-shell h-full",
             ScrollArea { class: "overflow-auto h-full px-4 py-5 sm:px-6",
                 div { class: "settings-page-container mx-auto gap-5",
@@ -44,17 +49,17 @@ pub(crate) fn UserSettingsView() -> Element {
                                 Settings { size: 16 }
                             }
                             p { class: "font-semibold tracking-widest uppercase",
-                                "Application preferences"
+                                {t!(language, "settings-eyebrow")}
                             }
                         }
                         h1 {
                             id: gtl_web_contracts::user_settings::SETTINGS_HEADING_ID,
                             class: "settings-page-title mt-1 text-lg font-semibold tracking-tight",
                             tabindex: "-1",
-                            "User settings"
+                            {t!(language, "settings-title")}
                         }
                         p { class: "settings-page-description mt-1 leading-5",
-                            "Choose viewer defaults and command safeguards, then submit to save them."
+                            {t!(language, "settings-description")}
                         }
                     }
 
@@ -66,18 +71,18 @@ pub(crate) fn UserSettingsView() -> Element {
                             crate::views::settings_recovery::SettingsRecovery { onretry: move |()| settings.restart() }
                         },
                         (_, Some(Err(error))) => {
-                            let message = error.to_string();
+                            let message = client_error_message(error, language);
                             rsx! {
                                 PageNotice {
                                     class: "min-h-64",
                                     role: "alert",
-                                    title: "Settings are unavailable",
+                                    title: t!(language, "settings-unavailable"),
                                     message,
                                     Button {
                                         class: "mx-auto mt-4",
                                         variant: ButtonVariant::Outline,
                                         onclick: move |_| settings.restart(),
-                                        "Try again"
+                                        {t!(language, "action-try-again")}
                                     }
                                 }
                             }
@@ -94,31 +99,35 @@ pub(crate) fn UserSettingsView() -> Element {
 
 #[component]
 fn SettingsLoading() -> Element {
+    let language = use_language();
     rsx! {
         div {
             class: "grid gap-1",
             role: "status",
-            aria_label: "Loading settings",
+            aria_label: t!(language, "settings-loading"),
             for _ in 0..7 {
                 div { class: "grid gap-2 border-b border-line py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
                     Skeleton { class: "h-4 w-3/5" }
                     Skeleton { class: "h-4 w-4/5" }
                 }
             }
-            span { class: "sr-only", "Loading settings" }
+            span { class: "sr-only", {t!(language, "settings-loading")} }
         }
     }
 }
 
 #[component]
 fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) -> Element {
+    let language = use_language();
     let configuration_path = settings
         .configuration_path
-        .as_deref()
-        .unwrap_or("Built-in defaults");
+        .clone()
+        .unwrap_or_else(|| t!(language, "settings-built-in-defaults"));
     rsx! {
         SettingsEditableForm {
             revision: settings.revision,
+            configured_language: settings.language,
+            configured_date_format: settings.date_format,
             accessibility: settings.accessibility,
             focus_window_on_diff: settings.focus_window_on_diff,
             push_confirmation_required: settings.push_confirmation_required,
@@ -127,28 +136,30 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
             onchanged,
         }
 
-        SectionedSurface { aria_label: "Resolved viewer settings",
+        SectionedSurface { aria_label: t!(language, "settings-resolved-label"),
             SectionedSurfaceHeader { class: "px-4 py-3",
                 SettingsCardHeading {
                     icon: rsx! {
                         FileCog {}
                     },
-                    subtitle: "Current sources and effective values.",
-                    "Resolved configuration"
+                    subtitle: t!(language, "settings-resolved-subtitle"),
+                    {t!(language, "settings-resolved-title")}
                 }
             }
             SectionedSurfaceBody {
                 dl { class: "settings-rows",
-                    SettingsRow { term: "Configuration file", "{configuration_path}" }
-                    SettingsRow { term: "Effective theme", "{viewer_theme_label(settings.effective_theme)}" }
+                    SettingsRow { term: t!(language, "settings-configuration-file"), "{configuration_path}" }
+                    SettingsRow { term: t!(language, "settings-effective-theme"),
+                        "{viewer_theme_label(settings.effective_theme)}"
+                    }
                 }
             }
         }
 
-        SectionedSurface { aria_label: "Default diff exclusions",
+        SectionedSurface { aria_label: t!(language, "settings-default-exclusions-title"),
             SectionedSurfaceHeader { class: "px-4 py-3",
-                SettingsCardHeading { subtitle: "Used when a project has no project-specific exclusion list.",
-                    "Default diff exclusions"
+                SettingsCardHeading { subtitle: t!(language, "settings-default-exclusions-subtitle"),
+                    {t!(language, "settings-default-exclusions-title")}
                 }
             }
             SectionedSurfaceBody {
@@ -164,6 +175,8 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
 #[component]
 fn SettingsEditableForm(
     revision: gtl_models::settings::UserSettingsRevision,
+    configured_language: ViewerLanguage,
+    configured_date_format: gtl_models::settings::ViewerDateFormat,
     accessibility: gtl_models::settings::ViewerAccessibility,
     focus_window_on_diff: bool,
     push_confirmation_required: bool,
@@ -171,8 +184,11 @@ fn SettingsEditableForm(
     render_options: ViewerRenderOptions,
     onchanged: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let toast = use_toast();
     let initial = ViewerSettingsSelection::new(
+        configured_language,
+        configured_date_format,
         configured_theme,
         render_options,
         focus_window_on_diff,
@@ -182,7 +198,7 @@ fn SettingsEditableForm(
     let mut pending = use_signal(|| false);
     let mut saved = use_signal(|| false);
     let mut failure = use_signal(|| None::<ViewerClientError>);
-    let save_error = failure().map(|error| settings_edit_error_message(&error));
+    let save_error = failure().map(|error| settings_edit_error_message(&error, language));
     let field_errors = failure()
         .as_ref()
         .and_then(rejected_settings)
@@ -218,14 +234,14 @@ fn SettingsEditableForm(
                     match viewer_server::edit_settings(request).await {
                         Ok(()) => {
                             saved.set(true);
-                            toast.ok("Settings saved");
+                            toast.ok(t!(language, "settings-saved"));
                             onchanged.call(());
                         }
                         Err(error) => {
                             toast
                                 .show(
                                     client_error_severity(&error),
-                                    settings_edit_error_message(&error),
+                                    settings_edit_error_message(&error, language),
                                     None,
                                 );
                             failure.set(Some(error));
@@ -244,23 +260,26 @@ fn rejected_settings(error: &ViewerClientError) -> Option<FieldErrors<SettingsFi
 }
 
 /// Explains a settings edit failure in terms of this page's reload action.
-pub(super) fn settings_edit_error_message(error: &ViewerClientError) -> String {
+pub(super) fn settings_edit_error_message(
+    error: &ViewerClientError,
+    language: ViewerLanguage,
+) -> String {
     match error {
         ViewerClientError::Failed(Failure::Settings(SettingsFailure::Stale)) => {
-            "Settings changed since this page loaded. Reload them before saving again.".to_owned()
+            t!(language, "settings-edit-stale")
         }
         ViewerClientError::Failed(Failure::InvalidRequest { .. })
             if rejected_settings(error).is_some() =>
         {
-            "Correct the highlighted setting and save again.".to_owned()
+            t!(language, "settings-edit-field-rejected")
         }
         ViewerClientError::Failed(Failure::InvalidRequest { .. }) => {
-            "One or more settings were rejected. Reload the saved values and try again.".to_owned()
+            t!(language, "settings-edit-rejected")
         }
         ViewerClientError::Failed(Failure::Settings(SettingsFailure::Invalid { .. })) => {
-            "The settings file became invalid. Reload it to repair or reset it.".to_owned()
+            t!(language, "settings-edit-invalid-file")
         }
-        error => error.to_string(),
+        error => client_error_message(error, language),
     }
 }
 
@@ -324,11 +343,11 @@ mod tests {
 
         assert!(
             rejected_settings(&error)
-                .and_then(|errors| errors.message(SettingsField::Theme))
+                .and_then(|errors| errors.message(SettingsField::Theme, ViewerLanguage::EnUs))
                 .is_some()
         );
         assert_eq!(
-            settings_edit_error_message(&error),
+            settings_edit_error_message(&error, ViewerLanguage::EnUs),
             "Correct the highlighted setting and save again."
         );
         assert!(!settings_edit_reload_available(&error));

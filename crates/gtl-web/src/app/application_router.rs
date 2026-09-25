@@ -12,6 +12,7 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
+        i18n::{t, use_language},
         ui::{ToastHandle, use_toast},
     },
     views::{DiffWorkspaceView, UserSettingsView},
@@ -237,9 +238,10 @@ async fn apply_viewer_route(
 
 #[component]
 fn Projects() -> Element {
+    let language = use_language();
     use_effect(move || browser::focus_element("projects-heading".into()));
     rsx! {
-        document::Title { "Projects - git-tools" }
+        document::Title { {t!(language, "document-title-projects")} }
     }
 }
 
@@ -310,6 +312,8 @@ mod tests {
             }),
             preferences: ViewerPreferences {
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
+                language: gtl_models::settings::ViewerLanguage::default(),
+                date_format: gtl_models::settings::ViewerDateFormat::default(),
                 sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
                 theme: ViewerTheme::Dark,
                 render_options: ViewerRenderOptions {

@@ -26,8 +26,12 @@ const WATCH_START_COMMAND: &str = "viewer_watch_start";
 const WATCH_NEXT_BATCH_COMMAND: &str = "viewer_watch_next_batch";
 const WATCH_CANCEL_COMMAND: &str = "viewer_watch_cancel";
 
-pub async fn pick_project_folder() -> Result<Option<String>, ViewerClientError> {
-    invoke_without_arguments("desktop_pick_project_folder").await
+pub async fn pick_project_folder(title: String) -> Result<Option<String>, ViewerClientError> {
+    invoke_with_request(
+        "desktop_pick_project_folder",
+        gtl_wire::window::PickProjectFolder { title },
+    )
+    .await
 }
 
 thread_local! {

@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight};
 
 use super::{Button, ButtonSize, ButtonState, ButtonVariant};
+use crate::shared::i18n::{t, use_language};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PagePosition {
@@ -35,13 +36,14 @@ pub(crate) fn Pagination(
     onselect: EventHandler<PageNavigation>,
     children: Element,
 ) -> Element {
+    let language = use_language();
     let progress = (position.number as u128 * 100) / position.count as u128;
     rsx! {
         footer { class: "control-pagination min-h-14 gap-3 px-3 sm:px-4",
             div {
                 class: "control-pagination-progress",
                 role: "progressbar",
-                aria_label: "{label} page position",
+                aria_label: t!(language, "pagination-position", label = label.as_str()),
                 aria_valuemin: "1",
                 aria_valuemax: "{position.count}",
                 aria_valuenow: "{position.number}",
@@ -53,14 +55,18 @@ pub(crate) fn Pagination(
             div { class: "min-w-0 text-xs text-ink-3 tabular-nums", {children} }
             nav {
                 class: "control-pagination-navigation gap-1",
-                aria_label: "{label} pages",
-                for (navigation, title) in [(PageNavigation::First, "First page"), (PageNavigation::Previous, "Previous page")] {
+                aria_label: t!(language, "pagination-pages", label = label.as_str()),
+                for (navigation, title) in [
+                    (PageNavigation::First, t!(language, "pagination-first")),
+                    (PageNavigation::Previous, t!(language, "pagination-previous")),
+                ]
+                {
                     Button {
                         key: "{title}",
                         size: ButtonSize::IconTouch,
                         variant: ButtonVariant::Ghost,
                         state: if disabled || position.number == 1 { ButtonState::Disabled } else { ButtonState::Enabled },
-                        aria_label: title,
+                        aria_label: title.clone(),
                         title,
                         onclick: move |_| onselect.call(navigation),
                         span { aria_hidden: "true",
@@ -74,16 +80,20 @@ pub(crate) fn Pagination(
                 }
                 output {
                     class: "min-w-16 px-2 text-center text-xs text-ink tabular-nums",
-                    aria_label: "Page {position.number} of {position.count}",
+                    aria_label: t!(language, "pagination-page-of", number = position.number, count = position.count),
                     "{position.number:02} / {position.count:02}"
                 }
-                for (navigation, title) in [(PageNavigation::Next, "Next page"), (PageNavigation::Last, "Last page")] {
+                for (navigation, title) in [
+                    (PageNavigation::Next, t!(language, "pagination-next")),
+                    (PageNavigation::Last, t!(language, "pagination-last")),
+                ]
+                {
                     Button {
                         key: "{title}",
                         size: ButtonSize::IconTouch,
                         variant: ButtonVariant::Ghost,
                         state: if disabled || position.number == position.count { ButtonState::Disabled } else { ButtonState::Enabled },
-                        aria_label: title,
+                        aria_label: title.clone(),
                         title,
                         onclick: move |_| onselect.call(navigation),
                         span { aria_hidden: "true",

@@ -1,4 +1,5 @@
 proto = "crates/gtl-wire/proto/gtl/v1/settings.proto"
+import-paths = ["crates/gtl-wire/proto"]
 call = "gtl.v1.SettingsService.GetPushConfirmationRequirement"
 total = 1020
 skipFirst = 20

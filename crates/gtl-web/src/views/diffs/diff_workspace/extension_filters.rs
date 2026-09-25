@@ -2,9 +2,12 @@ use dioxus::prelude::*;
 use gtl_models::diffs::ExcludedExtensions;
 use lucide_dioxus::{ChevronDown, FileX, RotateCcw};
 
-use crate::shared::ui::{
-    Button, ButtonLayout, ButtonSize, ButtonVariant, ExtensionExclusionsAction,
-    ExtensionExclusionsInput, IconPopover, popover::PopoverPlacement,
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::{
+        Button, ButtonLayout, ButtonSize, ButtonVariant, ExtensionExclusionsAction,
+        ExtensionExclusionsInput, IconPopover, popover::PopoverPlacement,
+    },
 };
 
 #[cfg(feature = "desktop")]
@@ -18,6 +21,7 @@ pub(crate) fn ExtensionFilter(
     onrestore: EventHandler<()>,
     children: Element,
 ) -> Element {
+    let language = use_language();
     let summary = excluded
         .extensions()
         .iter()
@@ -25,14 +29,14 @@ pub(crate) fn ExtensionFilter(
         .collect::<Vec<_>>()
         .join(", ");
     let label = if summary.is_empty() {
-        "Excluded extensions: none".to_owned()
+        t!(language, "extensions-label-none")
     } else {
-        format!("Excluded extensions: {summary}")
+        t!(language, "extensions-label", extensions = summary.as_str())
     };
     let summary_text = if summary.is_empty() {
-        "None"
+        t!(language, "extensions-summary-none")
     } else {
-        summary.as_str()
+        summary.clone()
     };
     rsx! {
         IconPopover {
@@ -48,7 +52,7 @@ pub(crate) fn ExtensionFilter(
                 }
             },
             div { class: "extension-filter",
-                h2 { class: "text-sm font-semibold", "Excluded extensions" }
+                h2 { class: "text-sm font-semibold", {t!(language, "extensions-excluded")} }
                 ExtensionExclusionsInput {
                     id: "extension-filter",
                     excluded,
@@ -63,7 +67,7 @@ pub(crate) fn ExtensionFilter(
                         layout: ButtonLayout::FullWidthStart,
                         onclick: move |_| onrestore.call(()),
                         RotateCcw { size: 15 }
-                        "Restore global defaults"
+                        {t!(language, "extensions-restore-defaults")}
                     }
                 }
             }

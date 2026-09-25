@@ -52,7 +52,11 @@ async fn wait_for_review(driver: &WebDriver, commit: &str) -> Result<()> {
                 .await?
                 .text()
                 .await?;
-            Ok((review.contains(commit) && review.contains("origin/main")).then_some(()))
+            Ok((review.contains(commit)
+                && review.contains("Branch")
+                && review.contains("Remote")
+                && review.contains("origin"))
+            .then_some(()))
         },
     )
     .await

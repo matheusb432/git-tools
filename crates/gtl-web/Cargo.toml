@@ -15,6 +15,9 @@ gtl-client = { workspace = true, optional = true, features = ["viewer-ipc"] }
 gtl-models.workspace = true
 gtl-wire.workspace = true
 gtl-web-contracts.workspace = true
+i18n-embed = { version = "0.16.0", features = ["fluent-system"] }
+i18n-embed-fl = "0.10.1"
+jiff.workspace = true
 lru = { workspace = true, optional = true }
 lucide-dioxus = { version = "3.26.0", features = [
   "account",
@@ -52,15 +55,18 @@ web-sys = { workspace = true, features = [
   "PointerEvent",
   "Range",
   "Selection",
+  "Storage",
   "Window",
 ] }
 thiserror = { workspace = true, optional = true }
+unic-langid = { version = "0.9.6", features = ["macros"] }
 
 [build-dependencies]
 minifier = { version = "0.4.0", default-features = false, optional = true }
 
 [dev-dependencies]
 dioxus-ssr = "0.7.10"
+fluent-syntax = "0.12.0"
 
 [lints]
 workspace = true

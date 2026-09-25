@@ -6,10 +6,12 @@ fn plan_at(name: &str) -> PushPlan {
     let commit: CommitId = "a".repeat(40).parse().unwrap();
     PushPlan {
         path: std::env::temp_dir().join(name).try_into().unwrap(),
+        project: None,
         repository: PushRepository {
             branch: BranchName::try_new("feature").unwrap(),
             remote: RemoteName::try_new("origin").unwrap(),
             destination: GitRefName::try_new("refs/heads/main").unwrap(),
+            destination_branch: BranchName::main(),
             url: RemoteUrl::try_new("/remote.git").unwrap(),
             head: commit.clone(),
             upstream: "b".repeat(40).parse().unwrap(),
@@ -21,6 +23,66 @@ fn plan_at(name: &str) -> PushPlan {
 
 fn status(operations: &ViewerPushOperations, id: ViewerPushId) -> ViewerPushStatus {
     get_viewer_push::execute(ViewerPushRequest { id }, operations).unwrap()
+}
+
+#[test]
+fn provider_detection_keeps_atomic_push_on_supported_hosts_only() {
+    for (url, provider, atomic) in [
+        (
+            "https://github.com/team/repo.git",
+            PushProvider::GitHub,
+            true,
+        ),
+        ("git@gitlab.com:team/repo.git", PushProvider::GitLab, true),
+        (
+            "ssh://git@codeberg.org/team/repo.git",
+            PushProvider::Codeberg,
+            true,
+        ),
+        (
+            "https://bitbucket.org/team/repo.git",
+            PushProvider::BitbucketCloud,
+            true,
+        ),
+        (
+            "https://dev.azure.com/team/repo/_git/repo",
+            PushProvider::AzureDevOps,
+            false,
+        ),
+        (
+            "git@ssh.dev.azure.com:v3/team/repo/repo",
+            PushProvider::AzureDevOps,
+            false,
+        ),
+        (
+            "https://team.visualstudio.com/project/_git/repo",
+            PushProvider::AzureDevOps,
+            false,
+        ),
+        ("/tmp/remote.git", PushProvider::Unknown, false),
+        (
+            "https://example.test/team/repo.git",
+            PushProvider::Unknown,
+            false,
+        ),
+        (
+            "https://github.com.evil.test/team/repo.git",
+            PushProvider::Unknown,
+            false,
+        ),
+    ] {
+        let url = RemoteUrl::try_new(url).unwrap();
+        assert_eq!(PushProvider::from_url(&url), provider, "{url}");
+        let mut plan = plan_at("provider-test");
+        plan.repository.url = url;
+        assert_eq!(plan.arguments().contains(&"--atomic".to_owned()), atomic);
+        assert_eq!(
+            plan.preview()
+                .command_arguments
+                .contains(&ViewerPushCommandArgument::Atomic),
+            atomic
+        );
+    }
 }
 
 #[test]

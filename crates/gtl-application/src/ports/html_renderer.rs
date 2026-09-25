@@ -1,4 +1,7 @@
-use gtl_models::viewer::{RenderOptions, Theme};
+use gtl_models::{
+    settings::ViewerLanguage,
+    viewer::{RenderOptions, Theme},
+};
 
 use crate::diffs::View;
 
@@ -10,6 +13,7 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         view: &View,
         options: RenderOptions,
         theme: Option<Theme>,
+        language: ViewerLanguage,
     ) -> anyhow::Result<String>;
 
     /// Renders several views in one document with a tab per repository.
@@ -19,5 +23,6 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         views: &[View],
         options: RenderOptions,
         theme: Option<Theme>,
+        language: ViewerLanguage,
     ) -> anyhow::Result<String>;
 }

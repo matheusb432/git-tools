@@ -637,10 +637,12 @@ impl HtmlRenderer for StubRenderer {
         view: &crate::diffs::View,
         options: RenderOptions,
         theme: Option<Theme>,
+        language: gtl_models::settings::ViewerLanguage,
     ) -> anyhow::Result<String> {
         let theme = theme.map_or_else(String::new, |theme| theme.to_string());
         Ok(format!(
-            "<html data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{}</title></html>",
+            "<html lang=\"{}\" data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{}</title></html>",
+            language,
             theme,
             options.layout(),
             options.density(),
@@ -653,14 +655,16 @@ impl HtmlRenderer for StubRenderer {
         views: &[crate::diffs::View],
         options: RenderOptions,
         theme: Option<Theme>,
+        language: gtl_models::settings::ViewerLanguage,
     ) -> anyhow::Result<String> {
         let theme = theme.map_or_else(String::new, |theme| theme.to_string());
         let view_summaries = views
             .iter()
             .map(|view| {
                 format!(
-                    "{}:{}:{}:{}:{}",
+                    "{}:{}:{}:{}:{}:{}",
                     view.repo_name,
+                    language,
                     theme,
                     options.layout(),
                     options.density(),

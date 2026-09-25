@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+message RepositoryAbsentStatus {}
+
+message RepositoryPresentStatus {
+  RepositoryStatusHead head = 1;
+  RepositoryStatusChanges changes = 2;
+}
+
+message RepositoryStatusResult {
+  string project_name = 1;
+  oneof state {
+    RepositoryAbsentStatus absent = 2;
+    RepositoryPresentStatus present = 3;
+  }
+}
+
+message RepositoryStatusHead {
+  oneof state {
+    RepositoryStatusUnavailable unavailable = 1;
+    RepositoryStatusDetached detached = 2;
+    RepositoryStatusBranch branch = 3;
+  }
+}
+
+message RepositoryStatusUnavailable {}
+
+message RepositoryStatusDetached {}
+
+message RepositoryStatusBranch {
+  string name = 1;
+  oneof upstream {
+    RepositoryUpstreamMissing missing = 2;
+    RepositoryUpstreamTracking tracking = 3;
+  }
+}
+
+message RepositoryUpstreamMissing {}
+
+message RepositoryUpstreamTracking {
+  string reference = 1;
+  uint64 commits_ahead = 2;
+}
+
+message RepositoryStatusChanges {
+  oneof state {
+    RepositoryChangesClean clean = 1;
+    RepositoryChangesChanged changed = 2;
+    RepositoryChangesUnavailable unavailable = 3;
+  }
+}
+
+message RepositoryChangesClean {}
+
+message RepositoryChangesChanged {
+  uint64 tracked_paths = 1;
+  uint64 untracked_paths = 2;
+}
+
+message RepositoryChangesUnavailable {}

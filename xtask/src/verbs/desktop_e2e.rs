@@ -26,7 +26,7 @@ mod stable_runner;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
-const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
+const WINDOW_TITLE_PATTERN: &str = "^git-tools$";
 const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
 const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";
 const EVIDENCE_OUTPUT_PATH_DEFAULT: &str = ".artifacts/e2e";

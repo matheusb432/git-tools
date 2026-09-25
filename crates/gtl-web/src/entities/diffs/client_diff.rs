@@ -80,18 +80,28 @@ impl ClientDiffFileError {
 }
 
 #[cfg(feature = "desktop")]
-impl std::fmt::Display for ClientDiffFileError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ClientDiffFileError {
+    /// Explains why rows did not load, in `language`.
+    pub(crate) fn message(&self, language: gtl_models::settings::ViewerLanguage) -> String {
+        use crate::shared::{
+            failure_message::failure_message, failure_notice::client_error_message, i18n::t,
+        };
         match self {
             Self::Transport(ViewerClientError::Disconnected | ViewerClientError::StreamClosed) => {
-                formatter.write_str("The diff row stream disconnected.")
+                t!(language, "diff-rows-disconnected")
             }
-            Self::Transport(error) => error.fmt(formatter),
-            Self::InvalidResponse => formatter.write_str(
-                "The server returned invalid diff rows. Retry this view to load it again.",
-            ),
-            Self::Server { failure, .. } => failure.fmt(formatter),
+            Self::Transport(error) => client_error_message(error, language),
+            Self::InvalidResponse => t!(language, "diff-rows-invalid"),
+            Self::Server { failure, .. } => failure_message(failure, language),
         }
+    }
+}
+
+/// Describes the error in the default language for diagnostics and tests.
+#[cfg(feature = "desktop")]
+impl std::fmt::Display for ClientDiffFileError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message(gtl_models::settings::ViewerLanguage::default()))
     }
 }
 

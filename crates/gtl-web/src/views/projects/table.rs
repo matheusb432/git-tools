@@ -13,14 +13,17 @@ use super::{
 };
 use crate::{
     app::application_router::Route,
-    shared::ui::{
-        HoverPopover, HoverPopoverPlacement,
-        data_table::{
-            DataTable, DataTableActions, DataTableRow, TableColumn, TableHeading,
-            TableSortDirection, TableSortHeading,
+    shared::{
+        i18n::{t, use_language},
+        ui::{
+            HoverPopover, HoverPopoverPlacement,
+            data_table::{
+                DataTable, DataTableActions, DataTableRow, TableColumn, TableHeading,
+                TableSortDirection, TableSortHeading,
+            },
+            no_data::NoData,
+            use_hover_popover,
         },
-        no_data::NoData,
-        use_hover_popover,
     },
 };
 const TABLE_LINK_CLASSES: &str = "project-table-link -mx-3 h-11 min-w-0 px-3";
@@ -34,17 +37,18 @@ pub(super) fn ProjectTable(
     onsort: EventHandler<ProjectsSort>,
 ) -> Element {
     use ProjectsSort::{Branch, BranchDescending, Changes, ChangesAscending, Name, NameDescending};
+    let language = use_language();
     rsx! {
         DataTable {
-            caption: "Managed projects",
+            caption: t!(language, "projects-table-caption"),
             header: rsx! {
                 TableHeading { class: "w-8",
-                    span { class: "sr-only", "Status" }
+                    span { class: "sr-only", {t!(language, "projects-table-status")} }
                 }
                 for (label, ascending, descending, initial) in [
-                    ("Project", Name, NameDescending, Name),
-                    ("Branch", Branch, BranchDescending, Branch),
-                    ("Changes", ChangesAscending, Changes, Changes),
+                    (t!(language, "projects-table-project"), Name, NameDescending, Name),
+                    (t!(language, "projects-table-branch"), Branch, BranchDescending, Branch),
+                    (t!(language, "projects-table-changes"), ChangesAscending, Changes, Changes),
                 ]
                 {
                     {
@@ -71,7 +75,7 @@ pub(super) fn ProjectTable(
                         }
                     }
                 }
-                TableHeading { class: "text-right", "Actions" }
+                TableHeading { class: "text-right", {t!(language, "projects-table-actions")} }
             },
             for project in projects {
                 ProjectTableRow { key: "{project.id}", project, disabled }
@@ -82,6 +86,7 @@ pub(super) fn ProjectTable(
 
 #[component]
 fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
+    let language = use_language();
     let status = super::loading::use_project_status(&project);
     let load = (status.state)();
     let loading = load.status.is_none() && !load.failed;
@@ -97,7 +102,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
         local,
         ahead,
         ..
-    } = project_presentation(&project, result);
+    } = project_presentation(&project, result, language);
     let destination = (!disabled && local.is_available())
         .then(|| Route::project_diff(&project.path, ViewerProjectDiffMode::Live));
     rsx! {
@@ -134,7 +139,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                             GitBranch { size: 13, class: "shrink-0 text-ink-3" }
                             span {
                                 class: "truncate select-text",
-                                title: branch,
+                                title: branch.to_string(),
                                 "data-testid": "project-table-branch-text",
                                 "{branch}"
                             }
@@ -178,8 +183,8 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                         crate::shared::ui::Button {
                             variant: crate::shared::ui::ButtonVariant::Ghost,
                             size: crate::shared::ui::ButtonSize::IconSmall,
-                            aria_label: "Retry Git status for {project.name}",
-                            title: "Retry Git status",
+                            aria_label: t!(language, "projects-retry-status-for", project = project.name.to_string()),
+                            title: t!(language, "projects-retry-status"),
                             onclick: move |_| (status.retry)(()),
                             lucide_dioxus::RefreshCw { size: 14 }
                         }
@@ -229,28 +234,21 @@ fn ProjectChanges(
     local: ProjectSignal,
     ahead: ProjectSignal,
 ) -> Element {
+    let language = use_language();
     let id = format!("project-changes-{project_id}");
     let anchor_name = format!("--{id}");
     let hover = use_hover_popover(id.clone());
     let local_description = match &local {
-        ProjectSignal::Local { tracked, untracked } if local.has_changes() => {
-            format!(
-                "{tracked} tracked {} changed; {untracked} untracked {}",
-                if tracked.value() == 1 {
-                    "file"
-                } else {
-                    "files"
-                },
-                if untracked.value() == 1 {
-                    "file"
-                } else {
-                    "files"
-                }
-            )
-        }
-        _ => local.description().into_owned(),
+        ProjectSignal::Local { tracked, untracked } if local.has_changes() => t!(
+            language,
+            "projects-local-counts",
+            tracked = tracked.value(),
+            untracked = untracked.value()
+        ),
+        _ => local.description(language),
     };
-    let description = format!("{}; {local_description}", ahead.description());
+    let ahead_description = ahead.description(language);
+    let description = format!("{ahead_description}; {local_description}");
     let issue = ahead.issue().or_else(|| local.issue());
     let clean = local.is_available()
         && ahead.is_available()
@@ -274,32 +272,34 @@ fn ProjectChanges(
                     if let ProjectSignal::Ahead { count, .. } = &ahead && count.into_inner() > 0 {
                         span {
                             class: "inline-flex items-center gap-0.5",
-                            title: ahead.description().into_owned(),
+                            title: ahead_description,
                             ArrowUp { size: 16 }
                             "{count}"
                         }
                     }
                     if let ProjectSignal::Local { tracked, untracked } = &local {
                         if !tracked.is_zero() {
-                            span { title: "Tracked changes",
+                            span { title: t!(language, "projects-tracked-changes"),
                                 FilePenLine { size: 16 }
                             }
                         }
                         if !untracked.is_zero() {
-                            span { title: "Untracked files",
+                            span { title: t!(language, "projects-local-untracked"),
                                 FilePlus { size: 16 }
                             }
                         }
                     }
                     if clean {
-                        span { class: "text-add", title: "No changes pending",
+                        span {
+                            class: "text-add",
+                            title: t!(language, "projects-no-changes"),
                             Check { size: 17 }
                         }
                     }
                     if let Some(issue) = issue {
                         span {
                             class: "text-warn",
-                            title: issue.description().into_owned(),
+                            title: issue.description(language),
                             TriangleAlert { size: 16 }
                         }
                     } else if local == ProjectSignal::Loading || ahead == ProjectSignal::Loading {
@@ -311,7 +311,7 @@ fn ProjectChanges(
         HoverPopover {
             id,
             anchor_name: anchor_name.clone(),
-            aria_label: "Project changes",
+            aria_label: t!(language, "projects-changes-popover"),
             placement: HoverPopoverPlacement::Below,
             span { class: "block whitespace-normal text-xs text-ink-2", "{description}" }
         }

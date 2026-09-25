@@ -15,6 +15,8 @@ use crate::{
     entities::diffs::viewer_server,
     shared::{
         browser,
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
         ui::{
             NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
             ViewerTabRailMeasurementItem, ViewerTabSelectionIndicator, use_toast,
@@ -120,6 +122,7 @@ fn viewer_tab_rail_overflows(content_width: f64, viewport_width: f64) -> bool {
 
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
+    let language = use_language();
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
     let route = use_route::<Route>();
@@ -171,7 +174,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     }
                     Err(error) => {
                         toast.client_error(&error);
-                        (submission.complete)(Err(error.to_string()));
+                        (submission.complete)(Err(client_error_message(&error, language)));
                     }
                 }
             });
@@ -291,21 +294,21 @@ pub(crate) fn ApplicationNavigation() -> Element {
     rsx! {
         NavigationBar {
             bordered: false,
-            aria_label: "Viewer navigation",
+            aria_label: t!(language, "navigation-label"),
             leading: rsx! {
                 Link {
                     to: Route::Projects {},
                     class: "viewer-tab-pinned",
                     draggable: "false",
-                    aria_label: "Projects",
+                    aria_label: t!(language, "navigation-projects"),
                     aria_current: projects_active.then_some("page"),
-                    title: "Projects",
+                    title: t!(language, "navigation-projects"),
                     span {
                         class: "viewer-navigation-icon size-5 [&>svg]:size-full",
                         aria_hidden: "true",
                         dangerous_inner_html: include_str!("assets/app-icon.svg"),
                     }
-                    span { class: "hidden sm:inline", "Projects" }
+                    span { class: "hidden sm:inline", {t!(language, "navigation-projects")} }
                     ViewerTabSelectionIndicator { active: projects_active }
                 }
             },
@@ -314,7 +317,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     variant: ScrollAreaVariant::Rail,
                     class: "viewer-tab-rail",
                     role: "tablist",
-                    aria_label: "Open diffs",
+                    aria_label: t!(language, "navigation-open-diffs"),
                     aria_hidden: tab_rail_collapsed.to_string(),
                     "data-viewer-tab-rail-mode": if tab_rail_collapsed { "measurement" } else { "interactive" },
                     onresize: move |event: ResizeEvent| {
@@ -328,7 +331,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             tab_rail_overflow.content_resized.call(event);
                         },
                         if tabs.is_empty() {
-                            p { class: "viewer-navigation-empty h-9 px-3", "No open diffs" }
+                            p { class: "viewer-navigation-empty h-9 px-3",
+                                {t!(language, "navigation-no-open-diffs")}
+                            }
                         }
                         if tab_rail_collapsed {
                             for tab in displayed_tabs.iter().copied() {

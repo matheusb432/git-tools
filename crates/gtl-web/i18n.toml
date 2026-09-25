@@ -1,0 +1,6 @@
+# Read by `i18n_embed_fl::fl!` to check message IDs and arguments at compile time.
+fallback_language = "en-US"
+
+[fluent]
+assets_dir = "i18n"
+domain = "gtl_web"

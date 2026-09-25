@@ -102,7 +102,7 @@ pub(crate) fn confirmation(target: &PushTarget) -> crate::confirm::Dialog {
             "Commits to push",
             target.pending.ahead.into_inner().saturating_add(1),
         ),
-        Detail::new("Push", remote_label(target)),
+        Detail::new("Remote", remote_label(target)),
     ];
     Dialog::new(
         "Confirm commit and push",
@@ -120,7 +120,7 @@ pub(crate) fn push_confirmation(target: &PushTarget) -> crate::confirm::Dialog {
             Detail::new("Project", &target.name),
             Detail::new("Branch", &target.branch),
             Detail::new("Commits to push", target.pending.ahead),
-            Detail::new("Push", remote_label(target)),
+            Detail::new("Remote", remote_label(target)),
         ],
         "Push these commits?",
     )
@@ -204,6 +204,8 @@ mod tests {
         assert!(text.contains("3 (all changes, including unstaged and untracked)"));
         assert!(text.contains("Commits to push  3"));
         assert!(text.contains("origin (git@example.invalid:team/example-project.git)"));
+        assert!(text.contains("Remote"));
+        assert!(!text.contains("Push  origin"));
         assert!(!text.contains("/repos"));
         assert!(!text.contains("message"));
     }

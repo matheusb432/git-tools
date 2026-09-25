@@ -1,4 +1,4 @@
-use gtl_wire::window::{WindowAction, WindowState};
+use gtl_wire::window::{TrayLabels, WindowAction, WindowState};
 
 use crate::ViewerClientError;
 
@@ -12,6 +12,18 @@ pub async fn set_scale(
 #[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
 pub fn set_scale(
     _scale: gtl_wire::window::ViewerScalePercent,
+) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
+    std::future::ready(Err(ViewerClientError::Disconnected))
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub async fn set_tray_labels(labels: TrayLabels) -> Result<(), ViewerClientError> {
+    crate::viewer::tauri::invoke_with_request("desktop_tray_labels", labels).await
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
+pub fn set_tray_labels(
+    _labels: TrayLabels,
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
     std::future::ready(Err(ViewerClientError::Disconnected))
 }

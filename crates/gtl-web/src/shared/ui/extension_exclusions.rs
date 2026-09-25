@@ -6,6 +6,7 @@ use lucide_dioxus::{Plus, X};
 
 use crate::shared::{
     file_extension::FileExtension,
+    i18n::{t, use_language},
     ui::{Button, ButtonLayout, ButtonSize, ButtonVariant},
 };
 
@@ -36,6 +37,7 @@ pub(crate) fn ExtensionExclusionsInput(
     #[props(default)] disabled: bool,
     onchange: EventHandler<ExtensionExclusionsAction>,
 ) -> Element {
+    let language = use_language();
     let mut searching = use_signal(|| false);
     let add_id = format!("{id}-add");
     let search_id = format!("{id}-search");
@@ -44,9 +46,9 @@ pub(crate) fn ExtensionExclusionsInput(
         div { class: "extension-exclusions-input",
             div {
                 class: "extension-filter-chips",
-                aria_label: "Excluded extensions",
+                aria_label: t!(language, "extensions-excluded"),
                 if excluded.is_empty() {
-                    p { class: "text-sm text-ink-3", "No excluded extensions" }
+                    p { class: "text-sm text-ink-3", {t!(language, "extensions-none")} }
                 }
                 for extension in excluded.extensions().iter().cloned() {
                     ExcludedChip {
@@ -78,7 +80,7 @@ pub(crate) fn ExtensionExclusionsInput(
                     disabled,
                     onclick: move |_| searching.set(true),
                     Plus { size: 16 }
-                    "Exclude extension…"
+                    {t!(language, "extensions-exclude")}
                 }
             }
         }
@@ -91,13 +93,14 @@ fn ExcludedChip(
     disabled: bool,
     onchange: EventHandler<ExtensionExclusionsAction>,
 ) -> Element {
+    let language = use_language();
     let value = extension.clone();
     rsx! {
         Button {
             class: "extension-filter-chip",
             size: ButtonSize::Small,
             variant: ButtonVariant::Bare,
-            aria_label: "Reveal .{extension}",
+            aria_label: t!(language, "extensions-reveal", extension = extension.as_str()),
             disabled,
             onclick: move |_| {
                 onchange.call(ExtensionExclusionsAction::Reveal(value.clone()));

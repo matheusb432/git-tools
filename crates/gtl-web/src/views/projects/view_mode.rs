@@ -7,6 +7,7 @@ use crate::{
     app::application_layout::ViewerContext,
     entities::diffs::viewer_server,
     shared::{
+        i18n::{t, use_language},
         ui::{Button, ButtonSize, ButtonState, ButtonVariant},
         viewer_client::ViewerClientError,
     },
@@ -136,19 +137,24 @@ async fn load_preferences(active: bool) -> Result<ViewerUserSettings, ViewerClie
 
 #[component]
 pub(super) fn ProjectsViewToggle(presentation: ProjectsPresentation) -> Element {
+    let language = use_language();
     let mode = (presentation.mode)();
     rsx! {
         div {
             class: "project-view-toggle gap-px p-px",
             role: "group",
-            aria_label: "Projects view",
-            for (value, label) in [(ProjectsViewMode::Grid, "Grid view"), (ProjectsViewMode::Table, "List view")] {
+            aria_label: t!(language, "projects-view-label"),
+            for (value, label) in [
+                (ProjectsViewMode::Grid, t!(language, "projects-view-grid")),
+                (ProjectsViewMode::Table, t!(language, "projects-view-list")),
+            ]
+            {
                 Button {
                     variant: if mode == value { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                     size: ButtonSize::IconSmall,
                     class: "max-sm:size-11",
                     state: if (presentation.pending)() { ButtonState::Disabled } else { ButtonState::Enabled },
-                    aria_label: label,
+                    aria_label: label.clone(),
                     title: label,
                     aria_pressed: (mode == value).to_string(),
                     onclick: move |_| (presentation.select)(value),

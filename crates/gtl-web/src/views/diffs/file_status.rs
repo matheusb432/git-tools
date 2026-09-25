@@ -1,15 +1,18 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::ViewerFileStatus;
+
+use crate::shared::i18n::{t, use_language};
 
 #[component]
 pub(crate) fn DiffFileStatus(status: ViewerFileStatus) -> Element {
-    let label = status_label(status);
+    let label = status_label(status, use_language());
     let color = file_status_text_class(status);
 
     rsx! {
         span {
             class: "flex-none text-xs leading-none font-semibold {color}",
-            title: label,
+            title: label.clone(),
             aria_label: label,
             "{status_code(status)}"
         }
@@ -34,11 +37,11 @@ const fn status_code(status: ViewerFileStatus) -> &'static str {
     }
 }
 
-const fn status_label(status: ViewerFileStatus) -> &'static str {
+fn status_label(status: ViewerFileStatus, language: ViewerLanguage) -> String {
     match status {
-        ViewerFileStatus::Added => "Added file",
-        ViewerFileStatus::Deleted => "Deleted file",
-        ViewerFileStatus::Renamed => "Renamed file",
-        ViewerFileStatus::Modified => "Modified file",
+        ViewerFileStatus::Added => t!(language, "file-status-added"),
+        ViewerFileStatus::Deleted => t!(language, "file-status-deleted"),
+        ViewerFileStatus::Renamed => t!(language, "file-status-renamed"),
+        ViewerFileStatus::Modified => t!(language, "file-status-modified"),
     }
 }

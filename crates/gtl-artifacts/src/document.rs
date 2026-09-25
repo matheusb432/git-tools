@@ -6,6 +6,7 @@ use gtl_application::{
     diffs::View,
     viewer::{RenderOptions, Theme},
 };
+use gtl_models::settings::ViewerLanguage;
 use gtl_web::{
     StaticArtifactView, render_static_artifact_body, static_artifact_enhancement_script,
 };
@@ -21,25 +22,31 @@ fn content_security_policy(script: &str, stylesheet: &str) -> String {
     )
 }
 
-/// Builds one self-contained static diff artifact.
-pub fn build_html(view: &View, options: RenderOptions, theme: Option<Theme>) -> Result<String> {
+/// Builds one self-contained static diff artifact with its copy in `language`.
+pub fn build_html(
+    view: &View,
+    options: RenderOptions,
+    theme: Option<Theme>,
+    language: ViewerLanguage,
+) -> Result<String> {
     let count = view.commits.len();
     let suffix = if count == 1 { "" } else { "s" };
     let title = format!(
         "{} - {} · {count} commit{suffix}",
         view.repo_name, view.title
     );
-    build_document(&title, std::slice::from_ref(view), options, theme)
+    build_document(&title, std::slice::from_ref(view), options, theme, language)
 }
 
-/// Builds one self-contained static artifact with a tab per diff view.
+/// Builds one self-contained static artifact with a tab per diff view and its copy in `language`.
 pub fn build_tabbed_html(
     title: &str,
     views: &[View],
     options: RenderOptions,
     theme: Option<Theme>,
+    language: ViewerLanguage,
 ) -> Result<String> {
-    build_document(title, views, options, theme)
+    build_document(title, views, options, theme, language)
 }
 
 fn build_document(
@@ -47,6 +54,7 @@ fn build_document(
     views: &[View],
     options: RenderOptions,
     theme: Option<Theme>,
+    language: ViewerLanguage,
 ) -> Result<String> {
     let payload = project_payload(views, options, theme)?;
     let static_views = payload
@@ -55,7 +63,7 @@ fn build_document(
         .map(|projected| StaticArtifactView::try_new(projected.view, projected.rows))
         .collect::<Result<Vec<_>, _>>()
         .context("construct static artifact views")?;
-    let body = render_static_artifact_body(static_views);
+    let body = render_static_artifact_body(static_views, language);
     let script = static_artifact_enhancement_script();
     ensure!(
         !assets::TAILWIND_CSS
@@ -79,7 +87,8 @@ fn build_document(
     );
     write!(
         html,
-        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"darkreader-lock\"><title>",
+        "<!doctype html><html lang=\"{}\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark\"><meta name=\"darkreader-lock\"><title>",
+        language.as_str(),
         payload.theme.as_str(),
         content_security_policy,
     )
@@ -131,12 +140,35 @@ mod tests {
     }
 
     #[test]
+    fn document_declares_its_language_and_renders_copy_in_it() {
+        let html = build_html(
+            &sample_view(),
+            RenderOptions::DEFAULT,
+            None,
+            ViewerLanguage::PtBr,
+        )
+        .unwrap();
+
+        assert!(html.starts_with("<!doctype html><html lang=\"pt-BR\""));
+        assert!(html.contains("data-gtl-label-copied=\"Copiado\""));
+        assert!(html.contains(
+            "data-gtl-label-copied-context-lines=\"Copiado com contexto - linhas {lines}\""
+        ));
+    }
+
+    #[test]
     fn document_contains_complete_static_markup() {
-        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None).unwrap();
+        let html = build_html(
+            &sample_view(),
+            RenderOptions::DEFAULT,
+            None,
+            ViewerLanguage::EnUs,
+        )
+        .unwrap();
         let policy =
             content_security_policy(static_artifact_enhancement_script(), assets::TAILWIND_CSS);
 
-        assert!(html.starts_with("<!doctype html><html lang=\"en\" data-theme=\"dark\">"));
+        assert!(html.starts_with("<!doctype html><html lang=\"en-US\" data-theme=\"dark\">"));
         assert!(html.contains("<title>api - diff · 0 commits</title>"));
         assert!(html.contains("static_rendered"));
         assert!(html.contains("data-gtl-diff-file"));
@@ -191,6 +223,7 @@ mod tests {
             &[view],
             RenderOptions::DEFAULT,
             None,
+            ViewerLanguage::EnUs,
         )
         .unwrap();
 
@@ -221,12 +254,14 @@ mod tests {
             &view,
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
             Some(Theme::Carbon),
+            ViewerLanguage::EnUs,
         )
         .unwrap();
         let split = build_html(
             &view,
             RenderOptions::new(DiffLayout::Split, DiffDensity::Compact).with_wrap_lines(true),
             Some(Theme::Carbon),
+            ViewerLanguage::EnUs,
         )
         .unwrap();
 
@@ -261,6 +296,7 @@ mod tests {
             &[first, second],
             RenderOptions::DEFAULT,
             None,
+            ViewerLanguage::EnUs,
         )
         .unwrap();
 
@@ -296,8 +332,20 @@ mod tests {
     #[test]
     fn tiny_artifact_is_deterministic_and_records_size_evidence() {
         let view = tiny_size_view();
-        let first = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
-        let second = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
+        let first = build_html(
+            &view,
+            RenderOptions::DEFAULT,
+            Some(Theme::Dark),
+            ViewerLanguage::EnUs,
+        )
+        .unwrap();
+        let second = build_html(
+            &view,
+            RenderOptions::DEFAULT,
+            Some(Theme::Dark),
+            ViewerLanguage::EnUs,
+        )
+        .unwrap();
         let evidence = size_evidence(&first);
 
         eprintln!("tiny static artifact size evidence: {evidence:?}");
@@ -314,7 +362,13 @@ mod tests {
     #[test]
     fn representative_large_artifact_records_complete_document_size() {
         let view = large_size_view();
-        let html = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark)).unwrap();
+        let html = build_html(
+            &view,
+            RenderOptions::DEFAULT,
+            Some(Theme::Dark),
+            ViewerLanguage::EnUs,
+        )
+        .unwrap();
         let evidence = size_evidence(&html);
 
         eprintln!("large static artifact size evidence: {evidence:?}");

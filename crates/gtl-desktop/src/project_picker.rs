@@ -1,15 +1,17 @@
 use gtl_client::ViewerClientError;
+use gtl_wire::window::PickProjectFolder;
 use tauri_plugin_dialog::DialogExt as _;
 
 #[tauri::command]
 pub(crate) async fn desktop_pick_project_folder(
     window: tauri::WebviewWindow,
+    request: PickProjectFolder,
 ) -> Result<Option<String>, ViewerClientError> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     window
         .dialog()
         .file()
-        .set_title("Choose a folder to scan")
+        .set_title(request.title)
         .pick_folder(move |folder| {
             let _ = sender.send(folder);
         });

@@ -3,6 +3,7 @@ use lucide_dioxus::{Ellipsis, Settings};
 
 use crate::shared::{
     browser,
+    i18n::{t, use_language},
     ui::{
         ButtonSize, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
         icon_popover::IconPopoverTrigger,
@@ -18,6 +19,7 @@ pub(crate) fn ViewerMenu(
     trigger_test_id: Option<String>,
     onsettings: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let keyboard_id = id.clone();
     rsx! {
         span {
@@ -29,7 +31,7 @@ pub(crate) fn ViewerMenu(
             ),
             IconPopoverTrigger {
                 id: id.clone(),
-                aria_label: "Viewer menu",
+                aria_label: t!(language, "viewer-menu-label"),
                 aria_haspopup: "menu",
                 trigger_size,
                 trigger_test_id,
@@ -42,7 +44,7 @@ pub(crate) fn ViewerMenu(
                 id: id.clone(),
                 placement: PopoverPlacement::TriggerEnd,
                 role: "menu",
-                aria_label: "Viewer menu",
+                aria_label: t!(language, "viewer-menu-label"),
                 aria_labelledby: format!("{id}-trigger"),
                 div { class: "grid gap-0.5 p-1.5",
                     button {
@@ -51,7 +53,7 @@ pub(crate) fn ViewerMenu(
                         role: "menuitem",
                         tabindex: "-1",
                         autofocus: true,
-                        aria_label: "User settings",
+                        aria_label: t!(language, "viewer-menu-settings-label"),
                         onclick: move |_| {
                             browser::hide_popover(&id);
                             onsettings.call(());
@@ -60,8 +62,8 @@ pub(crate) fn ViewerMenu(
                             icon: rsx! {
                                 Settings { size: 15 }
                             },
-                            label: "Settings",
-                            description: "Viewer defaults",
+                            label: t!(language, "viewer-menu-settings"),
+                            description: t!(language, "viewer-menu-settings-description"),
                         }
                     }
                 }

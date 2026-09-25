@@ -14,12 +14,12 @@ use gtl_models::{
     },
 };
 use nutype::nutype;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+use serde::{Deserialize, Serialize};
 
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 40;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 43;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -236,7 +236,7 @@ pub struct ViewerFileSummary {
     pub row_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerCommitSummary {
     pub id: CommitId,
     pub subject: String,
@@ -274,71 +274,6 @@ pub struct ViewerCommitPage {
     pub identity: ViewerViewIdentity,
     pub commits: Vec<ViewerCommitSummary>,
     pub next_cursor: Option<ViewerCommitCursor>,
-}
-
-#[derive(Serialize)]
-struct ViewerCommitSummaryRef<'a> {
-    id: &'a CommitId,
-    subject: &'a str,
-    body: &'a str,
-    date: String,
-    iso: &'a MachineTimestamp,
-    is_merge: bool,
-}
-
-impl Serialize for ViewerCommitSummary {
-    fn serialize<SerializerType>(
-        &self,
-        serializer: SerializerType,
-    ) -> Result<SerializerType::Ok, SerializerType::Error>
-    where
-        SerializerType: Serializer,
-    {
-        ViewerCommitSummaryRef {
-            id: &self.id,
-            subject: &self.subject,
-            body: &self.body,
-            date: self.committed_at.display_minute(),
-            iso: &self.committed_at,
-            is_merge: self.is_merge,
-        }
-        .serialize(serializer)
-    }
-}
-
-#[derive(Deserialize)]
-struct ViewerCommitSummaryFields {
-    id: CommitId,
-    subject: String,
-    body: String,
-    date: String,
-    iso: MachineTimestamp,
-    is_merge: bool,
-}
-
-impl<'de> Deserialize<'de> for ViewerCommitSummary {
-    fn deserialize<DeserializerType>(
-        deserializer: DeserializerType,
-    ) -> Result<Self, DeserializerType::Error>
-    where
-        DeserializerType: Deserializer<'de>,
-    {
-        let fields = ViewerCommitSummaryFields::deserialize(deserializer)?;
-        let expected_date = fields.iso.display_minute();
-        if fields.date != expected_date {
-            return Err(DeserializerType::Error::custom(format!(
-                "commit display timestamp `{}` does not match `{expected_date}`",
-                fields.date
-            )));
-        }
-        Ok(Self {
-            id: fields.id,
-            subject: fields.subject,
-            body: fields.body,
-            committed_at: fields.iso,
-            is_merge: fields.is_merge,
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -458,6 +393,8 @@ pub enum ViewerActiveState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerPreferences {
     pub accessibility: gtl_models::settings::ViewerAccessibility,
+    pub language: gtl_models::settings::ViewerLanguage,
+    pub date_format: gtl_models::settings::ViewerDateFormat,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
@@ -563,6 +500,8 @@ pub struct ViewerDiffExclusions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
     pub accessibility: gtl_models::settings::ViewerAccessibility,
+    pub language: gtl_models::settings::ViewerLanguage,
+    pub date_format: gtl_models::settings::ViewerDateFormat,
     pub revision: UserSettingsRevision,
     pub focus_window_on_diff: bool,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
@@ -596,6 +535,8 @@ pub struct ViewerProjectSettingsUpdate {
 pub struct EditSettingsRequest {
     pub ui_scale_percent: FieldUpdate<gtl_models::settings::ViewerScalePercent>,
     pub reduce_motion: FieldUpdate<bool>,
+    pub language: FieldUpdate<gtl_models::settings::ViewerLanguage>,
+    pub date_format: FieldUpdate<gtl_models::settings::ViewerDateFormat>,
     pub expected_revision: Option<UserSettingsRevision>,
     pub focus_window_on_diff: FieldUpdate<bool>,
     pub files_sidebar_visible: FieldUpdate<bool>,

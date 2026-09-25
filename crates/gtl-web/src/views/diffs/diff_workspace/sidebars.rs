@@ -1,8 +1,14 @@
 use dioxus::prelude::*;
-use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerSidebarVisibility};
+use gtl_models::{
+    settings::ViewerLanguage,
+    viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerSidebarVisibility},
+};
 use lucide_dioxus::{PanelLeft, PanelRight};
 
-use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::{Button, ButtonSize, ButtonVariant},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Sidebar {
@@ -18,10 +24,10 @@ impl Sidebar {
         }
     }
 
-    const fn label(self) -> &'static str {
+    fn toggle_label(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Files => "Files",
-            Self::Commits => "Commits",
+            Self::Files => t!(language, "sidebar-toggle-files"),
+            Self::Commits => t!(language, "sidebar-toggle-commits"),
         }
     }
 
@@ -35,9 +41,16 @@ impl Sidebar {
 
 #[component]
 pub(super) fn SidebarPanel(sidebar: Sidebar, visible: bool, children: Element) -> Element {
+    let language = use_language();
     let (class, label) = match sidebar {
-        Sidebar::Files => ("diff-workspace-files-panel", "Changed files"),
-        Sidebar::Commits => ("diff-workspace-commits-panel", "Commits"),
+        Sidebar::Files => (
+            "diff-workspace-files-panel",
+            t!(language, "workspace-changed-files"),
+        ),
+        Sidebar::Commits => (
+            "diff-workspace-commits-panel",
+            t!(language, "workspace-commits"),
+        ),
     };
     rsx! {
         aside {
@@ -58,11 +71,12 @@ pub(super) fn SidebarButtons(
     ontoggle: Option<EventHandler<Sidebar>>,
     artifact: bool,
 ) -> Element {
+    let language = use_language();
     rsx! {
         div {
             class: "hidden items-center gap-1 workspace:flex",
             role: "group",
-            aria_label: "Sidebar visibility",
+            aria_label: t!(language, "sidebar-visibility"),
             for (sidebar, visible) in [(Sidebar::Files, visibility.files), (Sidebar::Commits, visibility.commits)] {
                 SidebarButton {
                     key: "{sidebar.name()}",
@@ -90,7 +104,7 @@ fn SidebarButton(
         .map(|key| key.to_string())
         .collect::<Vec<_>>()
         .join("+");
-    let label = format!("Toggle {} sidebar", sidebar.label());
+    let label = sidebar.toggle_label(use_language());
     let title = format!("{label} ({shortcut})");
     rsx! {
         Button {

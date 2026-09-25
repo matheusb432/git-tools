@@ -80,7 +80,12 @@ pub fn execute(
     let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, computed.render_options, computed.theme)?;
+    let html = renderer.build_html(
+        &view,
+        computed.render_options,
+        computed.theme,
+        computed.language,
+    )?;
     let commit_range = git
         .resolve_commit_id(&computed.top, &computed.base)
         .ok()
@@ -104,6 +109,7 @@ pub fn execute(
         title: TITLE_MERGE_DIFF.to_string(),
         render_options: computed.render_options,
         theme: computed.theme,
+        language: computed.language,
         excluded_extensions: computed.excluded_extensions,
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -218,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn render_uses_the_settings_theme_and_resolved_project_exclusions() {
+    fn render_uses_the_settings_theme_language_and_resolved_project_exclusions() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -228,14 +234,17 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
-            Some(Theme::Graphite),
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
-            gtl_models::settings::PushAllExclusions::default(),
-        ));
+        let app_settings = FixedUserSettingsStore::new(
+            UserSettings::new(
+                Some(Theme::Graphite),
+                RenderOptions::DEFAULT,
+                gtl_models::viewer::ViewerKeybindings::default(),
+                true,
+                DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
+                gtl_models::settings::PushAllExclusions::default(),
+            )
+            .with_language(gtl_models::settings::ViewerLanguage::PtBr),
+        );
 
         render_merge_diff::execute(
             RenderMergeDiff {
@@ -255,6 +264,11 @@ mod tests {
             .unwrap();
         assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
         assert!(artifact.html.contains("graphite"));
+        assert_eq!(
+            artifact.meta.language,
+            gtl_models::settings::ViewerLanguage::PtBr
+        );
+        assert!(artifact.html.contains("lang=\"pt-BR\""));
     }
 
     #[test]

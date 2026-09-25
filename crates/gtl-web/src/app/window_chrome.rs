@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::window::{WindowAction, WindowState};
 use lucide_dioxus::{Copy, Minus, X};
+
+use crate::shared::i18n::{t, use_language};
 
 #[component]
 pub(super) fn WindowTitleBar(
@@ -34,22 +37,24 @@ pub(super) fn WindowDragExcluded(children: Element) -> Element {
 
 #[component]
 fn WindowDragRegion() -> Element {
+    let language = use_language();
     rsx! {
         div {
             class: "viewer-window-drag-region",
             "data-tauri-drag-region": "",
-            title: "Drag to move window",
+            title: t!(language, "window-drag-region"),
         }
     }
 }
 
 #[component]
 fn WindowControls(maximized: bool, onaction: EventHandler<WindowAction>) -> Element {
+    let language = use_language();
     rsx! {
         div {
             class: "viewer-window-controls",
             role: "group",
-            aria_label: "Window controls",
+            aria_label: t!(language, "window-controls"),
             WindowControlButton { control: WindowControl::Minimize, onaction }
             WindowControlButton {
                 control: if maximized { WindowControl::Restore } else { WindowControl::Maximize },
@@ -69,12 +74,12 @@ enum WindowControl {
 }
 
 impl WindowControl {
-    const fn label(self) -> &'static str {
+    fn label(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Minimize => "Minimize window",
-            Self::Maximize => "Maximize window",
-            Self::Restore => "Restore window",
-            Self::Close => "Close window",
+            Self::Minimize => t!(language, "window-minimize"),
+            Self::Maximize => t!(language, "window-maximize"),
+            Self::Restore => t!(language, "window-restore"),
+            Self::Close => t!(language, "window-close"),
         }
     }
 
@@ -89,13 +94,14 @@ impl WindowControl {
 
 #[component]
 fn WindowControlButton(control: WindowControl, onaction: EventHandler<WindowAction>) -> Element {
+    let label = control.label(use_language());
     rsx! {
         button {
             class: "viewer-window-button",
             r#type: "button",
             "data-close": (control == WindowControl::Close).to_string(),
-            aria_label: control.label(),
-            title: control.label(),
+            aria_label: label.clone(),
+            title: label,
             onclick: move |_| onaction.call(control.action()),
             span { class: "inline-flex", aria_hidden: "true",
                 match control {

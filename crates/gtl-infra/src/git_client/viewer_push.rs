@@ -58,6 +58,12 @@ impl ViewerPushGit for HybridGitClient {
             return Err(no_upstream().into());
         }
         let remote = RemoteName::try_new(remote).map_err(|_| no_upstream())?;
+        let destination_branch = BranchName::try_new(
+            destination
+                .strip_prefix("refs/heads/")
+                .ok_or_else(no_upstream)?,
+        )
+        .map_err(|_| no_upstream())?;
         let destination = GitRefName::try_new(destination).map_err(|_| no_upstream())?;
         let urls = read(
             path,
@@ -96,6 +102,7 @@ impl ViewerPushGit for HybridGitClient {
             branch,
             remote,
             destination,
+            destination_branch,
             url,
             head,
             upstream,

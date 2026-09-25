@@ -4,8 +4,8 @@ package gtl.v1;
 
 import "gtl/v1/common.proto";
 import "gtl/v1/failure.proto";
-import "gtl/v1/repository.proto";
-import "gtl/v1/settings.proto";
+import "gtl/v1/repository_status.proto";
+import "gtl/v1/viewer_theme.proto";
 
 service ViewerService {
   rpc GetViewerServerInfo(GetViewerServerInfoRequest) returns (GetViewerServerInfoResponse);
@@ -312,6 +312,8 @@ message ViewerSidebarVisibility {
 }
 
 message ViewerPreferences {
+  ViewerDateFormat date_format = 7;
+  ViewerLanguage language = 6;
   ViewerAccessibility accessibility = 5;
   ViewerSidebarVisibility sidebars = 4;
   ViewerTheme theme = 1;
@@ -322,6 +324,20 @@ message ViewerPreferences {
 message ViewerAccessibility {
   uint32 ui_scale_percent = 1;
   bool reduce_motion = 2;
+}
+
+enum ViewerLanguage {
+  VIEWER_LANGUAGE_UNSPECIFIED = 0;
+  VIEWER_LANGUAGE_EN_US = 1;
+  VIEWER_LANGUAGE_PT_BR = 2;
+}
+
+enum ViewerDateFormat {
+  VIEWER_DATE_FORMAT_UNSPECIFIED = 0;
+  VIEWER_DATE_FORMAT_ISO = 1;
+  VIEWER_DATE_FORMAT_DAY_FIRST = 2;
+  VIEWER_DATE_FORMAT_MONTH_FIRST = 3;
+  VIEWER_DATE_FORMAT_RELATIVE = 4;
 }
 
 enum ViewerKeybindingPlatform {
@@ -745,6 +761,8 @@ message ProjectsSortFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  ViewerDateFormat date_format = 16;
+  ViewerLanguage language = 15;
   ViewerAccessibility accessibility = 14;
   ProjectsSort projects_sort = 13;
   string revision = 12;
@@ -765,6 +783,18 @@ message ClearSetting {}
 message ThemeFieldUpdate {
   oneof operation {
     ViewerTheme update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message ViewerLanguageFieldUpdate {
+  oneof operation {
+    ViewerLanguage update = 1;
+    ClearSetting clear = 2;
+  }
+}
+message ViewerDateFormatFieldUpdate {
+  oneof operation {
+    ViewerDateFormat update = 1;
     ClearSetting clear = 2;
   }
 }
@@ -811,6 +841,8 @@ message ProjectSettingsFieldUpdate {
 }
 
 message EditSettingsRequest {
+  ViewerDateFormatFieldUpdate date_format = 18;
+  ViewerLanguageFieldUpdate language = 17;
   ViewerScaleFieldUpdate ui_scale_percent = 15;
   BoolFieldUpdate reduce_motion = 16;
   ProjectsSortFieldUpdate projects_sort = 14;
@@ -1000,10 +1032,31 @@ message StartViewerPushRequest { string id = 1; }
 message StartViewerPushResponse {}
 message ViewerPushPreview {
   string repository = 1;
-  string destination = 2;
+  reserved 2;
+  reserved "destination";
   string commit = 3;
   uint64 count = 4;
   string command = 5;
+  optional string project = 6;
+  string branch = 7;
+  string remote = 8;
+  string remote_url = 9;
+  repeated ViewerPushCommandArgument command_arguments = 10;
+  string remote_branch = 11;
+}
+enum ViewerPushCommandArgument {
+  VIEWER_PUSH_COMMAND_ARGUMENT_UNSPECIFIED = 0;
+  VIEWER_PUSH_COMMAND_ARGUMENT_GIT = 1;
+  VIEWER_PUSH_COMMAND_ARGUMENT_WORKING_DIRECTORY = 2;
+  VIEWER_PUSH_COMMAND_ARGUMENT_DISABLE_MIRRORING = 3;
+  VIEWER_PUSH_COMMAND_ARGUMENT_PUSH = 4;
+  VIEWER_PUSH_COMMAND_ARGUMENT_ATOMIC = 5;
+  VIEWER_PUSH_COMMAND_ARGUMENT_PORCELAIN = 6;
+  VIEWER_PUSH_COMMAND_ARGUMENT_NO_FOLLOW_TAGS = 7;
+  VIEWER_PUSH_COMMAND_ARGUMENT_NO_RECURSE_SUBMODULES = 8;
+  VIEWER_PUSH_COMMAND_ARGUMENT_OPTION_SEPARATOR = 9;
+  VIEWER_PUSH_COMMAND_ARGUMENT_REMOTE = 10;
+  VIEWER_PUSH_COMMAND_ARGUMENT_COMMIT_REF = 11;
 }
 message ViewerPushRunning {}
 message ViewerPushQueued {}

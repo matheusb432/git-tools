@@ -3,13 +3,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "proto/gtl/v1/common.proto",
         "proto/gtl/v1/diff.proto",
+        "proto/gtl/v1/diff_presentation.proto",
         "proto/gtl/v1/failure.proto",
         "proto/gtl/v1/live_view.proto",
         "proto/gtl/v1/project.proto",
         "proto/gtl/v1/repository.proto",
+        "proto/gtl/v1/repository_status.proto",
+        "proto/gtl/v1/repository_sync.proto",
         "proto/gtl/v1/settings.proto",
         "proto/gtl/v1/tag.proto",
         "proto/gtl/v1/viewer.proto",
+        "proto/gtl/v1/viewer_theme.proto",
     ];
     tonic_prost_build::configure()
         .build_transport(false)

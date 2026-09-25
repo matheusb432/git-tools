@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
+use crate::{
+    entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow},
+    shared::i18n::{t, use_language},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChangedTextTone {
@@ -77,11 +80,13 @@ pub(super) fn CodeCellContent(
     changed_text_tone: ChangedTextTone,
     copy_text: bool,
 ) -> Element {
+    let language = use_language();
     source.with(|code| {
         let Some(code) = code else {
             return rsx! {};
         };
         if let Some(omitted) = code.omitted_character_count {
+            let omission = t!(language, "diff-line-omitted", count = omitted);
             let copy_text = copy_text.then_some("");
             let text = code.text.as_str();
             return rsx! {
@@ -93,7 +98,7 @@ pub(super) fn CodeCellContent(
                         class: "diff-truncated-source",
                         "data-gtl-copy-text": copy_text,
                         span { class: "diff-truncated-text", "{text}" }
-                        span { class: "diff-line-omission", " ... (+{omitted} characters omitted)" }
+                        span { class: "diff-line-omission", " {omission}" }
                     }
                 }
             };

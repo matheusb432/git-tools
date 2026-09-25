@@ -1,9 +1,13 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use lucide_dioxus::{ChevronDown, ChevronUp, Search, X};
 
-use crate::shared::ui::{
-    Button, ButtonSize, ButtonState, ButtonVariant, SearchPanel, TextInput,
-    TextInputLabelVisibility,
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::{
+        Button, ButtonSize, ButtonState, ButtonVariant, SearchPanel, TextInput,
+        TextInputLabelVisibility,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,15 +16,15 @@ pub(in crate::views::diffs) enum DiffSearchScope {
 }
 
 impl DiffSearchScope {
-    const fn label(&self) -> &'static str {
+    fn search_label(&self, language: ViewerLanguage) -> String {
         match self {
-            Self::AllFiles => "All files",
+            Self::AllFiles => t!(language, "diff-search-all-files-label"),
         }
     }
 
-    const fn placeholder(&self) -> &'static str {
+    fn placeholder(&self, language: ViewerLanguage) -> String {
         match self {
-            Self::AllFiles => "Search code in all files...",
+            Self::AllFiles => t!(language, "diff-search-all-files-placeholder"),
         }
     }
 }
@@ -38,12 +42,13 @@ pub(in crate::views::diffs) fn DiffSearchBar(
     onnext: EventHandler<()>,
     onclose: EventHandler<()>,
 ) -> Element {
+    let language = use_language();
     let navigation_state = if navigation_enabled {
         ButtonState::Enabled
     } else {
         ButtonState::Disabled
     };
-    let aria_label = format!("Find code in {}", scope.label().to_lowercase());
+    let aria_label = scope.search_label(language);
 
     rsx! {
         SearchPanel {
@@ -74,12 +79,12 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                     }
                     TextInput {
                         id: input_id,
-                        label: "Search code",
+                        label: t!(language, "diff-search-code"),
                         label_visibility: TextInputLabelVisibility::Hidden,
                         class: "h-9 py-2 pr-2 pl-8",
                         value: query,
                         maxlength,
-                        placeholder: scope.placeholder(),
+                        placeholder: scope.placeholder(language),
                         oninput: move |event: FormEvent| onquerychange.call(event.value()),
                     }
                 }
@@ -88,8 +93,8 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
                         state: navigation_state,
-                        aria_label: "Previous match",
-                        title: "Previous match (Shift+Enter)",
+                        aria_label: t!(language, "diff-search-previous"),
+                        title: t!(language, "diff-search-previous-title"),
                         onclick: move |_| onprevious.call(()),
                         span { aria_hidden: "true",
                             ChevronUp { size: 16 }
@@ -99,8 +104,8 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
                         state: navigation_state,
-                        aria_label: "Next match",
-                        title: "Next match (Enter)",
+                        aria_label: t!(language, "diff-search-next"),
+                        title: t!(language, "diff-search-next-title"),
                         onclick: move |_| onnext.call(()),
                         span { aria_hidden: "true",
                             ChevronDown { size: 16 }
@@ -109,8 +114,8 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                     Button {
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
-                        aria_label: "Close search",
-                        title: "Close search (Escape)",
+                        aria_label: t!(language, "diff-search-close"),
+                        title: t!(language, "diff-search-close-title"),
                         onclick: move |_| onclose.call(()),
                         span { aria_hidden: "true",
                             X { size: 16 }

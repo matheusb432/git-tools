@@ -3,7 +3,10 @@ use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use super::super::scroll_area::DiffRowsScrollArea;
 #[cfg(feature = "desktop")]
-use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
+use crate::shared::{
+    i18n::{t, use_language},
+    ui::{Button, ButtonSize, ButtonVariant},
+};
 use crate::{
     entities::diffs::{
         ClientDiffFile, ClientDiffFileState, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
@@ -78,7 +81,7 @@ pub(in crate::views::diffs::client_diff_document) fn DiffFileLoadState(
         ClientDiffFileState::Complete => rsx! {},
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
-            let message = error.to_string();
+            let message = error.message(use_language());
             let retryable = error.retryable() && retry_allowed;
             rsx! {
                 DiffFileLoadError { message, retryable, onretry }
@@ -103,7 +106,7 @@ fn DiffFileLoadError(message: String, retryable: bool, onretry: EventHandler<()>
                         event.stop_propagation();
                         onretry.call(());
                     },
-                    "Retry"
+                    {t!(use_language(), "action-retry")}
                 }
             }
         }

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{
     FindViewerDiff, VIEWER_SEARCH_QUERY_MAX_BYTES, ViewerDiffSearchDirection,
     ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerViewIdentity,
@@ -7,7 +8,12 @@ use gtl_wire::viewer::{
 use super::search_bar::{DiffSearchBar, DiffSearchScope};
 use crate::{
     entities::diffs::{ClientDiffWorkspace, viewer_server},
-    shared::{browser, viewer_client::ViewerClientError},
+    shared::{
+        browser,
+        failure_notice::client_error_message,
+        i18n::{t, use_language},
+        viewer_client::ViewerClientError,
+    },
 };
 
 const FIND_INPUT_ID: &str = "viewer-diff-find-input";
@@ -52,31 +58,27 @@ impl DiffFindState {
         matches!(self, Self::Ready(result) if result.total_matches > 0)
     }
 
-    fn message(&self) -> String {
+    fn message(&self, language: ViewerLanguage) -> String {
         match self {
             Self::Idle => String::new(),
-            Self::QueryTooLong => {
-                format!("Search is limited to {VIEWER_SEARCH_QUERY_MAX_BYTES} UTF-8 bytes.")
-            }
-            Self::Loading => "Searching\u{2026}".into(),
-            Self::Ready(result) if result.total_matches == 0 => "No matches".into(),
-            Self::Ready(result) => format!(
-                "{} {}{}",
-                result.total_matches,
-                match_count_label(result.total_matches),
-                wrapped_label(result.wrapped),
+            Self::QueryTooLong => t!(
+                language,
+                "diff-find-query-too-long",
+                bytes = VIEWER_SEARCH_QUERY_MAX_BYTES
             ),
-            Self::Error(error) => error.to_string(),
+            Self::Loading => t!(language, "diff-find-searching"),
+            Self::Ready(result) if result.total_matches == 0 => {
+                t!(language, "diff-find-no-matches")
+            }
+            Self::Ready(result) if result.wrapped => t!(
+                language,
+                "diff-find-matches-wrapped",
+                count = result.total_matches
+            ),
+            Self::Ready(result) => t!(language, "diff-find-matches", count = result.total_matches),
+            Self::Error(error) => client_error_message(error, language),
         }
     }
-}
-
-const fn match_count_label(count: u64) -> &'static str {
-    if count == 1 { "match" } else { "matches" }
-}
-
-const fn wrapped_label(wrapped: bool) -> &'static str {
-    if wrapped { " \u{00b7} wrapped" } else { "" }
 }
 
 fn use_diff_find(
@@ -143,13 +145,14 @@ pub(super) fn DiffFindBar(
     workspace: ReadStore<ClientDiffWorkspace>,
     target: Signal<Option<super::DiffSearchTarget>>,
 ) -> Element {
+    let language = use_language();
     let find = use_diff_find(open, identity, workspace, target);
 
     if !open() {
         return rsx! {};
     }
     let current_state = find.state.read().clone();
-    let status_message = current_state.message();
+    let status_message = current_state.message(language);
 
     rsx! {
         DiffSearchBar {

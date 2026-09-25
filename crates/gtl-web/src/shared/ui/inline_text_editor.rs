@@ -3,6 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use super::LoadingSpinner;
+use crate::shared::i18n::{t, use_language};
 
 #[derive(Clone)]
 pub(crate) struct InlineTextSubmission {
@@ -19,6 +20,7 @@ pub(crate) fn InlineTextEditor(
     onsubmit: EventHandler<InlineTextSubmission>,
     onfinish: EventHandler<bool>,
 ) -> Element {
+    let language = use_language();
     let mut draft = use_signal(|| initial_value);
     let mut focus_after = use_signal(|| false);
     let mut pending = use_signal(|| false);
@@ -85,7 +87,7 @@ pub(crate) fn InlineTextEditor(
                 aria_label: label,
                 aria_invalid: error().is_some().to_string(),
                 aria_busy: pending().to_string(),
-                title: error().unwrap_or_else(|| "Enter to save, Escape to cancel".to_owned()),
+                title: error().unwrap_or_else(|| t!(language, "inline-editor-hint")),
                 placeholder,
                 value: draft(),
                 maxlength: 200,
@@ -107,7 +109,7 @@ pub(crate) fn InlineTextEditor(
                 span {
                     class: "inline-text-editor-status",
                     role: "status",
-                    aria_label: "Saving name",
+                    aria_label: t!(language, "inline-editor-saving"),
                     LoadingSpinner {}
                 }
             }

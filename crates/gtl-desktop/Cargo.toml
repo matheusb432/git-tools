@@ -13,7 +13,8 @@ name = "gtl_desktop"
 path = "src/lib.rs"
 
 [build-dependencies]
-tauri-build.workspace = true
+anyhow.workspace = true
+tauri-build = { workspace = true, features = ["codegen"] }
 
 [dependencies]
 anyhow.workspace = true

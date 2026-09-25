@@ -1,5 +1,10 @@
 pub use gtl_models::viewer::ViewerPushId;
-use gtl_models::{diffs::CommitId, failure::Failure, paths::RepositoryRoot};
+use gtl_models::{
+    diffs::CommitId,
+    failure::Failure,
+    git::{BranchName, RemoteName, RemoteUrl},
+    paths::{ProjectName, RepositoryRoot},
+};
 use serde::{Deserialize, Serialize};
 
 use super::ViewerViewIdentity;
@@ -19,10 +24,32 @@ pub struct ViewerPushRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerPushPreview {
     pub repository: RepositoryRoot,
-    pub destination: String,
+    pub project: Option<ProjectName>,
+    pub branch: BranchName,
+    pub remote_branch: BranchName,
+    pub remote: RemoteName,
+    pub remote_url: RemoteUrl,
     pub commit: CommitId,
     pub count: u64,
     pub command: String,
+    pub command_arguments: Vec<ViewerPushCommandArgument>,
+}
+
+/// Server-declared command parts, in display order. The viewer supplies only their help text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerPushCommandArgument {
+    Git,
+    WorkingDirectory,
+    DisableMirroring,
+    Push,
+    Atomic,
+    Porcelain,
+    NoFollowTags,
+    NoRecurseSubmodules,
+    OptionSeparator,
+    Remote,
+    CommitRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

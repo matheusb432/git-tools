@@ -530,6 +530,8 @@ fn SettingsMock() -> Element {
 #[component]
 fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
     let initial = ViewerSettingsSelection::new(
+        gtl_models::settings::ViewerLanguage::EnUs,
+        gtl_models::settings::ViewerDateFormat::Iso,
         Some(gtl_wire::viewer::ViewerTheme::Mirage),
         ViewerRenderOptions {
             wrap_lines: false,

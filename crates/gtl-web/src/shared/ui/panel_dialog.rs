@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::X;
 
 use super::{Button, ButtonSize, ButtonVariant, ScrollArea, dialog::use_dialog};
+use crate::shared::i18n::{t, use_language};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) enum PanelDialogVariant {
@@ -24,6 +25,7 @@ pub(crate) fn PanelDialog(
     artifact_view_id: Option<String>,
     children: Element,
 ) -> Element {
+    let language = use_language();
     use_dialog(&id, &trigger_id, open, Duration::ZERO);
     let title_id = format!("{id}-title");
     let artifact_dialog = artifact_view_id.as_ref().map(|_| "");
@@ -55,8 +57,8 @@ pub(crate) fn PanelDialog(
                     Button {
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
-                        aria_label: "Close {title}",
-                        title: "Close",
+                        aria_label: t!(language, "dialog-close-named", title = title.as_str()),
+                        title: t!(language, "dialog-close-short"),
                         "data-dialog-initial-focus": "true",
                         "data-gtl-action": artifact_close_action,
                         onclick: move |_| onclose.call(()),

@@ -171,6 +171,8 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
         tabs: shell.tabs.into_iter().map(encode_viewer_tab).collect(),
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
+            language: encode_viewer_language(shell.preferences.language) as i32,
+            date_format: encode_viewer_date_format(shell.preferences.date_format) as i32,
             accessibility: Some(encode_viewer_accessibility(shell.preferences.accessibility)),
             sidebars: Some(encode_sidebar_visibility(shell.preferences.sidebars)),
             theme: encode_viewer_theme(shell.preferences.theme) as i32,
@@ -585,6 +587,110 @@ pub fn decode_get_viewer_history_copy_response(
     }
 }
 
+const fn encode_viewer_language(
+    language: gtl_models::settings::ViewerLanguage,
+) -> v1::ViewerLanguage {
+    match language {
+        gtl_models::settings::ViewerLanguage::EnUs => v1::ViewerLanguage::EnUs,
+        gtl_models::settings::ViewerLanguage::PtBr => v1::ViewerLanguage::PtBr,
+    }
+}
+
+fn decode_viewer_language(
+    language: i32,
+) -> Result<gtl_models::settings::ViewerLanguage, ViewerCodecError> {
+    match v1::ViewerLanguage::try_from(language) {
+        Ok(v1::ViewerLanguage::EnUs) => Ok(gtl_models::settings::ViewerLanguage::EnUs),
+        Ok(v1::ViewerLanguage::PtBr) => Ok(gtl_models::settings::ViewerLanguage::PtBr),
+        Ok(v1::ViewerLanguage::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+fn encode_viewer_language_update(
+    update: &FieldUpdate<gtl_models::settings::ViewerLanguage>,
+) -> Option<v1::ViewerLanguageFieldUpdate> {
+    use v1::viewer_language_field_update::Operation;
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(language) => {
+            Operation::Update(encode_viewer_language(*language) as i32)
+        }
+    };
+    Some(v1::ViewerLanguageFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+fn decode_viewer_language_update(
+    update: Option<v1::ViewerLanguageFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ViewerLanguage>, ViewerCodecError> {
+    use v1::viewer_language_field_update::Operation;
+    Ok(match update {
+        None => FieldUpdate::Unchanged,
+        Some(update) => match required(update.operation)? {
+            Operation::Clear(_) => FieldUpdate::Clear,
+            Operation::Update(language) => FieldUpdate::Update(decode_viewer_language(language)?),
+        },
+    })
+}
+
+const fn encode_viewer_date_format(
+    date_format: gtl_models::settings::ViewerDateFormat,
+) -> v1::ViewerDateFormat {
+    use gtl_models::settings::ViewerDateFormat;
+    match date_format {
+        ViewerDateFormat::Iso => v1::ViewerDateFormat::Iso,
+        ViewerDateFormat::DayFirst => v1::ViewerDateFormat::DayFirst,
+        ViewerDateFormat::MonthFirst => v1::ViewerDateFormat::MonthFirst,
+        ViewerDateFormat::Relative => v1::ViewerDateFormat::Relative,
+    }
+}
+
+fn decode_viewer_date_format(
+    date_format: i32,
+) -> Result<gtl_models::settings::ViewerDateFormat, ViewerCodecError> {
+    use gtl_models::settings::ViewerDateFormat;
+    match v1::ViewerDateFormat::try_from(date_format) {
+        Ok(v1::ViewerDateFormat::Iso) => Ok(ViewerDateFormat::Iso),
+        Ok(v1::ViewerDateFormat::DayFirst) => Ok(ViewerDateFormat::DayFirst),
+        Ok(v1::ViewerDateFormat::MonthFirst) => Ok(ViewerDateFormat::MonthFirst),
+        Ok(v1::ViewerDateFormat::Relative) => Ok(ViewerDateFormat::Relative),
+        Ok(v1::ViewerDateFormat::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+fn encode_viewer_date_format_update(
+    update: &FieldUpdate<gtl_models::settings::ViewerDateFormat>,
+) -> Option<v1::ViewerDateFormatFieldUpdate> {
+    use v1::viewer_date_format_field_update::Operation;
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(date_format) => {
+            Operation::Update(encode_viewer_date_format(*date_format) as i32)
+        }
+    };
+    Some(v1::ViewerDateFormatFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+fn decode_viewer_date_format_update(
+    update: Option<v1::ViewerDateFormatFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::ViewerDateFormat>, ViewerCodecError> {
+    use v1::viewer_date_format_field_update::Operation;
+    Ok(match update {
+        None => FieldUpdate::Unchanged,
+        Some(update) => match required(update.operation)? {
+            Operation::Clear(_) => FieldUpdate::Clear,
+            Operation::Update(date_format) => {
+                FieldUpdate::Update(decode_viewer_date_format(date_format)?)
+            }
+        },
+    })
+}
+
 fn encode_viewer_accessibility(
     value: gtl_models::settings::ViewerAccessibility,
 ) -> v1::ViewerAccessibility {
@@ -639,6 +745,8 @@ pub fn decode_get_viewer_settings_response(
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     let exclusions = required(response.diff_exclusions)?;
     Ok(ViewerUserSettings {
+        language: decode_viewer_language(response.language)?,
+        date_format: decode_viewer_date_format(response.date_format)?,
         accessibility: decode_viewer_accessibility(required(response.accessibility)?)?,
         revision: response
             .revision
@@ -685,6 +793,8 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        language: encode_viewer_language(settings.language) as i32,
+        date_format: encode_viewer_date_format(settings.date_format) as i32,
         accessibility: Some(encode_viewer_accessibility(settings.accessibility)),
         revision: settings.revision.to_string(),
         focus_window_on_diff: Some(settings.focus_window_on_diff),
@@ -801,6 +911,8 @@ pub fn encode_edit_settings_request(request: EditSettingsRequest) -> v1::EditSet
     v1::EditSettingsRequest {
         ui_scale_percent: encode_viewer_scale_update(&request.ui_scale_percent),
         reduce_motion: encode_bool_field_update(&request.reduce_motion),
+        language: encode_viewer_language_update(&request.language),
+        date_format: encode_viewer_date_format_update(&request.date_format),
         expected_revision: request
             .expected_revision
             .map(|revision| revision.to_string()),
@@ -839,6 +951,9 @@ pub fn decode_edit_settings_request(
             .map_err(field("ui_scale_percent"))?,
         reduce_motion: decode_bool_field_update(request.reduce_motion)
             .map_err(field("reduce_motion"))?,
+        language: decode_viewer_language_update(request.language).map_err(field("language"))?,
+        date_format: decode_viewer_date_format_update(request.date_format)
+            .map_err(field("date_format"))?,
         expected_revision: decode_user_settings_revision(request.expected_revision)
             .map_err(field("expected_revision"))?,
         focus_window_on_diff: decode_bool_field_update(request.focus_window_on_diff)
@@ -1216,6 +1331,8 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
             .collect::<Result<Vec<_>, _>>()?,
         active: decode_viewer_active_state(required(shell.active)?)?,
         preferences: ViewerPreferences {
+            language: decode_viewer_language(preferences.language)?,
+            date_format: decode_viewer_date_format(preferences.date_format)?,
             accessibility: decode_viewer_accessibility(required(preferences.accessibility)?)?,
             sidebars: decode_sidebar_visibility(required(preferences.sidebars)?),
             theme: decode_viewer_theme(preferences.theme)?,

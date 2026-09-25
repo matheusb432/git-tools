@@ -9,6 +9,7 @@ use gtl_application::{
     diffs::View,
     viewer::{RenderOptions, Theme},
 };
+use gtl_models::settings::ViewerLanguage;
 
 /// The [`HtmlRenderer`](gtl_application::ports::HtmlRenderer) adapter for offline artifacts.
 #[derive(Debug, Clone, Copy, Default)]
@@ -20,8 +21,9 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
         view: &View,
         options: RenderOptions,
         theme: Option<Theme>,
+        language: ViewerLanguage,
     ) -> anyhow::Result<String> {
-        build_html(view, options, theme)
+        build_html(view, options, theme, language)
     }
 
     fn build_tabbed_html(
@@ -30,8 +32,9 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
         views: &[View],
         options: RenderOptions,
         theme: Option<Theme>,
+        language: ViewerLanguage,
     ) -> anyhow::Result<String> {
-        build_tabbed_html(title, views, options, theme)
+        build_tabbed_html(title, views, options, theme, language)
     }
 }
 

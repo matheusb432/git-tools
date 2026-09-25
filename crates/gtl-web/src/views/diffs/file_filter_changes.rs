@@ -8,7 +8,8 @@ use crate::{
     app::application_layout::ViewerContext,
     entities::diffs::viewer_server,
     shared::{
-        ui::{ToastHandle, use_toast},
+        i18n::t,
+        ui::{ToastHandle, ToastText, use_toast},
         viewer_client::ViewerClientError,
     },
 };
@@ -177,9 +178,9 @@ impl FileFilterController {
                 spawn_forever(write);
             }
             Some(false) => {}
-            None => self
-                .toast
-                .error("Too many pending exclusion changes. Try again shortly."),
+            None => self.toast.error(ToastText::localized(|language| {
+                t!(language, "extensions-too-many-changes")
+            })),
         }
     }
 

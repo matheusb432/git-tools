@@ -1,10 +1,12 @@
-use std::{collections::VecDeque, convert::Infallible, time::Duration};
+use std::{collections::VecDeque, convert::Infallible, fmt, rc::Rc, time::Duration};
 
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
 use gtl_web_contracts::test_ids;
 use lucide_dioxus::{CircleCheck, CircleX, Info, TriangleAlert, X};
 
 use super::{Button, ButtonSize, ButtonVariant, animation::computed_animation_duration};
+use crate::shared::i18n::{t, use_language};
 
 const TOAST_WAITING_COUNT_MAX: usize = 5;
 const TOAST_STACK_DEPTH_MAX: usize = 2;
@@ -111,11 +113,74 @@ impl ToastPhase {
     }
 }
 
+/// What a toast says: copy its caller formatted, or copy it formats in the
+/// displayed language each time it renders.
+#[derive(Clone)]
+pub(crate) enum ToastText {
+    Formatted(String),
+    #[cfg_attr(
+        not(feature = "desktop"),
+        expect(dead_code, reason = "component previews show only formatted toasts")
+    )]
+    Localized(Rc<dyn Fn(ViewerLanguage) -> String>),
+}
+
+impl ToastText {
+    /// Copy formatted in the displayed language each time the toast renders.
+    #[cfg_attr(
+        not(feature = "desktop"),
+        expect(dead_code, reason = "component previews show only formatted toasts")
+    )]
+    pub(crate) fn localized(format: impl Fn(ViewerLanguage) -> String + 'static) -> Self {
+        Self::Localized(Rc::new(format))
+    }
+
+    fn format(&self, language: ViewerLanguage) -> String {
+        match self {
+            Self::Formatted(text) => text.clone(),
+            Self::Localized(format) => format(language),
+        }
+    }
+}
+
+impl PartialEq for ToastText {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Formatted(text), Self::Formatted(other)) => text == other,
+            (Self::Localized(format), Self::Localized(other)) => Rc::ptr_eq(format, other),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ToastText {}
+
+impl fmt::Debug for ToastText {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Formatted(text) => formatter.debug_tuple("Formatted").field(text).finish(),
+            Self::Localized(_) => formatter.write_str("Localized"),
+        }
+    }
+}
+
+impl From<String> for ToastText {
+    fn from(text: String) -> Self {
+        Self::Formatted(text)
+    }
+}
+
+impl From<&str> for ToastText {
+    fn from(text: &str) -> Self {
+        Self::Formatted(text.to_owned())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToastMessage {
     id: ToastId,
     kind: ToastKind,
-    message: String,
+    message: ToastText,
     /// Secondary verbatim text, such as tool output, shown below the message.
     detail: Option<String>,
 }
@@ -138,7 +203,7 @@ impl ToastQueue {
     fn enqueue(
         &mut self,
         kind: ToastKind,
-        message: impl Into<String>,
+        message: impl Into<ToastText>,
         detail: Option<String>,
     ) -> ToastId {
         self.next_id = self.next_id.wrapping_add(1);
@@ -197,20 +262,20 @@ pub(crate) struct ToastHandle {
 }
 
 impl ToastHandle {
-    pub(crate) fn ok(self, message: impl Into<String>) {
+    pub(crate) fn ok(self, message: impl Into<ToastText>) {
         self.show(ToastKind::Ok, message, None);
     }
 
-    pub(crate) fn warn(self, message: impl Into<String>) {
+    pub(crate) fn warn(self, message: impl Into<ToastText>) {
         self.show(ToastKind::Warn, message, None);
     }
 
     #[allow(dead_code, reason = "the atom API includes every supported severity")]
-    pub(crate) fn info(self, message: impl Into<String>) {
+    pub(crate) fn info(self, message: impl Into<ToastText>) {
         self.show(ToastKind::Info, message, None);
     }
 
-    pub(crate) fn error(self, message: impl Into<String>) {
+    pub(crate) fn error(self, message: impl Into<ToastText>) {
         self.show(ToastKind::Error, message, None);
     }
 
@@ -218,7 +283,7 @@ impl ToastHandle {
     pub(crate) fn show(
         mut self,
         kind: ToastKind,
-        message: impl Into<String>,
+        message: impl Into<ToastText>,
         detail: Option<String>,
     ) {
         self.queue.write().enqueue(kind, message, detail);
@@ -325,10 +390,13 @@ fn ToastViewport(
     onhoverchange: EventHandler<bool>,
     onfocuschange: EventHandler<bool>,
 ) -> Element {
+    let language = use_language();
     let waiting_count = queue.waiting.len();
 
     rsx! {
-        div { class: "toast-viewport", aria_label: "Notifications",
+        div {
+            class: "toast-viewport",
+            aria_label: t!(language, "toast-viewport"),
             if let Some(visible) = queue.visible {
                 div {
                     class: "toast-stack",
@@ -368,13 +436,11 @@ fn ToastCard(
         message: toast,
         phase,
     } = visible;
+    let language = use_language();
     let toast_id = toast.id;
     let lifetime_ms = toast.kind.lifetime().as_millis();
-    let waiting_label = if waiting_count == 1 {
-        String::from("1 more notification")
-    } else {
-        format!("{waiting_count} more notifications")
-    };
+    let waiting_label = t!(language, "toast-waiting", count = waiting_count);
+    let message = toast.message.format(language);
 
     rsx! {
         div {
@@ -392,7 +458,7 @@ fn ToastCard(
                 ToastIcon { kind: toast.kind }
             }
             div { class: "toast-body",
-                p { class: "toast-message", "{toast.message}" }
+                p { class: "toast-message", "{message}" }
                 if let Some(detail) = &toast.detail {
                     p { class: "toast-detail", "{detail}" }
                 }
@@ -409,8 +475,8 @@ fn ToastCard(
                 class: "shrink-0 text-ink-3",
                 size: ButtonSize::IconSmall,
                 variant: ButtonVariant::Ghost,
-                aria_label: "Dismiss notification",
-                title: "Dismiss notification",
+                aria_label: t!(language, "toast-dismiss"),
+                title: t!(language, "toast-dismiss"),
                 "data-testid": test_ids::TOAST_DISMISS.value(),
                 onclick: move |_| ondismiss.call(toast_id),
                 span { aria_hidden: "true",
@@ -454,13 +520,17 @@ mod tests {
         ToastQueue, ToastViewport, ToastViewportProps,
     };
 
-    fn messages(queue: &ToastQueue) -> Vec<&str> {
+    fn messages(queue: &ToastQueue) -> Vec<String> {
         queue
             .visible
             .iter()
             .map(|visible| &visible.message)
             .chain(&queue.waiting)
-            .map(|toast| toast.message.as_str())
+            .map(|toast| {
+                toast
+                    .message
+                    .format(gtl_models::settings::ViewerLanguage::EnUs)
+            })
             .collect()
     }
 

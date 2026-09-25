@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
-use gtl_models::{
-    diffs::{CommitId, CommitIdAbbreviation},
-    timestamps::MachineTimestamp,
-};
+use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
 
 use crate::shared::{
     browser,
+    date_display::DateDisplayTime,
+    failure_message::failure_message,
+    i18n::{t, use_language},
     ui::{
         Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
         EmptyNotice, HoverPopover, LoadingSpinner, ScrollArea, use_hover_popover,
@@ -53,6 +53,7 @@ pub(super) fn WorkspaceCommitsPanel(
     #[props(default)] has_more: bool,
     onloadmore: Option<EventHandler<()>>,
 ) -> Element {
+    let language = use_language();
     let workspace = super::use_workspace_context();
     let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Commits);
     let view = workspace.view.read();
@@ -86,10 +87,10 @@ pub(super) fn WorkspaceCommitsPanel(
             },
             CommitsPanelHeader { actions }
             if let ViewerCommitSelection::Error { failure, .. } = &view.commit_selection {
-                CommitSelectionError { message: failure.to_string() }
+                CommitSelectionError { message: failure_message(failure, language) }
             }
             if view.commit_count == 0 {
-                EmptyNotice { class: "m-3 compact:m-2.5", "No commits" }
+                EmptyNotice { class: "m-3 compact:m-2.5", {t!(language, "commits-empty")} }
             }
             for (commit_index, commit) in workspace.commits.iter().enumerate() {
                 {
@@ -109,7 +110,9 @@ pub(super) fn WorkspaceCommitsPanel(
                 }
             }
             if loading {
-                p { class: "diff-commits-loading px-3 py-3", role: "status", "Loading commits..." }
+                p { class: "diff-commits-loading px-3 py-3", role: "status",
+                    {t!(language, "commits-loading")}
+                }
             } else if let Some(message) = load_error {
                 div { class: "diff-commits-error", role: "alert",
                     p { "{message}" }
@@ -119,7 +122,7 @@ pub(super) fn WorkspaceCommitsPanel(
                             size: ButtonSize::Small,
                             variant: ButtonVariant::Failure,
                             onclick: move |_| onloadmore.call(()),
-                            "Retry"
+                            {t!(language, "action-retry")}
                         }
                     }
                 }
@@ -130,7 +133,7 @@ pub(super) fn WorkspaceCommitsPanel(
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| onloadmore.call(()),
-                        "Load more"
+                        {t!(language, "commits-load-more")}
                     }
                 }
             }
@@ -147,12 +150,13 @@ fn scroll_is_near_bottom(scroll: &ScrollData) -> bool {
 
 #[component]
 fn CommitsPanelHeader(actions: Option<Element>) -> Element {
+    let language = use_language();
     rsx! {
         header { class: "diff-commits-header px-3 py-2 compact:px-2.5",
             div { class: "flex items-center justify-between gap-2",
                 div {
                     h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
-                        "Commits"
+                        {t!(language, "workspace-commits")}
                     }
                     CommitPanelHint {}
                 }
@@ -164,8 +168,9 @@ fn CommitsPanelHeader(actions: Option<Element>) -> Element {
 
 #[component]
 fn CommitPanelHint() -> Element {
+    let language = use_language();
     rsx! {
-        p { class: "mt-1 mb-0 text-xs text-ink-3", "click ID to copy" }
+        p { class: "mt-1 mb-0 text-xs text-ink-3", {t!(language, "commits-hint")} }
     }
 }
 
@@ -186,6 +191,7 @@ fn CommitCard(
     selection_pending: bool,
     onselect: Option<EventHandler<CommitId>>,
 ) -> Element {
+    let language = use_language();
     let workspace = super::use_workspace_context();
     let Some(commit) = workspace.commits.get(commit_index) else {
         return rsx! {};
@@ -195,7 +201,12 @@ fn CommitCard(
         let abbreviated_id = commit.id.abbreviated(CommitIdAbbreviation::TenCharacters);
         (
             commit.id.clone(),
-            format!("Select commit {abbreviated_id}: {}", commit.subject),
+            t!(
+                language,
+                "commits-select",
+                commit = abbreviated_id,
+                subject = commit.subject.as_str()
+            ),
             format!("{details_popover_id_prefix}-{}-details", commit.id.as_ref()),
         )
     });
@@ -250,6 +261,7 @@ fn CommitCardContent(
     selectable: bool,
     loading: bool,
 ) -> Element {
+    let language = use_language();
     let commit = commit.read();
     rsx! {
         span {
@@ -261,12 +273,19 @@ fn CommitCardContent(
             span { class: "flex min-w-0 items-center gap-1.5",
                 CommitIdButton { id: commit.id.clone() }
                 if loading {
-                    span { role: "status", aria_label: "Loading commit", LoadingSpinner {} }
+                    span {
+                        role: "status",
+                        aria_label: t!(language, "commits-loading-commit"),
+                        LoadingSpinner {}
+                    }
                 }
                 if commit.is_merge {
-                    Badge { variant: BadgeVariant::Neutral, "merge" }
+                    Badge { variant: BadgeVariant::Neutral, {t!(language, "commits-merge")} }
                 }
-                CommitDate { committed_at: commit.committed_at.clone() }
+                DateDisplayTime {
+                    class: "ml-auto truncate text-ink-3 text-xs tabular-nums",
+                    timestamp: commit.committed_at.clone(),
+                }
             }
         }
     }
@@ -281,7 +300,11 @@ fn CommitDetailsPopover(
 ) -> Element {
     let abbreviated_id =
         commit.with(|commit| commit.id.abbreviated(CommitIdAbbreviation::TenCharacters));
-    let aria_label = format!("Commit details for {abbreviated_id}");
+    let aria_label = t!(
+        use_language(),
+        "commits-details-for",
+        commit = abbreviated_id
+    );
     rsx! {
         HoverPopover { id, anchor_name, aria_label,
             if active {
@@ -293,16 +316,15 @@ fn CommitDetailsPopover(
 
 #[component]
 fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
+    let language = use_language();
     let commit = commit.read();
-    let committed_at_display = commit.committed_at.display_minute();
-    let committed_at_iso = commit.committed_at.to_string();
     rsx! {
         header { class: "diff-commit-details-header gap-2",
             p { class: "text-xs font-semibold tracking-widest text-ink-3 uppercase",
-                "Commit details"
+                {t!(language, "commits-details")}
             }
             if commit.is_merge {
-                Badge { variant: BadgeVariant::Neutral, "merge" }
+                Badge { variant: BadgeVariant::Neutral, {t!(language, "commits-merge")} }
             }
         }
         h4 { class: "mt-2 text-sm font-semibold leading-snug text-ink", "{commit.subject}" }
@@ -311,17 +333,16 @@ fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
         }
         dl { class: "diff-commit-details-metadata mt-3",
             div { class: "grid gap-1 py-2",
-                dt { class: "text-xs font-semibold text-ink-3", "Date" }
+                dt { class: "text-xs font-semibold text-ink-3", {t!(language, "commits-date")} }
                 dd { class: "m-0 min-w-0",
-                    time {
+                    DateDisplayTime {
                         class: "block text-xs tabular-nums text-ink",
-                        datetime: committed_at_iso,
-                        "{committed_at_display}"
+                        timestamp: commit.committed_at.clone(),
                     }
                 }
             }
             div { class: "grid gap-1 pt-2",
-                dt { class: "text-xs font-semibold text-ink-3", "Commit ID" }
+                dt { class: "text-xs font-semibold text-ink-3", {t!(language, "commits-id")} }
                 dd { class: "m-0 min-w-0",
                     code { class: "block break-all text-xs text-ink", "{commit.id}" }
                 }
@@ -339,6 +360,7 @@ fn CommitIdButton(id: CommitId) -> Element {
         });
     }
 
+    let language = use_language();
     let abbreviated_id = id.abbreviated(CommitIdAbbreviation::TenCharacters);
     let copy_value = id.as_ref().to_owned();
 
@@ -348,7 +370,7 @@ fn CommitIdButton(id: CommitId) -> Element {
                 class: "min-h-5 text-xs font-medium leading-none text-acc hover:text-acc-2 active:text-ink",
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Bare,
-                title: "Copy commit ID",
+                title: t!(language, "commits-copy-id"),
                 "data-gtl-action": "copy-commit",
                 "data-gtl-copy-value": copy_value,
                 onclick: move |e: Event<MouseData>| {
@@ -357,20 +379,6 @@ fn CommitIdButton(id: CommitId) -> Element {
                 },
                 code { "{abbreviated_id}" }
             }
-        }
-    }
-}
-
-#[component]
-fn CommitDate(committed_at: MachineTimestamp) -> Element {
-    let date = committed_at.display_minute();
-    let iso = committed_at.to_string();
-    rsx! {
-        time {
-            class: "ml-auto truncate text-ink-3 text-xs tabular-nums",
-            datetime: iso.clone(),
-            title: iso,
-            "{date}"
         }
     }
 }

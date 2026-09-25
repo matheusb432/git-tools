@@ -8,7 +8,7 @@ use gtl_models::{
     paths::{ProjectName, ProjectNameError},
     settings::{
         ProjectsPageSize, ProjectsPreferences, ProjectsSort, ProjectsViewMode, PushAllExclusions,
-        UserSettings,
+        UserSettings, ViewerDateFormat, ViewerLanguage,
     },
     tags::{
         TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
@@ -30,6 +30,10 @@ pub(super) enum UserSettingsDocumentKey {
     UiScalePercent,
     #[strum(to_string = "reduce_motion")]
     ReduceMotion,
+    #[strum(to_string = "language")]
+    Language,
+    #[strum(to_string = "date_format")]
+    DateFormat,
     #[strum(to_string = "focus_window_on_diff")]
     FocusWindowOnDiff,
     #[strum(to_string = "wrap_lines")]
@@ -89,6 +93,8 @@ impl UserSettingsDocumentKey {
         match self {
             Self::UiScalePercent => "ui_scale_percent",
             Self::ReduceMotion => "reduce_motion",
+            Self::Language => "language",
+            Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -122,6 +128,8 @@ impl UserSettingsDocumentKey {
         match self {
             Self::UiScalePercent => "ui_scale_percent",
             Self::ReduceMotion => "reduce_motion",
+            Self::Language => "language",
+            Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -151,6 +159,8 @@ impl UserSettingsDocumentKey {
         match self {
             Self::UiScalePercent => "ui_scale_percent",
             Self::ReduceMotion => "reduce_motion",
+            Self::Language => "language",
+            Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::Theme => "theme",
@@ -328,6 +338,10 @@ struct RawUserSettingsDocument {
     #[serde(default)]
     ui_scale_percent: gtl_models::settings::ViewerScalePercent,
     reduce_motion: Option<RawSettingValue>,
+    #[serde(default)]
+    language: ViewerLanguage,
+    #[serde(default)]
+    date_format: ViewerDateFormat,
     focus_window_on_diff: Option<RawSettingValue>,
     files_sidebar_visible: Option<RawSettingValue>,
     commits_sidebar_visible: Option<RawSettingValue>,
@@ -551,6 +565,8 @@ fn parse_settings(
             projects.push_all_exclusions,
         )
         .with_accessibility(accessibility)
+        .with_language(document.language)
+        .with_date_format(document.date_format)
         .with_focus_window_on_diff(focus_window_on_diff)
         .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
@@ -836,6 +852,12 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         document,
         UserSettingsDocumentKey::ProjectsSort,
         patch.projects_sort,
+    );
+    apply_root_string(document, UserSettingsDocumentKey::Language, patch.language);
+    apply_root_string(
+        document,
+        UserSettingsDocumentKey::DateFormat,
+        patch.date_format,
     );
     apply_root_string(document, UserSettingsDocumentKey::Theme, patch.theme);
     apply_root_string(document, UserSettingsDocumentKey::Layout, patch.layout);

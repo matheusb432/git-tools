@@ -1,5 +1,5 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{settings::ViewerLanguage, viewer::ViewerTabId};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 use lucide_dioxus::{ArrowUp, FileDiff, Pin, Radio, TriangleAlert, X};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
@@ -10,7 +10,10 @@ use super::{
 };
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use super::{CountBadge, ScrollArea};
-use crate::shared::browser;
+use crate::shared::{
+    browser,
+    i18n::{t, use_language},
+};
 
 mod pointer_drag;
 
@@ -51,6 +54,7 @@ pub(crate) fn ViewerTabItem(
     #[props(default)] oncloseothers: Option<EventHandler<()>>,
     #[props(default)] onrename: Option<EventHandler<InlineTextSubmission>>,
 ) -> Element {
+    let language = use_language();
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
     let tab_id = tab.id;
     let mut editing = use_signal(|| false);
@@ -95,8 +99,8 @@ pub(crate) fn ViewerTabItem(
                     ViewerTabKindIndicator { kind: tab.kind }
                     InlineTextEditor {
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
-                        label: "Snapshot name",
-                        placeholder: "Snapshot name",
+                        label: t!(language, "tab-snapshot-name"),
+                        placeholder: t!(language, "tab-snapshot-name"),
                         width_text: tab.label.clone(),
                         onsubmit: move |submission| {
                             if let Some(rename) = onrename {
@@ -119,13 +123,13 @@ pub(crate) fn ViewerTabItem(
                     r#type: "button",
                     draggable: "false",
                     role: "tab",
-                    aria_roledescription: reorderable.then_some("sortable tab"),
+                    aria_roledescription: reorderable.then(|| t!(language, "tab-sortable")),
                     aria_selected: active.to_string(),
                     aria_busy: presentation_state.is_loading().to_string(),
                     "data-viewer-state": presentation_state.dom_state(),
                     aria_controls: "viewer-active-view",
                     tabindex: if active { "0" } else { "-1" },
-                    title: tab_description(&tab),
+                    title: tab_description(&tab, language),
                     onpointerdown: move |event: PointerEvent| {
                         if reorderable {
                             drag.start.call(event.clone());
@@ -169,8 +173,8 @@ pub(crate) fn ViewerTabItem(
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
                     class: "mr-1 text-acc",
-                    aria_label: "Unpin {tab.label}",
-                    title: "Unpin tab",
+                    aria_label: t!(language, "tab-unpin-named", tab = tab.label.as_str()),
+                    title: t!(language, "tab-unpin"),
                     onclick: move |_| {
                         if let Some(onpin) = onpin {
                             onpin.call(false);
@@ -236,12 +240,20 @@ pub(crate) fn ViewerTabRailMeasurementItem(
     }
 }
 
-fn tab_description(tab: &ViewerTab) -> String {
-    match tab.kind {
-        ViewerTabKind::LiveLocalChanges => format!("{} - Local changes", tab.label),
-        ViewerTabKind::LiveBranchChanges => format!("{} - Branch changes", tab.label),
-        ViewerTabKind::LiveUnpushedCommits => format!("{} - Unpushed commits", tab.label),
-        ViewerTabKind::Snapshot | ViewerTabKind::Live => tab.label.clone(),
+fn tab_description(tab: &ViewerTab, language: ViewerLanguage) -> String {
+    tab_comparison_name(tab.kind, language).map_or_else(
+        || tab.label.clone(),
+        |comparison| format!("{} - {comparison}", tab.label),
+    )
+}
+
+/// Names the comparison a live tab follows, when it follows one.
+fn tab_comparison_name(kind: ViewerTabKind, language: ViewerLanguage) -> Option<String> {
+    match kind {
+        ViewerTabKind::LiveLocalChanges => Some(t!(language, "comparison-local-changes")),
+        ViewerTabKind::LiveBranchChanges => Some(t!(language, "comparison-branch-changes")),
+        ViewerTabKind::LiveUnpushedCommits => Some(t!(language, "comparison-unpushed-commits")),
+        ViewerTabKind::Snapshot | ViewerTabKind::Live => None,
     }
 }
 
@@ -262,12 +274,13 @@ fn ViewerTabCloseButton(
     #[props(default)] test_id: Option<String>,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let language = use_language();
     rsx! {
         Button {
             size: ButtonSize::IconCompact,
             variant: ButtonVariant::Bare,
             class: "viewer-tab-close mr-1 group/viewer-tab-close",
-            aria_label: "Close {label}",
+            aria_label: t!(language, "tab-close-named", tab = label),
             "data-testid": test_id,
             onclick,
             span {
@@ -287,12 +300,11 @@ fn ViewerTabCloseButton(
 
 #[component]
 fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
-    let label = match kind {
-        ViewerTabKind::Snapshot => "",
-        ViewerTabKind::Live => ", Live",
-        ViewerTabKind::LiveLocalChanges => ", Live, Local changes",
-        ViewerTabKind::LiveUnpushedCommits => ", Live, Unpushed commits",
-        ViewerTabKind::LiveBranchChanges => ", Live, Branch changes",
+    let language = use_language();
+    let label = match (kind, tab_comparison_name(kind, language)) {
+        (ViewerTabKind::Snapshot, _) => String::new(),
+        (_, None) => format!(", {}", t!(language, "tab-kind-live")),
+        (_, Some(comparison)) => format!(", {}, {comparison}", t!(language, "tab-kind-live")),
     };
     rsx! {
         span { class: "viewer-tab-kind-indicator size-3.5", aria_hidden: "true",
@@ -333,20 +345,23 @@ pub(crate) fn ViewerTabOverflowMenu(
     #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
     #[props(default)] onopenchange: Option<EventHandler<bool>>,
 ) -> Element {
+    let language = use_language();
     let active_tab_state = active_tab
         .as_ref()
         .map(|tab| tab_presentation_state(&tab.state, diff_rows_loading_tab_id == Some(tab.id)));
     let active_tab_id = active_tab.as_ref().map(|tab| tab.id);
-    let active_tab_label = active_tab
-        .as_ref()
-        .map_or("Open diffs", |tab| tab.label.as_str());
+    let active_tab_label = active_tab.as_ref().map_or_else(
+        || t!(language, "navigation-open-diffs"),
+        |tab| tab.label.clone(),
+    );
     let popover_id = id.clone();
     let trigger_id = format!("{id}-trigger");
     let title_id = format!("{id}-title");
-    let trigger_label = format!(
-        "Choose open diff. Current: {}. {} open diffs.",
-        active_tab_label,
-        tabs.len()
+    let trigger_label = t!(
+        language,
+        "tabs-overflow-trigger",
+        current = active_tab_label.as_str(),
+        count = tabs.len()
     );
 
     rsx! {
@@ -396,18 +411,20 @@ pub(crate) fn ViewerTabOverflowMenu(
                         h2 {
                             id: title_id,
                             class: "text-sm font-semibold text-ink",
-                            "Open diffs"
+                            {t!(language, "navigation-open-diffs")}
                         }
-                        p { class: "text-xs text-ink-3", "Select a diff or close one" }
+                        p { class: "text-xs text-ink-3", {t!(language, "tabs-overflow-hint")} }
                     }
                     CountBadge {
                         count: tabs.len(),
-                        aria_label: "{tabs.len()} open diffs",
+                        aria_label: t!(language, "tabs-open-count", count = tabs.len()),
                     }
                 }
                 ScrollArea { class: "min-h-0 overscroll-contain overflow-y-auto p-1.5",
                     if tabs.is_empty() {
-                        p { class: "px-3 py-2 text-xs text-ink-3", "No open diffs" }
+                        p { class: "px-3 py-2 text-xs text-ink-3",
+                            {t!(language, "navigation-no-open-diffs")}
+                        }
                     }
                     ul { class: "grid gap-px", role: "list",
                         for tab in &tabs {
@@ -458,6 +475,7 @@ fn ViewerTabOverflowMenuItem(
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
     #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
 ) -> Element {
+    let language = use_language();
     let tab_id = tab.id;
     let mut editing = use_signal(|| false);
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
@@ -501,8 +519,8 @@ fn ViewerTabOverflowMenuItem(
                     ViewerTabKindIndicator { kind: tab.kind }
                     InlineTextEditor {
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
-                        label: "Snapshot name",
-                        placeholder: "Snapshot name",
+                        label: t!(language, "tab-snapshot-name"),
+                        placeholder: t!(language, "tab-snapshot-name"),
                         width_text: tab.label.clone(),
                         onsubmit: move |submission| {
                             if let Some(rename) = onrename {
@@ -526,7 +544,7 @@ fn ViewerTabOverflowMenuItem(
                     draggable: "false",
                     popovertarget: popover_id,
                     popovertargetaction: "hide",
-                    aria_roledescription: reorderable.then_some("sortable tab"),
+                    aria_roledescription: reorderable.then(|| t!(language, "tab-sortable")),
                     aria_current: active.then_some("page"),
                     aria_controls: "viewer-active-view",
                     onpointerdown: move |event: PointerEvent| {
@@ -570,7 +588,7 @@ fn ViewerTabOverflowMenuItem(
                     }
                     span { class: "flex flex-none items-center gap-1.5",
                         TabStateMarker { state: presentation_state }
-                        if let Some(label) = presentation_state.menu_label() {
+                        if let Some(label) = presentation_state.menu_label(language) {
                             small {
                                 class: "text-xs text-ink-3",
                                 aria_hidden: "true",
@@ -591,7 +609,7 @@ fn ViewerTabOverflowMenuItem(
                 Button {
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
-                    aria_label: "Unpin {tab.label}",
+                    aria_label: t!(language, "tab-unpin-named", tab = tab.label.as_str()),
                     onclick: move |_| {
                         if let Some(onpin) = onpin {
                             onpin.call((tab_id, false));
@@ -639,12 +657,12 @@ enum TabPresentationState {
 }
 
 impl TabPresentationState {
-    const fn label(self) -> &'static str {
+    fn label(self, language: ViewerLanguage) -> String {
         match self {
-            Self::Ready => "Ready",
-            Self::Loading => "Rendering",
-            Self::Broken => "Render stopped",
-            Self::Error => "Render failed",
+            Self::Ready => t!(language, "tab-state-ready"),
+            Self::Loading => t!(language, "tab-state-rendering"),
+            Self::Broken => t!(language, "tab-state-stopped"),
+            Self::Error => t!(language, "tab-state-failed"),
         }
     }
 
@@ -661,10 +679,10 @@ impl TabPresentationState {
     }
 
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
-    const fn menu_label(self) -> Option<&'static str> {
+    fn menu_label(self, language: ViewerLanguage) -> Option<String> {
         match self {
             Self::Ready => None,
-            Self::Loading | Self::Broken | Self::Error => Some(self.label()),
+            Self::Loading | Self::Broken | Self::Error => Some(self.label(language)),
         }
     }
 }
@@ -684,7 +702,7 @@ const fn tab_presentation_state(
 
 #[component]
 fn TabStateMarker(state: TabPresentationState) -> Element {
-    let label = state.label();
+    let label = state.label(use_language());
 
     rsx! {
         span {
@@ -755,10 +773,14 @@ mod tests {
 
     #[test]
     fn every_tab_state_has_a_non_color_label() {
-        assert_eq!(TabPresentationState::Ready.label(), "Ready");
-        assert_eq!(TabPresentationState::Loading.label(), "Rendering");
-        assert_eq!(TabPresentationState::Broken.label(), "Render stopped");
-        assert_eq!(TabPresentationState::Error.label(), "Render failed");
+        let language = gtl_models::settings::ViewerLanguage::EnUs;
+        assert_eq!(TabPresentationState::Ready.label(language), "Ready");
+        assert_eq!(TabPresentationState::Loading.label(language), "Rendering");
+        assert_eq!(
+            TabPresentationState::Broken.label(language),
+            "Render stopped"
+        );
+        assert_eq!(TabPresentationState::Error.label(language), "Render failed");
     }
 
     #[test]
@@ -977,6 +999,7 @@ fn ViewerTabContextMenu(
     oncloseothers: Option<EventHandler<()>>,
     onrename: Option<EventHandler<()>>,
 ) -> Element {
+    let language = use_language();
     let keyboard_id = id.clone();
     let pin_id = id.clone();
     let others_id = id.clone();
@@ -989,7 +1012,7 @@ fn ViewerTabContextMenu(
             style: "left:clamp(0px, {x}px, calc(100vw - 13rem));top:clamp(0px, {y}px, calc(100vh - 8rem));",
             popover: "auto",
             role: "menu",
-            aria_label: "Tab actions",
+            aria_label: t!(language, "tab-actions"),
             onkeydown: move |event| super::menu_keyboard::keydown(&keyboard_id, &trigger_id, &event),
             if let Some(rename) = onrename {
                 button {
@@ -1001,7 +1024,7 @@ fn ViewerTabContextMenu(
                         browser::hide_popover(&rename_id);
                         rename.call(());
                     },
-                    "Rename snapshot"
+                    {t!(language, "tab-rename-snapshot")}
                 }
             }
             button {
@@ -1017,9 +1040,9 @@ fn ViewerTabContextMenu(
                 },
                 span {
                     if pinned {
-                        "Unpin tab"
+                        {t!(language, "tab-unpin")}
                     } else {
-                        "Pin tab"
+                        {t!(language, "tab-pin")}
                     }
                 }
                 span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+P" }
@@ -1035,7 +1058,7 @@ fn ViewerTabContextMenu(
                     browser::hide_popover(&id);
                     onclose.call(event);
                 },
-                span { "Close tab" }
+                span { {t!(language, "tab-close")} }
                 span { class: "ml-auto text-ink-3", aria_hidden: "true", "Ctrl+W" }
             }
             button {
@@ -1051,7 +1074,7 @@ fn ViewerTabContextMenu(
                         close.call(());
                     }
                 },
-                span { "Close others" }
+                span { {t!(language, "tab-close-others")} }
                 span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+O" }
             }
         }

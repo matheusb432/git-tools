@@ -8,6 +8,8 @@ use std::time::Duration;
     not(target_arch = "wasm32")
 ))]
 use dioxus::prelude::spawn;
+#[cfg(feature = "interactive-ui")]
+use gtl_models::settings::ViewerLanguage;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen::JsCast;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
@@ -16,6 +18,9 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlDetailsElement;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 use web_sys::{HtmlDocument, HtmlElement, HtmlTextAreaElement};
+
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+const VIEWER_LANGUAGE_STORAGE_KEY: &str = "gtl.viewer.language";
 
 #[cfg(all(feature = "desktop", target_arch = "wasm32"))]
 #[derive(Clone)]
@@ -31,6 +36,46 @@ pub(crate) fn apply_theme(theme: &'static str) {
     };
     let _ = root.set_attribute("data-theme", theme);
 }
+
+/// Names the language of the document's copy for assistive technology and spellcheck.
+#[cfg(feature = "interactive-ui")]
+pub(crate) fn apply_document_language(language: ViewerLanguage) {
+    let Some(root) = document().and_then(|document| document.document_element()) else {
+        return;
+    };
+    let _ = root.set_attribute("lang", language.as_str());
+}
+
+/// Returns the language the viewer last displayed, so a restart renders it
+/// before the server's settings arrive.
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn stored_viewer_language() -> Option<ViewerLanguage> {
+    web_sys::window()?
+        .local_storage()
+        .ok()??
+        .get_item(VIEWER_LANGUAGE_STORAGE_KEY)
+        .ok()??
+        .parse()
+        .ok()
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) const fn stored_viewer_language() -> Option<ViewerLanguage> {
+    None
+}
+
+/// Remembers the displayed language for [`stored_viewer_language`].
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn store_viewer_language(language: ViewerLanguage) {
+    let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+    else {
+        return;
+    };
+    let _ = storage.set_item(VIEWER_LANGUAGE_STORAGE_KEY, language.as_str());
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) const fn store_viewer_language(_language: ViewerLanguage) {}
 
 #[cfg(feature = "desktop")]
 pub(crate) fn apply_reduced_motion(reduce_motion: bool) {
@@ -116,16 +161,25 @@ pub(crate) fn hide_popover(id: &str) {
 
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn show_hover_popover(id: &str) {
-    let blocked = document()
-        .and_then(|document| {
-            document
-                .query_selector("[popover]:popover-open:not([role='tooltip']), dialog[open]")
-                .ok()
-                .flatten()
-        })
+    let Some(document) = document() else {
+        return;
+    };
+    let menu_open = document
+        .query_selector("[popover]:popover-open:not([role='tooltip'])")
+        .ok()
+        .flatten()
+        .is_some();
+    let dialog_open = document
+        .query_selector("dialog[open]")
+        .ok()
+        .flatten()
+        .is_some();
+    let inside_dialog = document
+        .get_element_by_id(id)
+        .and_then(|element| element.closest("dialog[open]").ok().flatten())
         .is_some();
     // An auto tooltip would dismiss an open editor or menu when its delay expires.
-    if !blocked {
+    if !menu_open && (!dialog_open || inside_dialog) {
         show_popover(id);
     }
 }
@@ -275,6 +329,47 @@ fn exec_copy(text: &str) -> bool {
     let copied = document.exec_command("copy").unwrap_or(false);
     let _ = body.remove_child(&textarea);
     copied
+}
+
+/// Returns the current instant from the `WebView` clock.
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn current_timestamp() -> jiff::Timestamp {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "Date.now() returns whole milliseconds well inside i64"
+    )]
+    let milliseconds = web_sys::js_sys::Date::now() as i64;
+    jiff::Timestamp::from_millisecond(milliseconds).unwrap_or(jiff::Timestamp::UNIX_EPOCH)
+}
+
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) fn current_timestamp() -> jiff::Timestamp {
+    jiff::Timestamp::now()
+}
+
+/// Returns the `WebView` local UTC offset at `instant`, which follows daylight saving time.
+#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+pub(crate) fn local_offset_at(instant: jiff::Timestamp) -> jiff::tz::Offset {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "supported timestamps stay far below 2^53 milliseconds"
+    )]
+    let date = web_sys::js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        instant.as_millisecond() as f64,
+    ));
+    // `getTimezoneOffset()` returns UTC minus local time in whole minutes.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "offsets are whole minutes within one day"
+    )]
+    let offset_minutes = -(date.get_timezone_offset() as i32);
+    jiff::tz::Offset::from_seconds(offset_minutes * 60).unwrap_or(jiff::tz::Offset::UTC)
+}
+
+/// Native builds only run tests, which display UTC.
+#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+pub(crate) const fn local_offset_at(_instant: jiff::Timestamp) -> jiff::tz::Offset {
+    jiff::tz::Offset::UTC
 }
 
 fn document() -> Option<web_sys::Document> {
