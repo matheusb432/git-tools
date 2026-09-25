@@ -6,10 +6,10 @@ use gtl_application::{
         catalogue::{
             create_project, get_project, list_active_projects,
             set_project_membership::{self, ProjectMembership, SetProjectMembership},
-            set_project_status::{self, SetProjectStatus},
         },
         get_project_repository::{self, GetProjectRepository},
         pull_repositories, push_repositories,
+        set_project_status::{self, SetProjectStatus},
     },
     repositories::get_repository_statuses,
 };
@@ -138,7 +138,7 @@ impl ProjectService for ProjectGrpcService {
             mode: catalogue::mode(request.mode)?,
         };
         let state = self.state.clone();
-        let outcome = run_blocking(move || {
+        let result = run_blocking(move || {
             let mut connection = state
                 .database
                 .connection_lock()
@@ -147,7 +147,8 @@ impl ProjectService for ProjectGrpcService {
         })
         .await??;
         Ok(Response::new(v1::PauseProjectResponse {
-            outcome: catalogue::outcome(outcome),
+            outcome: catalogue::outcome(result.outcome),
+            target_status: catalogue::status(result.target_status),
         }))
     }
 
@@ -165,7 +166,7 @@ impl ProjectService for ProjectGrpcService {
             mode: catalogue::mode(request.mode)?,
         };
         let state = self.state.clone();
-        let outcome = run_blocking(move || {
+        let result = run_blocking(move || {
             let mut connection = state
                 .database
                 .connection_lock()
@@ -174,7 +175,8 @@ impl ProjectService for ProjectGrpcService {
         })
         .await??;
         Ok(Response::new(v1::ResumeProjectResponse {
-            outcome: catalogue::outcome(outcome),
+            outcome: catalogue::outcome(result.outcome),
+            target_status: catalogue::status(result.target_status),
         }))
     }
 

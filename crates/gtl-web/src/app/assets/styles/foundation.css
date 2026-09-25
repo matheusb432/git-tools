@@ -46,6 +46,7 @@
   --radius-panel: var(--r);
   --shadow-floating: var(--elevation-floating);
   --shadow-dialog: var(--elevation-dialog);
+  --shadow-notification: var(--elevation-notification);
   --animate-commit-popover-enter: commit-popover-enter 100ms linear;
   --animate-inline-edit-enter: inline-edit-enter 150ms ease-out;
 }

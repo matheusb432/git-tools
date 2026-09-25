@@ -6,8 +6,6 @@ use gtl_models::{
 
 use crate::ports::GitClient;
 
-pub(crate) const DEFAULT_MERGE_BASE: &str = "main";
-
 pub(crate) fn resolve_range(
     repo_path: &RepositoryRoot,
     base: &GitRevision,

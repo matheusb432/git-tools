@@ -47,7 +47,7 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
         },
         content_id: ViewerRowContentId::from_digest([7; 32]),
         row_source: ViewerRowSourceState::Ready,
-        title: "diff".to_owned(),
+        title: gtl_models::diffs::DiffViewTitle::Diff,
         repository_name: project_name("project")?,
         branch: GitHead::Branch(BranchName::main()),
         upstream: GitRevision::main(),
@@ -57,7 +57,6 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
             trail: String::new(),
         },
         files: Vec::new(),
-        commits_label: "0 commits".to_owned(),
         commit_count: 0,
         commits: Vec::new(),
         commit_selection: ViewerCommitSelection::None,
@@ -83,6 +82,13 @@ pub(crate) fn history_page(number: u32, count: u32) -> TestResult<HistoryPage> {
 
 pub(crate) fn project_name(value: &str) -> TestResult<ProjectName> {
     Ok(ProjectName::try_from(value)?)
+}
+
+#[cfg(feature = "interactive-ui")]
+pub(crate) fn recipe_label(name: &str) -> TestResult<gtl_models::recipes::RecipeLabel> {
+    Ok(gtl_models::recipes::RecipeLabel::Named {
+        name: project_name(name)?,
+    })
 }
 
 pub(crate) fn repository_relative_path(value: &str) -> TestResult<RepositoryRelativePath> {

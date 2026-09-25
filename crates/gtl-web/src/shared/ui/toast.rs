@@ -50,6 +50,15 @@ impl ToastKind {
         }
     }
 
+    const fn card_classes(self) -> &'static str {
+        match self {
+            Self::Ok => "border-add-line",
+            Self::Warn => "border-warn-line",
+            Self::Info => "border-acc-line",
+            Self::Error => "border-del-line",
+        }
+    }
+
     const fn icon_classes(self) -> &'static str {
         match self {
             Self::Ok => "text-add",
@@ -444,7 +453,7 @@ fn ToastCard(
 
     rsx! {
         div {
-            class: "toast-card",
+            class: "toast-card {toast.kind.card_classes()}",
             "data-state": phase.state(),
             "data-entrance": phase.entrance(),
             "data-paused": paused.to_string(),

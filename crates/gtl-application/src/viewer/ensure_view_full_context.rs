@@ -197,7 +197,7 @@ mod tests {
                 session.publish_labeled_if_current(
                     ticket,
                     CachedView::new(Arc::clone(&shared)),
-                    "ready".into(),
+                    crate::utils::viewer::label("ready"),
                 );
                 shell::identity_for(session.active_content_identity().unwrap(), options)
             })
@@ -311,9 +311,7 @@ mod tests {
 
     fn shell_for(state: &ViewerState, density: DiffDensity) -> gtl_wire::viewer::ViewerShell {
         state
-            .inspect(|session| {
-                shell::project(session, &settings_with_density(density), None).unwrap()
-            })
+            .inspect(|session| shell::project(session, &settings_with_density(density)).unwrap())
             .unwrap()
     }
 
@@ -378,7 +376,7 @@ mod tests {
                 session.publish_labeled_if_current(
                     ticket,
                     CachedView::new(source),
-                    "refreshed".into(),
+                    crate::utils::viewer::label("refreshed"),
                 );
             })
             .unwrap();

@@ -7,7 +7,7 @@
 - Find Git repositories recursively from a chosen folder and add selected projects in the desktop app. Browse managed projects, ordered by their latest render, and open saved local-change or unpushed-commit comparisons.
 - Render unpushed, range, merge, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
 - Use the desktop viewer and its offline diffs in English (US) or Brazilian Portuguese.
-- Review and confirm atomic pushes through an exact commit from desktop diffs or the Projects dashboard.
+- Review and confirm pushes of an exact commit from desktop diffs or the Projects dashboard.
 - Inspect status, push changes, fast-forward branches, and manage tags.
 - Run batch workflows across active [managed projects](docs/agents/projects.md), or select one project's repository by ID.
 

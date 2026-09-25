@@ -169,6 +169,20 @@ impl ServerClient {
             .block_on(self.client.get_project_repository(request))?)
     }
 
+    pub(crate) fn pause_project(
+        &self,
+        request: v1::PauseProjectRequest,
+    ) -> anyhow::Result<v1::PauseProjectResponse> {
+        Ok(self.runtime.block_on(self.client.pause_project(request))?)
+    }
+
+    pub(crate) fn resume_project(
+        &self,
+        request: v1::ResumeProjectRequest,
+    ) -> anyhow::Result<v1::ResumeProjectResponse> {
+        Ok(self.runtime.block_on(self.client.resume_project(request))?)
+    }
+
     pub(crate) fn pull_repository(
         &self,
         request: v1::PullRepositoryRequest,

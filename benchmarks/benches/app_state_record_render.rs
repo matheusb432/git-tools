@@ -34,12 +34,14 @@ fn request() -> RecordRender {
             },
             name: None,
         },
-        title: "git-tools · unpushed".into(),
         repo_name: require(
             gtl_models::paths::ProjectName::try_from("git-tools"),
             "creating the benchmark project name",
         ),
         range_label: "origin/main..HEAD".into(),
+        label_parts: gtl_application::recipes::RecipeLabelParts::UnpushedCommits {
+            count: gtl_models::git::CommitCount::new(2),
+        },
     }
 }
 

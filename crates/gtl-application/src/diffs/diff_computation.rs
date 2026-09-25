@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions},
+    diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions, DiffViewTitle},
     git::{GitRange, GitRevision},
     paths::RepositoryRoot,
 };
@@ -10,7 +10,7 @@ use crate::{
         assemble::{DiffData, assemble},
         exclusions,
         range::DiffRanges,
-        range_view::{RangePresentation, RangeView},
+        range_view::RangeView,
         view::sort_files_tree_order,
     },
     ports::GitClient,
@@ -27,17 +27,17 @@ struct ResolvedTarget {
     base_ref: GitRevision,
     io_ranges: DiffRanges,
     view_ranges: DiffRanges,
-    presentation: RangePresentation,
+    title: DiffViewTitle,
     fallback_to_branch: bool,
 }
 
 impl ResolvedTarget {
-    fn pinned(pin: &PinnedRange, base_ref: GitRevision, presentation: RangePresentation) -> Self {
+    fn pinned(pin: &PinnedRange, base_ref: GitRevision, title: DiffViewTitle) -> Self {
         Self {
             base_ref,
             io_ranges: DiffRanges::exact(pin.to_git_range()),
             view_ranges: DiffRanges::exact(pin.to_display_range()),
-            presentation,
+            title,
             fallback_to_branch: false,
         }
     }
@@ -45,14 +45,14 @@ impl ResolvedTarget {
     fn same_ranges(
         base_ref: GitRevision,
         ranges: DiffRanges,
-        presentation: RangePresentation,
+        title: DiffViewTitle,
         fallback_to_branch: bool,
     ) -> Self {
         Self {
             base_ref,
             io_ranges: ranges.clone(),
             view_ranges: ranges,
-            presentation,
+            title,
             fallback_to_branch,
         }
     }
@@ -74,10 +74,10 @@ pub(super) fn build(
         base_ref,
         io_ranges,
         view_ranges,
-        presentation,
+        title,
         fallback_to_branch,
     } = resolve_target_ranges(git, top, target, &mut notes, comparisons)?;
-    let range_view = RangeView::new(&view_ranges.diff, presentation);
+    let range_view = RangeView::new(&view_ranges.diff, title);
 
     let DiffData {
         commits,
@@ -98,7 +98,6 @@ pub(super) fn build(
         upstream: base_ref.clone(),
         title: range_view.title,
         cmd: range_view.cmd,
-        commits_label: range_view.commits_label,
         foot: range_view.foot,
         commits,
         files,
@@ -140,7 +139,7 @@ fn resolve_target_ranges(
         } => ResolvedTarget::pinned(
             pin,
             GitRevision::from(&pin.to_display_range()),
-            RangePresentation::Exact,
+            DiffViewTitle::Diff,
         ),
         DiffTarget::Range {
             range,
@@ -150,7 +149,7 @@ fn resolve_target_ranges(
             ResolvedTarget::same_ranges(
                 GitRevision::from(range),
                 DiffRanges::exact(range.clone()),
-                RangePresentation::Exact,
+                DiffViewTitle::Diff,
                 false,
             )
         }
@@ -159,7 +158,7 @@ fn resolve_target_ranges(
         {
             let mut ranges = DiffRanges::working_tree(base);
             ranges.log = None;
-            ResolvedTarget::same_ranges(base.clone(), ranges, RangePresentation::WorkingTree, false)
+            ResolvedTarget::same_ranges(base.clone(), ranges, DiffViewTitle::Diff, false)
         }
         DiffTarget::Base(base) => {
             git.verify_commit(top, base)?;
@@ -170,43 +169,41 @@ fn resolve_target_ranges(
                 base_ref: short.clone(),
                 io_ranges: DiffRanges::working_tree(base),
                 view_ranges: DiffRanges::working_tree(&short),
-                presentation: RangePresentation::WorkingTree,
+                title: DiffViewTitle::Diff,
                 fallback_to_branch: false,
             }
         }
         DiffTarget::Merge {
             base,
             pinned: Some(pin),
-        } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
+        } => ResolvedTarget::pinned(pin, base.clone(), DiffViewTitle::MergeDiff),
         DiffTarget::Merge { base, pinned: None } => {
             git.verify_commit(top, base)?;
             ResolvedTarget::same_ranges(
                 base.clone(),
                 DiffRanges::merge(base),
-                RangePresentation::Merge,
+                DiffViewTitle::MergeDiff,
                 false,
             )
         }
         DiffTarget::Unpushed { pinned: Some(pin) } => {
-            ResolvedTarget::pinned(pin, pin.to_display_base(), RangePresentation::Exact)
+            ResolvedTarget::pinned(pin, pin.to_display_base(), DiffViewTitle::Diff)
         }
         DiffTarget::Unpushed { pinned: None } => {
             let comparison = crate::projects::comparison::resolve(top, git, comparisons)?;
             let base = comparison.reference();
-            let (ranges, presentation, fallback) = match comparison {
-                crate::projects::comparison::ResolvedComparison::Upstream { .. } => (
-                    DiffRanges::unpushed(&base),
-                    RangePresentation::Unpushed,
-                    false,
-                ),
+            let (ranges, fallback) = match comparison {
+                crate::projects::comparison::ResolvedComparison::Upstream { .. } => {
+                    (DiffRanges::unpushed(&base), false)
+                }
                 crate::projects::comparison::ResolvedComparison::Branch { branch, .. } => {
                     notes.push(Note::info(format!(
                         "diff-artifact: no upstream; comparing branch changes against {branch}"
                     )));
-                    (DiffRanges::merge(&base), RangePresentation::Branch, true)
+                    (DiffRanges::merge(&base), true)
                 }
             };
-            ResolvedTarget::same_ranges(base, ranges, presentation, fallback)
+            ResolvedTarget::same_ranges(base, ranges, DiffViewTitle::Diff, fallback)
         }
 
         DiffTarget::Last {
@@ -218,7 +215,7 @@ fn resolve_target_ranges(
             ResolvedTarget::same_ranges(
                 GitRevision::from(&range),
                 DiffRanges::exact(range),
-                RangePresentation::Exact,
+                DiffViewTitle::Diff,
                 false,
             )
         }

@@ -113,12 +113,11 @@ fn is_skipped(entry: &DirEntry, scope: RepositoryTraversalScope) -> bool {
         return false;
     }
     let name = entry.file_name().to_str().unwrap_or_default();
-    let is_worktree = is_linked_worktree(entry.path());
+    let is_worktree = is_linked_worktree(entry.path()) && !is_submodule_checkout(entry.path());
     rules::should_skip(entry.depth(), name, is_worktree, scope)
 }
 
-// Git gives only a linked worktree's administrative directory a `commondir` file. Submodule Git
-// directories lack it even when stored under a worktree's administrative directory.
+// Git gives only a linked worktree's administrative directory a `commondir` file.
 fn is_linked_worktree(directory: &Path) -> bool {
     let git_path = directory.join(".git");
     if !git_path.is_file() {
@@ -128,6 +127,25 @@ fn is_linked_worktree(directory: &Path) -> bool {
         rules::gitfile_target(&content)
             .is_some_and(|target| directory.join(target).join("commondir").is_file())
     })
+}
+
+// A submodule checkout can itself be a linked worktree of another checkout's submodule repository.
+fn is_submodule_checkout(directory: &Path) -> bool {
+    let Some(superproject) = directory
+        .ancestors()
+        .skip(1)
+        .find(|ancestor| ancestor.join(".git").exists())
+    else {
+        return false;
+    };
+    let Ok(gitmodules) = std::fs::read_to_string(superproject.join(".gitmodules")) else {
+        return false;
+    };
+    directory
+        .strip_prefix(superproject)
+        .is_ok_and(|submodule_path| {
+            rules::gitmodules_paths(&gitmodules).any(|path| Path::new(path) == submodule_path)
+        })
 }
 
 /// Checks whether a scan rooted at `directory` reports the directory itself.
@@ -259,6 +277,38 @@ mod tests {
             [worktree.as_path(), worktree.join("lib/submodule").as_path()]
         );
         assert!(is_discoverable_repository(&worktree));
+    }
+
+    #[test]
+    fn keeps_submodule_checkouts_that_are_linked_worktrees() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let worktree = root.join("api/.worktrees/feature");
+        utils::make_repository(&root.join("api"));
+        utils::make_linked_worktree(&worktree, &root.join("api/.git/worktrees/feature"));
+        std::fs::write(
+            worktree.join(".gitmodules"),
+            "[submodule \"submodule\"]\n\tpath = lib/submodule\n",
+        )
+        .unwrap();
+        utils::make_linked_worktree(
+            &worktree.join("lib/submodule"),
+            &root.join("api/.git/modules/submodule/worktrees/submodule"),
+        );
+
+        let repositories = find_repositories::execute(FindRepositories {
+            root: worktree.clone(),
+            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
+        })
+        .unwrap();
+
+        assert_eq!(
+            repositories
+                .iter()
+                .map(|repository| repository.path.as_ref())
+                .collect::<Vec<_>>(),
+            [worktree.as_path(), worktree.join("lib/submodule").as_path()]
+        );
     }
 
     #[test]

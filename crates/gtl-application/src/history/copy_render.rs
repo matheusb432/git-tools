@@ -7,7 +7,7 @@ use crate::{history::RecentRenderRecord, recipes::RecipeOp};
 #[derive(Serialize)]
 struct HistoryCopy<'record> {
     id: gtl_models::viewer::RenderHistoryId,
-    title: &'record str,
+    label: gtl_models::recipes::RecipeLabel,
     repo_name: &'record gtl_models::paths::ProjectName,
     kind: HistoryCopyKind,
     range_label: &'record str,
@@ -30,7 +30,7 @@ pub fn format(record: &RecentRenderRecord) -> Result<String, serde_json::Error> 
     };
     serde_json::to_string_pretty(&HistoryCopy {
         id: record.id,
-        title: &record.title,
+        label: record.label(),
         repo_name: &record.repo_name,
         kind,
         range_label: &record.range_label,
@@ -52,8 +52,8 @@ mod tests {
         let record = RecentRenderRecord {
             project_id: None,
             id: gtl_models::viewer::RenderHistoryId::try_new(31).unwrap(),
-            title: "Release diff".to_owned(),
             repo_name: crate::utils::project_name("git-tools"),
+            label_parts: crate::recipes::RecipeLabelParts::None,
             range_label: "main...release".to_owned(),
             rendered_at: "2026-08-09T10:00:00Z".try_into().unwrap(),
             recipe: Recipe {
@@ -70,6 +70,10 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&copied).unwrap();
 
         assert_eq!(json["id"], 31);
+        assert_eq!(
+            json["label"],
+            serde_json::json!({"label": "named", "name": "release"})
+        );
         assert_eq!(json["repo_name"], "git-tools");
         assert_eq!(json["kind"], "merge-diff");
         assert_eq!(json["recipe"]["source"]["value"], "/repos/git-tools");

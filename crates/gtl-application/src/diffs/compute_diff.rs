@@ -79,10 +79,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        diffs::{
-            DiffTarget, PinnedRange, compute_diff,
-            range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS},
-        },
+        diffs::{DiffTarget, PinnedRange, compute_diff},
         utils::{
             FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
@@ -134,7 +131,6 @@ mod tests {
         assert_eq!(response.view.branch.to_string(), "feature");
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.files[0].path.to_string_lossy(), "f.txt");
-        assert_eq!(response.view.commits_label, LABEL_UNPUSHED_COMMITS);
         assert_eq!(response.summary, "1 unpushed commit(s)");
         assert!(response.notes.is_empty());
     }
@@ -220,7 +216,6 @@ mod tests {
             response.notes.is_empty(),
             "no fallback note for a pinned range"
         );
-        assert_eq!(response.view.commits_label, LABEL_COMMITS_IN_RANGE);
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(response.view.foot.cmd, "git diff aaaaaaaaaa..1111111111");
         assert_eq!(response.view.upstream.as_ref(), "aaaaaaaaaa");
@@ -247,7 +242,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(response.view.title, "merge-diff");
+        assert_eq!(
+            response.view.title,
+            gtl_models::diffs::DiffViewTitle::MergeDiff
+        );
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(response.summary, "to merge into main");
     }
@@ -274,7 +272,6 @@ mod tests {
 
         assert!(response.notes.is_empty());
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
-        assert_eq!(response.view.commits_label, LABEL_COMMITS_IN_RANGE);
     }
 
     #[test]

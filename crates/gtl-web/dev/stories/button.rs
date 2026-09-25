@@ -22,6 +22,7 @@ fn variants() -> Element {
         div { class: "flex flex-wrap items-center gap-3",
             Button { variant: ButtonVariant::Primary, "Primary" }
             Button { variant: ButtonVariant::Secondary, "Secondary" }
+            Button { variant: ButtonVariant::Accent, "Accent" }
             Button { variant: ButtonVariant::Destructive, "Destructive" }
             Button { variant: ButtonVariant::Warning, "Warning" }
             Button { variant: ButtonVariant::Failure, "Failure" }

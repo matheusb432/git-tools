@@ -61,7 +61,7 @@ pub(super) async fn open_viewer_history(
     let work = work::reserve_history_open(&state.viewer, record).into_grpc()?;
     viewer_runtime::spawn_recipe(state.clone(), work);
     Ok(Response::new(v1::OpenViewerHistoryResponse {
-        shell: Some(project_shell(state, None)?),
+        shell: Some(project_shell(state)?),
     }))
 }
 
@@ -100,7 +100,7 @@ pub(super) fn project_history_page(
             .into_iter()
             .map(|record| ViewerHistoryEntry {
                 id: record.id,
-                title: record.title,
+                label: record.label(),
                 repository_name: record.repo_name,
                 kind: match record.recipe.op {
                     RecipeOp::Diff { .. } => ViewerRecipeKind::Diff,

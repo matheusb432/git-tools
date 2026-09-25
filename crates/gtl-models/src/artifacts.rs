@@ -76,27 +76,6 @@ impl ArtifactContentHash {
 #[error("artifact content hash must contain exactly 16 ASCII hexadecimal characters")]
 pub struct ArtifactContentHashError;
 
-/// Exact serialized size of one stored artifact.
-#[nutype(
-    const_fn,
-    default = 0,
-    derive(
-        Debug,
-        Clone,
-        Copy,
-        Default,
-        PartialEq,
-        Eq,
-        PartialOrd,
-        Ord,
-        Hash,
-        Display,
-        Serialize,
-        Deserialize
-    )
-)]
-pub struct ArtifactByteSize(u64);
-
 /// A commit-range operator that can address an immutable stored artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArtifactRangeKind {

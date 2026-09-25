@@ -9,7 +9,6 @@ pub mod create_project;
 pub mod get_project;
 pub mod list_active_projects;
 pub mod set_project_membership;
-pub mod set_project_status;
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum ProjectCatalogueError {

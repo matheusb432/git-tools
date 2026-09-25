@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use gtl_models::paths::ProjectName;
+use gtl_models::recipes::RecipeLabel;
 
-use super::{ViewerTabKind, recipe_label};
+use super::ViewerTabKind;
 use crate::{
     diffs::View,
-    recipes::{Recipe, RecipeOp, RecipeTarget},
+    recipes::{Recipe, RecipeLabelParts, recipe_label},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,64 +16,34 @@ pub struct CompleteRecipeComputation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum CompleteRecipeComputationOk {
-    Publish { label: String, view: Arc<View> },
-    Skipped { label: String },
+pub struct CompleteRecipeComputationOk {
+    pub label: RecipeLabel,
+    pub view: Arc<View>,
 }
 
 #[cqrsy::command]
 pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationOk {
     let CompleteRecipeComputation { recipe, kind, view } = command;
-    if kind == ViewerTabKind::Snapshot && !view.has_diff_content() {
-        return CompleteRecipeComputationOk::Skipped {
-            label: recipe_label::initial(&recipe),
-        };
-    }
-
-    CompleteRecipeComputationOk::Publish {
+    let rendered = || {
+        let parts = RecipeLabelParts::from_view(&recipe, &view);
+        recipe_label::rendered(&recipe, view.repo_name.clone(), &parts)
+    };
+    CompleteRecipeComputationOk {
         label: if kind == ViewerTabKind::Live {
-            recipe_label::live(&recipe).unwrap_or_else(|| computed_label(&recipe, &view))
+            recipe_label::live(&recipe).unwrap_or_else(rendered)
         } else {
-            computed_label(&recipe, &view)
+            rendered()
         },
         view: Arc::new(view),
     }
 }
 
-fn computed_label(recipe: &Recipe, view: &View) -> String {
-    if let Some(name) = &recipe.name {
-        return name.to_string();
-    }
-
-    let repo = &view.repo_name;
-    match &recipe.op {
-        RecipeOp::Diff { target } => computed_diff_label(repo, target, view),
-        RecipeOp::MergeDiff { .. } => merge_label(repo, view),
-    }
-}
-
-fn computed_diff_label(repo: &ProjectName, target: &RecipeTarget, view: &View) -> String {
-    match target {
-        RecipeTarget::Unpushed { .. } => {
-            format!("{repo}: {}", recipe_label::commit_count(view.commits.len()))
-        }
-        RecipeTarget::Base { rev } => format!("{repo}: {rev}->working"),
-        RecipeTarget::Range { range, .. } => format!("{repo}: {range}"),
-        RecipeTarget::Merge { .. } => merge_label(repo, view),
-        RecipeTarget::Last { count, .. } => format!(
-            "{repo}: last {}",
-            recipe_label::commit_count(count.get() as usize)
-        ),
-    }
-}
-
-fn merge_label(repo: &ProjectName, view: &View) -> String {
-    format!("{repo}: merge {}->{}", view.branch, view.upstream)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
+    use gtl_models::{
+        git::CommitCount,
+        recipes::{RecipeLabel, RecipeLabelChanges},
+    };
 
     use super::*;
     use crate::{
@@ -85,81 +55,53 @@ mod tests {
         viewer::complete_recipe_computation,
     };
 
+    fn unpushed() -> Recipe {
+        recipe(RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { pinned: None },
+        })
+    }
+
+    fn published_label(recipe: Recipe, kind: ViewerTabKind) -> RecipeLabel {
+        let mut view = empty_view();
+        view.commits = vec![commit("abc1234")];
+        complete_recipe_computation::execute(CompleteRecipeComputation { recipe, kind, view }).label
+    }
+
     #[test]
-    fn computed_labels_preserve_recipe_intent() {
-        let cases = [
-            (
-                RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed { pinned: None },
+    fn live_tabs_name_their_repository_while_snapshots_show_computed_changes() {
+        let project = crate::utils::project_name("project");
+
+        assert_eq!(
+            published_label(unpushed(), ViewerTabKind::Live),
+            RecipeLabel::Repository {
+                repository: project.clone(),
+            }
+        );
+        assert_eq!(
+            published_label(unpushed(), ViewerTabKind::Snapshot),
+            RecipeLabel::Changes {
+                repository: project.clone(),
+                changes: RecipeLabelChanges::UnpushedCommits {
+                    count: CommitCount::new(1),
                 },
-                1,
-                "project",
-            ),
-            (
-                RecipeOp::Diff {
+            }
+        );
+        assert_eq!(
+            published_label(
+                recipe(RecipeOp::Diff {
                     target: RecipeTarget::Base {
                         rev: crate::utils::git_revision("v1"),
                     },
-                },
-                0,
-                "project: v1->working",
+                }),
+                ViewerTabKind::Live,
             ),
-            (
-                RecipeOp::Diff {
-                    target: RecipeTarget::Range {
-                        range: crate::utils::git_range("v1..v2"),
-                        pinned: None,
-                    },
+            RecipeLabel::Changes {
+                repository: project,
+                changes: RecipeLabelChanges::WorkingTree {
+                    base: crate::utils::git_revision("v1"),
                 },
-                0,
-                "project: v1..v2",
-            ),
-            (
-                RecipeOp::Diff {
-                    target: RecipeTarget::Merge {
-                        base: crate::utils::git_revision("main"),
-                        pinned: None,
-                    },
-                },
-                0,
-                "project: merge feature->main",
-            ),
-            (
-                RecipeOp::Diff {
-                    target: RecipeTarget::Last {
-                        count: NonZeroU32::new(1).unwrap(),
-                        pinned: None,
-                    },
-                },
-                0,
-                "project: last 1 commit",
-            ),
-            (
-                RecipeOp::MergeDiff {
-                    base: Some(crate::utils::git_revision("main")),
-                    pinned: None,
-                },
-                0,
-                "project: merge feature->main",
-            ),
-        ];
-
-        for (op, commit_count, expected) in cases {
-            let mut view = empty_view();
-            view.commits = (0..commit_count).map(|_| commit("abc1234")).collect();
-            let response = complete_recipe_computation::execute(CompleteRecipeComputation {
-                recipe: recipe(op),
-                kind: ViewerTabKind::Live,
-                view,
-            });
-            let label = match response {
-                CompleteRecipeComputationOk::Publish { label, .. } => Some(label),
-                CompleteRecipeComputationOk::Skipped { .. } => None,
             }
-            .unwrap();
-
-            assert_eq!(label, expected);
-        }
+        );
     }
 
     #[test]
@@ -170,16 +112,11 @@ mod tests {
         });
         named.name = Some(crate::utils::project_name("Release review"));
 
-        let response = complete_recipe_computation::execute(CompleteRecipeComputation {
-            recipe: named,
-            kind: ViewerTabKind::Live,
-            view: empty_view(),
-        });
-
-        assert!(matches!(
-            response,
-        CompleteRecipeComputationOk::Publish { label, .. }
-                if label == "Release review"
-        ));
+        assert_eq!(
+            published_label(named, ViewerTabKind::Live),
+            RecipeLabel::Named {
+                name: crate::utils::project_name("Release review"),
+            }
+        );
     }
 }

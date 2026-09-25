@@ -107,7 +107,7 @@ mod tests {
                 session.publish_labeled_if_current(
                     ticket,
                     CachedView::new(Arc::new(view)),
-                    "current".into(),
+                    crate::utils::viewer::label("current"),
                 );
                 shell::identity_for(session.active_content_identity().unwrap(), options)
             })

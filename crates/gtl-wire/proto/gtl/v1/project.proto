@@ -139,6 +139,8 @@ message PauseProjectRequest {
 
 message PauseProjectResponse {
   ProjectMutationOutcome outcome = 1;
+  // The resulting status for apply, or the prospective status for preview.
+  ProjectStatus target_status = 2;
 }
 
 message ResumeProjectRequest {
@@ -148,6 +150,8 @@ message ResumeProjectRequest {
 
 message ResumeProjectResponse {
   ProjectMutationOutcome outcome = 1;
+  // The resulting status for apply, or the prospective status for preview.
+  ProjectStatus target_status = 2;
 }
 
 message ManageProjectsRequest {

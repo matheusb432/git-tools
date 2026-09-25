@@ -16,6 +16,20 @@ pub(super) fn gitfile_target(git_file_contents: &str) -> Option<&str> {
         .filter(|target| !target.is_empty())
 }
 
+/// Reads the submodule paths a `.gitmodules` file registers, relative to its checkout.
+pub(super) fn gitmodules_paths(gitmodules_contents: &str) -> impl Iterator<Item = &str> {
+    gitmodules_contents.lines().filter_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        let value = value.trim();
+        key.trim().eq_ignore_ascii_case("path").then(|| {
+            value
+                .strip_prefix('"')
+                .and_then(|quoted| quoted.strip_suffix('"'))
+                .unwrap_or(value)
+        })
+    })
+}
+
 /// Never prunes the root, which the caller names explicitly even when it is a linked worktree.
 pub(super) fn should_skip(
     depth: usize,
@@ -54,6 +68,17 @@ mod tests {
         );
         assert_eq!(gitfile_target("gitdir:\n"), None);
         assert_eq!(gitfile_target("ref: refs/heads/main\n"), None);
+    }
+
+    #[test]
+    fn gitmodules_paths_reads_each_registered_path() {
+        let gitmodules = "[submodule \"api\"]\n\tpath = src/api\n\turl = https://example.invalid/api\n\
+                          [submodule \"web\"]\n\tPath = \"src/web\"\n";
+
+        assert_eq!(
+            gitmodules_paths(gitmodules).collect::<Vec<_>>(),
+            ["src/api", "src/web"]
+        );
     }
 
     #[test]

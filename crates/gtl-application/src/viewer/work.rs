@@ -5,6 +5,7 @@ use std::sync::Arc;
 use gtl_models::{
     diffs::CommitId,
     failure::{Classified as _, ErrorMeta, Failure, Resource, ViewerFailure},
+    recipes::RecipeLabel,
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 
@@ -12,8 +13,8 @@ use super::{
     ViewerState, ViewerStateError,
     prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     session::{
-        BeginCommitSelectionError, CachedView, CommitPatchTicket, ComputeTicket, PublishOutcome,
-        ViewerSession,
+        BeginCommitSelectionError, CachedView, CommitPatchTicket, ComputeTicket,
+        EmptySnapshotOutcome, PublishOutcome, ViewerSession,
     },
 };
 use crate::{
@@ -21,7 +22,7 @@ use crate::{
     history::{RecentRenderRecord, record_render::RecordRender},
     live_views::{LiveViewRecord, recipe_for_record},
     ports::{GitClient, UserSettingsReader},
-    recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind},
+    recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind, recipe_label},
 };
 
 #[derive(Debug)]
@@ -321,17 +322,23 @@ pub fn publish_recipe(
             view,
             history,
         }) => {
+            let skipped_label =
+                (!view.has_diff_content()).then(|| recipe_label::pending(&history.recipe));
             let value = CachedView::from_snapshot(state.prepare_snapshot(view)?);
-            state.update(
-                |session| match session.publish_labeled_if_current(ticket, value, label) {
-                    PublishOutcome::Published => {
-                        session.retain_snapshot_recipe(ticket, &history.recipe);
-                        session.set_live_head(ticket, head);
-                        RecipePublication::Published { history }
+            state.update(|session| {
+                let outcome = skipped_label.map_or(EmptySnapshotOutcome::Kept, |skipped_label| {
+                    session.skip_empty_snapshot_if_current(ticket, skipped_label)
+                });
+                match outcome {
+                    EmptySnapshotOutcome::Skipped => RecipePublication::Skipped {
+                        path: history.recipe.cwd(),
+                    },
+                    EmptySnapshotOutcome::Stale => RecipePublication::Stale,
+                    EmptySnapshotOutcome::Kept => {
+                        publish_view(session, ticket, value, label, *history, head)
                     }
-                    PublishOutcome::Stale => RecipePublication::Stale,
-                },
-            )
+                }
+            })
         }
         Ok(PrepareRecipeOk::Broken { state: broken }) => {
             let published = broken.clone();
@@ -341,12 +348,6 @@ pub fn publish_recipe(
                     PublishOutcome::Stale => RecipePublication::Stale,
                 },
             )
-        }
-        Ok(PrepareRecipeOk::Skipped { path, .. }) => {
-            state.update(|session| match session.close_if_current(ticket) {
-                PublishOutcome::Published => RecipePublication::Skipped { path },
-                PublishOutcome::Stale => RecipePublication::Stale,
-            })
         }
         Err(error) => state.update(|session| {
             let outcome = session.set_state_if_current(
@@ -367,6 +368,24 @@ pub fn publish_recipe(
                 PublishOutcome::Stale => RecipePublication::Stale,
             }
         }),
+    }
+}
+
+fn publish_view(
+    session: &mut ViewerSession,
+    ticket: ComputeTicket,
+    value: CachedView,
+    label: RecipeLabel,
+    history: RecordRender,
+    head: Option<super::refresh_live_view::LiveViewState>,
+) -> RecipePublication {
+    match session.publish_labeled_if_current(ticket, value, label) {
+        PublishOutcome::Published => {
+            session.retain_snapshot_recipe(ticket, &history.recipe);
+            session.set_live_head(ticket, head);
+            RecipePublication::Published { history }
+        }
+        PublishOutcome::Stale => RecipePublication::Stale,
     }
 }
 
@@ -457,6 +476,7 @@ mod tests {
     use crate::{
         recipes::{RecipeOp, RecipeSource},
         utils::{FixedUserSettingsStore, git_revision, repository_root},
+        viewer::get_viewer_shell,
     };
 
     fn recipe() -> Recipe {
@@ -505,6 +525,71 @@ mod tests {
             state.version().unwrap(),
             gtl_models::viewer::ViewerVersion::new(4)
         );
+    }
+
+    /// Completes `work` with an empty view, as a render of a range without changes would.
+    fn computed_empty(work: &ReservedRecipeWork) -> ComputedRecipeWork {
+        ComputedRecipeWork {
+            ticket: work.ticket(),
+            result: Ok(PrepareRecipeOk::Publish {
+                label: crate::utils::viewer::label("empty"),
+                view: Arc::new(crate::utils::viewer::empty_view()),
+                history: Box::new(RecordRender {
+                    recipe: work.recipe().clone(),
+                    repo_name: crate::utils::project_name("empty"),
+                    range_label: "main..HEAD".into(),
+                    label_parts: crate::recipes::RecipeLabelParts::None,
+                }),
+            }),
+            head: None,
+        }
+    }
+
+    #[test]
+    fn pinned_empty_snapshot_shows_its_empty_view() {
+        let state = ViewerState::new();
+        let reserved = reserve_pending(&state, "/repo/empty", ViewerTabKind::Snapshot);
+        let tab_id = reserved.ticket().tab_id;
+        state
+            .update(|session| session.set_pinned(tab_id, true))
+            .unwrap();
+
+        let publication = publish_recipe(&state, computed_empty(&reserved)).unwrap();
+
+        assert!(matches!(publication, RecipePublication::Published { .. }));
+        state
+            .inspect(|session| {
+                assert_eq!(
+                    session.tab(tab_id).unwrap().tab.state(),
+                    &gtl_models::viewer::ViewerTabState::Ready
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn skipped_snapshot_reaches_the_next_shell_once() {
+        let state = ViewerState::new();
+        let reserved = reserve_pending(&state, "/repo/empty", ViewerTabKind::Snapshot);
+        let label = crate::recipes::recipe_label::pending(reserved.recipe());
+        let work = computed_empty(&reserved);
+        let shell_feedback = || {
+            get_viewer_shell::execute(&state, &FixedUserSettingsStore::default())
+                .unwrap()
+                .shell
+                .feedback
+        };
+
+        let publication = publish_recipe(&state, work).unwrap();
+
+        assert!(matches!(publication, RecipePublication::Skipped { .. }));
+        assert_eq!(
+            shell_feedback(),
+            Some(gtl_wire::viewer::ViewerFeedback::SnapshotRecipesSkipped {
+                labels: vec![label],
+            })
+        );
+        assert_eq!(shell_feedback(), None);
     }
 
     #[test]

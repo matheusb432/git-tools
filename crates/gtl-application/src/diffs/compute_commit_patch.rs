@@ -1,7 +1,7 @@
 //! Computes the standalone patch introduced by one commit already present in a viewer range.
 
 use gtl_models::{
-    diffs::{AppliedExclusions, Commit, CommitIdAbbreviation},
+    diffs::{AppliedExclusions, Commit, CommitIdAbbreviation, DiffViewTitle},
     git::{GitDiffSpec, GitRange, GitRevision},
     paths::RepositoryRoot,
 };
@@ -75,13 +75,14 @@ pub fn execute(
         repo_root: repo_path.clone(),
         branch: git.current_branch(&repo_path)?,
         upstream: base_abbreviated.clone(),
-        title: format!("commit {abbreviated_id}"),
+        title: DiffViewTitle::Commit {
+            id: commit.id.clone(),
+        },
         cmd: Cmd {
             lead: "git diff ".into(),
             range: format!("{base_abbreviated}..{abbreviated_id}"),
             trail: String::new(),
         },
-        commits_label: "# selected commit".into(),
         foot: Foot {
             cmd: format!("git show --format=fuller {}", commit.id),
         },
@@ -131,14 +132,14 @@ mod tests {
         let view = compute_commit_patch::execute(
             ComputeCommitPatch {
                 repo_root: crate::utils::repository_root("/repo"),
-                commit,
+                commit: commit.clone(),
             },
             &FixedUserSettingsStore::default(),
             &source,
         )
         .unwrap();
 
-        assert_eq!(view.title, "commit 1111111111");
+        assert_eq!(view.title, DiffViewTitle::Commit { id: commit.id });
         assert_eq!(view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(view.commits, source.commits);
         assert_eq!(view.files.len(), 1);

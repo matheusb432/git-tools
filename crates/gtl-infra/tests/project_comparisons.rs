@@ -163,7 +163,6 @@ fn fallback_uses_the_common_ancestor_and_excludes_all_uncommitted_changes() {
         Path::new("feature.txt")
     );
     assert_eq!(response.view.cmd.range, "refs/heads/main...HEAD");
-    assert_eq!(response.view.commits_label, "# branch changes");
 }
 
 #[test]
@@ -276,7 +275,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
     .unwrap() else {
         anyhow::bail!("setting change must refresh the live comparison")
     };
-    refresh_live_view::publish(publication, &live).unwrap();
+    refresh_live_view::publish(*publication, &live).unwrap();
     assert_eq!(
         live.inspect(|session| session
             .cached_view_snapshot(tab)
@@ -301,7 +300,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
     .unwrap() else {
         anyhow::bail!("base tip change must refresh the live comparison")
     };
-    refresh_live_view::publish(publication, &live).unwrap();
+    refresh_live_view::publish(*publication, &live).unwrap();
     assert_eq!(
         live.inspect(|session| session
             .cached_view_snapshot(tab)

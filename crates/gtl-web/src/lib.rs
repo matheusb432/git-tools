@@ -17,7 +17,8 @@ mod views;
 #[cfg(feature = "artifact")]
 pub use artifact::{
     StaticArtifactFileRows, StaticArtifactView, StaticArtifactViewError,
-    render_static_artifact_body, static_artifact_enhancement_script,
+    render_static_artifact_body, static_artifact_document_title,
+    static_artifact_enhancement_script,
 };
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub use views::diffs::diff_workspace::commits_panel::{CommitsPanel, CommitsPanelProps};

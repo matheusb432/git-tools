@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
-use gtl_models::settings::ViewerLanguage;
+use gtl_models::{diffs::DiffViewTitle, paths::ProjectName, settings::ViewerLanguage};
 use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows, ViewerFileSummary};
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
     shared::{
+        diff_view_title::diff_view_title_text,
         i18n::{t, use_language_provider},
         ui::{Button, ButtonSize, ButtonVariant, ScrollArea, scroll_area::ScrollAreaVariant},
     },
@@ -110,6 +111,23 @@ pub fn render_static_artifact_body(
     dioxus_ssr::render_element(rsx! {
         StaticArtifactDocument { views, language }
     })
+}
+
+/// Titles the document of a single-view artifact in `language`.
+#[must_use]
+pub fn static_artifact_document_title(
+    repository: &ProjectName,
+    title: &DiffViewTitle,
+    commit_count: usize,
+    language: ViewerLanguage,
+) -> String {
+    t!(
+        language,
+        "artifact-document-title",
+        repository = repository.as_str(),
+        title = diff_view_title_text(title, language),
+        count = commit_count,
+    )
 }
 
 #[must_use]
@@ -382,7 +400,7 @@ mod tests {
                     density: ViewerDiffDensity::Compact,
                 },
             },
-            title: "diff".to_owned(),
+            title: gtl_models::diffs::DiffViewTitle::Diff,
             repository_name: project_name("repo")?,
             branch: GitHead::Branch(BranchName::main()),
             upstream: GitRevision::main(),
@@ -392,7 +410,6 @@ mod tests {
                 trail: String::new(),
             },
             files,
-            commits_label: "0 commits".to_owned(),
             commit_count: 0,
             commits: Vec::new(),
             commit_selection: ViewerCommitSelection::None,

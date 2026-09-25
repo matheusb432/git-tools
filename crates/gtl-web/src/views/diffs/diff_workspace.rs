@@ -710,7 +710,7 @@ mod artifact_tests {
             row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
             content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
             identity,
-            title: "diff".to_owned(),
+            title: gtl_models::diffs::DiffViewTitle::Diff,
             repository_name: project_name(&format!("repo-{tab_id}"))?,
             branch: GitHead::Branch(BranchName::main()),
             upstream: GitRevision::main(),
@@ -720,7 +720,6 @@ mod artifact_tests {
                 trail: String::new(),
             },
             files: vec![file],
-            commits_label: "1 commit".to_owned(),
             commit_count: 1,
             commits: vec![ViewerCommitSummary {
                 id: CommitId::try_from("0123456789abcdef0123456789abcdef01234567")?,

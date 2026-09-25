@@ -248,7 +248,6 @@ pub(super) fn project_diff_view_with_content_id(
                 summary
             })
             .collect(),
-        commits_label: range_view.commits_label.clone(),
         commit_count: range_view.commits.len(),
         commits: Vec::new(),
         commit_selection,
@@ -406,13 +405,12 @@ mod tests {
                     full_lines: None,
                 },
             ],
-            title: "Feature diff".into(),
+            title: crate::utils::diffs::view_title("Feature diff"),
             cmd: Cmd {
                 lead: "git diff ".into(),
                 range: "main...feature".into(),
                 trail: " --".into(),
             },
-            commits_label: "2 commits".into(),
             exclusions: Some(AppliedExclusions {
                 extensions: ExcludedExtensions::new(["lock"]),
                 hidden_paths: vec![utils::repository_relative_path("Cargo.lock")],
@@ -441,7 +439,7 @@ mod tests {
     fn row_content_is_equal_across_tab_metadata_and_snapshot_projection() {
         let original = view();
         let mut renamed = original.clone();
-        renamed.title = "Live unpushed commits".into();
+        renamed.title = crate::utils::diffs::view_title("Live unpushed commits");
         renamed.cmd.lead = "gtl live ".into();
         renamed.cmd.range = "0123456..abcdef0".into();
         renamed.foot.cmd = "different command".into();

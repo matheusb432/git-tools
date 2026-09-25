@@ -95,22 +95,38 @@ CREATE TABLE "projects" (
 ) STRICT;
 
 CREATE TABLE "recent_renders" (
-  id           INTEGER PRIMARY KEY,
-  source_id    INTEGER NOT NULL REFERENCES "render_sources" (id),
-  operation_id INTEGER NOT NULL REFERENCES render_operations (id),
-  target_id    INTEGER REFERENCES render_targets (id),
-  argument     TEXT,
-  pinned_base  TEXT,
-  pinned_head  TEXT,
-  recipe_name  TEXT,
-  title        TEXT NOT NULL,
-  repo_name    TEXT NOT NULL,
-  range_label  TEXT NOT NULL,
-  rendered_at  TEXT NOT NULL, project_id TEXT REFERENCES projects (id), render_status TEXT NOT NULL DEFAULT 'success'
+  id             INTEGER PRIMARY KEY,
+  source_id      INTEGER NOT NULL REFERENCES render_sources (id),
+  operation_id   INTEGER NOT NULL REFERENCES render_operations (id),
+  target_id      INTEGER REFERENCES render_targets (id),
+  argument       TEXT,
+  pinned_base    TEXT,
+  pinned_head    TEXT,
+  recipe_name    TEXT,
+  repo_name      TEXT NOT NULL,
+  range_label    TEXT,
+  commit_count   INTEGER,
+  merge_branch   TEXT,
+  merge_upstream TEXT,
+  rendered_at    TEXT NOT NULL,
+  project_id     TEXT REFERENCES projects (id),
+  render_status  TEXT NOT NULL DEFAULT 'success'
     CHECK (render_status IN ('pending', 'success', 'error')),
   CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
   -- Only the diff operation (seeded id 1) takes a target.
-  CHECK ((operation_id = 1) = (target_id IS NOT NULL))
+  CHECK ((operation_id = 1) = (target_id IS NOT NULL)),
+  -- Only a successful render knows its Git range and label parts.
+  CHECK ((render_status = 'success') = (range_label IS NOT NULL)),
+  CHECK (render_status = 'success' OR (commit_count IS NULL AND merge_branch IS NULL)),
+  -- Unpushed diffs (seeded target id 1) label their commit count.
+  CHECK (commit_count IS NULL OR (commit_count >= 0 AND target_id = 1)),
+  -- Merge diffs (seeded operation id 2 or target id 4) label both merged heads.
+  CHECK ((merge_branch IS NULL) = (merge_upstream IS NULL)),
+  CHECK (merge_branch IS NULL OR (
+    (operation_id = 2 OR target_id = 4)
+    AND length(trim(merge_branch)) > 0
+    AND length(trim(merge_upstream)) > 0
+  ))
 ) STRICT;
 
 CREATE UNIQUE INDEX recent_renders_fingerprint_idx

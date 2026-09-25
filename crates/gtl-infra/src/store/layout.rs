@@ -12,6 +12,7 @@ use gtl_application::ports::{ArtifactRangeKey, PlacedArtifact};
 use gtl_models::{
     artifacts::{ArtifactContentHash, RepositoryStoreId},
     paths::AbsoluteFilePath,
+    timestamps::MachineTimestamp,
 };
 
 use crate::store::{
@@ -20,7 +21,6 @@ use crate::store::{
 };
 
 struct StoredArtifact {
-    content_hash: ArtifactContentHash,
     html_path: PathBuf,
     metadata: ArtifactMetadata,
 }
@@ -31,6 +31,7 @@ pub fn place(
     store_root: &Path,
     repo_id: &RepositoryStoreId,
     html: &str,
+    generated_at: &MachineTimestamp,
     metadata: &ArtifactMetadata,
 ) -> anyhow::Result<PlacedArtifact> {
     ensure_gitignore(store_root)?;
@@ -49,7 +50,7 @@ pub fn place(
                 .context("stored artifact path is not absolute")?,
         });
     }
-    let stem = format!("{}-{hash}", filename_datetime(&metadata.generated_at));
+    let stem = format!("{}-{hash}", filename_datetime(generated_at));
     let html_path = store_root.join(format!("{stem}.html"));
     let json_path = store_root.join(format!("{stem}.json"));
     atomic_write(&html_path, html.as_bytes())?;
@@ -62,7 +63,7 @@ pub fn place(
     })
 }
 
-fn filename_datetime(generated_at: &gtl_models::timestamps::MachineTimestamp) -> String {
+fn filename_datetime(generated_at: &MachineTimestamp) -> String {
     let datetime: String = generated_at
         .as_ref()
         .chars()
@@ -103,10 +104,7 @@ fn existing_pair(
             if !json_path.exists() {
                 return None;
             }
-            let metadata = fs::read_to_string(&json_path)
-                .ok()
-                .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok())
-                .and_then(|sidecar| sidecar.try_into_metadata().ok())?;
+            let metadata = read_sidecar(&json_path)?;
             (metadata.repo_id == *repo_id).then_some((html_path, json_path, metadata))
         })
         .collect();
@@ -171,16 +169,6 @@ pub fn lookup_by_range(
     None
 }
 
-/// All sidecars across all repos, for the viewer's history.
-/// Each entry pairs the sidecar with its content hash.
-#[must_use]
-pub fn list_history_with_hash(store_root: &Path) -> Vec<(ArtifactContentHash, ArtifactMetadata)> {
-    read_sidecars_paired(store_root)
-        .into_iter()
-        .map(|artifact| (artifact.content_hash, artifact.metadata))
-        .collect()
-}
-
 fn read_sidecars_paired(store_root: &Path) -> Vec<StoredArtifact> {
     let Ok(entries) = fs::read_dir(store_root) else {
         return Vec::new();
@@ -196,17 +184,26 @@ fn stored_artifact_from_sidecar(path: &Path) -> Option<StoredArtifact> {
         .is_some_and(|extension| extension == "json")
         .then_some(())?;
     let stem = path.file_stem()?.to_str()?;
-    let content_hash = content_hash_from_stem(stem)?;
+    content_hash_from_stem(stem)?;
     let html_path = path.with_extension("html");
     html_path.exists().then_some(())?;
-    let text = fs::read_to_string(path).ok()?;
-    let sidecar = serde_json::from_str::<Sidecar>(&text).ok()?;
-    let metadata = sidecar.try_into_metadata().ok()?;
+    let metadata = read_sidecar(path)?;
     Some(StoredArtifact {
-        content_hash,
         html_path,
         metadata,
     })
+}
+
+/// Reads one valid sidecar and rewrites it without retired keys, so each store sheds them the
+/// first time it is used. A failed rewrite keeps serving the sidecar and retries on a later read.
+fn read_sidecar(json_path: &Path) -> Option<ArtifactMetadata> {
+    let json = fs::read_to_string(json_path).ok()?;
+    let (sidecar, has_retired_keys) = Sidecar::from_stored_json(&json).ok()?;
+    let metadata = sidecar.clone().try_into_metadata().ok()?;
+    if has_retired_keys && let Ok(upgraded) = serde_json::to_string_pretty(&sidecar) {
+        atomic_write(json_path, upgraded.as_bytes()).ok();
+    }
+    Some(metadata)
 }
 
 fn content_hash_from_stem(stem: &str) -> Option<ArtifactContentHash> {
@@ -235,10 +232,27 @@ mod tests {
         html: &str,
         sidecar: &Sidecar,
     ) -> anyhow::Result<PlacedArtifact> {
+        place_at(
+            store_root,
+            repository_label,
+            html,
+            "2026-07-03T00:01:00Z",
+            sidecar,
+        )
+    }
+
+    fn place_at(
+        store_root: &Path,
+        repository_label: &str,
+        html: &str,
+        generated_at: &str,
+        sidecar: &Sidecar,
+    ) -> anyhow::Result<PlacedArtifact> {
         super::place(
             store_root,
             &repository_id(repository_label),
             html,
+            &MachineTimestamp::try_from(generated_at)?,
             &sidecar.clone().try_into_metadata()?,
         )
     }
@@ -254,16 +268,9 @@ mod tests {
     fn sidecar(kind: DiffKind, base: &str, head: &str) -> Sidecar {
         Sidecar {
             repo_id: repository_id("repo0000").to_string(),
-            repo_name: "r".into(),
-            repo_root: "/r".into(),
             kind,
             base_sha: commit_id_text(base),
             head_sha: commit_id_text(head),
-            range_label: "x".into(),
-            head_committed_at: "2026-07-03T00:00:00Z".into(),
-            generated_at: "2026-07-03T00:01:00Z".into(),
-            title: "diff".into(),
-            byte_size: 0,
             layout: RenderOptions::DEFAULT.layout().to_string(),
             density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
@@ -332,10 +339,9 @@ mod tests {
     fn place_writes_a_flat_datetime_named_pair_then_reuses_it() {
         let tmp = tempfile::tempdir().unwrap();
         let html = "<html>x</html>";
-        let mut sc = sidecar(DiffKind::TwoDot, "a", "b");
-        sc.generated_at = "2026-07-28T12:34:56Z".into();
+        let sc = sidecar(DiffKind::TwoDot, "a", "b");
 
-        let first = place(tmp.path(), "repo0000", html, &sc).unwrap();
+        let first = place_at(tmp.path(), "repo0000", html, "2026-07-28T12:34:56Z", &sc).unwrap();
 
         assert!(!first.is_reused());
         assert_eq!(
@@ -346,8 +352,7 @@ mod tests {
         assert!(first.path().with_extension("json").exists());
         assert!(!tmp.path().join("diffs").exists());
 
-        sc.generated_at = "2026-07-28T13:00:00Z".into();
-        let second = place(tmp.path(), "repo0000", html, &sc).unwrap();
+        let second = place_at(tmp.path(), "repo0000", html, "2026-07-28T13:00:00Z", &sc).unwrap();
 
         assert!(second.is_reused());
         assert_eq!(first.path(), second.path());
@@ -427,30 +432,32 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_with_malformed_timestamp_is_neither_listed_nor_reused() {
+    fn legacy_sidecar_sheds_retired_keys_and_stays_reusable() {
         let tmp = tempfile::tempdir().unwrap();
         let sidecar = sidecar(DiffKind::TwoDot, "a", "b");
-        let first = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
-        let mut malformed = sidecar.clone();
-        malformed.generated_at = "2026-07-03T00:01:00".into();
-        fs::write(
-            first.path().with_extension("json"),
-            serde_json::to_string(&malformed).unwrap(),
-        )
-        .unwrap();
+        let first = place(tmp.path(), "repo0000", "<html>legacy</html>", &sidecar).unwrap();
+        let json_path = first.path().with_extension("json");
+        let mut legacy = serde_json::to_value(&sidecar).unwrap();
+        legacy.as_object_mut().unwrap().extend([
+            ("repo_name".to_owned(), serde_json::json!("r")),
+            ("title".to_owned(), serde_json::json!("diff")),
+            (
+                "generated_at".to_owned(),
+                serde_json::json!("2026-07-03T00:01:00Z"),
+            ),
+        ]);
+        fs::write(&json_path, legacy.to_string()).unwrap();
 
-        assert!(list_history_with_hash(tmp.path()).is_empty());
-        assert!(
-            lookup_by_range(
-                tmp.path(),
-                "repo0000",
-                &range_key(DiffKind::TwoDot, "a", "b"),
-            )
-            .is_none()
+        let hit = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            &range_key(DiffKind::TwoDot, "a", "b"),
         );
 
-        let repaired = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
-        assert!(!repaired.is_reused());
+        assert_eq!(hit.as_ref(), Some(first.path()));
+        let stored: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&json_path).unwrap()).unwrap();
+        assert_eq!(stored, serde_json::to_value(&sidecar).unwrap());
     }
 
     #[test]
@@ -666,40 +673,5 @@ mod tests {
             &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
         assert!(hit.is_some(), "current renderer artifact must hit");
-    }
-
-    #[test]
-    fn list_history_with_hash_collects_across_repos() {
-        let tmp = tempfile::tempdir().unwrap();
-        place(
-            tmp.path(),
-            "repoAAAA",
-            "<a/>",
-            &sidecar(DiffKind::TwoDot, "a", "b"),
-        )
-        .unwrap();
-        place(
-            tmp.path(),
-            "repoBBBB",
-            "<b/>",
-            &sidecar(DiffKind::ThreeDot, "c", "d"),
-        )
-        .unwrap();
-        assert_eq!(list_history_with_hash(tmp.path()).len(), 2);
-    }
-
-    #[test]
-    fn list_history_with_hash_pairs_content_hash_to_sidecar() {
-        let tmp = tempfile::tempdir().unwrap();
-        place(
-            tmp.path(),
-            "repoAAAA",
-            "<a/>",
-            &sidecar(DiffKind::TwoDot, "a", "b"),
-        )
-        .unwrap();
-        let got = list_history_with_hash(tmp.path());
-        assert_eq!(got.len(), 1);
-        assert_eq!(got[0].0, content_hash("<a/>"));
     }
 }

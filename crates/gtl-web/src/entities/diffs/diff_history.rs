@@ -43,13 +43,13 @@ mod tests {
     use super::history_navigation;
     use crate::test_support::{
         TestResult, history_page, history_page_number, machine_timestamp, project_name,
-        render_history_id,
+        recipe_label, render_history_id,
     };
 
     fn entry(id: i64) -> TestResult<ViewerHistoryEntry> {
         Ok(ViewerHistoryEntry {
             id: render_history_id(id)?,
-            title: format!("Render {id}"),
+            label: recipe_label(&format!("Render {id}"))?,
             repository_name: project_name("git-tools")?,
             kind: ViewerRecipeKind::Diff,
             range_label: "main..HEAD".into(),

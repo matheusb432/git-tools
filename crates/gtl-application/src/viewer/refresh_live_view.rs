@@ -91,14 +91,14 @@ pub enum LiveViewCheck {
     Inactive,
     Unchanged,
     ChangedDuringComputation,
-    Prepared(LiveViewPublication),
+    Prepared(Box<LiveViewPublication>),
 }
 
 pub struct LiveViewPublication {
     ticket: ComputeTicket,
     head: LiveViewState,
     value: CachedView,
-    label: String,
+    label: gtl_models::recipes::RecipeLabel,
 }
 
 pub fn prepare(
@@ -131,12 +131,12 @@ pub fn prepare(
     }
     match result {
         PrepareRecipeOk::Publish { label, view, .. } => {
-            Ok(LiveViewCheck::Prepared(LiveViewPublication {
+            Ok(LiveViewCheck::Prepared(Box::new(LiveViewPublication {
                 ticket: request.ticket,
                 head,
                 value: CachedView::from_snapshot(state.prepare_snapshot(view)?),
                 label,
-            }))
+            })))
         }
         PrepareRecipeOk::Broken { state } => Err(match state {
             ViewerTabState::Error { failure } => RefreshLiveViewError::Refused(failure),
@@ -148,9 +148,6 @@ pub fn prepare(
                 anyhow::anyhow!("a broken live comparison reported a ready tab").into()
             }
         }),
-        PrepareRecipeOk::Skipped { .. } => {
-            Err(anyhow::anyhow!("live comparison produced no view").into())
-        }
     }
 }
 

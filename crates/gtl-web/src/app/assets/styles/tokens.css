@@ -22,6 +22,7 @@
     --r:6px; --r-sm:4px;
     --mono:'Maple Mono','Maple Mono NF',ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,monospace;
     --elevation-floating:0 6px 18px rgba(0,0,0,.22); --elevation-dialog:0 20px 48px rgba(0,0,0,.40);
+    --elevation-notification:0 18px 48px -6px rgba(0,0,0,.70),0 6px 16px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.06);
     --scrollbar-thumb:#343434; --scrollbar-thumb-hover:#484848; --scrollbar-thumb-active:#585858;
     color-scheme:dark;
   }

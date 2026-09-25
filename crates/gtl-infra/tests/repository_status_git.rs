@@ -1,6 +1,9 @@
 #![cfg(test)]
 
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use gtl_application::{
     ports::{GitClient as _, GitEffect, GitStatusSnapshot, GitWorkingTree},
@@ -92,9 +95,65 @@ fn status_snapshot_reads_real_branch_upstream_and_changes() {
 #[test]
 fn recursive_status_reports_a_linked_worktree_root_and_its_submodules() {
     let temporary = tempfile::tempdir().unwrap();
-    let submodule_source = temporary.path().join("submodule-source");
+    let (_, worktree) = repository_with_feature_worktree(temporary.path());
+    git(
+        &worktree,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+        ],
+    );
+
+    assert_eq!(
+        recursive_branch_labels(&worktree),
+        [
+            ("feature".to_owned(), Some("feature".to_owned())),
+            ("lib/submodule".to_owned(), Some("detached".to_owned()))
+        ]
+    );
+}
+
+#[test]
+fn recursive_status_reports_submodule_checkouts_that_are_linked_worktrees() {
+    let temporary = tempfile::tempdir().unwrap();
+    let (repository, worktree) = repository_with_feature_worktree(temporary.path());
+    git(
+        &repository,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+        ],
+    );
+    git(
+        &repository.join("lib/submodule"),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            worktree.join("lib/submodule").to_str().unwrap(),
+        ],
+    );
+
+    assert_eq!(
+        recursive_branch_labels(&worktree),
+        [
+            ("feature".to_owned(), Some("feature".to_owned())),
+            ("lib/submodule".to_owned(), Some("detached".to_owned()))
+        ]
+    );
+}
+
+fn repository_with_feature_worktree(directory: &Path) -> (PathBuf, PathBuf) {
+    let submodule_source = directory.join("submodule-source");
     init_repo(&submodule_source);
-    let repository = temporary.path().join("repository");
+    let repository = directory.join("repository");
     init_repo(&repository);
     add_submodule(&repository, &submodule_source, "lib/submodule");
     let worktree = repository.join(".worktrees/feature");
@@ -109,36 +168,26 @@ fn recursive_status_reports_a_linked_worktree_root_and_its_submodules() {
             worktree.to_str().unwrap(),
         ],
     );
-    git(
-        &worktree,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-        ],
-    );
+    (repository, worktree)
+}
 
-    let results = get_recursive_repository_statuses::execute(
+fn recursive_branch_labels(root: &Path) -> Vec<(String, Option<String>)> {
+    get_recursive_repository_statuses::execute(
         GetRecursiveRepositoryStatuses {
-            root: worktree.canonicalize().unwrap(),
+            root: root.canonicalize().unwrap(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         },
         &HybridGitClient,
     )
-    .unwrap();
-
-    assert_eq!(
-        results
-            .iter()
-            .map(|result| (result.name().as_ref(), result.branch_label()))
-            .collect::<Vec<_>>(),
-        [
-            ("feature", Some("feature")),
-            ("lib/submodule", Some("detached"))
-        ]
-    );
+    .unwrap()
+    .iter()
+    .map(|result| {
+        (
+            result.name().to_string(),
+            result.branch_label().map(str::to_owned),
+        )
+    })
+    .collect()
 }
 
 fn git(repository: &Path, arguments: &[&str]) {

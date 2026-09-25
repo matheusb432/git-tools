@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::AppliedExclusions,
+    diffs::{AppliedExclusions, DiffViewTitle},
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
 };
@@ -9,7 +9,7 @@ use crate::{
         PinnedRange, View,
         assemble::{DiffData, assemble},
         range::DiffRanges,
-        range_view::{RangePresentation, RangeView},
+        range_view::RangeView,
     },
     ports::GitClient,
 };
@@ -46,7 +46,7 @@ pub(super) fn build(
             ))
         },
     )?;
-    let range_view = RangeView::new(&view_ranges.diff, RangePresentation::Merge);
+    let range_view = RangeView::new(&view_ranges.diff, DiffViewTitle::MergeDiff);
     let DiffData {
         commits,
         files,
@@ -65,7 +65,6 @@ pub(super) fn build(
         upstream: base.clone(),
         title: range_view.title,
         cmd: range_view.cmd,
-        commits_label: range_view.commits_label,
         foot: range_view.foot,
         commits,
         files,

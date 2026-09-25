@@ -73,7 +73,7 @@ async fn viewer_discovers_and_imports_repositories_with_independent_row_results(
         )?;
         connection.execute_batch(
             "INSERT INTO recent_renders
-             (id, source_id, operation_id, target_id, title, repo_name, range_label, rendered_at)
+             (id, source_id, operation_id, target_id, recipe_name, repo_name, range_label, rendered_at)
              VALUES (1, 1, 1, 1, 'Snapshot', 'new', 'main..HEAD', '2026-01-01T00:00:00Z')",
         )?;
     }
@@ -456,14 +456,12 @@ async fn manages_its_own_projects_through_private_grpc() -> TestResult {
         project_id: "GTL".into(),
         mode: mode.into(),
     };
-    assert_eq!(
-        client
-            .pause_project(pause(v1::ProjectOperationMode::Preview))
-            .await?
-            .into_inner()
-            .outcome(),
-        v1::ProjectMutationOutcome::Changed
-    );
+    let preview = client
+        .pause_project(pause(v1::ProjectOperationMode::Preview))
+        .await?
+        .into_inner();
+    assert_eq!(preview.outcome(), v1::ProjectMutationOutcome::Changed);
+    assert_eq!(preview.target_status(), v1::ProjectStatus::Paused);
     assert_eq!(
         client
             .list_active_projects(v1::ListActiveProjectsRequest {})
@@ -473,22 +471,18 @@ async fn manages_its_own_projects_through_private_grpc() -> TestResult {
             .len(),
         2
     );
-    assert_eq!(
-        client
-            .pause_project(pause(v1::ProjectOperationMode::Apply))
-            .await?
-            .into_inner()
-            .outcome(),
-        v1::ProjectMutationOutcome::Changed
-    );
-    assert_eq!(
-        client
-            .pause_project(pause(v1::ProjectOperationMode::Apply))
-            .await?
-            .into_inner()
-            .outcome(),
-        v1::ProjectMutationOutcome::Unchanged
-    );
+    let paused = client
+        .pause_project(pause(v1::ProjectOperationMode::Apply))
+        .await?
+        .into_inner();
+    assert_eq!(paused.outcome(), v1::ProjectMutationOutcome::Changed);
+    assert_eq!(paused.target_status(), v1::ProjectStatus::Paused);
+    let unchanged = client
+        .pause_project(pause(v1::ProjectOperationMode::Apply))
+        .await?
+        .into_inner();
+    assert_eq!(unchanged.outcome(), v1::ProjectMutationOutcome::Unchanged);
+    assert_eq!(unchanged.target_status(), v1::ProjectStatus::Paused);
     assert_eq!(
         client
             .list_active_projects(v1::ListActiveProjectsRequest {})
@@ -560,17 +554,15 @@ async fn manages_its_own_projects_through_private_grpc() -> TestResult {
             .status(),
         v1::ProjectStatus::Paused
     );
-    assert_eq!(
-        client
-            .resume_project(v1::ResumeProjectRequest {
-                project_id: "GTL".into(),
-                mode: v1::ProjectOperationMode::Apply.into()
-            })
-            .await?
-            .into_inner()
-            .outcome(),
-        v1::ProjectMutationOutcome::Changed
-    );
+    let resumed = client
+        .resume_project(v1::ResumeProjectRequest {
+            project_id: "GTL".into(),
+            mode: v1::ProjectOperationMode::Apply.into(),
+        })
+        .await?
+        .into_inner();
+    assert_eq!(resumed.outcome(), v1::ProjectMutationOutcome::Changed);
+    assert_eq!(resumed.target_status(), v1::ProjectStatus::Active);
     // The first update must roll back when a later ID is missing.
     let error = client
         .unmanage_projects(unmanage(

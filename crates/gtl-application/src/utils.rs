@@ -59,7 +59,7 @@ pub(crate) fn absolute_file_path(path: &str) -> AbsoluteFilePath {
 use crate::ports::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, GitCommitReceipt,
     GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree,
-    HistoryRecord, HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError, ProjectClient,
+    HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError, ProjectClient,
     ProjectClientError, UserSettingsLoadError, UserSettingsReader,
 };
 
@@ -268,7 +268,6 @@ pub struct FakeGitClient {
     pub full_diff_output: String,
     pub known_revs: Vec<String>,
     pub commit_ids: HashMap<String, CommitId>,
-    pub committed_at: Option<MachineTimestamp>,
     pub repository_state: Option<GitRepositoryState>,
     pub repository_probe_error: Option<String>,
     pub per_repo: HashMap<String, RepoOverride>,
@@ -564,9 +563,6 @@ impl GitClient for FakeGitClient {
     ) -> anyhow::Result<CommitId> {
         try_commit_id_fixture(&format!("merge-base-{left}-{right}")).map_err(Into::into)
     }
-    fn committed_at(&self, _repo: &RepositoryRoot, _rev: &GitRevision) -> Option<MachineTimestamp> {
-        self.committed_at.clone()
-    }
 }
 
 pub type RangeHits = Arc<Mutex<HashMap<ArtifactRangeKey, AbsoluteFilePath>>>;
@@ -581,7 +577,6 @@ pub struct StoredArtifact {
 pub struct InMemoryArtifactStore {
     pub artifacts: Arc<Mutex<HashMap<PathBuf, StoredArtifact>>>,
     pub range_hits: RangeHits,
-    pub history: Vec<HistoryRecord>,
 }
 
 impl InMemoryArtifactStore {
@@ -623,9 +618,6 @@ impl ArtifactStore for InMemoryArtifactStore {
     ) -> anyhow::Result<Option<AbsoluteFilePath>> {
         Ok(lock_or_recover(&self.range_hits).get(key).cloned())
     }
-    fn list_history(&self, _store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {
-        Ok(self.history.clone())
-    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -641,7 +633,7 @@ impl HtmlRenderer for StubRenderer {
     ) -> anyhow::Result<String> {
         let theme = theme.map_or_else(String::new, |theme| theme.to_string());
         Ok(format!(
-            "<html lang=\"{}\" data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{}</title></html>",
+            "<html lang=\"{}\" data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{:?}</title></html>",
             language,
             theme,
             options.layout(),
@@ -1234,13 +1226,6 @@ impl GitClient for ScriptedGitClient {
         .map(|raw| try_commit_id_fixture(&raw))
         .transpose()?
         .ok_or_else(|| anyhow::anyhow!("no merge base"))
-    }
-    fn committed_at(
-        &self,
-        _repo: &RepositoryRoot,
-        _revision: &GitRevision,
-    ) -> Option<MachineTimestamp> {
-        None
     }
 }
 

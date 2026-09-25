@@ -139,10 +139,20 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
     );
     assert_eq!(
         serde_json::to_value(ViewerFeedback::SnapshotRecipesSkipped {
-            labels: vec!["api".into()],
+            labels: vec![gtl_models::recipes::RecipeLabel::Changes {
+                repository: project_name("api")?,
+                changes: gtl_models::recipes::RecipeLabelChanges::Unpushed,
+            }],
         })
         .unwrap(),
-        json!({"kind": "snapshot_recipes_skipped", "labels": ["api"]})
+        json!({
+            "kind": "snapshot_recipes_skipped",
+            "labels": [{
+                "label": "changes",
+                "repository": "api",
+                "changes": {"changes": "unpushed"},
+            }],
+        })
     );
     Ok(())
 }
@@ -205,7 +215,9 @@ fn semantic_shell() -> TestResult<ViewerShell> {
             custom_name: None,
             pinned: false,
             id: tab_id(7)?,
-            label: "git-tools".into(),
+            label: gtl_models::recipes::RecipeLabel::Repository {
+                repository: project_name("git-tools")?,
+            },
             kind: ViewerTabKind::Live,
             state: ViewerTabState::Ready,
         }],
@@ -215,7 +227,9 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                 row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
                 identity,
                 content_id: ViewerRowContentId::from_digest([42; 32]),
-                title: "feature vs main".into(),
+                title: gtl_models::diffs::DiffViewTitle::Named {
+                    name: project_name("feature vs main")?,
+                },
                 repository_name: project_name("git-tools")?,
                 branch: head("feature")?,
                 upstream: revision("origin/main")?,
@@ -237,7 +251,6 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                     initially_expanded: true,
                     row_count: 1,
                 }],
-                commits_label: "1 commit".into(),
                 commit_count: 1,
                 commits: vec![ViewerCommitSummary {
                     id: commit_id()?,
@@ -310,7 +323,9 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         projects: Vec::new(),
         entries: vec![ViewerHistoryEntry {
             id: render_id(31)?,
-            title: "Release diff".into(),
+            label: gtl_models::recipes::RecipeLabel::Named {
+                name: project_name("Release diff")?,
+            },
             repository_name: project_name("git-tools")?,
             kind: ViewerRecipeKind::MergeDiff,
             range_label: "main...release".into(),
@@ -377,7 +392,10 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
 fn history_copy_payload_carries_server_formatted_json() -> TestResult {
     let json = r#"{
   "id": 31,
-  "title": "Release diff",
+  "label": {
+    "label": "named",
+    "name": "Release diff"
+  },
   "repo_name": "git-tools",
   "kind": "merge-diff"
 }"#;

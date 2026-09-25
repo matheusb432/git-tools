@@ -21,6 +21,7 @@ use crate::{
         browser,
         failure_notice::{client_error_message, is_invalid_settings},
         i18n::{t, use_language},
+        recipe_label::recipe_label_text,
         retry_delay::RetryDelay,
         ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
         viewer_client::{ViewerClientError, discard_viewer_connection},
@@ -746,15 +747,15 @@ fn viewer_feedback_toast(
     language: gtl_models::settings::ViewerLanguage,
 ) -> Option<String> {
     match feedback? {
-        ViewerFeedback::TabClosed => None,
-        ViewerFeedback::SnapshotRecipesSkipped { labels } if labels.is_empty() => {
-            Some(t!(language, "feedback-snapshots-skipped"))
-        }
         ViewerFeedback::SnapshotRecipesSkipped { labels } => Some(t!(
             language,
             "feedback-snapshots-skipped-named",
             count = labels.len(),
-            labels = labels.join(", "),
+            labels = labels
+                .iter()
+                .map(|label| recipe_label_text(label, language))
+                .collect::<Vec<_>>()
+                .join(", "),
         )),
     }
 }
@@ -776,7 +777,7 @@ mod tests {
         ViewerRenderCommandScheduler, ViewerRenderCommandSubmission, ViewerRenderCommandTicket,
         ViewerShellOrder, viewer_feedback_toast,
     };
-    use crate::test_support::{TestResult, viewer_tab_id};
+    use crate::test_support::{TestResult, project_name, recipe_label, viewer_tab_id};
 
     #[component]
     fn DiffInteractionFixture(shell: Signal<super::ViewerShellLoad>) -> Element {
@@ -816,7 +817,7 @@ mod tests {
                         custom_name: None,
                         pinned: false,
                         id: viewer_tab_id(id)?,
-                        label: format!("Diff {id}"),
+                        label: recipe_label(&format!("Diff {id}"))?,
                         kind: gtl_wire::viewer::ViewerTabKind::Snapshot,
                         state: gtl_wire::viewer::ViewerTabState::Pending,
                     })
@@ -1058,17 +1059,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_close_feedback_never_becomes_a_toast() {
-        assert_eq!(
-            viewer_feedback_toast(
-                Some(&ViewerFeedback::TabClosed),
-                gtl_models::settings::ViewerLanguage::EnUs
-            ),
-            None
-        );
-    }
-
-    #[test]
     fn stale_row_stream_cleanup_preserves_the_current_loading_tab() -> TestResult {
         let mut loading = ViewerDiffRowsLoading::default();
         let first = viewer_tab_id(4)?;
@@ -1083,14 +1073,21 @@ mod tests {
     }
 
     #[test]
-    fn skipped_snapshot_feedback_keeps_every_label() {
+    fn skipped_snapshot_feedback_localizes_every_label() -> TestResult {
         let feedback = ViewerFeedback::SnapshotRecipesSkipped {
-            labels: vec!["api".to_owned(), "web".to_owned()],
+            labels: vec![
+                gtl_models::recipes::RecipeLabel::Changes {
+                    repository: project_name("api")?,
+                    changes: gtl_models::recipes::RecipeLabelChanges::Unpushed,
+                },
+                recipe_label("web")?,
+            ],
         };
 
         assert_eq!(
             viewer_feedback_toast(Some(&feedback), gtl_models::settings::ViewerLanguage::EnUs),
-            Some("Skipped 2 diffs with no commits or changed files: api, web.".to_owned())
+            Some("Skipped 2 diffs with no commits or changed files: api: diff, web.".to_owned())
         );
+        Ok(())
     }
 }

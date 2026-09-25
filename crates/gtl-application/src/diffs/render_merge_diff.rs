@@ -13,7 +13,6 @@ use gtl_models::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
 use crate::{
     diffs::{
         compute_merge_diff::{self, ComputeMergeDiff},
@@ -97,16 +96,12 @@ pub fn execute(
 
     let meta = ArtifactMeta {
         repo_root: computed.top.clone(),
-        repo_name: view.repo_name.clone(),
         identity: ArtifactDiffIdentity::from_parts(
             DiffKind::from_diff_range(computed.diff_range.as_arg()),
             commit_range,
         )
         .map_err(anyhow::Error::from)?,
-        range_label: computed.diff_range.to_string(),
-        head_committed_at: git.committed_at(&computed.top, &GitRevision::head()),
         generated_at: clock.now().map_err(anyhow::Error::from)?,
-        title: TITLE_MERGE_DIFF.to_string(),
         render_options: computed.render_options,
         theme: computed.theme,
         language: computed.language,
@@ -211,10 +206,7 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.title, "merge-diff");
-        assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
         assert_eq!(artifact.meta.repo_root, computed.top);
-        assert_eq!(artifact.meta.range_label, computed.diff_range.to_string());
         assert_eq!(artifact.meta.render_options, computed.render_options);
         assert_eq!(artifact.meta.theme, computed.theme);
         assert_eq!(

@@ -1,4 +1,8 @@
-use gtl_models::{diffs::Commit, git::GitHead, timestamps::MachineTimestamp};
+use gtl_models::{
+    diffs::{Commit, DiffViewTitle},
+    git::GitHead,
+    timestamps::MachineTimestamp,
+};
 
 use crate::{
     diffs::{Cmd, Foot, View},
@@ -14,6 +18,13 @@ index 111..222 100644\n\
 -old line\n\
 +new line\n\
 +extra line\n";
+
+/// Tags a test view with a distinguishable title.
+pub(crate) fn view_title(name: &str) -> DiffViewTitle {
+    DiffViewTitle::Named {
+        name: crate::utils::project_name(name),
+    }
+}
 
 pub(crate) fn commit(id_prefix: &str) -> Commit {
     commit_with(id_prefix, "feat: work", &[])
@@ -41,13 +52,12 @@ pub(crate) fn view() -> View {
         upstream: crate::utils::git_revision("origin/main"),
         commits: Vec::new(),
         files: Vec::new(),
-        title: "Diff".into(),
+        title: DiffViewTitle::Diff,
         cmd: Cmd {
             lead: String::new(),
             range: String::new(),
             trail: String::new(),
         },
-        commits_label: "Commits".into(),
         foot: Foot {
             cmd: "git diff".into(),
         },

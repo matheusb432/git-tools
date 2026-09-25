@@ -169,7 +169,7 @@ mod tests {
                 session.publish_labeled_if_current(
                     work.ticket(),
                     CachedView::new(std::sync::Arc::new(utils::viewer::empty_view())),
-                    "snapshot".into(),
+                    crate::utils::viewer::label("snapshot"),
                 )
             })
             .unwrap();

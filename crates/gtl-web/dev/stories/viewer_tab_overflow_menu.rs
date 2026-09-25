@@ -2,12 +2,17 @@ use std::error::Error;
 
 use dioxus::prelude::*;
 use dx_story::{stories, story};
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{
+    paths::ProjectName, recipes::RecipeLabel, settings::ViewerLanguage, viewer::ViewerTabId,
+};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
 
-use crate::shared::ui::{
-    Button, ButtonSize, ButtonVariant, NavigationBar, ScrollArea, ScrollAreaVariant, ViewerTabItem,
-    ViewerTabOverflowMenu,
+use crate::shared::{
+    recipe_label::recipe_label_text,
+    ui::{
+        Button, ButtonSize, ButtonVariant, InlineTextSubmission, NavigationBar, ScrollArea,
+        ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
+    },
 };
 
 type PreviewResult<T> = Result<T, Box<dyn Error>>;
@@ -111,7 +116,7 @@ fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Elem
     let active_tab = state.active_tab().cloned();
     let active_label = active_tab
         .as_ref()
-        .map_or_else(|| "No open diff".to_owned(), |tab| tab.label.clone());
+        .map_or_else(|| "No open diff".to_owned(), label_text);
 
     rsx! {
         section { class: width.frame_classes(), aria_label: width.frame_label(),
@@ -167,7 +172,7 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
     let state = preview_state();
     let active_label = state
         .active_tab()
-        .map_or_else(|| "No open diff".to_owned(), |tab| tab.label.clone());
+        .map_or_else(|| "No open diff".to_owned(), label_text);
 
     rsx! {
         section {
@@ -201,6 +206,14 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
                                         },
                                         onmove: move |request| {
                                             preview_state.set(preview_state().move_tab(request));
+                                        },
+                                        onpin: move |pinned| {
+                                            preview_state.set(preview_state().pin(tab_id, pinned));
+                                        },
+                                        onrename: move |submission: InlineTextSubmission| {
+                                            preview_state
+                                                .set(preview_state().rename(tab_id, &submission.value));
+                                            (submission.complete)(Ok(()));
                                         },
                                     }
                                 }
@@ -249,7 +262,7 @@ impl PreviewTabState {
             return self;
         };
         self.active_tab_id = Some(tab_id);
-        self.announcement = format!("Selected {}", tab.label);
+        self.announcement = format!("Selected {}", label_text(tab));
         self
     }
 
@@ -265,7 +278,35 @@ impl PreviewTabState {
                 .or_else(|| self.tabs.last())
                 .map(|tab| tab.id);
         }
-        self.announcement = format!("Closed {}", closed_tab.label);
+        self.announcement = format!("Closed {}", label_text(&closed_tab));
+        self
+    }
+
+    /// Pins or unpins a tab; pinned tabs lead the rail, as in the viewer.
+    fn pin(mut self, tab_id: ViewerTabId, pinned: bool) -> Self {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return self;
+        };
+        tab.pinned = pinned;
+        self.announcement = format!(
+            "{} {}",
+            if pinned { "Pinned" } else { "Unpinned" },
+            label_text(tab)
+        );
+        self.tabs.sort_by_key(|tab| !tab.pinned);
+        self
+    }
+
+    fn rename(mut self, tab_id: ViewerTabId, name: &str) -> Self {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+            return self;
+        };
+        let Ok(name) = ProjectName::try_new(name.trim()) else {
+            return self;
+        };
+        tab.custom_name = Some(name.to_string());
+        self.announcement = format!("Renamed to {name}");
+        tab.label = RecipeLabel::Named { name };
         self
     }
 
@@ -297,7 +338,7 @@ impl PreviewTabState {
         }
 
         let tab = self.tabs.remove(from);
-        let label = tab.label.clone();
+        let label = label_text(&tab);
         self.tabs.insert(insertion_index, tab);
         self.announcement = format!("Moved {label} to position {}", insertion_index + 1);
         self
@@ -361,12 +402,18 @@ fn preview_tabs() -> PreviewResult<Vec<ViewerTab>> {
                 custom_name: None,
                 pinned: false,
                 id: ViewerTabId::try_new(index as u64 + 1)?,
-                label: label.to_owned(),
+                label: RecipeLabel::Named {
+                    name: ProjectName::try_new(label)?,
+                },
                 kind,
                 state,
             })
         })
         .collect()
+}
+
+fn label_text(tab: &ViewerTab) -> String {
+    recipe_label_text(&tab.label, ViewerLanguage::EnUs)
 }
 
 fn preview_error(error: impl std::fmt::Display) -> Element {
@@ -392,6 +439,41 @@ mod tests {
             .close(closing_tab_id);
 
         assert_eq!(state.active_tab_id, Some(expected_tab_id));
+        Ok(())
+    }
+
+    #[test]
+    fn pinning_moves_the_tab_ahead_of_unpinned_tabs() -> PreviewResult<()> {
+        let tabs = preview_tabs()?;
+        let third = tabs[2].id;
+        let expected_order = [third, tabs[0].id, tabs[1].id];
+
+        let state = PreviewTabState::new(tabs).pin(third, true);
+
+        assert_eq!(
+            state
+                .tabs
+                .iter()
+                .take(expected_order.len())
+                .map(|tab| tab.id)
+                .collect::<Vec<_>>(),
+            expected_order
+        );
+        assert!(state.tabs[0].pinned);
+        Ok(())
+    }
+
+    #[test]
+    fn renaming_trims_the_name_and_ignores_blank_drafts() -> PreviewResult<()> {
+        let tabs = preview_tabs()?;
+        let snapshot = tabs[1].id;
+
+        let state = PreviewTabState::new(tabs)
+            .rename(snapshot, "  Review notes  ")
+            .rename(snapshot, "   ");
+
+        assert_eq!(super::label_text(&state.tabs[1]), "Review notes");
+        assert_eq!(state.tabs[1].custom_name.as_deref(), Some("Review notes"));
         Ok(())
     }
 

@@ -15,8 +15,6 @@ use crate::{
     ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
-pub const DEFAULT_BASE: &str = crate::shared::git_range_pinning::DEFAULT_MERGE_BASE;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeMergeDiff {
     pub repo_root: RepositoryRoot,
@@ -257,7 +255,10 @@ index 333..444 100644\n\
         )
         .unwrap();
 
-        assert_eq!(response.view.title, "merge-diff");
+        assert_eq!(
+            response.view.title,
+            gtl_models::diffs::DiffViewTitle::MergeDiff
+        );
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
     }
 

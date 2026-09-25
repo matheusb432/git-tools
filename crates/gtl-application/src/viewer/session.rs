@@ -1,14 +1,17 @@
 mod cache;
 pub(super) mod file_filters;
 
-use std::sync::Arc;
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 
 pub use cache::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache};
 use gtl_models::{
     diffs::{Commit, CommitId},
     failure::{ErrorMeta, Failure, Resource},
     live_views::LiveSource,
-    recipes::RecipeBatchId,
+    recipes::{RecipeBatchId, RecipeLabel},
     viewer::{
         ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTab, ViewerTabId, ViewerTabKind,
         ViewerTabPlacement, ViewerTabState, ViewerVersion,
@@ -17,11 +20,14 @@ use gtl_models::{
 
 use crate::{
     diffs::View,
-    recipes::{Recipe, RecipeSource},
-    viewer::{ViewerDiffSnapshot, initial_recipe_label},
+    recipes::{Recipe, RecipeSource, recipe_label},
+    viewer::ViewerDiffSnapshot,
 };
 
 pub const DEFAULT_VIEW_CACHE_WEIGHT: ViewCacheWeight = ViewCacheWeight::new(128 * 1024 * 1024);
+
+/// Most skipped snapshots kept until a shell reports them; the oldest drop first.
+const SKIPPED_SNAPSHOTS_MAX: usize = 100;
 
 /// A generation token authorizing publication for one still-current compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +155,14 @@ pub enum PublishOutcome {
     Stale,
 }
 
+/// Whether an empty computation closed its snapshot or left the tab to show the empty view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EmptySnapshotOutcome {
+    Skipped,
+    Kept,
+    Stale,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseOutcome {
     ActiveChanged,
@@ -194,6 +208,7 @@ pub struct ViewerSession {
     full_context_transient: Option<(ActiveContentIdentity, ViewerDiffSnapshot)>,
     modified_files_transient: Option<(ViewerTabId, ViewerDiffSnapshot)>,
     full_context_preparation: Option<(ActiveContentIdentity, FullContextPreparation)>,
+    skipped_snapshots: VecDeque<(RecipeBatchId, RecipeLabel)>,
 }
 
 impl ViewerSession {
@@ -209,6 +224,7 @@ impl ViewerSession {
             full_context_transient: None,
             modified_files_transient: None,
             full_context_preparation: None,
+            skipped_snapshots: VecDeque::new(),
         }
     }
 
@@ -219,10 +235,9 @@ impl ViewerSession {
         kind: ViewerTabKind,
     ) -> Option<ViewerTabId> {
         let label = if kind == ViewerTabKind::Live {
-            super::recipe_label::live(&recipe)
-                .unwrap_or_else(|| initial_recipe_label::execute(&recipe))
+            recipe_label::live(&recipe).unwrap_or_else(|| recipe_label::pending(&recipe))
         } else {
-            initial_recipe_label::execute(&recipe)
+            recipe_label::pending(&recipe)
         };
         self.open_labeled(recipe, batch_id, kind, label)
     }
@@ -232,7 +247,7 @@ impl ViewerSession {
         recipe: Recipe,
         batch_id: RecipeBatchId,
         kind: ViewerTabKind,
-        label: String,
+        label: RecipeLabel,
     ) -> Option<ViewerTabId> {
         let unpinned = recipe.unpinned();
         if let Some(existing) = self.tabs.iter_mut().find(|tab| {
@@ -245,7 +260,7 @@ impl ViewerSession {
         }) {
             existing.tab = ViewerTab::new(
                 existing.tab.id(),
-                existing.tab.label().into(),
+                existing.tab.label().clone(),
                 kind,
                 existing.tab.state().clone(),
             );
@@ -300,7 +315,7 @@ impl ViewerSession {
         };
         tab.tab = ViewerTab::new(
             id,
-            tab.tab.label().into(),
+            tab.tab.label().clone(),
             tab.tab.kind(),
             ViewerTabState::Pending,
         );
@@ -316,7 +331,7 @@ impl ViewerSession {
         &mut self,
         ticket: ComputeTicket,
         value: CachedView,
-        label: String,
+        label: RecipeLabel,
     ) -> PublishOutcome {
         let Some(tab) = self
             .tabs
@@ -336,7 +351,11 @@ impl ViewerSession {
         }
         tab.file_exclusions
             .get_or_insert_with(|| value.view.file_filter.excluded().clone());
-        let label = tab.recipe.name.as_ref().map_or(label, ToString::to_string);
+        let label = tab
+            .recipe
+            .name
+            .clone()
+            .map_or(label, |name| RecipeLabel::Named { name });
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_version();
@@ -358,7 +377,7 @@ impl ViewerSession {
         if tab.generation != ticket.generation {
             return PublishOutcome::Stale;
         }
-        let label = tab.tab.label().into();
+        let label = tab.tab.label().clone();
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), state);
         self.bump_version();
         PublishOutcome::Published
@@ -408,7 +427,7 @@ impl ViewerSession {
             if let Some(name) = &tab.recipe.name {
                 tab.tab = ViewerTab::new(
                     tab.tab.id(),
-                    name.to_string(),
+                    RecipeLabel::Named { name: name.clone() },
                     tab.tab.kind(),
                     tab.tab.state().clone(),
                 );
@@ -427,7 +446,7 @@ impl ViewerSession {
                 tab.recipe.name = Some(name.clone());
                 tab.tab = ViewerTab::new(
                     tab.tab.id(),
-                    name.to_string(),
+                    RecipeLabel::Named { name: name.clone() },
                     tab.tab.kind(),
                     tab.tab.state().clone(),
                 );
@@ -468,7 +487,7 @@ impl ViewerSession {
         ticket: ComputeTicket,
         head: super::refresh_live_view::LiveViewState,
         mut value: CachedView,
-        label: String,
+        label: RecipeLabel,
     ) -> PublishOutcome {
         if self.active != Some(ticket.tab_id) || self.current_ticket(ticket.tab_id) != Some(ticket)
         {
@@ -805,13 +824,45 @@ impl ViewerSession {
         })
     }
 
-    pub(super) fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
+    /// Closes an unpinned snapshot whose computation found nothing to show, remembering it
+    /// under `label` until its batch finishes. Live and pinned tabs keep the empty view.
+    pub(super) fn skip_empty_snapshot_if_current(
+        &mut self,
+        ticket: ComputeTicket,
+        label: RecipeLabel,
+    ) -> EmptySnapshotOutcome {
         if self.current_ticket(ticket.tab_id) != Some(ticket) {
-            return PublishOutcome::Stale;
+            return EmptySnapshotOutcome::Stale;
         }
-        let closed = self.close(ticket.tab_id);
-        debug_assert!(closed.is_some());
-        PublishOutcome::Published
+        let Some(tab) = self.tab(ticket.tab_id) else {
+            return EmptySnapshotOutcome::Stale;
+        };
+        if tab.tab.kind() != ViewerTabKind::Snapshot || tab.pinned {
+            return EmptySnapshotOutcome::Kept;
+        }
+        let batch_id = tab.batch_id;
+        self.close(ticket.tab_id);
+        if self.skipped_snapshots.len() == SKIPPED_SNAPSHOTS_MAX {
+            self.skipped_snapshots.pop_front();
+        }
+        self.skipped_snapshots.push_back((batch_id, label));
+        EmptySnapshotOutcome::Skipped
+    }
+
+    /// Takes the labels of skipped snapshots whose batch has no computation left.
+    pub(super) fn take_finished_skipped_snapshots(&mut self) -> Vec<RecipeLabel> {
+        let computing = self
+            .tabs
+            .iter()
+            .filter(|tab| matches!(tab.tab.state(), ViewerTabState::Pending))
+            .map(|tab| tab.batch_id)
+            .collect::<HashSet<_>>();
+        let (finished, computing): (VecDeque<_>, VecDeque<_>) =
+            std::mem::take(&mut self.skipped_snapshots)
+                .into_iter()
+                .partition(|(batch_id, _)| !computing.contains(batch_id));
+        self.skipped_snapshots = computing;
+        finished.into_iter().map(|(_, label)| label).collect()
     }
 
     pub(crate) fn set_pinned(&mut self, id: ViewerTabId, pinned: bool) -> bool {
@@ -1258,13 +1309,12 @@ mod tests {
             upstream: git_revision("main"),
             commits: Vec::new(),
             files: Vec::new(),
-            title: title.into(),
+            title: crate::utils::diffs::view_title(title),
             cmd: Cmd {
                 lead: String::new(),
                 range: "main..HEAD".into(),
                 trail: String::new(),
             },
-            commits_label: String::new(),
             foot: Foot { cmd: String::new() },
             full_context: crate::diffs::FullContextDiffState::Unavailable,
         })
@@ -1280,7 +1330,7 @@ mod tests {
             session.publish_labeled_if_current(
                 ticket,
                 CachedView::new(view("current")),
-                "ready".into(),
+                crate::utils::viewer::label("ready"),
             ),
             PublishOutcome::Published
         );
@@ -1307,7 +1357,7 @@ mod tests {
         session.publish_labeled_if_current(
             ticket,
             CachedView::new(Arc::new(range)),
-            "ready".into(),
+            crate::utils::viewer::label("ready"),
         );
         (session, id, ids)
     }
@@ -1320,7 +1370,7 @@ mod tests {
         session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(view("patch")));
         session.cache.remove(id);
         let ticket = session.begin_compute(id).unwrap();
-        session.publish_labeled_if_current(ticket, range, "reloaded".into());
+        session.publish_labeled_if_current(ticket, range, crate::utils::viewer::label("reloaded"));
         assert!(matches!(session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Pending { id: selected } if selected == ids[0]));
         let (tab_id, commit_id) = session.selected_commit_to_reload().unwrap();
@@ -1334,7 +1384,7 @@ mod tests {
         assert!(session.selected_commit_to_reload().is_none());
         assert!(matches!(session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Ready { id: selected, view }
-                if selected == ids[0] && view.title == "reloaded patch"));
+                if selected == ids[0] && view.title == crate::utils::diffs::view_title("reloaded patch")));
     }
 
     #[test]
@@ -1352,7 +1402,7 @@ mod tests {
         );
         assert_eq!(
             session.active_content_snapshot().unwrap().view().title,
-            "working tree"
+            crate::utils::diffs::view_title("working tree")
         );
         assert_ne!(
             session.active_content_identity().unwrap(),
@@ -1362,7 +1412,7 @@ mod tests {
         session.hide_modified_files(id);
         assert_eq!(
             session.active_content_snapshot().unwrap().view().title,
-            "selected"
+            crate::utils::diffs::view_title("selected")
         );
         assert_eq!(
             session.publish_modified_files(ticket, ViewerDiffSnapshot::new(view("late"))),
@@ -1376,7 +1426,7 @@ mod tests {
         session.clear_commit_selection(id);
         assert_eq!(
             session.active_content_snapshot().unwrap().view().title,
-            "range"
+            crate::utils::diffs::view_title("range")
         );
     }
 
@@ -1450,7 +1500,7 @@ mod tests {
                 ticket,
                 head.clone().into(),
                 CachedView::new(range.view.shared_view()),
-                "updated".into()
+                crate::utils::viewer::label("updated")
             ),
             PublishOutcome::Published
         );
@@ -1466,7 +1516,7 @@ mod tests {
             ticket,
             head.into(),
             CachedView::new(view("empty range")),
-            "updated".into(),
+            crate::utils::viewer::label("updated"),
         );
         assert!(matches!(
             session.commit_selection_snapshot(id),
@@ -1488,7 +1538,7 @@ mod tests {
                 stale,
                 head.clone().into(),
                 CachedView::new(view("stale")),
-                "stale".into()
+                crate::utils::viewer::label("stale")
             ),
             PublishOutcome::Stale
         );
@@ -1503,7 +1553,7 @@ mod tests {
                 ticket,
                 head.into(),
                 CachedView::new(view("stale")),
-                "stale".into()
+                crate::utils::viewer::label("stale")
             ),
             PublishOutcome::Stale
         );
@@ -1521,7 +1571,7 @@ mod tests {
             session.publish_labeled_if_current(
                 ticket,
                 CachedView::new(Arc::clone(&view)),
-                "ready".into(),
+                crate::utils::viewer::label("ready"),
             ),
             PublishOutcome::Published
         );
@@ -1549,9 +1599,12 @@ mod tests {
         assert!(matches!(
             session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Ready { id: selected_id, view }
-                if selected_id == ids[0] && view.title == "patch"
+                if selected_id == ids[0] && view.title == crate::utils::diffs::view_title("patch")
         ));
-        assert_eq!(session.cached_view(id).unwrap().view.title, "range");
+        assert_eq!(
+            session.cached_view(id).unwrap().view.title,
+            crate::utils::diffs::view_title("range")
+        );
 
         assert!(session.clear_commit_selection(id));
         assert!(matches!(
@@ -1611,7 +1664,7 @@ mod tests {
             gtl_models::diffs::DiffExclusions::default(),
             gtl_models::settings::PushAllExclusions::default(),
         );
-        let active = crate::viewer::shell::project(&mut session, &settings, None)
+        let active = crate::viewer::shell::project(&mut session, &settings)
             .unwrap()
             .active;
         assert!(
@@ -1639,7 +1692,10 @@ mod tests {
             .unwrap();
 
         assert!(Arc::ptr_eq(&published, &replacement));
-        assert_eq!(session.cached_view(id).unwrap().view.title, "range");
+        assert_eq!(
+            session.cached_view(id).unwrap().view.title,
+            crate::utils::diffs::view_title("range")
+        );
         assert!(matches!(
             session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Ready { view, .. }
@@ -1648,7 +1704,7 @@ mod tests {
         assert!(session.clear_commit_selection(id));
         assert_eq!(
             session.active_content_snapshot().unwrap().view().title,
-            "range"
+            crate::utils::diffs::view_title("range")
         );
     }
 
@@ -1758,7 +1814,7 @@ mod tests {
             session.publish_labeled_if_current(
                 refresh,
                 CachedView::new(view("refreshed")),
-                "refreshed".into(),
+                crate::utils::viewer::label("refreshed"),
             ),
             PublishOutcome::Published
         );
@@ -1809,7 +1865,7 @@ mod tests {
             session.publish_labeled_if_current(
                 current,
                 CachedView::new(view("newer")),
-                "newer".into(),
+                crate::utils::viewer::label("newer"),
             ),
             PublishOutcome::Published
         );
@@ -1817,23 +1873,106 @@ mod tests {
             session.publish_labeled_if_current(
                 stale,
                 CachedView::new(view("stale")),
-                "stale".into(),
+                crate::utils::viewer::label("stale"),
             ),
             PublishOutcome::Stale
         );
-        assert_eq!(session.cached_view(id).unwrap().view.title, "newer");
+        assert_eq!(
+            session.cached_view(id).unwrap().view.title,
+            crate::utils::diffs::view_title("newer")
+        );
     }
 
     #[test]
-    fn close_if_current_rejects_a_stale_compute() {
+    fn empty_snapshot_skip_rejects_a_stale_compute() {
         let (mut session, id) = ready_session();
         let stale = session.begin_compute(id).unwrap();
         let current = session.begin_compute(id).unwrap();
+        let label = crate::utils::viewer::label("empty");
 
-        assert_eq!(session.close_if_current(stale), PublishOutcome::Stale);
+        assert_eq!(
+            session.skip_empty_snapshot_if_current(stale, label.clone()),
+            EmptySnapshotOutcome::Stale
+        );
         assert!(session.tab(id).is_some());
-        assert_eq!(session.close_if_current(current), PublishOutcome::Published);
+        assert_eq!(
+            session.skip_empty_snapshot_if_current(current, label.clone()),
+            EmptySnapshotOutcome::Skipped
+        );
         assert!(session.tab(id).is_none());
+        assert_eq!(session.take_finished_skipped_snapshots(), [label]);
+    }
+
+    #[test]
+    fn pinned_snapshots_and_live_tabs_keep_an_empty_view() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let pinned = open_snapshot(&mut session, "/repo/pinned", 1);
+        session.set_pinned(pinned.tab_id, true);
+        let pinned = session.begin_compute(pinned.tab_id).unwrap();
+        let live_id = session
+            .open(recipe(), batch_id(2), ViewerTabKind::Live)
+            .unwrap();
+        let live = session.begin_compute(live_id).unwrap();
+
+        for ticket in [pinned, live] {
+            assert_eq!(
+                session
+                    .skip_empty_snapshot_if_current(ticket, crate::utils::viewer::label("empty")),
+                EmptySnapshotOutcome::Kept
+            );
+            assert!(session.tab(ticket.tab_id).is_some());
+        }
+        assert!(session.take_finished_skipped_snapshots().is_empty());
+    }
+
+    fn open_snapshot(session: &mut ViewerSession, repository: &str, batch: u64) -> ComputeTicket {
+        let mut recipe = recipe();
+        recipe.source = RecipeSource::LocalRepo(repository_root(repository));
+        let id = session
+            .open(recipe, batch_id(batch), ViewerTabKind::Snapshot)
+            .unwrap();
+        session.begin_compute(id).unwrap()
+    }
+
+    #[test]
+    fn skipped_snapshots_are_reported_once_their_batch_finishes() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let skipped = open_snapshot(&mut session, "/repo/empty", 1);
+        let computing = open_snapshot(&mut session, "/repo/changed", 1);
+        let other_batch = open_snapshot(&mut session, "/repo/other", 2);
+        let label = crate::utils::viewer::label("empty");
+
+        session.skip_empty_snapshot_if_current(skipped, label.clone());
+        assert!(session.take_finished_skipped_snapshots().is_empty());
+        session.publish_labeled_if_current(
+            computing,
+            CachedView::new(view("changed")),
+            crate::utils::viewer::label("changed"),
+        );
+
+        assert_eq!(
+            session.tab(other_batch.tab_id).unwrap().tab.state(),
+            &ViewerTabState::Pending
+        );
+        assert_eq!(session.take_finished_skipped_snapshots(), [label]);
+        assert!(session.take_finished_skipped_snapshots().is_empty());
+    }
+
+    #[test]
+    fn skipped_snapshot_backlog_drops_its_oldest_labels() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        for index in 0..=SKIPPED_SNAPSHOTS_MAX {
+            let ticket = open_snapshot(&mut session, &format!("/repo/{index}"), 1);
+            session.skip_empty_snapshot_if_current(
+                ticket,
+                crate::utils::viewer::label(&index.to_string()),
+            );
+        }
+
+        let labels = session.take_finished_skipped_snapshots();
+
+        assert_eq!(labels.len(), SKIPPED_SNAPSHOTS_MAX);
+        assert_eq!(labels[0], crate::utils::viewer::label("1"));
     }
 
     #[test]
@@ -1852,7 +1991,7 @@ mod tests {
             session.publish_labeled_if_current(
                 stale,
                 CachedView::new(view("stale")),
-                "stale".into(),
+                crate::utils::viewer::label("stale"),
             ),
             PublishOutcome::Stale
         );
@@ -1860,7 +1999,7 @@ mod tests {
             session.publish_labeled_if_current(
                 refresh,
                 CachedView::new(view("fresh")),
-                "fresh".into(),
+                crate::utils::viewer::label("fresh"),
             ),
             PublishOutcome::Published
         );
@@ -1929,7 +2068,7 @@ mod tests {
             session.publish_labeled_if_current(
                 ticket,
                 CachedView::new(view("late")),
-                "late".into(),
+                crate::utils::viewer::label("late"),
             ),
             PublishOutcome::Stale
         );

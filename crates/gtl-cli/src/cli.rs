@@ -181,12 +181,26 @@ pub struct ProjectArgs {
 pub enum ProjectCommand {
     /// List active projects and their repository status.
     Ls(LsArgs),
+    /// Pause a managed project.
+    Pause(ProjectStatusArgs),
+    /// Resume a paused project.
+    Resume(ProjectStatusArgs),
     /// Push active projects, respecting configured push exclusions.
     Push(ProjectPushArgs),
     /// Fast-forward all active projects from origin.
     Pull(ProjectPullArgs),
     /// View diffs for active projects with unpushed changes.
     Diff(ProjectDiffArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ProjectStatusArgs {
+    /// Project ID.
+    #[arg(value_name = "PROJECT_ID", value_parser = project_id)]
+    pub id: ProjectId,
+    /// Print the result as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

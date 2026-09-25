@@ -31,11 +31,11 @@ pub enum ProjectViewerShellError {
     ActiveViewUnavailable,
 }
 
-/// Projects one short-lived snapshot of the viewer shell.
+/// Projects one short-lived snapshot of the viewer shell, reporting snapshots
+/// skipped since the previous projection.
 pub fn project(
     session: &mut ViewerSession,
     settings: &UserSettings,
-    feedback: Option<ViewerFeedback>,
 ) -> Result<ViewerShell, ProjectViewerShellError> {
     let options = settings.viewer_render_options();
     let tabs = session
@@ -44,7 +44,7 @@ pub fn project(
             pinned: entry.pinned,
             custom_name: entry.recipe.name.as_ref().map(ToString::to_string),
             id: entry.tab.id(),
-            label: entry.tab.label().to_owned(),
+            label: entry.tab.label().clone(),
             kind: match session
                 .live_source(entry.tab.id())
                 .map(|(_, comparison)| comparison)
@@ -84,6 +84,9 @@ pub fn project(
             }
         }
     };
+    let skipped = session.take_finished_skipped_snapshots();
+    let feedback =
+        (!skipped.is_empty()).then_some(ViewerFeedback::SnapshotRecipesSkipped { labels: skipped });
     Ok(ViewerShell {
         version: session.version(),
         focus_request_version: session.focus_request_version(),
@@ -155,7 +158,7 @@ fn ready_active_view(
         && tab.tab.kind() == viewer::ViewerTabKind::Snapshot
         && let Some(name) = &tab.recipe.name
     {
-        view.title = name.to_string();
+        view.title = gtl_models::diffs::DiffViewTitle::Named { name: name.clone() };
     }
     view.modified_files = modified_files;
     if options.density() == super::DiffDensity::Full

@@ -1,12 +1,9 @@
 use std::path::Path;
 
 use gtl_models::{
-    artifacts::{
-        ArtifactByteSize, ArtifactCommitRange, ArtifactContentHash, ArtifactDiffIdentity,
-        RepositoryStoreId,
-    },
-    diffs::{DiffKind, ExcludedExtensions},
-    paths::{AbsoluteFilePath, ProjectName, RepositoryRoot},
+    artifacts::{ArtifactCommitRange, ArtifactDiffIdentity},
+    diffs::ExcludedExtensions,
+    paths::{AbsoluteFilePath, RepositoryRoot},
     settings::ViewerLanguage,
     timestamps::MachineTimestamp,
     viewer::{RenderOptions, Theme},
@@ -17,12 +14,8 @@ use gtl_models::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArtifactMeta {
     pub repo_root: RepositoryRoot,
-    pub repo_name: ProjectName,
     pub identity: ArtifactDiffIdentity,
-    pub range_label: String,
-    pub head_committed_at: Option<MachineTimestamp>,
     pub generated_at: MachineTimestamp,
-    pub title: String,
     pub render_options: RenderOptions,
     /// The configured renderer theme used to build the artifact. `None` means
     /// the renderer selected its default theme.
@@ -78,21 +71,6 @@ impl PlacedArtifact {
     }
 }
 
-/// One row from the content-addressed store's history listing - the port-facing
-/// mirror of infra's private `Sidecar`, same reasoning as `ArtifactMeta`/`place`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HistoryRecord {
-    pub repo_id: RepositoryStoreId,
-    pub repo_name: ProjectName,
-    pub title: String,
-    pub range_label: String,
-    pub head_committed_at: Option<MachineTimestamp>,
-    pub generated_at: MachineTimestamp,
-    pub content_hash: ArtifactContentHash,
-    pub kind: DiffKind,
-    pub byte_size: ArtifactByteSize,
-}
-
 /// The content-addressed store behind diff artifacts.
 pub trait ArtifactStore: Clone + Send + Sync + 'static {
     /// Place `html` and its metadata under `store_root`, addressed by content hash.
@@ -112,8 +90,4 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         repo_root: &RepositoryRoot,
         key: &ArtifactRangeKey,
     ) -> anyhow::Result<Option<AbsoluteFilePath>>;
-
-    /// Every recorded artifact under `store_root`, across all repos, unordered
-    /// (the `history/list` handler owns sort order).
-    fn list_history(&self, store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>>;
 }

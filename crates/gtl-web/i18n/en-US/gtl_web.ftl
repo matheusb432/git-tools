@@ -56,7 +56,6 @@ window-close = Close window
 connection-connecting = Connecting to the viewer server…
 connection-retrying = { $message } Retrying automatically.
 connection-try-now = Try now
-feedback-snapshots-skipped = Skipped snapshot diffs with no commits or changed files.
 feedback-snapshots-skipped-named =
     { $count ->
         [one] Skipped { $count } diff with no commits or changed files: { $labels }.
@@ -407,6 +406,24 @@ projects-import-select-row = Select { $path }
 projects-import-id-label = Project ID for { $project }
 projects-import-title-label = Project title for { $project }
 
+## Recipe labels
+
+recipe-label-unpushed = { $repository }: diff
+recipe-label-unpushed-commits =
+    { $count ->
+        [one] { $repository }: { $count } commit
+       *[other] { $repository }: { $count } commits
+    }
+recipe-label-working-tree = { $repository }: { $base }->working
+recipe-label-range = { $repository }: { $range }
+recipe-label-merge-into = { $repository }: merge ->{ $base }
+recipe-label-merge = { $repository }: merge { $branch }->{ $upstream }
+recipe-label-last-commits =
+    { $count ->
+        [one] { $repository }: last { $count } commit
+       *[other] { $repository }: last { $count } commits
+    }
+
 ## Tabs
 
 tab-snapshot-name = Snapshot name
@@ -475,6 +492,9 @@ extensions-invalid = Enter a final file extension, such as .lock or .md.
 
 ## Diff document
 
+diff-view-title-diff = diff
+diff-view-title-merge-diff = merge-diff
+diff-view-title-commit = commit { $commit }
 file-status-added = Added file
 file-status-deleted = Deleted file
 file-status-renamed = Renamed file
@@ -661,6 +681,11 @@ project-diff-loading = Loading diff...
 
 ## Offline artifacts
 
+artifact-document-title =
+    { $count ->
+        [one] { $repository } - { $title } · { $count } commit
+       *[other] { $repository } - { $title } · { $count } commits
+    }
 artifact-empty = No diffs in this artifact
 artifact-subrepo-diffs = Subrepo diffs
 

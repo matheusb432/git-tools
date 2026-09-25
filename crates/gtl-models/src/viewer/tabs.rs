@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 use super::ViewerTabId;
-use crate::failure::{Failure, ViewerFailure};
+use crate::{
+    failure::{Failure, ViewerFailure},
+    recipes::RecipeLabel,
+};
 
 /// Describes whether a viewer tab can currently provide rendered diff content.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +42,7 @@ pub enum ViewerTabPlacement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewerTab {
     id: ViewerTabId,
-    label: String,
+    label: RecipeLabel,
     kind: ViewerTabKind,
     state: ViewerTabState,
 }
@@ -47,7 +50,12 @@ pub struct ViewerTab {
 impl ViewerTab {
     /// Creates a tab-strip entry from validated identity and closed state values.
     #[must_use]
-    pub fn new(id: ViewerTabId, label: String, kind: ViewerTabKind, state: ViewerTabState) -> Self {
+    pub fn new(
+        id: ViewerTabId,
+        label: RecipeLabel,
+        kind: ViewerTabKind,
+        state: ViewerTabState,
+    ) -> Self {
         Self {
             id,
             label,
@@ -64,7 +72,7 @@ impl ViewerTab {
 
     /// Returns the tab-strip label.
     #[must_use]
-    pub fn label(&self) -> &str {
+    pub const fn label(&self) -> &RecipeLabel {
         &self.label
     }
 

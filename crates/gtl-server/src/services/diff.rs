@@ -336,7 +336,11 @@ fn to_render_request(request: v1::RenderDiffRequest) -> Result<RenderDiff, Statu
     Ok(RenderDiff {
         cwd: super::absolute_path(request.working_directory, "working_directory")?,
         target: diff_target(request.target)?,
-        name: request.name,
+        name: request
+            .name
+            .map(ProjectName::try_new)
+            .transpose()
+            .map_err(|_| invalid_request("name"))?,
     })
 }
 

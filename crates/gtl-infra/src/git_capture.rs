@@ -138,16 +138,6 @@ pub(crate) fn merge_base(
         .map_err(Into::into)
 }
 
-/// The committer timestamp of `rev`, or `None` when Git or decoding fails.
-pub(crate) fn committed_at(
-    repo_path: impl AsRef<Path>,
-    rev: &GitRevision,
-) -> Option<MachineTimestamp> {
-    run_git(repo_path, &["show", "-s", "--format=%cI", rev.as_ref()])
-        .ok()
-        .and_then(|raw| MachineTimestamp::try_from(raw.trim()).ok())
-}
-
 pub(crate) fn parse_commit_log(raw: &str) -> anyhow::Result<Vec<Commit>> {
     raw.split('\x1e')
         .map(str::trim)

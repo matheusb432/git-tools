@@ -1,7 +1,7 @@
 use std::{iter::Sum, ops::Add, path::Path, sync::Arc};
 
 use gtl_models::{
-    diffs::Commit,
+    diffs::{Commit, DiffViewTitle},
     git::{GitHead, GitRevision},
 };
 use lru::LruCache;
@@ -230,11 +230,10 @@ fn view_weight(view: &View) -> ViewCacheWeight {
             .iter()
             .map(string_weight)
             .sum::<ViewCacheWeight>()
-        + string_weight(&view.title)
+        + title_weight(&view.title)
         + string_weight(&view.cmd.lead)
         + string_weight(&view.cmd.range)
         + string_weight(&view.cmd.trail)
-        + string_weight(&view.commits_label)
         + string_weight(&view.foot.cmd)
         + full_context_weight(&view.full_context)
         + view
@@ -294,6 +293,14 @@ fn file_weight(file: &FileDiff) -> ViewCacheWeight {
             })
 }
 
+fn title_weight(title: &DiffViewTitle) -> ViewCacheWeight {
+    match title {
+        DiffViewTitle::Diff | DiffViewTitle::MergeDiff => ViewCacheWeight::default(),
+        DiffViewTitle::Commit { id } => ViewCacheWeight::new(id.as_ref().len()),
+        DiffViewTitle::Named { name } => ViewCacheWeight::new(name.as_str().len()),
+    }
+}
+
 fn string_weight(value: &String) -> ViewCacheWeight {
     ViewCacheWeight::new(value.capacity())
 }
@@ -337,13 +344,12 @@ mod tests {
             upstream: GitRevision::head(),
             commits: Vec::new(),
             files: Vec::new(),
-            title: title.into(),
+            title: crate::utils::diffs::view_title(title),
             cmd: Cmd {
                 lead: String::new(),
                 range: String::new(),
                 trail: String::new(),
             },
-            commits_label: String::new(),
             foot: Foot { cmd: String::new() },
             full_context: crate::diffs::FullContextDiffState::Unavailable,
         }))
@@ -440,13 +446,12 @@ mod tests {
                 full_lines: Some(lines.clone().into()),
                 lines: lines.into(),
             }],
-            title: "Large diff".into(),
+            title: crate::utils::diffs::view_title("Large diff"),
             cmd: Cmd {
                 lead: "git diff ".into(),
                 range: "origin/main..HEAD".into(),
                 trail: String::new(),
             },
-            commits_label: "0 commits".into(),
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".into(),
             },

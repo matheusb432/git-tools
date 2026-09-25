@@ -193,12 +193,43 @@ enum ViewerTabState {
 }
 
 message ViewerTab {
+  reserved 2;
+  reserved "label";
+
   uint64 id = 1;
-  string label = 2;
   ViewerTabKind kind = 3;
   ViewerTabState state = 4;
   bool pinned = 5;
   optional string custom_name = 6;
+  ViewerRecipeLabel recipe_label = 7;
+}
+
+// Names a recipe's diff in parts the viewer localizes.
+message ViewerRecipeLabel {
+  oneof label {
+    string name = 1;
+    string repository = 2;
+    ViewerRecipeChangesLabel changes = 3;
+  }
+}
+
+// Describes which changes a recipe shows in its repository.
+message ViewerRecipeChangesLabel {
+  string repository = 1;
+  oneof changes {
+    Empty unpushed = 2;
+    uint64 unpushed_commit_count = 3;
+    string working_tree_base = 4;
+    string range = 5;
+    string merge_into_base = 6;
+    ViewerRecipeMergeLabel merge = 7;
+    uint32 last_commit_count = 8;
+  }
+}
+
+message ViewerRecipeMergeLabel {
+  string branch = 1;
+  string upstream = 2;
 }
 
 enum ViewerFileStatus {
@@ -263,14 +294,15 @@ enum ViewerRowSourceState {
 }
 
 message ViewerActiveView {
+  reserved 2, 8;
+  reserved "title", "commits_label";
+
   ViewerViewIdentity identity = 1;
-  string title = 2;
   string repository_name = 3;
   string branch = 4;
   string upstream = 5;
   ViewerCommandLine command = 6;
   repeated ViewerFileSummary files = 7;
-  string commits_label = 8;
   uint32 commit_count = 9;
   ViewerCommitSelection commit_selection = 10;
   ViewerFooter footer = 11;
@@ -278,6 +310,17 @@ message ViewerActiveView {
   optional bytes content_id = 13;
   ViewerRowSourceState row_source = 14;
   bool modified_files = 15;
+  ViewerDiffViewTitle view_title = 16;
+}
+
+// Names what one diff view shows, in parts the viewer localizes.
+message ViewerDiffViewTitle {
+  oneof title {
+    Empty diff = 1;
+    Empty merge_diff = 2;
+    string commit_id = 3;
+    string name = 4;
+  }
 }
 
 message ViewerPendingState {
@@ -358,15 +401,17 @@ message ViewerKeybindings {
 
 enum ViewerFeedbackKind {
   VIEWER_FEEDBACK_KIND_UNSPECIFIED = 0;
-  VIEWER_FEEDBACK_KIND_TAB_CLOSED = 1;
-  reserved 2;
-  reserved "VIEWER_FEEDBACK_KIND_LIVE_VIEW_DELETED";
+  reserved 1, 2;
+  reserved "VIEWER_FEEDBACK_KIND_TAB_CLOSED", "VIEWER_FEEDBACK_KIND_LIVE_VIEW_DELETED";
   VIEWER_FEEDBACK_KIND_SNAPSHOT_RECIPES_SKIPPED = 3;
 }
 
 message ViewerFeedback {
+  reserved 2;
+  reserved "labels";
+
   ViewerFeedbackKind kind = 1;
-  repeated string labels = 2;
+  repeated ViewerRecipeLabel recipe_labels = 3;
 }
 
 message ViewerShell {
@@ -680,12 +725,15 @@ enum ViewerRecipeKind {
 }
 
 message ViewerHistoryEntry {
+  reserved 2;
+  reserved "title";
+
   uint64 id = 1;
-  string title = 2;
   string repository_name = 3;
   ViewerRecipeKind kind = 4;
   string range_label = 5;
   string rendered_at = 6;
+  ViewerRecipeLabel recipe_label = 7;
 }
 
 message ViewerHistoryPagePosition {

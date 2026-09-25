@@ -4,8 +4,8 @@ use gtl_wire::v1;
 use crate::{
     cli::{
         Cli, ColorChoice, Command, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
-        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, ProjectCommand, PullArgs,
-        PushArgs, ServerArgs, ServerCommand, StatusArgs, Theme,
+        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, ProjectCommand,
+        ProjectStatusArgs, PullArgs, PushArgs, ServerArgs, ServerCommand, StatusArgs, Theme,
     },
     commands::managed::{ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary},
     failure::{CommandFailure, Refusal, fail},
@@ -118,6 +118,12 @@ fn run_project(command: ProjectCommand) -> ExitCode {
         ProjectCommand::Ls(args) => managed_exit(&commands::managed::run_status(
             &managed_read_options(args.read),
         )),
+        ProjectCommand::Pause(args) => {
+            run_project_status(&args, commands::project_status::ProjectStatusAction::Pause)
+        }
+        ProjectCommand::Resume(args) => {
+            run_project_status(&args, commands::project_status::ProjectStatusAction::Resume)
+        }
         ProjectCommand::Push(args) => managed_exit(&commands::managed::run_push_all(
             &managed_options(args.managed),
         )),
@@ -128,6 +134,19 @@ fn run_project(command: ProjectCommand) -> ExitCode {
             commands::canonical_working_directory()
                 .and_then(|root| commands::diff_subrepos::run_managed_all(root, args.raw)),
         ),
+    }
+}
+
+fn run_project_status(
+    args: &ProjectStatusArgs,
+    action: commands::project_status::ProjectStatusAction,
+) -> ExitCode {
+    match commands::project_status::run(action, &args.id, args.json) {
+        Ok(output) => {
+            println!("{output}");
+            ExitCode::Ok
+        }
+        Err(error) => fail(action.command_name(), &error),
     }
 }
 

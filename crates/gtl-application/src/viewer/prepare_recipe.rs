@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gtl_models::failure::ErrorMeta;
+use gtl_models::{failure::ErrorMeta, recipes::RecipeLabel};
 
 use super::{
     ViewerTabKind, ViewerTabState,
@@ -14,7 +14,7 @@ use crate::{
     diffs::View,
     history::record_render::RecordRender,
     ports::{GitClient, UserSettingsReader},
-    recipes::Recipe,
+    recipes::{Recipe, RecipeLabelParts},
 };
 
 /// Requests one complete viewer recipe preparation.
@@ -30,14 +30,10 @@ pub enum PrepareRecipeOk {
     Broken {
         state: ViewerTabState,
     },
-    Skipped {
-        label: String,
-        path: gtl_models::paths::RepositoryRoot,
-    },
     Publish {
-        label: String,
+        label: RecipeLabel,
         view: Arc<View>,
-        history: RecordRender,
+        history: Box<RecordRender>,
     },
 }
 
@@ -52,8 +48,8 @@ pub enum PrepareRecipeError {
     Compute(#[from] compute_recipe::ComputeRecipeError),
 }
 
-/// Probes the source, computes the view, and decides whether the result is
-/// broken, an empty snapshot, or publishable content.
+/// Probes the source, computes the view, and decides whether the result is broken or
+/// publishable content.
 #[cqrsy::query]
 pub fn execute(
     query: PrepareRecipe,
@@ -95,25 +91,18 @@ pub fn execute(
         kind,
         view,
     });
-    match completed {
-        CompleteRecipeComputationOk::Skipped { label } => Ok(PrepareRecipeOk::Skipped {
-            label,
-            path: recipe.cwd(),
-        }),
-        CompleteRecipeComputationOk::Publish { label, view } => {
-            let history = RecordRender {
-                recipe,
-                title: label.clone(),
-                repo_name: view.repo_name.clone(),
-                range_label: view.cmd.range.clone(),
-            };
-            Ok(PrepareRecipeOk::Publish {
-                label,
-                view,
-                history,
-            })
-        }
-    }
+    let CompleteRecipeComputationOk { label, view } = completed;
+    let history = Box::new(RecordRender {
+        label_parts: RecipeLabelParts::from_view(&recipe, &view),
+        recipe,
+        repo_name: view.repo_name.clone(),
+        range_label: view.cmd.range.clone(),
+    });
+    Ok(PrepareRecipeOk::Publish {
+        label,
+        view,
+        history,
+    })
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@ use super::{CountBadge, ScrollArea};
 use crate::shared::{
     browser,
     i18n::{t, use_language},
+    recipe_label::recipe_label_text,
 };
 
 mod pointer_drag;
@@ -55,6 +56,7 @@ pub(crate) fn ViewerTabItem(
     #[props(default)] onrename: Option<EventHandler<InlineTextSubmission>>,
 ) -> Element {
     let language = use_language();
+    let label = recipe_label_text(&tab.label, language);
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
     let tab_id = tab.id;
     let mut editing = use_signal(|| false);
@@ -101,7 +103,7 @@ pub(crate) fn ViewerTabItem(
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
                         label: t!(language, "tab-snapshot-name"),
                         placeholder: t!(language, "tab-snapshot-name"),
-                        width_text: tab.label.clone(),
+                        width_text: label.clone(),
                         onsubmit: move |submission| {
                             if let Some(rename) = onrename {
                                 rename.call(submission);
@@ -129,7 +131,7 @@ pub(crate) fn ViewerTabItem(
                     "data-viewer-state": presentation_state.dom_state(),
                     aria_controls: "viewer-active-view",
                     tabindex: if active { "0" } else { "-1" },
-                    title: tab_description(&tab, language),
+                    title: tab_description(&label, tab.kind, language),
                     onpointerdown: move |event: PointerEvent| {
                         if reorderable {
                             drag.start.call(event.clone());
@@ -165,7 +167,7 @@ pub(crate) fn ViewerTabItem(
                         activation_gesture.write().cancel();
                         drag.cancel.call(());
                     },
-                    {viewer_tab_rail_content(&tab, presentation_state)}
+                    {viewer_tab_rail_content(&tab, &label, presentation_state)}
                 }
             }
             if tab.pinned {
@@ -173,7 +175,7 @@ pub(crate) fn ViewerTabItem(
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
                     class: "mr-1 text-acc",
-                    aria_label: t!(language, "tab-unpin-named", tab = tab.label.as_str()),
+                    aria_label: t!(language, "tab-unpin-named", tab = label.as_str()),
                     title: t!(language, "tab-unpin"),
                     onclick: move |_| {
                         if let Some(onpin) = onpin {
@@ -184,7 +186,7 @@ pub(crate) fn ViewerTabItem(
                 }
             } else {
                 ViewerTabCloseButton {
-                    label: tab.label.clone(),
+                    label: label.clone(),
                     test_id: gtl_web_contracts::test_ids::VIEWER_TAB_CLOSE.value().to_owned(),
                     onclick: onclose,
                 }
@@ -225,6 +227,7 @@ pub(crate) fn ViewerTabRailMeasurementItem(
     tab: ViewerTab,
     #[props(default)] rows_loading: bool,
 ) -> Element {
+    let label = recipe_label_text(&tab.label, use_language());
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
 
     rsx! {
@@ -233,17 +236,17 @@ pub(crate) fn ViewerTabRailMeasurementItem(
             "data-viewer-tab-measurement": "true",
             aria_hidden: "true",
             span { class: "flex h-full min-w-0 flex-1 items-center gap-1.5 pr-1 pl-2",
-                {viewer_tab_rail_content(&tab, presentation_state)}
+                {viewer_tab_rail_content(&tab, &label, presentation_state)}
             }
             span { class: "mr-1 size-6 flex-none", aria_hidden: "true" }
         }
     }
 }
 
-fn tab_description(tab: &ViewerTab, language: ViewerLanguage) -> String {
-    tab_comparison_name(tab.kind, language).map_or_else(
-        || tab.label.clone(),
-        |comparison| format!("{} - {comparison}", tab.label),
+fn tab_description(label: &str, kind: ViewerTabKind, language: ViewerLanguage) -> String {
+    tab_comparison_name(kind, language).map_or_else(
+        || label.to_owned(),
+        |comparison| format!("{label} - {comparison}"),
     )
 }
 
@@ -257,14 +260,18 @@ fn tab_comparison_name(kind: ViewerTabKind, language: ViewerLanguage) -> Option<
     }
 }
 
-fn viewer_tab_rail_content(tab: &ViewerTab, presentation_state: TabPresentationState) -> Element {
+fn viewer_tab_rail_content(
+    tab: &ViewerTab,
+    label: &str,
+    presentation_state: TabPresentationState,
+) -> Element {
     rsx! {
         if presentation_state == TabPresentationState::Ready {
             ViewerTabKindIndicator { kind: tab.kind }
         } else {
             TabStateMarker { state: presentation_state }
         }
-        span { class: "min-w-0 truncate", "{tab.label}" }
+        span { class: "min-w-0 truncate", "{label}" }
     }
 }
 
@@ -352,7 +359,7 @@ pub(crate) fn ViewerTabOverflowMenu(
     let active_tab_id = active_tab.as_ref().map(|tab| tab.id);
     let active_tab_label = active_tab.as_ref().map_or_else(
         || t!(language, "navigation-open-diffs"),
-        |tab| tab.label.clone(),
+        |tab| recipe_label_text(&tab.label, language),
     );
     let popover_id = id.clone();
     let trigger_id = format!("{id}-trigger");
@@ -476,6 +483,7 @@ fn ViewerTabOverflowMenuItem(
     #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
 ) -> Element {
     let language = use_language();
+    let label = recipe_label_text(&tab.label, language);
     let tab_id = tab.id;
     let mut editing = use_signal(|| false);
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
@@ -521,7 +529,7 @@ fn ViewerTabOverflowMenuItem(
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
                         label: t!(language, "tab-snapshot-name"),
                         placeholder: t!(language, "tab-snapshot-name"),
-                        width_text: tab.label.clone(),
+                        width_text: label.clone(),
                         onsubmit: move |submission| {
                             if let Some(rename) = onrename {
                                 rename.call((tab_id, submission));
@@ -584,7 +592,7 @@ fn ViewerTabOverflowMenuItem(
                     },
                     ViewerTabKindIndicator { kind: tab.kind }
                     strong { class: "min-w-0 flex-1 truncate text-xs font-semibold text-inherit",
-                        "{tab.label}"
+                        "{label}"
                     }
                     span { class: "flex flex-none items-center gap-1.5",
                         TabStateMarker { state: presentation_state }
@@ -609,7 +617,7 @@ fn ViewerTabOverflowMenuItem(
                 Button {
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
-                    aria_label: t!(language, "tab-unpin-named", tab = tab.label.as_str()),
+                    aria_label: t!(language, "tab-unpin-named", tab = label.as_str()),
                     onclick: move |_| {
                         if let Some(onpin) = onpin {
                             onpin.call((tab_id, false));
@@ -619,7 +627,7 @@ fn ViewerTabOverflowMenuItem(
                 }
             } else {
                 ViewerTabCloseButton {
-                    label: tab.label.clone(),
+                    label: label.clone(),
                     onclick: move |_| onclose.call(tab_id),
                 }
             }
@@ -735,7 +743,7 @@ mod tests {
     };
     #[cfg(any(feature = "component-preview", feature = "desktop"))]
     use super::{ViewerTabOverflowMenu, ViewerTabOverflowMenuProps};
-    use crate::test_support::{TestResult, viewer_tab_id};
+    use crate::test_support::{TestResult, recipe_label, viewer_tab_id};
 
     #[test]
     fn typed_and_row_stream_states_map_to_dom_states() {
@@ -802,6 +810,7 @@ mod tests {
     #[test]
     fn active_tab_surface_wraps_the_activation_and_close_controls() -> TestResult {
         let tab_id = viewer_tab_id(1)?;
+        let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
             onrename: None,
@@ -811,7 +820,7 @@ mod tests {
                 custom_name: None,
                 pinned: false,
                 id: tab_id,
-                label: "Working tree".to_owned(),
+                label,
                 kind: ViewerTabKind::Live,
                 state: ViewerTabState::Ready,
             },
@@ -849,6 +858,7 @@ mod tests {
     #[test]
     fn inactive_pending_tab_exposes_its_loading_state() -> TestResult {
         let tab_id = viewer_tab_id(1)?;
+        let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
             onrename: None,
@@ -858,7 +868,7 @@ mod tests {
                 custom_name: None,
                 pinned: false,
                 id: tab_id,
-                label: "Working tree".to_owned(),
+                label,
                 kind: ViewerTabKind::Live,
                 state: ViewerTabState::Pending,
             },
@@ -903,7 +913,7 @@ mod tests {
                     custom_name: None,
                     pinned: false,
                     id: viewer_tab_id(1)?,
-                    label: "Working tree".to_owned(),
+                    label: recipe_label("Working tree")?,
                     kind: ViewerTabKind::Live,
                     state: ViewerTabState::Ready,
                 },
@@ -940,7 +950,7 @@ mod tests {
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(1)?,
-            label: "Working tree".to_owned(),
+            label: recipe_label("Working tree")?,
             kind: ViewerTabKind::Live,
             state: ViewerTabState::Ready,
         };
@@ -948,7 +958,7 @@ mod tests {
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(2)?,
-            label: "Saved comparison".to_owned(),
+            label: recipe_label("Saved comparison")?,
             kind: ViewerTabKind::Snapshot,
             state: ViewerTabState::Pending,
         };

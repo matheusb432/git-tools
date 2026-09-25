@@ -287,13 +287,14 @@ mod tests {
     };
 
     use super::*;
-    use crate::test_support::{TestResult, viewer_active_view, viewer_tab_id};
+    use crate::test_support::{TestResult, recipe_label, viewer_active_view, viewer_tab_id};
 
     fn shell(
         active: Option<ViewerTabId>,
         focus_request_version: Option<ViewerVersion>,
-    ) -> ViewerShell {
-        ViewerShell {
+    ) -> TestResult<ViewerShell> {
+        let label = recipe_label("diff")?;
+        Ok(ViewerShell {
             version: ViewerVersion::new(10),
             focus_request_version,
             tabs: active
@@ -302,7 +303,7 @@ mod tests {
                     custom_name: None,
                     pinned: false,
                     id,
-                    label: "diff".to_owned(),
+                    label: label.clone(),
                     kind: ViewerTabKind::Snapshot,
                     state: ViewerTabState::Pending,
                 })
@@ -324,13 +325,13 @@ mod tests {
                 keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             },
             feedback: None,
-        }
+        })
     }
 
     #[test]
     fn projects_home_only_leaves_for_an_explicit_diff_open() -> TestResult {
         let tab_id = viewer_tab_id(7)?;
-        let mut shell = shell(Some(tab_id), None);
+        let mut shell = shell(Some(tab_id), None)?;
         let (observed, action) = ViewerRouteObservation::default().next(
             "server".to_owned(),
             &Route::Projects {},
@@ -402,7 +403,7 @@ mod tests {
     fn project_links_round_trip_paths_and_resolve_their_own_open() -> TestResult {
         let path = RepositoryRoot::try_new("/tmp/project with spaces & # + %20 ?/repo".into())?;
         let tab_id = viewer_tab_id(7)?;
-        let initial = shell(Some(tab_id), None);
+        let initial = shell(Some(tab_id), None)?;
         let (observed, _) = ViewerRouteObservation::default().next(
             "server".to_owned(),
             &Route::Projects {},
@@ -414,7 +415,7 @@ mod tests {
             let (_, action) = observed.next(
                 "server".to_owned(),
                 &route,
-                &shell(Some(tab_id), Some(ViewerVersion::new(1))),
+                &shell(Some(tab_id), Some(ViewerVersion::new(1)))?,
             );
             assert_eq!(action, ViewerRouteAction::None);
         }
@@ -424,7 +425,7 @@ mod tests {
     #[test]
     fn repeated_cli_open_leaves_settings_even_when_the_active_tab_is_unchanged() -> TestResult {
         let tab_id = viewer_tab_id(7)?;
-        let mut shell = shell(Some(tab_id), Some(ViewerVersion::new(1)));
+        let mut shell = shell(Some(tab_id), Some(ViewerVersion::new(1)))?;
         let (observed, _) = ViewerRouteObservation::default().next(
             "server".to_owned(),
             &Route::Projects {},
@@ -444,12 +445,12 @@ mod tests {
     fn initial_direct_route_and_back_navigation_activate_the_requested_tab() -> TestResult {
         let first = viewer_tab_id(4)?;
         let second = viewer_tab_id(8)?;
-        let mut shell = shell(Some(second), Some(ViewerVersion::new(1)));
+        let mut shell = shell(Some(second), Some(ViewerVersion::new(1)))?;
         shell.tabs.push(ViewerTab {
             custom_name: None,
             pinned: false,
             id: first,
-            label: "first".to_owned(),
+            label: recipe_label("first")?,
             kind: ViewerTabKind::Snapshot,
             state: ViewerTabState::Ready,
         });
@@ -473,7 +474,7 @@ mod tests {
     fn closed_tabs_and_server_replacement_resolve_to_the_current_workspace() -> TestResult {
         let first = viewer_tab_id(4)?;
         let second = viewer_tab_id(8)?;
-        let shell = shell(Some(second), None);
+        let shell = shell(Some(second), None)?;
         let (observed, action) = ViewerRouteObservation::default().next(
             "old".to_owned(),
             &Route::Diff { tab_id: first },
@@ -491,7 +492,7 @@ mod tests {
         let (_, action) = observed.next("new".to_owned(), &Route::Settings {}, &shell);
         assert_eq!(action, ViewerRouteAction::None);
 
-        let empty = self::shell(None, None);
+        let empty = self::shell(None, None)?;
         let (_, action) = observed.next("old".to_owned(), &Route::Diff { tab_id: second }, &empty);
         assert_eq!(action, ViewerRouteAction::Replace(Route::Projects {}));
         Ok(())

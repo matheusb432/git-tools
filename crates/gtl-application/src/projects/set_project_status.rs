@@ -3,7 +3,7 @@ use gtl_models::projects::catalogue::{
 };
 use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior};
 
-use super::ProjectCatalogueError;
+use super::catalogue::ProjectCatalogueError;
 
 pub struct SetProjectStatus {
     pub id: ProjectId,
@@ -11,11 +11,16 @@ pub struct SetProjectStatus {
     pub mode: ProjectOperationMode,
 }
 
+pub struct SetProjectStatusOk {
+    pub target_status: ProjectStatus,
+    pub outcome: ProjectMutationOutcome,
+}
+
 #[cqrsy::command]
 pub fn execute(
     request: &SetProjectStatus,
     connection: &mut Connection,
-) -> Result<ProjectMutationOutcome, ProjectCatalogueError> {
+) -> Result<SetProjectStatusOk, ProjectCatalogueError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let paused: bool = transaction
         .query_row(
@@ -36,9 +41,12 @@ pub fn execute(
         transaction.execute(sql, [request.id.as_ref()])?;
     }
     transaction.commit()?;
-    Ok(if changed {
-        ProjectMutationOutcome::Changed
-    } else {
-        ProjectMutationOutcome::Unchanged
+    Ok(SetProjectStatusOk {
+        target_status: request.status,
+        outcome: if changed {
+            ProjectMutationOutcome::Changed
+        } else {
+            ProjectMutationOutcome::Unchanged
+        },
     })
 }

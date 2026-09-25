@@ -14,9 +14,7 @@ mod project_comparison_reader;
 mod text_editor_client;
 mod user_settings;
 
-pub use artifact_store::{
-    ArtifactMeta, ArtifactRangeKey, ArtifactStore, HistoryRecord, PlacedArtifact,
-};
+pub use artifact_store::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, PlacedArtifact};
 pub use clock::Clock;
 pub use diff_viewer_client::{
     DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerClient,

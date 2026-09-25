@@ -1,5 +1,5 @@
 use gtl_models::failure::ErrorMeta;
-use gtl_wire::viewer::{ViewerFeedback, ViewerShell};
+use gtl_wire::viewer::ViewerShell;
 
 use super::{
     ViewerState, ViewerStateError,
@@ -33,14 +33,13 @@ pub enum GetViewerShellError {
 
 #[cqrsy::query]
 pub fn execute(
-    feedback: Option<ViewerFeedback>,
     state: &ViewerState,
     settings: &impl UserSettingsReader,
 ) -> Result<GetViewerShellOk, GetViewerShellError> {
     let settings = settings.load()?;
     let commit_reload = work::reserve_selected_commit_reload(state)?;
     let full_context = ensure_view_full_context::reserve(state, settings.viewer_render_options())?;
-    let shell = state.inspect(|session| shell::project(session, &settings, feedback))??;
+    let shell = state.inspect(|session| shell::project(session, &settings))??;
     Ok(GetViewerShellOk {
         shell,
         commit_reload,

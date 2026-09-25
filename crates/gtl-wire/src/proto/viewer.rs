@@ -1,11 +1,12 @@
 pub mod projects;
 pub mod push;
+mod recipe_label;
 pub mod text;
 
 use std::path::PathBuf;
 
 use gtl_models::{
-    diffs::{CommitId, DiffLineCount, ExcludedExtensions},
+    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExcludedExtensions},
     failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
@@ -190,7 +191,7 @@ fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
         pinned: tab.pinned,
         custom_name: tab.custom_name,
         id: u64::from(tab.id),
-        label: tab.label,
+        recipe_label: Some(recipe_label::encode(tab.label)),
         kind: match tab.kind {
             ViewerTabKind::Snapshot => v1::ViewerTabKind::Snapshot,
             ViewerTabKind::Live => v1::ViewerTabKind::Live,
@@ -251,7 +252,7 @@ fn encode_viewer_active_view(
             crate::viewer::ViewerRowSourceState::Pending => v1::ViewerRowSourceState::Pending,
             crate::viewer::ViewerRowSourceState::Failed => v1::ViewerRowSourceState::Failed,
         } as i32,
-        title: view.title,
+        view_title: Some(encode_diff_view_title(view.title)),
         repository_name: view.repository_name.to_string(),
         branch: view.branch.to_string(),
         upstream: view.upstream.to_string(),
@@ -287,7 +288,6 @@ fn encode_viewer_active_view(
                 })
             })
             .collect::<Result<Vec<_>, ViewerCodecError>>()?,
-        commits_label: view.commits_label,
         commit_count: u32::try_from(view.commit_count)
             .map_err(|_| ViewerCodecError::Unrepresentable)?,
         commit_selection: Some(encode_viewer_commit_selection(view.commit_selection)),
@@ -304,6 +304,35 @@ fn encode_viewer_active_view(
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect(),
             }),
+    })
+}
+
+fn encode_diff_view_title(title: DiffViewTitle) -> v1::ViewerDiffViewTitle {
+    use v1::viewer_diff_view_title::Title;
+
+    let title = match title {
+        DiffViewTitle::Diff => Title::Diff(v1::Empty {}),
+        DiffViewTitle::MergeDiff => Title::MergeDiff(v1::Empty {}),
+        DiffViewTitle::Commit { id } => Title::CommitId(id.to_string()),
+        DiffViewTitle::Named { name } => Title::Name(name.to_string()),
+    };
+    v1::ViewerDiffViewTitle { title: Some(title) }
+}
+
+fn decode_diff_view_title(
+    title: v1::ViewerDiffViewTitle,
+) -> Result<DiffViewTitle, ViewerCodecError> {
+    use v1::viewer_diff_view_title::Title;
+
+    Ok(match required(title.title)? {
+        Title::Diff(v1::Empty {}) => DiffViewTitle::Diff,
+        Title::MergeDiff(v1::Empty {}) => DiffViewTitle::MergeDiff,
+        Title::CommitId(id) => DiffViewTitle::Commit {
+            id: CommitId::try_new(id).map_err(|_| ViewerCodecError::InvalidMessage)?,
+        },
+        Title::Name(name) => DiffViewTitle::Named {
+            name: ProjectName::try_new(name).map_err(|_| ViewerCodecError::InvalidMessage)?,
+        },
     })
 }
 
@@ -335,14 +364,13 @@ fn encode_viewer_commit_selection(selection: ViewerCommitSelection) -> v1::Viewe
 
 fn encode_viewer_feedback(feedback: ViewerFeedback) -> v1::ViewerFeedback {
     let (kind, labels) = match feedback {
-        ViewerFeedback::TabClosed => (v1::ViewerFeedbackKind::TabClosed, Vec::new()),
         ViewerFeedback::SnapshotRecipesSkipped { labels } => {
             (v1::ViewerFeedbackKind::SnapshotRecipesSkipped, labels)
         }
     };
     v1::ViewerFeedback {
         kind: kind as i32,
-        labels,
+        recipe_labels: labels.into_iter().map(recipe_label::encode).collect(),
     }
 }
 
@@ -538,7 +566,7 @@ pub fn encode_list_viewer_history_response(
             .map(|entry| {
                 Ok(v1::ViewerHistoryEntry {
                     id: encode_render_history_id(entry.id)?,
-                    title: entry.title,
+                    recipe_label: Some(recipe_label::encode(entry.label)),
                     repository_name: entry.repository_name.to_string(),
                     kind: match entry.kind {
                         ViewerRecipeKind::Diff => v1::ViewerRecipeKind::Diff,
@@ -1402,7 +1430,7 @@ fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> 
         pinned: tab.pinned,
         custom_name: tab.custom_name,
         id: ViewerTabId::try_new(tab.id).map_err(|_| ViewerCodecError::InvalidMessage)?,
-        label: tab.label,
+        label: recipe_label::decode(required(tab.recipe_label)?)?,
         kind: match v1::ViewerTabKind::try_from(tab.kind) {
             Ok(v1::ViewerTabKind::Snapshot) => ViewerTabKind::Snapshot,
             Ok(v1::ViewerTabKind::Live) => ViewerTabKind::Live,
@@ -1478,7 +1506,7 @@ fn decode_viewer_active_view(
                 .try_into()
                 .map_err(|_| ViewerCodecError::InvalidMessage)?,
         ),
-        title: view.title,
+        title: decode_diff_view_title(required(view.view_title)?)?,
         repository_name: ProjectName::try_new(view.repository_name)
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         branch: GitHead::try_from(view.branch).map_err(|_| ViewerCodecError::InvalidMessage)?,
@@ -1490,7 +1518,6 @@ fn decode_viewer_active_view(
             .into_iter()
             .map(decode_viewer_file_summary)
             .collect::<Result<Vec<_>, _>>()?,
-        commits_label: view.commits_label,
         commit_count: usize::try_from(view.commit_count)
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         commits: Vec::new(),
@@ -1605,13 +1632,21 @@ fn decode_viewer_feedback(
     feedback: v1::ViewerFeedback,
 ) -> Result<ViewerFeedback, ViewerCodecError> {
     match v1::ViewerFeedbackKind::try_from(feedback.kind) {
-        Ok(v1::ViewerFeedbackKind::TabClosed) => Ok(ViewerFeedback::TabClosed),
-        Ok(v1::ViewerFeedbackKind::SnapshotRecipesSkipped) => {
+        Ok(v1::ViewerFeedbackKind::SnapshotRecipesSkipped)
+            if !feedback.recipe_labels.is_empty() =>
+        {
             Ok(ViewerFeedback::SnapshotRecipesSkipped {
-                labels: feedback.labels,
+                labels: feedback
+                    .recipe_labels
+                    .into_iter()
+                    .map(recipe_label::decode)
+                    .collect::<Result<_, _>>()?,
             })
         }
-        Ok(v1::ViewerFeedbackKind::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+        Ok(
+            v1::ViewerFeedbackKind::SnapshotRecipesSkipped | v1::ViewerFeedbackKind::Unspecified,
+        )
+        | Err(_) => Err(ViewerCodecError::InvalidMessage),
     }
 }
 
@@ -1737,7 +1772,7 @@ fn decode_viewer_history_entry(
     let raw_id = i64::try_from(entry.id).map_err(|_| ViewerCodecError::InvalidMessage)?;
     Ok(ViewerHistoryEntry {
         id: RenderHistoryId::try_new(raw_id).map_err(|_| ViewerCodecError::InvalidMessage)?,
-        title: entry.title,
+        label: recipe_label::decode(required(entry.recipe_label)?)?,
         repository_name: ProjectName::try_new(entry.repository_name)
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         kind: match v1::ViewerRecipeKind::try_from(entry.kind) {

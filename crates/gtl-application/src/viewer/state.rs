@@ -59,7 +59,8 @@ impl ViewerState {
         Ok(ViewerDiffSnapshot::new(view))
     }
 
-    /// Runs a read that may update cache recency but does not change visible shell output.
+    /// Runs a read that may update cache recency or hand off one-shot shell feedback, but does
+    /// not change versioned shell state.
     pub fn inspect<Output>(
         &self,
         inspect: impl FnOnce(&mut ViewerSession) -> Output,
@@ -125,7 +126,7 @@ mod tests {
         let state = ViewerState::new();
         let make_view = |title: &str| {
             let mut view = crate::utils::diffs::view();
-            view.title = title.to_owned();
+            view.title = crate::utils::diffs::view_title(title);
             view.files = vec![crate::diffs::FileDiff {
                 path: crate::utils::repository_relative_path("f.txt"),
                 added: gtl_models::diffs::DiffLineCount::new(1),
@@ -154,8 +155,8 @@ mod tests {
                 .unwrap()
                 .as_ptr()
         );
-        assert_eq!(first.title, "live");
-        assert_eq!(second.title, "snapshot");
+        assert_eq!(first.title, crate::utils::diffs::view_title("live"));
+        assert_eq!(second.title, crate::utils::diffs::view_title("snapshot"));
     }
 
     #[test]

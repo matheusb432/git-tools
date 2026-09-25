@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use gtl_models::{
     artifacts::{ArtifactCommitRange, ArtifactDiffIdentity, ArtifactRangeKind},
-    diffs::{DiffKind, PinnedRange},
+    diffs::{DiffKind, DiffViewTitle, PinnedRange},
     failure::ErrorMeta,
     git::{GitDiffSpec, GitRevision},
-    paths::RepositoryRoot,
+    paths::{ProjectName, RepositoryRoot},
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ pub struct RenderDiff {
     pub cwd: PathBuf,
     pub target: DiffTargetRequest,
     #[serde(default)]
-    pub name: Option<String>,
+    pub name: Option<ProjectName>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,7 +187,7 @@ pub fn execute(
     let summary = computed.summary;
     notes.extend(computed.notes);
     if let Some(name) = &name {
-        view.title.clone_from(name);
+        view.title = DiffViewTitle::Named { name: name.clone() };
     }
     if !view.has_diff_content() {
         notes.push(Note::warn(format!(
@@ -204,16 +204,12 @@ pub fn execute(
 
     let meta = ArtifactMeta {
         repo_root: top.clone(),
-        repo_name: view.repo_name.clone(),
         identity: ArtifactDiffIdentity::from_parts(
             DiffKind::from_diff_range(&view.cmd.range),
             commit_range,
         )
         .map_err(anyhow::Error::from)?,
-        range_label: view.cmd.range.clone(),
-        head_committed_at: git.committed_at(&top, &GitRevision::head()),
         generated_at: clock.now().map_err(anyhow::Error::from)?,
-        title: view.title.clone(),
         render_options,
         theme,
         language,
@@ -314,9 +310,6 @@ mod tests {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
-            committed_at: Some(
-                gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z").unwrap(),
-            ),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
@@ -341,8 +334,10 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.title, "diff");
-        assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
+        assert_eq!(
+            artifact.meta.repo_root,
+            crate::utils::repository_root("/repo")
+        );
         assert_eq!(
             response.notes,
             vec![
@@ -659,7 +654,7 @@ mod tests {
                 pinned: None,
             },
         );
-        request.name = Some("custom".into());
+        request.name = Some(crate::utils::project_name("custom"));
         let response = render_diff::execute(
             request,
             &FixedUserSettingsStore::default(),
@@ -678,7 +673,7 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.title, "custom");
+        assert!(artifact.html.contains("\"custom\""));
     }
 
     #[test]

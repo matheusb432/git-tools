@@ -179,7 +179,7 @@ impl ViewerService for ViewerGrpcService {
         _request: Request<v1::GetViewerShellRequest>,
     ) -> Result<Response<v1::GetViewerShellResponse>, Status> {
         Ok(Response::new(v1::GetViewerShellResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -263,7 +263,7 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::ActivateViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -283,7 +283,7 @@ impl ViewerService for ViewerGrpcService {
         .await?
         .map_err(|error| unexpected(error, "save pinned tab order"))?;
         Ok(Response::new(v1::MoveViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -374,7 +374,7 @@ impl ViewerService for ViewerGrpcService {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -386,7 +386,7 @@ impl ViewerService for ViewerGrpcService {
         let work = work::reserve_refresh(&self.state.viewer, tab_id).into_grpc()?;
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::RefreshViewerTabResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -401,7 +401,7 @@ impl ViewerService for ViewerGrpcService {
         let work = work::reserve_commit(&self.state.viewer, tab_id, &commit_id).into_grpc()?;
         viewer_runtime::spawn_commit(self.state.clone(), work);
         Ok(Response::new(v1::SelectViewerCommitResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 
@@ -441,7 +441,7 @@ impl ViewerService for ViewerGrpcService {
             }));
         }
         Ok(Response::new(v1::ClearViewerCommitSelectionResponse {
-            shell: Some(project_shell(&self.state, None)?),
+            shell: Some(project_shell(&self.state)?),
         }))
     }
 

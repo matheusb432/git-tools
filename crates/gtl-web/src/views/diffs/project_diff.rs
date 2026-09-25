@@ -166,7 +166,7 @@ mod tests {
     use gtl_wire::viewer::{ViewerTabKind, ViewerTabState};
 
     use super::*;
-    use crate::test_support::{TestResult, viewer_tab_id};
+    use crate::test_support::{TestResult, recipe_label, viewer_tab_id};
 
     fn request(path: &str, mode: ViewerProjectDiffMode) -> TestResult<OpenViewerProject> {
         Ok(OpenViewerProject {
@@ -180,7 +180,7 @@ mod tests {
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(id)?,
-            label: "Project".to_owned(),
+            label: recipe_label("Project")?,
             kind: ViewerTabKind::Snapshot,
             state: ViewerTabState::Ready,
         })

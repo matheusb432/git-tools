@@ -1,10 +1,11 @@
 //! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
 
 use gtl_models::{
-    diffs::{CommitId, DiffLineCount, ExcludedExtensions},
+    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExcludedExtensions},
     failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
+    recipes::RecipeLabel,
     settings::UserSettingsRevision,
     timestamps::MachineTimestamp,
     viewer::{
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 43;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 47;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -160,7 +161,7 @@ pub struct ViewerTab {
     #[serde(default)]
     pub pinned: bool,
     pub id: ViewerTabId,
-    pub label: String,
+    pub label: RecipeLabel,
     pub kind: ViewerTabKind,
     pub state: ViewerTabState,
 }
@@ -318,13 +319,12 @@ pub struct ViewerActiveView {
     pub identity: ViewerViewIdentity,
     pub content_id: ViewerRowContentId,
     pub row_source: ViewerRowSourceState,
-    pub title: String,
+    pub title: DiffViewTitle,
     pub repository_name: ProjectName,
     pub branch: GitHead,
     pub upstream: GitRevision,
     pub command: ViewerCommandLine,
     pub files: Vec<ViewerFileSummary>,
-    pub commits_label: String,
     #[serde(default)]
     pub commit_count: usize,
     pub commits: Vec<ViewerCommitSummary>,
@@ -404,8 +404,7 @@ pub struct ViewerPreferences {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ViewerFeedback {
-    TabClosed,
-    SnapshotRecipesSkipped { labels: Vec<String> },
+    SnapshotRecipesSkipped { labels: Vec<RecipeLabel> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,7 +460,7 @@ pub enum ViewerRecipeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryEntry {
     pub id: RenderHistoryId,
-    pub title: String,
+    pub label: RecipeLabel,
     pub repository_name: ProjectName,
     pub kind: ViewerRecipeKind,
     pub range_label: String,

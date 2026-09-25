@@ -15,6 +15,7 @@ use crate::{
         date_display::DateDisplayTime,
         failure_notice::client_error_message,
         i18n::{t, use_language},
+        recipe_label::recipe_label_text,
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, Select, SelectOption,
             Skeleton,
@@ -271,14 +272,15 @@ fn HistoryRow(
     oncopy: EventHandler<RenderHistoryId>,
 ) -> Element {
     let language = use_language();
+    let label = recipe_label_text(&entry.label, language);
     rsx! {
         DataTableRow {
             TableColumn { class: "font-mono text-xs text-ink-3", "#{entry.id}" }
             TableColumn {
                 span {
                     class: "block max-w-64 truncate font-semibold text-ink",
-                    title: entry.title.clone(),
-                    "{entry.title}"
+                    title: label.clone(),
+                    "{label}"
                 }
             }
             TableColumn {
@@ -312,7 +314,7 @@ fn HistoryRow(
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Outline,
                         state: if opening { ButtonState::Loading } else if open_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
-                        aria_label: t!(language, "history-open-named", title = entry.title.as_str()),
+                        aria_label: t!(language, "history-open-named", title = label.as_str()),
                         "data-testid": test_ids::HISTORY_ENTRY_OPEN.value(),
                         onclick: move |_| onopen.call(entry.id),
                         span { aria_hidden: "true",
@@ -323,7 +325,7 @@ fn HistoryRow(
                     Button {
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
-                        aria_label: t!(language, "history-copy-json-named", title = entry.title.as_str()),
+                        aria_label: t!(language, "history-copy-json-named", title = label.as_str()),
                         title: if copied { t!(language, "copy-copied") } else { t!(language, "history-copy-json") },
                         onclick: move |_| oncopy.call(entry.id),
                         span { aria_hidden: "true",

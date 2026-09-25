@@ -39,13 +39,12 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
             full_lines: Some(lines.clone().into()),
             lines: lines.into(),
         }],
-        title: "Large diff".into(),
+        title: gtl_models::diffs::DiffViewTitle::Diff,
         cmd: Cmd {
             lead: "git diff ".into(),
             range: "origin/main..HEAD".into(),
             trail: String::new(),
         },
-        commits_label: "0 commits".into(),
         foot: Foot {
             cmd: "git diff origin/main..HEAD".into(),
         },

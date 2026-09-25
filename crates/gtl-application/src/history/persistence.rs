@@ -5,11 +5,19 @@
 
 use std::num::NonZeroU32;
 
-use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp, viewer::RenderHistoryId};
+use gtl_models::{
+    git::{CommitCount, GitHead, GitRevision},
+    paths::ProjectName,
+    recipes::RecipeLabel,
+    timestamps::MachineTimestamp,
+    viewer::RenderHistoryId,
+};
 #[cfg(test)]
 use rusqlite::Connection;
 
-use crate::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use crate::recipes::{
+    PinnedRange, Recipe, RecipeLabelParts, RecipeOp, RecipeSource, RecipeTarget, recipe_label,
+};
 
 /// The `render_sources.kind` value for a repository addressed by directory.
 pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
@@ -20,10 +28,66 @@ pub struct RecentRenderRecord {
     pub project_id: Option<gtl_models::projects::catalogue::ProjectId>,
     pub id: RenderHistoryId,
     pub recipe: Recipe,
-    pub title: String,
     pub repo_name: ProjectName,
+    pub label_parts: RecipeLabelParts,
+    /// The Git range the render compared, as Git spells it.
     pub range_label: String,
     pub rendered_at: MachineTimestamp,
+}
+
+impl RecentRenderRecord {
+    /// Names the render as a snapshot tab of it would.
+    #[must_use]
+    pub fn label(&self) -> RecipeLabel {
+        recipe_label::rendered(&self.recipe, self.repo_name.clone(), &self.label_parts)
+    }
+}
+
+/// The nullable `recent_renders` label-part columns of one successful render.
+pub(super) struct LabelPartColumns {
+    pub(super) commit_count: Option<i64>,
+    pub(super) merge_branch: Option<String>,
+    pub(super) merge_upstream: Option<String>,
+}
+
+impl LabelPartColumns {
+    pub(super) fn from_parts(parts: &RecipeLabelParts) -> anyhow::Result<Self> {
+        Ok(match parts {
+            RecipeLabelParts::None => Self {
+                commit_count: None,
+                merge_branch: None,
+                merge_upstream: None,
+            },
+            RecipeLabelParts::UnpushedCommits { count } => Self {
+                commit_count: Some(i64::try_from(count.into_inner())?),
+                merge_branch: None,
+                merge_upstream: None,
+            },
+            RecipeLabelParts::Merge { branch, upstream } => Self {
+                commit_count: None,
+                merge_branch: Some(branch.to_string()),
+                merge_upstream: Some(upstream.to_string()),
+            },
+        })
+    }
+
+    fn try_into_parts(self) -> Result<RecipeLabelParts, String> {
+        match (self.commit_count, self.merge_branch, self.merge_upstream) {
+            (None, None, None) => Ok(RecipeLabelParts::None),
+            (Some(count), None, None) => Ok(RecipeLabelParts::UnpushedCommits {
+                count: CommitCount::new(
+                    u64::try_from(count).map_err(|error| format!("commit count: {error}"))?,
+                ),
+            }),
+            (None, Some(branch), Some(upstream)) => Ok(RecipeLabelParts::Merge {
+                branch: GitHead::try_from(branch)
+                    .map_err(|error| format!("merge branch: {error}"))?,
+                upstream: GitRevision::try_new(upstream)
+                    .map_err(|error| format!("merge upstream: {error}"))?,
+            }),
+            _ => Err("expected a commit count, both merge heads, or neither".to_owned()),
+        }
+    }
 }
 
 /// The relational projection of one [`Recipe`], ready to bind as SQL
@@ -88,9 +152,9 @@ pub(super) struct RecentRenderRow {
     pinned_base: Option<String>,
     pinned_head: Option<String>,
     recipe_name: Option<String>,
-    title: String,
     repo_name: String,
     range_label: String,
+    label_parts: LabelPartColumns,
     rendered_at: String,
 }
 
@@ -99,7 +163,8 @@ pub(super) struct RecentRenderRow {
 pub(super) const RECENT_RENDER_SELECT: &str = "
 SELECT r.id, s.kind, s.value, o.name, t.name, r.argument,
        r.pinned_base, r.pinned_head, r.recipe_name,
-       r.title, r.repo_name, r.range_label, r.rendered_at, r.project_id
+       r.repo_name, r.range_label, r.commit_count, r.merge_branch, r.merge_upstream,
+       r.rendered_at, r.project_id
 FROM recent_renders r
 JOIN render_sources s ON s.id = r.source_id
 JOIN render_operations o ON o.id = r.operation_id
@@ -117,11 +182,15 @@ impl RecentRenderRow {
             pinned_base: row.get(6)?,
             pinned_head: row.get(7)?,
             recipe_name: row.get(8)?,
-            title: row.get(9)?,
-            repo_name: row.get(10)?,
-            range_label: row.get(11)?,
-            rendered_at: row.get(12)?,
-            project_id: row.get(13)?,
+            repo_name: row.get(9)?,
+            range_label: row.get(10)?,
+            label_parts: LabelPartColumns {
+                commit_count: row.get(11)?,
+                merge_branch: row.get(12)?,
+                merge_upstream: row.get(13)?,
+            },
+            rendered_at: row.get(14)?,
+            project_id: row.get(15)?,
         })
     }
 
@@ -142,11 +211,17 @@ impl RecentRenderRow {
                 id: self.id,
                 reason: error.to_string(),
             })?;
+        let label_parts = self.label_parts.try_into_parts().map_err(|reason| {
+            RecentRenderRowError::LabelParts {
+                id: self.id,
+                reason,
+            }
+        })?;
         Ok(RecentRenderRecord {
             project_id,
             id,
             recipe,
-            title: self.title,
+            label_parts,
             repo_name: ProjectName::try_new(self.repo_name).map_err(|error| {
                 RecentRenderRowError::ProjectName {
                     id: self.id,
@@ -260,6 +335,8 @@ pub enum RecentRenderRowError {
     Id { id: i64 },
     #[error("recent_renders row id {id} holds an undecodable recipe: {reason}")]
     Recipe { id: i64, reason: String },
+    #[error("recent_renders row id {id} holds undecodable label parts: {reason}")]
+    LabelParts { id: i64, reason: String },
     #[error("recent_renders row id {id} has invalid {field}: {reason}")]
     ProjectName {
         id: i64,
@@ -308,14 +385,25 @@ pub(super) fn store_test() -> Connection {
           pinned_base  TEXT,
           pinned_head  TEXT,
           recipe_name  TEXT,
-          title        TEXT NOT NULL,
           repo_name    TEXT NOT NULL,
-          range_label  TEXT NOT NULL,
+          range_label  TEXT,
+          commit_count INTEGER,
+          merge_branch TEXT,
+          merge_upstream TEXT,
           rendered_at  TEXT NOT NULL,
           render_status TEXT NOT NULL DEFAULT 'success'
             CHECK (render_status IN ('pending', 'success', 'error')),
           CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
-          CHECK ((operation_id = 1) = (target_id IS NOT NULL))
+          CHECK ((operation_id = 1) = (target_id IS NOT NULL)),
+          CHECK ((render_status = 'success') = (range_label IS NOT NULL)),
+          CHECK (render_status = 'success' OR (commit_count IS NULL AND merge_branch IS NULL)),
+          CHECK (commit_count IS NULL OR (commit_count >= 0 AND target_id = 1)),
+          CHECK ((merge_branch IS NULL) = (merge_upstream IS NULL)),
+          CHECK (merge_branch IS NULL OR (
+            (operation_id = 2 OR target_id = 4)
+            AND length(trim(merge_branch)) > 0
+            AND length(trim(merge_upstream)) > 0
+          ))
         ) STRICT;
         CREATE UNIQUE INDEX recent_renders_fingerprint_idx
         ON recent_renders (
@@ -354,10 +442,10 @@ pub(super) fn store_test() -> Connection {
     connection
 }
 
-/// Inserts one minimal unpushed-diff render row under `id`, sharing a single
-/// seeded project source across calls.
+/// Inserts one minimal named unpushed-diff render row under `id`, sharing a
+/// single seeded project source across calls.
 #[cfg(test)]
-pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) {
+pub(super) fn seed_recent_render(connection: &Connection, id: i64, name: &str) {
     let pinned_base = format!("{id:040x}");
     let pinned_head = format!("{:040x}", id + 1_000);
     connection
@@ -366,8 +454,8 @@ pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) 
              VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
              INSERT INTO recent_renders \
              (id, source_id, operation_id, target_id, pinned_base, pinned_head, \
-              title, repo_name, range_label, rendered_at) \
-             VALUES ({id}, 7, 1, 1, '{pinned_base}', '{pinned_head}', '{title}', \
+              recipe_name, repo_name, range_label, rendered_at) \
+             VALUES ({id}, 7, 1, 1, '{pinned_base}', '{pinned_head}', '{name}', \
              'git-tools', 'main..HEAD', '2026-07-11T00:00:00Z');"
         ))
         .unwrap();
@@ -385,12 +473,15 @@ mod tests {
 
     fn assert_round_trips(recipe: &Recipe) {
         let mut connection = store_test();
+        let mut view = crate::utils::viewer::empty_view();
+        view.commits = vec![crate::utils::diffs::commit("abc1234")];
+        let label_parts = RecipeLabelParts::from_view(recipe, &view);
         record_render::execute(
             &record_render::RecordRender {
                 recipe: recipe.clone(),
-                title: "t".into(),
                 repo_name: crate::utils::project_name("gt"),
                 range_label: "main..HEAD".into(),
+                label_parts: label_parts.clone(),
             },
             &mut connection,
             &FixedClock::from_raw("2026-07-11T00:00:00Z"),
@@ -406,10 +497,15 @@ mod tests {
 
         assert_eq!(entries.len(), 1, "recipe {recipe:?} persists one row");
         assert_eq!(&entries[0].recipe, recipe, "recipe survives the row codec");
+        assert_eq!(
+            entries[0].label_parts, label_parts,
+            "label parts survive the row codec"
+        );
     }
 
     /// The row codec is the persistence contract: every operation and target
-    /// shape must survive a record -> list round trip unchanged.
+    /// shape, with the label parts its render computes, must survive a
+    /// record -> list round trip unchanged.
     #[test]
     fn every_recipe_shape_round_trips_through_the_relational_codec() {
         let pin = Some(crate::utils::pinned_range(&"a".repeat(40), &"b".repeat(40)));

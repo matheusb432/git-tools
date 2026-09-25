@@ -109,7 +109,7 @@ async fn check(state: &AppState, tab_id: ViewerTabId) -> Result<bool, LiveCheckE
         LiveViewCheck::Inactive | LiveViewCheck::ChangedDuringComputation => Ok(false),
         LiveViewCheck::Unchanged => Ok(true),
         LiveViewCheck::Prepared(work) => {
-            Ok(refresh_live_view::publish(work, &state.viewer)? == PublishOutcome::Published)
+            Ok(refresh_live_view::publish(*work, &state.viewer)? == PublishOutcome::Published)
         }
     }
 }

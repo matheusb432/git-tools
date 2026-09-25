@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::{AppliedExclusions, Commit},
+    diffs::{AppliedExclusions, Commit, DiffViewTitle},
     git::{GitDiffSpec, GitHead, GitRevision},
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
 };
@@ -89,9 +89,8 @@ pub struct View {
     pub upstream: GitRevision,
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
-    pub title: String,
+    pub title: DiffViewTitle,
     pub cmd: Cmd,
-    pub commits_label: String,
     pub foot: Foot,
     pub full_context: FullContextDiffState,
     /// Renderers must disclose hidden files when this is present.

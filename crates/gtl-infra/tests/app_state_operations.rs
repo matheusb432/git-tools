@@ -18,7 +18,7 @@ use gtl_application::{
         save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
     ports::{Clock, GitRepositoryState},
-    recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
+    recipes::{Recipe, RecipeLabelParts, RecipeOp, RecipeSource, RecipeTarget},
     utils::FakeGitClient,
     viewer::{
         ViewerState,
@@ -28,6 +28,7 @@ use gtl_application::{
 };
 use gtl_infra::app_state::SqliteAppState;
 use gtl_models::{
+    git::CommitCount,
     paths::{ProjectName, RepositoryRoot},
     recipes::RecipeBatchId,
     timestamps::MachineTimestamp,
@@ -124,9 +125,11 @@ fn public_operations_use_the_migrated_schema() {
         record_render::execute(
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
-                title: "alpha · unpushed".into(),
                 repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),
+                label_parts: RecipeLabelParts::UnpushedCommits {
+                    count: CommitCount::new(2),
+                },
             },
             &mut connection,
             &ClockTest,
@@ -143,7 +146,12 @@ fn public_operations_use_the_migrated_schema() {
         let connection = state.connection_lock().unwrap();
         get_recent_render::execute(&GetRecentRender { id }, &connection).unwrap()
     };
-    assert_eq!(found.unwrap().title, "alpha · unpushed");
+    assert_eq!(
+        found.unwrap().label_parts,
+        RecipeLabelParts::UnpushedCommits {
+            count: CommitCount::new(2),
+        }
+    );
 
     let viewer = ViewerState::new();
     let tab_id = work::reserve_open(
@@ -296,9 +304,9 @@ fn prune_failure_rolls_back_the_render_insertion() {
              )
              INSERT INTO recent_renders
                (source_id, operation_id, target_id, pinned_base, pinned_head,
-                title, repo_name, range_label, rendered_at)
+                repo_name, range_label, rendered_at)
              SELECT 1, 1, 1, 'base-' || value, 'head-' || value,
-                    'seed ' || value, 'fixture', 'main..HEAD', '2026-07-18T00:00:00Z'
+                    'fixture', 'main..HEAD', '2026-07-18T00:00:00Z'
              FROM render_number;
              CREATE TRIGGER recent_renders_prune_abort
              BEFORE DELETE ON recent_renders
@@ -313,9 +321,9 @@ fn prune_failure_rolls_back_the_render_insertion() {
         record_render::execute(
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
-                title: "failed insertion".into(),
                 repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),
+                label_parts: RecipeLabelParts::None,
             },
             &mut connection,
             &ClockTest,
@@ -329,7 +337,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
         .unwrap();
     let failed_insertion_count: i64 = connection
         .query_row(
-            "SELECT COUNT(*) FROM recent_renders WHERE title = 'failed insertion'",
+            "SELECT COUNT(*) FROM recent_renders WHERE repo_name = 'alpha'",
             [],
             |row| row.get(0),
         )

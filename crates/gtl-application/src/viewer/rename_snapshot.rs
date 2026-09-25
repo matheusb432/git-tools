@@ -67,7 +67,7 @@ pub fn execute(
         }).collect::<Vec<_>>();
         let transaction = connection.transaction().map_err(anyhow::Error::from)?;
         let changed = transaction.execute(
-            "UPDATE recent_renders SET recipe_name = ?1, title = ?1 WHERE id = ?2 AND render_status = 'success'",
+            "UPDATE recent_renders SET recipe_name = ?1 WHERE id = ?2 AND render_status = 'success'",
             params![name.as_str(), i64::from(history_id)],
         ).map_err(anyhow::Error::from)?;
         if changed != 1 {
@@ -82,20 +82,39 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::{recipes::RecipeBatchId, viewer::RenderHistoryId};
+    use gtl_models::{
+        git::CommitCount,
+        recipes::{RecipeBatchId, RecipeLabel, RecipeLabelChanges},
+        viewer::RenderHistoryId,
+    };
 
     use super::*;
     use crate::{
         history::RecentRenderRecord,
-        recipes::{RecipeOp, RecipeTarget},
+        recipes::{RecipeLabelParts, RecipeOp, RecipeTarget},
         utils,
         viewer::{rename_snapshot, session::CachedView, work},
     };
 
+    fn named(name: &str) -> RecipeLabel {
+        RecipeLabel::Named {
+            name: utils::project_name(name),
+        }
+    }
+
+    fn two_commits() -> RecipeLabel {
+        RecipeLabel::Changes {
+            repository: utils::project_name("project"),
+            changes: RecipeLabelChanges::UnpushedCommits {
+                count: CommitCount::new(2),
+            },
+        }
+    }
+
     fn fixture(kind: ViewerTabKind) -> (ViewerState, Connection, gtl_models::viewer::ViewerTabId) {
         let connection = Connection::open_in_memory().unwrap();
-        connection.execute_batch("CREATE TABLE recent_renders (id INTEGER PRIMARY KEY, recipe_name TEXT, title TEXT, render_status TEXT);
-            INSERT INTO recent_renders VALUES (1, NULL, 'project: 2 commits', 'success');
+        connection.execute_batch("CREATE TABLE recent_renders (id INTEGER PRIMARY KEY, recipe_name TEXT, render_status TEXT);
+            INSERT INTO recent_renders VALUES (1, NULL, 'success');
             CREATE TABLE pinned_viewer_tabs (position INTEGER PRIMARY KEY, recipe_json TEXT, live INTEGER);").unwrap();
         let state = ViewerState::new();
         let recipe = utils::viewer::recipe(RecipeOp::Diff {
@@ -109,7 +128,7 @@ mod tests {
                 session.publish_labeled_if_current(
                     ticket,
                     CachedView::new(std::sync::Arc::new(utils::viewer::empty_view())),
-                    "project: 2 commits".into(),
+                    two_commits(),
                 );
                 session.bind_snapshot_history(
                     ticket,
@@ -117,8 +136,10 @@ mod tests {
                         id: RenderHistoryId::try_new(1).unwrap(),
                         project_id: None,
                         recipe,
-                        title: "project: 2 commits".into(),
                         repo_name: utils::project_name("project"),
+                        label_parts: RecipeLabelParts::UnpushedCommits {
+                            count: CommitCount::new(2),
+                        },
                         range_label: "main..HEAD".into(),
                         rendered_at: "2026-09-20T00:00:00Z".parse().unwrap(),
                     },
@@ -148,8 +169,8 @@ mod tests {
                 id: RenderHistoryId::try_new(1).unwrap(),
                 project_id: None,
                 recipe,
-                title: "Saved review".into(),
                 repo_name: utils::project_name("project"),
+                label_parts: RecipeLabelParts::None,
                 range_label: "main..HEAD".into(),
                 rendered_at: "2026-09-20T00:00:00Z".parse().unwrap(),
             };
@@ -157,7 +178,7 @@ mod tests {
                 .update(|session| {
                     session.bind_snapshot_history(work.ticket(), &record);
                     let tab = session.tab(work.ticket().tab_id).unwrap();
-                    assert_eq!(tab.tab.label(), expected);
+                    assert_eq!(tab.tab.label(), &named(expected));
                     assert_eq!(tab.recipe.name.as_ref().unwrap().as_str(), expected);
                 })
                 .unwrap();
@@ -185,14 +206,14 @@ mod tests {
             &mut connection,
         )
         .unwrap();
-        let stored: (String, String) = connection
+        let stored: String = connection
             .query_row(
-                "SELECT recipe_name, title FROM recent_renders WHERE id = 1",
+                "SELECT recipe_name FROM recent_renders WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, ("Review auth".into(), "Review auth".into()));
+        assert_eq!(stored, "Review auth");
         let restored = ViewerState::new();
         let restored_work = pinned_tabs::restore(&restored, &connection).unwrap();
         assert_eq!(
@@ -202,7 +223,7 @@ mod tests {
         state
             .inspect(|session| {
                 let tab = session.tab(tab_id).unwrap();
-                assert_eq!(tab.tab.label(), "Review auth");
+                assert_eq!(tab.tab.label(), &named("Review auth"));
                 assert_eq!(tab.recipe.name.as_ref().unwrap().as_str(), "Review auth");
                 assert!(tab.pinned);
             })
@@ -226,14 +247,18 @@ mod tests {
             )
             .is_err()
         );
-        let title: String = connection
-            .query_row("SELECT title FROM recent_renders WHERE id = 1", [], |row| {
-                row.get(0)
-            })
+        let stored: Option<String> = connection
+            .query_row(
+                "SELECT recipe_name FROM recent_renders WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(title, "project: 2 commits");
+        assert_eq!(stored, None);
         state
-            .inspect(|session| assert_eq!(session.tab(tab_id).unwrap().tab.label(), title))
+            .inspect(|session| {
+                assert_eq!(session.tab(tab_id).unwrap().tab.label(), &two_commits());
+            })
             .unwrap();
     }
 

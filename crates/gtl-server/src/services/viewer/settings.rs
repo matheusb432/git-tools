@@ -122,7 +122,7 @@ pub(super) async fn set_viewer_preference(
             .into_grpc()?;
     }
     Ok(Response::new(v1::SetViewerPreferenceResponse {
-        shell: Some(project_shell(state, None)?),
+        shell: Some(project_shell(state)?),
     }))
 }
 

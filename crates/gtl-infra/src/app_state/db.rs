@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 14]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 15]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -248,6 +248,9 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 14]> = LazyLock::new(|| {
             include_str!("../../db/migrations/0014_absolute_project_sources.sql"),
             migrate_absolute_project_sources,
         ),
+        M::up(include_str!(
+            "../../db/migrations/0015_recent_render_label_parts.sql"
+        )),
     ]
 });
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -725,7 +728,7 @@ mod tests {
         let version: i64 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, i64::try_from(MIGRATIONS_SLICE.len()).unwrap());
         connection
             .execute(
                 "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
@@ -826,7 +829,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 14);
+        assert_eq!(user_version, 15);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -1061,7 +1064,7 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 14);
+        assert_eq!(user_version, 15);
     }
 
     #[test]
@@ -1086,7 +1089,9 @@ mod tests {
             )
             .unwrap();
 
-        MIGRATIONS.to_latest(&mut connection).unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..12])
+            .to_latest(&mut connection)
+            .unwrap();
 
         let status: String = connection
             .query_row(
@@ -1129,6 +1134,147 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert!(violations.is_empty());
+    }
+
+    type MigratedLabelParts = (
+        i64,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+
+    /// Seeds v14 renders whose titles spell every legacy label shape.
+    fn seed_v14_titled_renders(connection: &Connection) {
+        connection
+            .execute_batch(
+                "INSERT INTO render_sources (id, kind, value, created_at)
+                 VALUES (1, 'directory', '/repos/gt', '2026-09-19T00:00:00Z');
+                 INSERT INTO project_sources (source_id, source_kind, source_value)
+                 VALUES (1, 'directory', '/repos/gt');
+                 INSERT INTO projects (id, source_id, title) VALUES ('GT', 1, 'gt');
+                 INSERT INTO recent_renders
+                   (id, source_id, operation_id, target_id, argument, pinned_base, pinned_head,
+                    recipe_name, title, repo_name, range_label, rendered_at, project_id,
+                    render_status)
+                 VALUES
+                   (1, 1, 1, 1, NULL, 'a1', 'b1', NULL, 'gt: 3 commits', 'gt', 'a1..b1',
+                    '2026-09-19T00:00:01Z', 'GT', 'success'),
+                   (2, 1, 1, 1, NULL, 'a2', 'b2', NULL, 'gt: 1 commit', 'gt', 'a2..b2',
+                    '2026-09-19T00:00:02Z', NULL, 'success'),
+                   (3, 1, 1, 1, NULL, NULL, NULL, NULL, 'gt', 'gt', 'origin/main..HEAD',
+                    '2026-09-19T00:00:03Z', NULL, 'success'),
+                   (4, 1, 2, NULL, 'main', 'a4', 'b4', NULL, 'gt: merge feature->origin/main',
+                    'gt', 'origin/main...HEAD', '2026-09-19T00:00:04Z', NULL, 'success'),
+                   (5, 1, 1, 4, 'main', 'a5', 'b5', NULL, 'gt: merge ->main', 'gt',
+                    'main...HEAD', '2026-09-19T00:00:05Z', NULL, 'success'),
+                   (6, 1, 1, 3, 'v1..v2', 'a6', 'b6', NULL, 'gt: 2 commits', 'gt', 'v1..v2',
+                    '2026-09-19T00:00:06Z', NULL, 'success'),
+                   (7, 1, 1, 1, NULL, 'a7', 'b7', NULL, 'gt: diff', 'gt', 'unpushed',
+                    '2026-09-19T00:00:07Z', NULL, 'error'),
+                   (8, 1, 1, 5, '2', NULL, NULL, NULL, 'gt: last 2 commits', 'gt', 'last 2',
+                    '2026-09-19T00:00:08Z', NULL, 'pending');
+                 INSERT INTO render_errors (id, recent_render_id, error_code, error_detail)
+                 VALUES (1, 7, 'render_failed', 'top-level failure'),
+                        (2, 7, 'source_unavailable', 'source detail');",
+            )
+            .unwrap();
+    }
+
+    fn migrated_label_parts(connection: &Connection) -> Vec<MigratedLabelParts> {
+        connection
+            .prepare(
+                "SELECT id, range_label, commit_count, merge_branch, merge_upstream,
+                        project_id, render_status
+                 FROM recent_renders ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<MigratedLabelParts>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn migration_v15_moves_legacy_titles_into_label_parts_and_keeps_render_errors() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..14])
+            .to_latest(&mut connection)
+            .unwrap();
+        seed_v14_titled_renders(&connection);
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+
+        let renders = migrated_label_parts(&connection);
+        let success = |id, range: &str, count, merge: Option<(&str, &str)>| {
+            (
+                id,
+                Some(range.to_owned()),
+                count,
+                merge.map(|(branch, _)| branch.to_owned()),
+                merge.map(|(_, upstream)| upstream.to_owned()),
+                None,
+                "success".to_owned(),
+            )
+        };
+        let mut expected = vec![
+            success(1, "a1..b1", Some(3), None),
+            success(2, "a2..b2", Some(1), None),
+            success(3, "origin/main..HEAD", None, None),
+            success(
+                4,
+                "origin/main...HEAD",
+                None,
+                Some(("feature", "origin/main")),
+            ),
+            success(5, "main...HEAD", None, None),
+            success(6, "v1..v2", None, None),
+            (7, None, None, None, None, None, "error".to_owned()),
+            (8, None, None, None, None, None, "pending".to_owned()),
+        ];
+        expected[0].5 = Some("GT".to_owned());
+        assert_eq!(renders, expected);
+        let errors: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM render_errors WHERE recent_render_id = 7",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(errors, 2);
+        assert!(
+            connection
+                .execute(
+                    "UPDATE recent_renders SET commit_count = 1 WHERE id = 6",
+                    [],
+                )
+                .is_err(),
+            "only unpushed diffs label a commit count"
+        );
+        assert!(
+            connection
+                .execute(
+                    "UPDATE recent_renders SET render_status = 'success' WHERE id = 8",
+                    [],
+                )
+                .is_err(),
+            "a successful render records its Git range"
+        );
     }
 
     /// Two processes can open a fresh database concurrently; both

@@ -129,7 +129,7 @@ mod tests {
                 RecipeTarget::Base {
                     rev: crate::utils::git_revision("v1"),
                 },
-                "diff",
+                gtl_models::diffs::DiffViewTitle::Diff,
                 "7631763176",
                 "7631763176",
             ),
@@ -138,7 +138,7 @@ mod tests {
                     range: crate::utils::git_range("v1..v2"),
                     pinned: None,
                 },
-                "diff",
+                gtl_models::diffs::DiffViewTitle::Diff,
                 "v1..v2",
                 "v1..v2",
             ),
@@ -147,7 +147,7 @@ mod tests {
                     base: crate::utils::git_revision("release"),
                     pinned: None,
                 },
-                "merge-diff",
+                gtl_models::diffs::DiffViewTitle::MergeDiff,
                 "release...HEAD",
                 "release",
             ),
@@ -156,7 +156,7 @@ mod tests {
                     count: NonZeroU32::new(1).unwrap(),
                     pinned: None,
                 },
-                "diff",
+                gtl_models::diffs::DiffViewTitle::Diff,
                 "HEAD~1..HEAD",
                 "HEAD~1..HEAD",
             ),
@@ -220,7 +220,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(response.title, "merge-diff");
+        assert_eq!(response.title, gtl_models::diffs::DiffViewTitle::MergeDiff);
     }
 
     #[test]

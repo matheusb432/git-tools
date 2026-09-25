@@ -2,19 +2,15 @@ use gtl_application::viewer::get_viewer_shell;
 use gtl_models::failure::{ErrorClass, ViewerFailure};
 use gtl_wire::{
     proto, v1,
-    viewer::{ViewerFeedback, ViewerShell, ViewerViewIdentity},
+    viewer::{ViewerShell, ViewerViewIdentity},
 };
 use tonic::Status;
 
 use super::super::status::{GrpcResultExt as _, invalid_request, private, status};
 use crate::{state::AppState, viewer_runtime};
 
-pub(super) fn project_shell(
-    state: &AppState,
-    feedback: Option<ViewerFeedback>,
-) -> Result<v1::ViewerShell, Status> {
-    let result =
-        get_viewer_shell::execute(feedback, &state.viewer, &state.user_settings).into_grpc()?;
+pub(super) fn project_shell(state: &AppState) -> Result<v1::ViewerShell, Status> {
+    let result = get_viewer_shell::execute(&state.viewer, &state.user_settings).into_grpc()?;
     if let Some(work) = result.commit_reload {
         viewer_runtime::spawn_commit(state.clone(), work);
     }

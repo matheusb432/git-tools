@@ -19,6 +19,7 @@ pub mod record_project_render;
 pub(crate) mod remote_sync;
 pub mod render_project_diff;
 pub mod select_comparison_repositories;
+pub mod set_project_status;
 pub mod status_cache;
 pub mod status_index;
 pub mod update_project_comparison;

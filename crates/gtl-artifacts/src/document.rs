@@ -8,7 +8,8 @@ use gtl_application::{
 };
 use gtl_models::settings::ViewerLanguage;
 use gtl_web::{
-    StaticArtifactView, render_static_artifact_body, static_artifact_enhancement_script,
+    StaticArtifactView, render_static_artifact_body, static_artifact_document_title,
+    static_artifact_enhancement_script,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -29,12 +30,8 @@ pub fn build_html(
     theme: Option<Theme>,
     language: ViewerLanguage,
 ) -> Result<String> {
-    let count = view.commits.len();
-    let suffix = if count == 1 { "" } else { "s" };
-    let title = format!(
-        "{} - {} · {count} commit{suffix}",
-        view.repo_name, view.title
-    );
+    let title =
+        static_artifact_document_title(&view.repo_name, &view.title, view.commits.len(), language);
     build_document(&title, std::slice::from_ref(view), options, theme, language)
 }
 
@@ -150,6 +147,7 @@ mod tests {
         .unwrap();
 
         assert!(html.starts_with("<!doctype html><html lang=\"pt-BR\""));
+        assert!(html.contains("<title>api - diff · nenhum commit</title>"));
         assert!(html.contains("data-gtl-label-copied=\"Copiado\""));
         assert!(html.contains(
             "data-gtl-label-copied-context-lines=\"Copiado com contexto - linhas {lines}\""
@@ -204,7 +202,12 @@ mod tests {
     #[test]
     fn user_content_is_literal_and_escaped() {
         let mut view = sample_view();
-        view.title = "diff </title><script>title_attack()</script>".to_owned();
+        view.title = gtl_models::diffs::DiffViewTitle::Named {
+            name: gtl_models::paths::ProjectName::try_new(
+                "diff </title><script>title_attack()</script>",
+            )
+            .unwrap(),
+        };
         view.files[0].path = gtl_models::paths::RepositoryRelativePath::try_new(
             "src/<script>path_attack()</script>.rs".into(),
         )

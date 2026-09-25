@@ -25,7 +25,6 @@ use gtl_models::{
     },
     paths::RepositoryRoot,
     tags::Tag,
-    timestamps::MachineTimestamp,
 };
 
 use self::parsing::{parse_local_tags, parse_remote_tags};
@@ -425,13 +424,6 @@ impl GitClient for HybridGitClient {
             .try_into()
             .map(Some)
             .map_err(Into::into)
-    }
-    fn committed_at(
-        &self,
-        repo_path: &RepositoryRoot,
-        rev: &GitRevision,
-    ) -> Option<MachineTimestamp> {
-        crate::git_capture::committed_at(repo_path, rev)
     }
 }
 

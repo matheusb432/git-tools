@@ -7,8 +7,10 @@ use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp, viewer::Rende
 use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use crate::{
-    history::persistence::RecipeColumns, ports::Clock, projects::record_project_render,
-    recipes::Recipe, viewer::initial_recipe_label,
+    history::persistence::{LabelPartColumns, RecipeColumns},
+    ports::Clock,
+    projects::record_project_render,
+    recipes::{Recipe, RecipeLabelParts},
 };
 
 const RECENT_RENDERS_CAP: usize = 500;
@@ -137,9 +139,10 @@ impl StartRender {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordRender {
     pub recipe: Recipe,
-    pub title: String,
     pub repo_name: ProjectName,
+    /// The Git range the render compared, as Git spells it.
     pub range_label: String,
+    pub label_parts: RecipeLabelParts,
 }
 
 /// Error when recording a render fails.
@@ -177,19 +180,18 @@ fn start_render(
     let columns = RecipeColumns::from_recipe(&request.recipe);
     let transaction = connection.transaction()?;
     let source_id = touch_render_source(&transaction, &columns, rendered_at)?;
-    let title = initial_recipe_label::execute(&request.recipe);
     let repo_name = request.recipe.cwd().project_name();
     let render_id: i64 = transaction
         .prepare_cached(
             "INSERT INTO recent_renders
                (source_id, operation_id, target_id, argument,
                 pinned_base, pinned_head, recipe_name,
-                title, repo_name, range_label, rendered_at, render_status)
+                repo_name, rendered_at, render_status)
              VALUES
                (?1,
                 (SELECT id FROM render_operations WHERE name = ?2),
                 (SELECT id FROM render_targets WHERE name = ?3),
-                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              RETURNING id",
         )?
         .query_row(
@@ -201,9 +203,7 @@ fn start_render(
                 columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
                 columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
                 columns.recipe_name.as_ref().map(|name| name.as_str()),
-                title,
                 repo_name.as_str(),
-                pending_range_label(&request.recipe),
                 rendered_at.as_ref(),
                 RenderStatus::Pending.as_str(),
             ],
@@ -260,21 +260,6 @@ fn collect_orphaned_render_sources(transaction: &Transaction<'_>) -> anyhow::Res
     Ok(())
 }
 
-fn pending_range_label(recipe: &Recipe) -> String {
-    match &recipe.op {
-        crate::recipes::RecipeOp::Diff { target } => match target {
-            crate::recipes::RecipeTarget::Unpushed { .. } => "unpushed".to_owned(),
-            crate::recipes::RecipeTarget::Base { rev } => format!("{rev}->working"),
-            crate::recipes::RecipeTarget::Range { range, .. } => range.to_string(),
-            crate::recipes::RecipeTarget::Merge { base, .. } => format!("{base}->HEAD"),
-            crate::recipes::RecipeTarget::Last { count, .. } => format!("last {count}"),
-        },
-        crate::recipes::RecipeOp::MergeDiff { base, .. } => base
-            .as_ref()
-            .map_or_else(|| "main->HEAD".to_owned(), |base| format!("{base}->HEAD")),
-    }
-}
-
 /// Changes a pending attempt to success and writes its computed metadata.
 ///
 /// # Errors
@@ -286,6 +271,7 @@ pub fn succeed(
     connection: &mut Connection,
 ) -> Result<RenderHistoryId, RecordRenderError> {
     let columns = RecipeColumns::from_recipe(&request.recipe);
+    let label_parts = LabelPartColumns::from_parts(&request.label_parts)?;
     let transaction = connection.transaction()?;
     let rendered_at = pending_rendered_at(&transaction, render_id)?;
     let source_id = touch_render_source(&transaction, &columns, &rendered_at)?;
@@ -323,10 +309,12 @@ pub fn succeed(
                  pinned_base = ?6,
                  pinned_head = ?7,
                  recipe_name = ?8,
-                 title = ?9,
-                 repo_name = ?10,
-                 range_label = ?11,
-                 render_status = ?12
+                 repo_name = ?9,
+                 range_label = ?10,
+                 commit_count = ?11,
+                 merge_branch = ?12,
+                 merge_upstream = ?13,
+                 render_status = ?14
              WHERE id = ?1 AND render_status = 'pending'",
             params![
                 i64::from(render_id),
@@ -337,9 +325,11 @@ pub fn succeed(
                 columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
                 columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
                 columns.recipe_name.as_ref().map(|name| name.as_str()),
-                request.title,
                 request.repo_name.as_str(),
                 request.range_label,
+                label_parts.commit_count,
+                label_parts.merge_branch,
+                label_parts.merge_upstream,
                 RenderStatus::Success.as_str(),
             ],
         )?;
@@ -487,24 +477,26 @@ mod tests {
         }
     }
 
-    fn command(title: impl Into<String>) -> RecordRender {
-        command_for_repo(title, "/repos/gt")
+    fn unpushed_commits(count: u64) -> RecipeLabelParts {
+        RecipeLabelParts::UnpushedCommits {
+            count: gtl_models::git::CommitCount::new(count),
+        }
     }
 
-    fn command_for_repo(title: impl Into<String>, repo: &str) -> RecordRender {
-        command_for_recipe(title, "gt", recipe(repo))
+    fn command(commit_count: u64) -> RecordRender {
+        command_for_repo(commit_count, "/repos/gt")
     }
 
-    fn command_for_recipe(
-        title: impl Into<String>,
-        repo_name: &str,
-        recipe: Recipe,
-    ) -> RecordRender {
+    fn command_for_repo(commit_count: u64, repo: &str) -> RecordRender {
+        command_for_recipe(commit_count, "gt", recipe(repo))
+    }
+
+    fn command_for_recipe(commit_count: u64, repo_name: &str, recipe: Recipe) -> RecordRender {
         RecordRender {
             recipe,
-            title: title.into(),
             repo_name: crate::utils::project_name(repo_name),
             range_label: "origin/main..HEAD".into(),
+            label_parts: unpushed_commits(commit_count),
         }
     }
 
@@ -540,7 +532,7 @@ mod tests {
     #[test]
     fn pending_render_transitions_to_success_without_changing_identity() {
         let mut connection = store_test();
-        let command = command("computed title");
+        let command = command(4);
         let render_id = record_render::start(
             &StartRender::new(command.recipe.clone()),
             &mut connection,
@@ -549,6 +541,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(render_status(&connection, render_id), "pending");
+        let computed_columns: (Option<String>, Option<i64>) = connection
+            .query_row(
+                "SELECT range_label, commit_count FROM recent_renders WHERE id = ?1",
+                [i64::from(render_id)],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(computed_columns, (None, None));
         assert!(list_recent(&connection).is_empty());
 
         record_render::succeed(render_id, &command, &mut connection).unwrap();
@@ -557,7 +557,8 @@ mod tests {
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].id, render_id);
-        assert_eq!(renders[0].title, "computed title");
+        assert_eq!(renders[0].label_parts, unpushed_commits(4));
+        assert_eq!(renders[0].range_label, "origin/main..HEAD");
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -637,7 +638,7 @@ mod tests {
     fn records_a_render_stamped_by_the_clock() {
         let mut connection = store_test();
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
-        record_render::execute(&command("gt · unpushed"), &mut connection, &clock).unwrap();
+        record_render::execute(&command(2), &mut connection, &clock).unwrap();
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
@@ -647,8 +648,8 @@ mod tests {
                 project_id: None,
                 id: gtl_models::viewer::RenderHistoryId::try_new(1).unwrap(),
                 recipe: recipe("/repos/gt"),
-                title: "gt · unpushed".into(),
                 repo_name: crate::utils::project_name("gt"),
+                label_parts: unpushed_commits(2),
                 range_label: "origin/main..HEAD".into(),
                 rendered_at: gtl_models::timestamps::MachineTimestamp::try_from(
                     "2026-07-07T00:00:00Z",
@@ -662,13 +663,13 @@ mod tests {
     fn repeated_renders_share_one_touched_project_source() {
         let mut connection = store_test();
         record_render::execute(
-            &command("first"),
+            &command(1),
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
         .unwrap();
         record_render::execute(
-            &command("second"),
+            &command(2),
             &mut connection,
             &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
@@ -683,9 +684,9 @@ mod tests {
     #[test]
     fn repeated_fingerprint_preserves_the_original_render() {
         let mut connection = store_test();
-        let first = command_for_recipe("first", "gt", pinned_recipe("/repos/gt", "base", "head"));
+        let first = command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head"));
         let mut repeated = first.clone();
-        repeated.title = "repeated".into();
+        repeated.label_parts = unpushed_commits(2);
 
         record_render::execute(
             &first,
@@ -702,7 +703,7 @@ mod tests {
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
-        assert_eq!(renders[0].title, "first");
+        assert_eq!(renders[0].label_parts, unpushed_commits(1));
         assert_eq!(renders[0].rendered_at.as_ref(), "2026-07-07T00:00:00Z");
     }
 
@@ -711,23 +712,11 @@ mod tests {
         let mut connection = store_test();
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
         let commands = [
-            command_for_recipe("original", "gt", pinned_recipe("/repos/gt", "base", "head")),
-            command_for_recipe(
-                "source",
-                "gt",
-                pinned_recipe("/repos/other", "base", "head"),
-            ),
-            command_for_recipe("repo", "other", pinned_recipe("/repos/gt", "base", "head")),
-            command_for_recipe(
-                "base",
-                "gt",
-                pinned_recipe("/repos/gt", "other-base", "head"),
-            ),
-            command_for_recipe(
-                "head",
-                "gt",
-                pinned_recipe("/repos/gt", "base", "other-head"),
-            ),
+            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head")),
+            command_for_recipe(1, "gt", pinned_recipe("/repos/other", "base", "head")),
+            command_for_recipe(1, "other", pinned_recipe("/repos/gt", "base", "head")),
+            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "other-base", "head")),
+            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "other-head")),
         ];
 
         for command in commands {
@@ -747,7 +736,7 @@ mod tests {
         for index in 0..5 {
             record_render::execute(
                 &command_for_recipe(
-                    format!("render {index}"),
+                    index,
                     "gt",
                     pinned_recipe(
                         "/repos/old",
@@ -763,7 +752,7 @@ mod tests {
         for index in 5..(RECENT_RENDERS_CAP + 5) {
             record_render::execute(
                 &command_for_recipe(
-                    format!("render {index}"),
+                    u64::try_from(index).unwrap(),
                     "gt",
                     pinned_recipe(
                         "/repos/gt",
@@ -777,19 +766,19 @@ mod tests {
             .unwrap();
         }
 
-        let (render_count, newest_title, oldest_title): (i64, String, String) = connection
+        let (render_count, newest_count, oldest_count): (i64, i64, i64) = connection
             .query_row(
                 "SELECT COUNT(*),
-                        (SELECT title FROM recent_renders ORDER BY id DESC LIMIT 1),
-                        (SELECT title FROM recent_renders ORDER BY id ASC LIMIT 1)
+                        (SELECT commit_count FROM recent_renders ORDER BY id DESC LIMIT 1),
+                        (SELECT commit_count FROM recent_renders ORDER BY id ASC LIMIT 1)
                  FROM recent_renders",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
         assert_eq!(render_count, i64::try_from(RECENT_RENDERS_CAP).unwrap());
-        assert_eq!(newest_title, "render 504");
-        assert_eq!(oldest_title, "render 5");
+        assert_eq!(newest_count, 504);
+        assert_eq!(oldest_count, 5);
         assert_eq!(
             render_sources(&connection)
                 .into_iter()

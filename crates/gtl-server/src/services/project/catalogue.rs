@@ -75,10 +75,7 @@ pub(super) fn project(project: Project) -> v1::Project {
             })),
         }),
         git_remote: project.metadata.git_remote.map(|remote| remote.to_string()),
-        status: match project.status {
-            ProjectStatus::Active => v1::ProjectStatus::Active,
-            ProjectStatus::Paused => v1::ProjectStatus::Paused,
-        } as i32,
+        status: status(project.status),
         color: project.metadata.color.map(|color| color.to_string()),
         groups: project
             .metadata
@@ -88,6 +85,13 @@ pub(super) fn project(project: Project) -> v1::Project {
             .map(ToString::to_string)
             .collect(),
     }
+}
+
+pub(super) fn status(status: ProjectStatus) -> i32 {
+    (match status {
+        ProjectStatus::Active => v1::ProjectStatus::Active,
+        ProjectStatus::Paused => v1::ProjectStatus::Paused,
+    }) as i32
 }
 
 pub(super) fn get_response(value: Project) -> v1::GetProjectResponse {

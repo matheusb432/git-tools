@@ -12,7 +12,6 @@ use gtl_models::{
     paths::{RepositoryRelativePath, RepositoryRoot},
     repository::{PathCount, working_tree::CommitFile},
     tags::Tag,
-    timestamps::MachineTimestamp,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -349,11 +348,4 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         left: &GitRevision,
         right: &GitRevision,
     ) -> anyhow::Result<CommitId>;
-
-    /// The committer timestamp of `rev`; returns `None` when Git or decoding fails.
-    fn committed_at(
-        &self,
-        repo_path: &RepositoryRoot,
-        rev: &GitRevision,
-    ) -> Option<MachineTimestamp>;
 }

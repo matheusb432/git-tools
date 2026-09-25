@@ -20,11 +20,15 @@ use serde::{Deserialize, Serialize};
 use super::{build, status_notifier::StatusNotifierWatcher};
 use crate::cli::{BuildTarget, DesktopE2eSuite};
 
+mod fuse_mounts;
 mod native;
 mod playwright;
 mod stable_runner;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a stopped session process may clean up, such as removing its X lock, before it is
+/// killed.
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WINDOW_TITLE_PATTERN: &str = "^git-tools$";
 const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
@@ -214,6 +218,13 @@ impl Sandbox {
     }
 }
 
+impl Drop for Sandbox {
+    /// Detaches the stale session mounts first, so the `TempDir` guard can remove the sandbox.
+    fn drop(&mut self) {
+        fuse_mounts::unmount_fuse_mounts_under(&self.root);
+    }
+}
+
 fn set_runtime_directory_permissions(runtime: &Path) -> Result<()> {
     if env::consts::OS != "linux" {
         return Ok(());
@@ -354,6 +365,11 @@ impl Drop for ManagedChild {
         let Some(mut child) = self.child.take() else {
             return;
         };
+        request_group_stop(&mut child);
+        let deadline = Instant::now() + STOP_TIMEOUT;
+        while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+            thread::sleep(POLL_INTERVAL);
+        }
         if child.try_wait().ok().flatten().is_none()
             && let Err(error) = child.kill()
         {
@@ -364,6 +380,19 @@ impl Drop for ManagedChild {
         }
     }
 }
+
+/// Asks the process group to exit, so Xvfb removes its lock and socket before any kill.
+#[cfg(unix)]
+fn request_group_stop(child: &mut GroupChild) {
+    use command_group::{Signal, UnixChildExt as _};
+
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = child.signal(Signal::SIGTERM);
+    }
+}
+
+#[cfg(not(unix))]
+const fn request_group_stop(_child: &mut GroupChild) {}
 
 pub(crate) fn run_scroll_benchmark() -> Result<()> {
     if std::env::consts::OS != "linux" {
@@ -932,10 +961,24 @@ fn release_binary(name: &str) -> Result<PathBuf> {
 }
 
 fn available_display(range: std::ops::Range<u16>) -> Option<u16> {
-    range.into_iter().find(|number| {
-        !Path::new(&format!("/tmp/.X{number}-lock")).exists()
-            && !Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
-    })
+    range.into_iter().find(|number| display_is_free(*number))
+}
+
+/// A display is free when no running X server owns it. Xvfb replaces the lock and
+/// socket that a killed server left behind, so a lock naming a dead process is free.
+fn display_is_free(number: u16) -> bool {
+    match fs::read_to_string(format!("/tmp/.X{number}-lock")) {
+        Ok(lock) => lock_owner_is_dead(&lock, |pid| Path::new(&format!("/proc/{pid}")).exists()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            !Path::new(&format!("/tmp/.X11-unix/X{number}")).exists()
+        }
+        Err(_) => false,
+    }
+}
+
+/// Reads the X lock's process ID; an unreadable lock counts as owned.
+fn lock_owner_is_dead(lock: &str, is_running: impl FnOnce(u32) -> bool) -> bool {
+    lock.trim().parse().is_ok_and(|pid| !is_running(pid))
 }
 
 fn find_window(env: &IsolatedEnv, pattern: &str) -> Result<String> {
@@ -1036,8 +1079,15 @@ mod tests {
 
     use super::{
         HostCargoEnvironment, IsolatedEnv, cargo_runner_config, clear_evidence_outcomes,
-        runtime_command,
+        lock_owner_is_dead, runtime_command,
     };
+
+    #[test]
+    fn x_lock_is_stale_only_when_it_names_a_dead_process() {
+        assert!(lock_owner_is_dead("    567715\n", |pid| pid != 567_715));
+        assert!(!lock_owner_is_dead("    567715\n", |pid| pid == 567_715));
+        assert!(!lock_owner_is_dead("corrupt", |_| false));
+    }
 
     #[test]
     fn plain_run_clears_failures_and_preserves_success_evidence() {

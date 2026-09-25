@@ -52,13 +52,12 @@ fn view(repo_root: &RepositoryRoot) -> View {
                 .into(),
             ),
         }],
-        title: "diff".into(),
+        title: gtl_models::diffs::DiffViewTitle::Diff,
         cmd: Cmd {
             lead: "git diff ".into(),
             range: "aaaa..bbbb".into(),
             trail: String::new(),
         },
-        commits_label: "Commits".into(),
         foot: Foot {
             cmd: "git diff aaaa..bbbb".into(),
         },
@@ -70,15 +69,9 @@ fn view(repo_root: &RepositoryRoot) -> View {
 fn artifact_meta(repo_root: &RepositoryRoot, render_options: RenderOptions) -> ArtifactMeta {
     ArtifactMeta {
         repo_root: repo_root.clone(),
-        repo_name: ProjectName::try_from("git-tools").unwrap(),
         identity: ArtifactDiffIdentity::from_parts(DiffKind::TwoDot, Some(pinned_range())).unwrap(),
-        range_label: "aaaa..bbbb".into(),
-        head_committed_at: Some(
-            gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:00:00Z").unwrap(),
-        ),
         generated_at: gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:01:00Z")
             .unwrap(),
-        title: "diff".into(),
         render_options,
         theme: None,
         language: gtl_models::settings::ViewerLanguage::EnUs,

@@ -4,10 +4,8 @@
 //! this application request with the resulting [`RepoRef`] values.
 
 use gtl_models::{
-    artifacts::ArtifactDiffIdentity,
-    diffs::ExcludedExtensions,
-    failure::ErrorMeta,
-    paths::{ProjectName, RepositoryRoot},
+    artifacts::ArtifactDiffIdentity, diffs::ExcludedExtensions, failure::ErrorMeta,
+    paths::RepositoryRoot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -113,12 +111,8 @@ pub fn execute(
     let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme, language)?;
     let meta = ArtifactMeta {
         repo_root: root,
-        repo_name: ProjectName::try_from("subrepos").map_err(anyhow::Error::from)?,
         identity: ArtifactDiffIdentity::WorkTree,
-        range_label: String::new(),
-        head_committed_at: None,
         generated_at,
-        title: title.clone(),
         render_options,
         theme,
         language,
@@ -213,10 +207,10 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.title, "2026-07-02 diff-artifact subrepos");
-        assert_eq!(
-            artifact.meta.repo_name,
-            crate::utils::project_name("subrepos")
+        assert!(
+            artifact
+                .html
+                .contains("<title>2026-07-02 diff-artifact subrepos</title>")
         );
     }
 

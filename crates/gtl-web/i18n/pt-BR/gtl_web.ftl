@@ -57,7 +57,6 @@ window-close = Fechar janela
 connection-connecting = Conectando ao servidor do visualizador…
 connection-retrying = { $message } Tentando novamente automaticamente.
 connection-try-now = Tentar agora
-feedback-snapshots-skipped = Diffs de snapshot sem commits nem arquivos alterados foram ignorados.
 feedback-snapshots-skipped-named =
     { $count ->
         [one] { $count } diff sem commits nem arquivos alterados foi ignorado: { $labels }.
@@ -418,6 +417,25 @@ projects-import-select-row = Selecionar { $path }
 projects-import-id-label = ID do projeto { $project }
 projects-import-title-label = Título do projeto { $project }
 
+## Recipe labels
+
+recipe-label-unpushed = { $repository }: diff
+recipe-label-unpushed-commits =
+    { $count ->
+        [0] { $repository }: nenhum commit
+        [one] { $repository }: { $count } commit
+       *[other] { $repository }: { $count } commits
+    }
+recipe-label-working-tree = { $repository }: { $base }->working tree
+recipe-label-range = { $repository }: { $range }
+recipe-label-merge-into = { $repository }: merge ->{ $base }
+recipe-label-merge = { $repository }: merge { $branch }->{ $upstream }
+recipe-label-last-commits =
+    { $count ->
+        [one] { $repository }: último commit
+       *[other] { $repository }: últimos { $count } commits
+    }
+
 ## Tabs
 
 tab-snapshot-name = Nome do snapshot
@@ -488,6 +506,9 @@ extensions-invalid = Informe uma extensão de arquivo final, como .lock ou .md.
 
 ## Diff document
 
+diff-view-title-diff = diff
+diff-view-title-merge-diff = merge-diff
+diff-view-title-commit = commit { $commit }
 file-status-added = Arquivo adicionado
 file-status-deleted = Arquivo excluído
 file-status-renamed = Arquivo renomeado
@@ -678,6 +699,12 @@ project-diff-loading = Carregando o diff...
 
 ## Offline artifacts
 
+artifact-document-title =
+    { $count ->
+        [0] { $repository } - { $title } · nenhum commit
+        [one] { $repository } - { $title } · { $count } commit
+       *[other] { $repository } - { $title } · { $count } commits
+    }
 artifact-empty = Nenhum diff neste artefato
 artifact-subrepo-diffs = Diffs dos sub-repositórios
 

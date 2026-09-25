@@ -1,6 +1,9 @@
-use crate::shared::i18n::{t, use_language};
 #[cfg(feature = "artifact")]
 use crate::shared::ui::ScrollArea;
+use crate::shared::{
+    diff_view_title::diff_view_title_text,
+    i18n::{t, use_language},
+};
 #[cfg(feature = "desktop")]
 mod copy_context;
 mod file;
@@ -122,8 +125,14 @@ fn LoadedDiffDocument(
     let diff = super::diff_workspace::use_workspace_context();
     let view = diff.view;
     let search_target = use_signal(|| None::<DiffSearchTarget>);
-    let (title, identity, content_id) =
-        view.with(|view| (view.title.clone(), view.identity, view.content_id));
+    let language = use_language();
+    let (title, identity, content_id) = view.with(|view| {
+        (
+            diff_view_title_text(&view.title, language),
+            view.identity,
+            view.content_id,
+        )
+    });
     copy_context::use_diff_copy(identity, workspace);
 
     rsx! {
@@ -201,7 +210,7 @@ pub(crate) fn StaticDiffDocument(
 ) -> Element {
     let diff = super::diff_workspace::use_workspace_context();
     let workspace = use_store(move || workspace);
-    let title = diff.view.read().title.clone();
+    let title = diff_view_title_text(&diff.view.read().title, use_language());
     let identity = workspace.identity().cloned();
     rsx! {
         section {

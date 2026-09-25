@@ -1,6 +1,10 @@
+use std::num::NonZeroU32;
+
 use gtl_models::{
-    diffs::ExcludedExtensions,
+    diffs::{CommitId, DiffViewTitle, ExcludedExtensions},
+    git::{CommitCount, GitHead, GitRange, GitRevision},
     paths::ProjectName,
+    recipes::{RecipeLabel, RecipeLabelChanges},
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
@@ -84,19 +88,70 @@ fn row_stream_events_carry_identity_sequence_file_and_typed_rows() {
     ));
 }
 
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+fn changes_label(changes: RecipeLabelChanges) -> TestResult<RecipeLabel> {
+    Ok(RecipeLabel::Changes {
+        repository: ProjectName::try_new("git-tools")?,
+        changes,
+    })
+}
+
+/// One label per variant, so each protobuf `oneof` case is exercised.
+fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
+    Ok(vec![
+        RecipeLabel::Named {
+            name: ProjectName::try_new("Release review")?,
+        },
+        RecipeLabel::Repository {
+            repository: ProjectName::try_new("git-tools")?,
+        },
+        changes_label(RecipeLabelChanges::Unpushed)?,
+        changes_label(RecipeLabelChanges::UnpushedCommits {
+            count: CommitCount::new(3),
+        })?,
+        changes_label(RecipeLabelChanges::WorkingTree {
+            base: GitRevision::try_new("HEAD~2")?,
+        })?,
+        changes_label(RecipeLabelChanges::Range {
+            range: GitRange::try_new("v1..v2")?,
+        })?,
+        changes_label(RecipeLabelChanges::MergeInto {
+            base: GitRevision::try_new("main")?,
+        })?,
+        changes_label(RecipeLabelChanges::Merge {
+            branch: GitHead::try_from("feature".to_owned())?,
+            upstream: GitRevision::try_new("origin/main")?,
+        })?,
+        changes_label(RecipeLabelChanges::LastCommits {
+            count: NonZeroU32::MIN.saturating_add(4),
+        })?,
+    ])
+}
+
+fn tab(id: u64, label: RecipeLabel) -> TestResult<ViewerTab> {
+    Ok(ViewerTab {
+        custom_name: None,
+        pinned: false,
+        id: ViewerTabId::try_new(id)?,
+        label,
+        kind: ViewerTabKind::Live,
+        state: ViewerTabState::Ready,
+    })
+}
+
 #[test]
-fn shell_codec_round_trips_the_process_neutral_contract() {
+fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
+    let labels = every_recipe_label()?;
     let shell = ViewerShell {
         version: ViewerVersion::new(4),
         focus_request_version: Some(ViewerVersion::new(3)),
-        tabs: vec![ViewerTab {
-            custom_name: None,
-            pinned: false,
-            id: ViewerTabId::try_new(7).unwrap(),
-            label: "git-tools".into(),
-            kind: ViewerTabKind::Live,
-            state: ViewerTabState::Ready,
-        }],
+        tabs: labels
+            .iter()
+            .cloned()
+            .zip(7..)
+            .map(|(label, id)| tab(id, label))
+            .collect::<TestResult<_>>()?,
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
@@ -122,27 +177,108 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
             )
             .unwrap(),
         },
-        feedback: Some(ViewerFeedback::TabClosed),
+        feedback: Some(ViewerFeedback::SnapshotRecipesSkipped { labels }),
     };
 
-    let encoded = encode_viewer_shell(shell.clone()).unwrap();
+    let encoded = encode_viewer_shell(shell.clone())?;
     let decoded = decode_get_viewer_shell_response(v1::GetViewerShellResponse {
         shell: Some(encoded),
-    })
-    .unwrap();
+    })?;
 
     assert_eq!(decoded, shell);
+    Ok(())
 }
 
 #[test]
-fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
--> Result<(), Box<dyn std::error::Error>> {
-    use prost::Message as _;
-    let active = v1::ViewerActiveView {
+fn shell_decoding_rejects_missing_or_invalid_recipe_label_parts() -> TestResult {
+    let shell = ViewerShell {
+        version: ViewerVersion::new(1),
+        focus_request_version: None,
+        tabs: vec![tab(
+            7,
+            changes_label(RecipeLabelChanges::LastCommits {
+                count: NonZeroU32::MIN,
+            })?,
+        )?],
+        active: ViewerActiveState::Empty,
+        preferences: ViewerPreferences {
+            accessibility: gtl_models::settings::ViewerAccessibility::default(),
+            language: gtl_models::settings::ViewerLanguage::default(),
+            date_format: gtl_models::settings::ViewerDateFormat::default(),
+            sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
+            theme: ViewerTheme::Dark,
+            render_options: gtl_wire::viewer::ViewerRenderOptions {
+                wrap_lines: false,
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+            },
+            keybindings: ViewerKeybindings::default(),
+        },
+        feedback: None,
+    };
+    let encoded = encode_viewer_shell(shell)?;
+    let mut empty_feedback = encoded.clone();
+    empty_feedback.feedback = Some(v1::ViewerFeedback {
+        kind: v1::ViewerFeedbackKind::SnapshotRecipesSkipped as i32,
+        recipe_labels: Vec::new(),
+    });
+    assert_eq!(
+        decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+            shell: Some(empty_feedback),
+        }),
+        Err(ViewerCodecError::InvalidMessage),
+        "skipped feedback names at least one snapshot"
+    );
+    let decode_with_label = |label: Option<v1::ViewerRecipeLabel>| {
+        let mut shell = encoded.clone();
+        shell.tabs[0].recipe_label = label;
+        decode_get_viewer_shell_response(v1::GetViewerShellResponse { shell: Some(shell) })
+    };
+    let changes = |changes| v1::ViewerRecipeLabel {
+        label: Some(v1::viewer_recipe_label::Label::Changes(
+            v1::ViewerRecipeChangesLabel {
+                repository: "git-tools".to_owned(),
+                changes,
+            },
+        )),
+    };
+
+    assert!(decode_with_label(encoded.tabs[0].recipe_label.clone()).is_ok());
+    for label in [
+        None,
+        Some(v1::ViewerRecipeLabel { label: None }),
+        Some(v1::ViewerRecipeLabel {
+            label: Some(v1::viewer_recipe_label::Label::Name(String::new())),
+        }),
+        Some(changes(None)),
+        Some(changes(Some(
+            v1::viewer_recipe_changes_label::Changes::LastCommitCount(0),
+        ))),
+        Some(changes(Some(
+            v1::viewer_recipe_changes_label::Changes::Merge(v1::ViewerRecipeMergeLabel {
+                branch: "feature".to_owned(),
+                upstream: " ".to_owned(),
+            }),
+        ))),
+    ] {
+        assert_eq!(
+            decode_with_label(label.clone()),
+            Err(ViewerCodecError::InvalidMessage),
+            "{label:?}"
+        );
+    }
+    Ok(())
+}
+
+fn raw_active_view() -> TestResult<v1::ViewerActiveView> {
+    Ok(v1::ViewerActiveView {
         modified_files: false,
         row_source: v1::ViewerRowSourceState::Ready as i32,
-        identity: Some(encode_viewer_view_identity(viewer_identity().unwrap())),
+        identity: Some(encode_viewer_view_identity(viewer_identity()?)),
         content_id: Some(vec![42; 32]),
+        view_title: Some(v1::ViewerDiffViewTitle {
+            title: Some(v1::viewer_diff_view_title::Title::Diff(v1::Empty {})),
+        }),
         commit_count: 17,
         repository_name: "repo".into(),
         branch: "main".into(),
@@ -154,7 +290,10 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
         }),
         footer: Some(v1::ViewerFooter::default()),
         ..Default::default()
-    };
+    })
+}
+
+fn encoded_ready_shell(active: v1::ViewerActiveView) -> TestResult<v1::ViewerShell> {
     let shell = ViewerShell {
         version: ViewerVersion::new(1),
         focus_request_version: None,
@@ -166,19 +305,81 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
             date_format: gtl_models::settings::ViewerDateFormat::Relative,
             sidebars: gtl_models::viewer::ViewerSidebarVisibility::default(),
             theme: ViewerTheme::Dark,
-            render_options: viewer_identity().unwrap().render_options,
+            render_options: viewer_identity()?.render_options,
             keybindings: ViewerKeybindings::default(),
         },
         feedback: None,
     };
-    let mut encoded = encode_viewer_shell(shell).unwrap();
+    let mut encoded = encode_viewer_shell(shell)?;
     encoded.active = Some(v1::ViewerActiveState {
         state: Some(v1::viewer_active_state::State::Ready(Box::new(
-            v1::ViewerReadyState {
-                view: Some(active.clone()),
-            },
+            v1::ViewerReadyState { view: Some(active) },
         ))),
     });
+    Ok(encoded)
+}
+
+#[test]
+fn active_view_titles_round_trip_and_reject_invalid_parts() -> TestResult {
+    use v1::viewer_diff_view_title::Title;
+
+    let decode_title =
+        |title: Option<Title>| -> TestResult<Result<DiffViewTitle, ViewerCodecError>> {
+            let shell = encoded_ready_shell(v1::ViewerActiveView {
+                view_title: Some(v1::ViewerDiffViewTitle { title }),
+                ..raw_active_view()?
+            })?;
+            Ok(
+                decode_get_viewer_shell_response(v1::GetViewerShellResponse { shell: Some(shell) })
+                    .map(|shell| match shell.active {
+                        ViewerActiveState::Ready { view } => Some(view.title),
+                        _ => None,
+                    })
+                    .and_then(|title| title.ok_or(ViewerCodecError::InvalidMessage)),
+            )
+        };
+    let commit_id = "abcdef0123456789abcdef0123456789abcdef01";
+
+    assert_eq!(
+        decode_title(Some(Title::Diff(v1::Empty {})))?,
+        Ok(DiffViewTitle::Diff)
+    );
+    assert_eq!(
+        decode_title(Some(Title::MergeDiff(v1::Empty {})))?,
+        Ok(DiffViewTitle::MergeDiff)
+    );
+    assert_eq!(
+        decode_title(Some(Title::CommitId(commit_id.to_owned())))?,
+        Ok(DiffViewTitle::Commit {
+            id: CommitId::try_from(commit_id)?,
+        })
+    );
+    assert_eq!(
+        decode_title(Some(Title::Name("Release review".to_owned())))?,
+        Ok(DiffViewTitle::Named {
+            name: ProjectName::try_new("Release review")?,
+        })
+    );
+    for title in [
+        None,
+        Some(Title::CommitId("abc1234".to_owned())),
+        Some(Title::Name(String::new())),
+    ] {
+        assert_eq!(
+            decode_title(title.clone())?,
+            Err(ViewerCodecError::InvalidMessage),
+            "{title:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
+-> Result<(), Box<dyn std::error::Error>> {
+    use prost::Message as _;
+    let active = raw_active_view()?;
+    let encoded = encoded_ready_shell(active.clone())?;
     let bytes = encoded.encode_to_vec();
     let decoded = decode_get_viewer_shell_response(v1::GetViewerShellResponse {
         shell: Some(v1::ViewerShell::decode(bytes.as_slice()).unwrap()),
@@ -470,7 +671,10 @@ fn history_page_codec_round_trips_navigation_and_identity() {
         projects: Vec::new(),
         entries: vec![ViewerHistoryEntry {
             id: RenderHistoryId::try_new(11).unwrap(),
-            title: "git-tools · unpushed".into(),
+            label: changes_label(RecipeLabelChanges::UnpushedCommits {
+                count: CommitCount::new(2),
+            })
+            .unwrap(),
             repository_name: ProjectName::try_new("git-tools").unwrap(),
             kind: ViewerRecipeKind::Diff,
             range_label: "origin/main..HEAD".into(),

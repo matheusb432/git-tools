@@ -70,13 +70,12 @@ mod tests {
                     .into(),
                 ),
             }],
-            title: "diff".to_owned(),
+            title: gtl_models::diffs::DiffViewTitle::Diff,
             cmd: Cmd {
                 lead: "git diff ".to_owned(),
                 range: "origin/main..HEAD".to_owned(),
                 trail: String::new(),
             },
-            commits_label: "0 commits".to_owned(),
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".to_owned(),
             },
