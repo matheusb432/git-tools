@@ -8,12 +8,11 @@ mod viewer_push;
 use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
-    BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, ExtensionsFieldUpdate,
-    ExtensionsValue, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetViewerServerInfoRequest, GetViewerSettingsRequest, GetViewerShellRequest,
-    MoveViewerTabRequest, PushProjectRepositoriesRequest, RenderDiffRequest, SetViewerThemeRequest,
-    ViewerTabPlacement, ViewerTheme, WatchViewerRequest, bool_field_update,
-    diff_service_client::DiffServiceClient, diff_target, extensions_field_update,
+    BoolFieldUpdate, DiffTarget, EditSettingsRequest, Empty, GetRecursiveRepositoryStatusesRequest,
+    GetRepositoryStatusRequest, GetViewerServerInfoRequest, GetViewerSettingsRequest,
+    GetViewerShellRequest, MoveViewerTabRequest, PushProjectRepositoriesRequest, RenderDiffRequest,
+    SetViewerThemeRequest, ViewerTabPlacement, ViewerTheme, WatchViewerRequest, bool_field_update,
+    diff_service_client::DiffServiceClient, diff_target,
     project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
@@ -78,10 +77,10 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
 
 #[tokio::test]
 #[serial(server_tracing)]
-async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> TestResult {
+async fn rejects_retired_diff_settings_before_managed_push_dependencies() -> TestResult {
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
-    std::fs::write(&settings_path, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
+    std::fs::write(&settings_path, "[diff]\nexclude = [\"md\"]\n")?;
     let server = ServerHarness::start(directory.path(), Some(settings_path.clone())).await?;
     let mut client = ProjectServiceClient::new(server.native_channel());
 
@@ -96,11 +95,7 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
             .message()
             .contains(&settings_path.display().to_string())
     );
-    assert!(
-        error
-            .message()
-            .contains("`diff.exclude` must be an array of strings")
-    );
+    assert!(error.message().contains("unknown field `diff`"));
     assert!(matches!(
         gtl_wire::proto::failure::decode_status(&error),
         gtl_wire::proto::failure::StatusFailure::Decoded(gtl_models::failure::Failure::Settings(
@@ -350,8 +345,7 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
 }
 
 #[tokio::test]
-async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_listener() -> TestResult
-{
+async fn viewer_edit_settings_preserves_false_updates_over_a_real_listener() -> TestResult {
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
@@ -380,13 +374,6 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
             push_confirmation_required: Some(BoolFieldUpdate {
                 operation: Some(bool_field_update::Operation::Update(false)),
             }),
-            default_diff_exclusions: Some(ExtensionsFieldUpdate {
-                operation: Some(extensions_field_update::Operation::Update(
-                    ExtensionsValue {
-                        extensions: Vec::new(),
-                    },
-                )),
-            }),
             ..Default::default()
         })
         .await?;
@@ -410,13 +397,6 @@ async fn viewer_edit_settings_preserves_false_and_empty_updates_over_a_real_list
             .wrap_lines
     );
     assert!(!settings.push_confirmation_required);
-    assert!(
-        settings
-            .diff_exclusions
-            .ok_or("settings response omitted exclusions")?
-            .default_extensions
-            .is_empty()
-    );
 
     let error = viewer
         .edit_settings(EditSettingsRequest {

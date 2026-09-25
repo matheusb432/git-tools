@@ -26,7 +26,7 @@ pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationO
     let CompleteRecipeComputation { recipe, kind, view } = command;
     let rendered = || {
         let parts = RecipeLabelParts::from_view(&recipe, &view);
-        recipe_label::rendered(&recipe, view.repo_name.clone(), &parts)
+        recipe_label::rendered(&recipe, view.repo_name.clone(), parts)
     };
     CompleteRecipeComputationOk {
         label: if kind == ViewerTabKind::Live {

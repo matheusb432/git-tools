@@ -1,7 +1,7 @@
 //! Computes the standalone patch introduced by one commit already present in a viewer range.
 
 use gtl_models::{
-    diffs::{AppliedExclusions, Commit, CommitIdAbbreviation, DiffViewTitle},
+    diffs::{AppliedExtensionFilter, Commit, CommitIdAbbreviation, DiffViewTitle},
     git::{GitDiffSpec, GitRange, GitRevision},
     paths::RepositoryRoot,
 };
@@ -13,7 +13,7 @@ use crate::{
         fetch_full_context_diff,
         view::sort_files_tree_order,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
 const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -38,13 +38,12 @@ pub fn execute(
     request: ComputeCommitPatch,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
 ) -> Result<View, ComputeCommitPatchError> {
     let repo_path = request.repo_root;
     let repo_name = repo_path.project_name();
     let settings = settings.load()?;
-    let excluded = settings
-        .diff_exclusions()
-        .for_project_or_default(&repo_name);
+    let filter = filters.extension_filter(&repo_path)?;
     let commit = request.commit;
     let abbreviation = CommitIdAbbreviation::TenCharacters;
     let (base, base_abbreviated) = match commit.parents.first() {
@@ -65,12 +64,12 @@ pub fn execute(
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, &repo_path, &diff_spec, Some(&log_range), excluded)?;
+    } = assemble(git, &repo_path, &diff_spec, Some(&log_range), &filter)?;
     sort_files_tree_order(&mut files);
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);
     let view = View {
-        file_filter: crate::diffs::file_filter::DiffFileFilter::new(diff_spec, excluded.clone()),
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(diff_spec, filter.clone()),
         repo_name,
         repo_root: repo_path.clone(),
         branch: git.current_branch(&repo_path)?,
@@ -89,7 +88,7 @@ pub fn execute(
         commits,
         files,
         full_context,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
+        extension_filter: AppliedExtensionFilter::from_hidden(&filter, hidden_paths),
     };
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &view.full_context
@@ -111,7 +110,7 @@ mod tests {
     use crate::{
         diffs::compute_commit_patch,
         utils::{
-            FakeGitClient, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore, SavedExtensionFilters,
             diffs::{DIFF_SINGLE_FILE, commit_with},
         },
     };
@@ -136,6 +135,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             &source,
+            &SavedExtensionFilters::default(),
         )
         .unwrap();
 
@@ -164,6 +164,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             &source,
+            &SavedExtensionFilters::default(),
         )
         .unwrap();
 

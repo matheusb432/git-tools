@@ -243,6 +243,7 @@ impl DiffService for DiffGrpcService {
                 &state.artifacts,
                 &state.renderer,
                 &state.clock,
+                &state.database,
             )
         })
         .await?

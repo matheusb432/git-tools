@@ -8,7 +8,7 @@ use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::artifact_store::StoreArtifacts;
 use gtl_models::{
     artifacts::{ArtifactCommitRange, ArtifactDiffIdentity, ArtifactRangeKind},
-    diffs::{DiffKind, DiffLineCount, ExcludedExtensions, PinnedRange},
+    diffs::{DiffKind, DiffLineCount, ExtensionFilter, PinnedRange},
     git::{BranchName, GitHead, GitRevision},
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
@@ -62,7 +62,7 @@ fn view(repo_root: &RepositoryRoot) -> View {
             cmd: "git diff aaaa..bbbb".into(),
         },
         full_context: gtl_application::diffs::FullContextDiffState::Loaded,
-        exclusions: None,
+        extension_filter: None,
     }
 }
 
@@ -75,7 +75,7 @@ fn artifact_meta(repo_root: &RepositoryRoot, render_options: RenderOptions) -> A
         render_options,
         theme: None,
         language: gtl_models::settings::ViewerLanguage::EnUs,
-        excluded_extensions: ExcludedExtensions::default(),
+        extension_filter: ExtensionFilter::default(),
     }
 }
 
@@ -88,7 +88,7 @@ fn artifact_range_key(render_options: RenderOptions) -> ArtifactRangeKey {
         render_options,
         theme: None,
         language: gtl_models::settings::ViewerLanguage::EnUs,
-        excluded_extensions: ExcludedExtensions::default(),
+        extension_filter: ExtensionFilter::default(),
     }
 }
 

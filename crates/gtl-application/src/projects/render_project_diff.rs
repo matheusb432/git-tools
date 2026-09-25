@@ -1,7 +1,7 @@
 //! Renders selected project comparisons into one artifact, reporting unavailable bases.
 
 use gtl_models::{
-    artifacts::ArtifactDiffIdentity, diffs::ExcludedExtensions, failure::ErrorMeta,
+    artifacts::ArtifactDiffIdentity, diffs::ExtensionFilter, failure::ErrorMeta,
     paths::RepositoryRoot,
 };
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        UserSettingsLoadError, UserSettingsReader,
+        RepositoryPreferenceReader, UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -54,7 +54,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    comparisons: &impl crate::ports::ProjectComparisonReader,
+    preferences: &impl RepositoryPreferenceReader,
 ) -> Result<RenderProjectDiffOk, RenderProjectDiffError> {
     let RenderProjectDiff { root, repos } = req;
     let store_root = artifacts::root(&root);
@@ -63,11 +63,11 @@ pub fn execute(
     let batch = render_batch(
         git,
         &DiffTarget::Unpushed { pinned: None },
-        &settings,
+        preferences,
         &repos,
         false,
         &mut notes,
-        comparisons,
+        preferences,
     )?;
 
     if batch.views.is_empty() {
@@ -91,7 +91,7 @@ pub fn execute(
         render_options,
         theme,
         language,
-        excluded_extensions: ExcludedExtensions::default(),
+        extension_filter: ExtensionFilter::default(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -112,32 +112,26 @@ mod tests {
     use std::path::PathBuf;
 
     use gtl_models::{
-        artifacts::ArtifactDiffIdentity,
-        diffs::DiffExclusions,
-        settings::UserSettings,
-        viewer::{RenderOptions, Theme},
+        artifacts::ArtifactDiffIdentity, diffs::ExtensionFilter, settings::UserSettings,
+        viewer::Theme,
     };
 
     use super::{RenderProjectDiff, RepoRef};
     use crate::{
+        ports::ExtensionFilterWriter as _,
         projects::render_project_diff,
         shared::notes::Note,
         utils::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, RepoOverride,
-            SequenceUserSettingsStore, StubRenderer,
+            SavedExtensionFilters, SavedRepositoryPreferences, SequenceUserSettingsStore,
+            StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
+            hiding_extensions, repository_root,
         },
     };
 
-    fn settings(theme: Theme, exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(
-            Some(theme),
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            exclusions,
-            gtl_models::settings::PushAllExclusions::default(),
-        )
+    fn settings(theme: Theme) -> UserSettings {
+        UserSettings::default().with_theme(Some(theme))
     }
 
     fn req(repos: Vec<RepoRef>) -> RenderProjectDiff {
@@ -167,6 +161,7 @@ mod tests {
             },
         ];
 
+        let filters = SavedRepositoryPreferences::default();
         let response = render_project_diff::execute(
             req(repos),
             &FixedUserSettingsStore::default(),
@@ -174,7 +169,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
 
@@ -209,6 +204,7 @@ mod tests {
             label: crate::utils::project_name("repo"),
         }];
 
+        let filters = SavedRepositoryPreferences::default();
         let result = render_project_diff::execute(
             req(repos),
             &FixedUserSettingsStore::default(),
@@ -216,7 +212,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         );
 
         let result = result.unwrap();
@@ -251,16 +247,12 @@ diff --git a/notes.md b/notes.md\n\
                 },
             );
         }
-        let app_settings = SequenceUserSettingsStore::new([
-            settings(
-                Theme::Mirage,
-                DiffExclusions::new([(crate::utils::project_name("repo-a"), vec!["md"])], None),
-            ),
-            settings(
-                Theme::Glacier,
-                DiffExclusions::new([(crate::utils::project_name("repo-b"), vec!["txt"])], None),
-            ),
-        ]);
+        let app_settings =
+            SequenceUserSettingsStore::new([settings(Theme::Mirage), settings(Theme::Glacier)]);
+        let filters = SavedRepositoryPreferences::from(SavedExtensionFilters::new([(
+            repository_root("/repo-a"),
+            hiding_extensions(&["md"]),
+        )]));
         let store = InMemoryArtifactStore::default();
         let repos = vec![
             RepoRef {
@@ -283,13 +275,21 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
         let first_html = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .unwrap()
             .html;
+        filters
+            .filters
+            .save_extension_filter(&repository_root("/repo-a"), &ExtensionFilter::default())
+            .unwrap();
+        filters
+            .filters
+            .save_extension_filter(&repository_root("/repo-b"), &hiding_extensions(&["txt"]))
+            .unwrap();
 
         render_project_diff::execute(
             RenderProjectDiff {
@@ -301,7 +301,7 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
         let second_html = store

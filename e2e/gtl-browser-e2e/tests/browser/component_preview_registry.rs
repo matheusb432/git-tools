@@ -130,11 +130,11 @@ async fn file_picker_opens_the_keyboard_or_pointer_selection() -> anyhow::Result
             AriaRole::Combobox,
             Some(
                 GetByRoleOptions::default()
-                    .name("Filter files by path")
+                    .name("Find a file by path")
                     .exact(true),
             ),
         );
-        expect(page.locator("input[placeholder='Filter files by path']:focus"))
+        expect(page.locator("input[placeholder='Find a file by path']:focus"))
             .to_be_visible()
             .await?;
         input.press("ArrowDown", None).await?;
@@ -322,7 +322,7 @@ async fn assert_push_command_details(page: &Page, dialog: &Locator) -> anyhow::R
         .await
         .context("show the push remote URL")?;
     expect(dialog.get_by_text(
-        "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
+        "git -C /repos/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin a101a101a101a101a101a101a101a101a101a101:refs/heads/main",
         true,
     ))
     .to_be_visible()

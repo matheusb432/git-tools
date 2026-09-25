@@ -63,7 +63,7 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
         footer: ViewerFooter {
             command: "git diff main..HEAD".to_owned(),
         },
-        exclusions: None,
+        extension_filter: None,
     })
 }
 

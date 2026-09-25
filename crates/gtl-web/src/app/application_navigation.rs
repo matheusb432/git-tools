@@ -303,11 +303,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     aria_label: t!(language, "navigation-projects"),
                     aria_current: projects_active.then_some("page"),
                     title: t!(language, "navigation-projects"),
-                    span {
-                        class: "viewer-navigation-icon size-5 [&>svg]:size-full",
-                        aria_hidden: "true",
-                        dangerous_inner_html: include_str!("assets/app-icon.svg"),
-                    }
+                    ApplicationLogo {}
                     span { class: "hidden sm:inline", {t!(language, "navigation-projects")} }
                     ViewerTabSelectionIndicator { active: projects_active }
                 }
@@ -453,6 +449,39 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     }
                 }
             },
+        }
+    }
+}
+
+/// Draws the launcher icon's geometry with the active theme's surface, line, and accent.
+#[component]
+fn ApplicationLogo() -> Element {
+    rsx! {
+        span { class: "viewer-navigation-icon size-5", aria_hidden: "true",
+            svg {
+                class: "size-full",
+                view_box: "0 0 32 32",
+                width: "20",
+                height: "20",
+                "focusable": "false",
+                rect {
+                    class: "fill-surface stroke-line-2",
+                    x: "1",
+                    y: "1",
+                    width: "30",
+                    height: "30",
+                    rx: "7",
+                    stroke_width: ".5",
+                }
+                svg {
+                    class: "text-acc",
+                    x: "4",
+                    y: "4",
+                    width: "24",
+                    height: "24",
+                    dangerous_inner_html: include_str!("assets/repository-hub.svg"),
+                }
+            }
         }
     }
 }

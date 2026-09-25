@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions, DiffViewTitle},
+    diffs::{AppliedExtensionFilter, CommitIdAbbreviation, DiffViewTitle, ExtensionFilter},
     git::{GitRange, GitRevision},
     paths::RepositoryRoot,
 };
@@ -8,7 +8,7 @@ use crate::{
     diffs::{
         DiffTarget, PinnedRange, View,
         assemble::{DiffData, assemble},
-        exclusions,
+        extension_filter_note,
         range::DiffRanges,
         range_view::RangeView,
         view::sort_files_tree_order,
@@ -62,13 +62,12 @@ pub(super) fn build(
     git: &impl GitClient,
     top: &RepositoryRoot,
     target: &DiffTarget,
-    exclusions: &DiffExclusions,
+    filter: &ExtensionFilter,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<DiffComputation, crate::projects::comparison::ComparisonError> {
     let mut notes = Vec::new();
     let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
-    let excluded = exclusions.for_project_or_default(&repo_name);
 
     let ResolvedTarget {
         base_ref,
@@ -84,13 +83,13 @@ pub(super) fn build(
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), excluded)?;
+    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), filter)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::new(
             io_ranges.diff.clone(),
-            excluded.clone(),
+            filter.clone(),
         ),
         repo_name: repo_name.clone(),
         repo_root: top.clone(),
@@ -102,9 +101,9 @@ pub(super) fn build(
         commits,
         files,
         full_context,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
+        extension_filter: AppliedExtensionFilter::from_hidden(filter, hidden_paths),
     };
-    notes.extend(exclusions::note("diff-artifact", &view));
+    notes.extend(extension_filter_note::note("diff-artifact", &view));
 
     let summary = match target {
         DiffTarget::Range { .. } => base_ref.to_string(),

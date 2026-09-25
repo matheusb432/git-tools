@@ -125,13 +125,6 @@ impl ViewerService for ViewerGrpcService {
         file_filters::set(&self.state, request).await
     }
 
-    async fn update_diff_exclusions(
-        &self,
-        request: Request<v1::UpdateDiffExclusionsRequest>,
-    ) -> Result<Response<v1::UpdateDiffExclusionsResponse>, Status> {
-        file_filters::defaults(&self.state, request).await
-    }
-
     async fn get_viewer_project_status(
         &self,
         request: Request<v1::GetViewerProjectStatusRequest>,
@@ -421,6 +414,7 @@ impl ViewerService for ViewerGrpcService {
                 &state.viewer,
                 &state.user_settings,
                 &state.git,
+                &state.database,
                 &state.database,
             )
         })

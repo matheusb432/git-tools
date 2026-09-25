@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 pub use setting_key::*;
 
 use crate::{
-    diffs::DiffExclusions,
     paths::ProjectName,
     tags::TagPatternSettings,
     viewer::{RenderOptions, Theme, ViewerKeybindings},
@@ -334,9 +333,20 @@ pub struct UserSettings {
     viewer_keybindings: ViewerKeybindings,
     sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
     push_confirmation_required: bool,
-    diff_exclusions: DiffExclusions,
     push_all_exclusions: PushAllExclusions,
     tag_patterns: TagPatternSettings,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self::new(
+            None,
+            RenderOptions::DEFAULT,
+            ViewerKeybindings::default(),
+            Self::PUSH_CONFIRMATION_REQUIRED_DEFAULT,
+            PushAllExclusions::default(),
+        )
+    }
 }
 
 impl UserSettings {
@@ -349,7 +359,6 @@ impl UserSettings {
         viewer_render_options: RenderOptions,
         viewer_keybindings: ViewerKeybindings,
         push_confirmation_required: bool,
-        diff_exclusions: DiffExclusions,
         push_all_exclusions: PushAllExclusions,
     ) -> Self {
         Self {
@@ -362,7 +371,6 @@ impl UserSettings {
             viewer_keybindings,
             sidebar_visibility: crate::viewer::ViewerSidebarVisibility::default(),
             push_confirmation_required,
-            diff_exclusions,
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
         }
@@ -405,14 +413,6 @@ impl UserSettings {
     }
 
     #[must_use]
-    pub fn with_diff_exclusions(self, diff_exclusions: DiffExclusions) -> Self {
-        Self {
-            diff_exclusions,
-            ..self
-        }
-    }
-
-    #[must_use]
     pub fn with_focus_window_on_diff(self, focus_window_on_diff: bool) -> Self {
         Self {
             focus_window_on_diff,
@@ -449,6 +449,35 @@ impl UserSettings {
         }
     }
 
+    #[must_use]
+    pub fn with_theme(self, theme: Option<Theme>) -> Self {
+        Self { theme, ..self }
+    }
+
+    #[must_use]
+    pub fn with_viewer_render_options(self, viewer_render_options: RenderOptions) -> Self {
+        Self {
+            viewer_render_options,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn with_push_confirmation_required(self, push_confirmation_required: bool) -> Self {
+        Self {
+            push_confirmation_required,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn with_push_all_exclusions(self, push_all_exclusions: PushAllExclusions) -> Self {
+        Self {
+            push_all_exclusions,
+            ..self
+        }
+    }
+
     /// Returns the selected theme, when one is configured.
     #[must_use]
     pub const fn theme(&self) -> Option<Theme> {
@@ -473,12 +502,6 @@ impl UserSettings {
         self.push_confirmation_required
     }
 
-    /// Returns the complete validated project and default exclusion map.
-    #[must_use]
-    pub const fn diff_exclusions(&self) -> &DiffExclusions {
-        &self.diff_exclusions
-    }
-
     /// Returns the configured project names omitted from managed push fan-out.
     #[must_use]
     pub const fn push_all_exclusions(&self) -> &PushAllExclusions {
@@ -495,8 +518,7 @@ impl UserSettings {
 mod tests {
     use super::{PushAllExclusions, UserSettings, UserSettingsRevision};
     use crate::{
-        diffs::DiffExclusions,
-        paths::{ProjectName, RepositoryRelativePath},
+        paths::ProjectName,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybindings},
     };
 
@@ -565,10 +587,6 @@ mod tests {
         ProjectName::try_new(value.to_owned()).unwrap()
     }
 
-    fn path(value: &str) -> RepositoryRelativePath {
-        RepositoryRelativePath::try_new(value.into()).unwrap()
-    }
-
     #[test]
     fn accessors_expose_the_complete_immutable_snapshot() {
         let settings = UserSettings::new(
@@ -576,7 +594,6 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             ViewerKeybindings::default(),
             false,
-            DiffExclusions::new([(project("git-tools"), vec!["md", "lock"])], None),
             PushAllExclusions::new([project("sample_project")]),
         );
 
@@ -593,18 +610,6 @@ mod tests {
                 .push_all_exclusions()
                 .contains(&project("git-tools"))
         );
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&project("git-tools"))
-                .matches(&path("README.md"))
-        );
-        assert!(
-            !settings
-                .diff_exclusions()
-                .for_project_or_default(&project("git-tools"))
-                .matches(&path("src/main.rs"))
-        );
     }
 
     #[test]
@@ -614,14 +619,12 @@ mod tests {
             RenderOptions::DEFAULT,
             ViewerKeybindings::default(),
             true,
-            DiffExclusions::default(),
             PushAllExclusions::default(),
         );
 
         assert_eq!(settings.theme(), None);
         assert_eq!(settings.viewer_render_options(), RenderOptions::DEFAULT);
         assert!(settings.push_confirmation_required());
-        assert!(settings.diff_exclusions().is_empty());
         assert!(settings.push_all_exclusions().is_empty());
     }
 }

@@ -2,14 +2,13 @@
 
 use gtl_models::{
     paths::{ProjectName, RepositoryRoot},
-    settings::UserSettings,
     timestamps::MachineTimestamp,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{DiffTarget, View, diff_computation},
-    ports::GitClient,
+    ports::{ExtensionFilterReader, GitClient},
     shared::notes::Note,
 };
 
@@ -34,7 +33,7 @@ pub(crate) struct BatchBuild {
 pub(crate) fn render_batch(
     git: &impl GitClient,
     target: &DiffTarget,
-    settings: &UserSettings,
+    filters: &impl ExtensionFilterReader,
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
@@ -44,13 +43,8 @@ pub(crate) fn render_batch(
     let mut skipped = 0usize;
     let mut completed = Vec::new();
     for repo in repos {
-        let built = diff_computation::build(
-            git,
-            &repo.top,
-            target,
-            settings.diff_exclusions(),
-            comparisons,
-        );
+        let filter = filters.extension_filter(&repo.top)?;
+        let built = diff_computation::build(git, &repo.top, target, &filter, comparisons);
         if built.is_ok() {
             completed.push(repo.top.clone());
         }
@@ -102,15 +96,13 @@ pub(crate) fn dated_title(timestamp: &MachineTimestamp, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
-
     use super::{RepoRef, dated_title, render_batch};
     use crate::{
         diffs::DiffTarget,
         utils::{
-            FakeGitClient, RepoOverride, default_user_settings,
+            FakeGitClient, RepoOverride, SavedExtensionFilters,
             diffs::{DIFF_SINGLE_FILE, commit},
-            project_name, repository_root,
+            hiding_extensions, project_name, repository_root,
         },
     };
 
@@ -125,17 +117,6 @@ mod tests {
                 label: project_name("repo-b"),
             },
         ]
-    }
-
-    fn settings(exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(
-            None,
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            exclusions,
-            gtl_models::settings::PushAllExclusions::default(),
-        )
     }
 
     #[test]
@@ -169,7 +150,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &default_user_settings(),
+            &SavedExtensionFilters::default(),
             &repos,
             true,
             &mut notes,
@@ -198,7 +179,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &default_user_settings(),
+            &SavedExtensionFilters::default(),
             &repos,
             true,
             &mut notes,
@@ -222,7 +203,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &default_user_settings(),
+            &SavedExtensionFilters::default(),
             &repos,
             false,
             &mut notes,
@@ -236,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn exclusions_apply_per_repo_by_directory_name() {
+    fn saved_filters_apply_per_repository_root() {
         const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
 --- a/f.txt\n\
 +++ b/f.txt\n\
@@ -262,18 +243,15 @@ diff --git a/notes.md b/notes.md\n\
                 },
             );
         }
-        let exclusions = gtl_models::diffs::DiffExclusions::new(
-            [(project_name("repo-a"), vec!["md".to_string()])],
-            None,
-        );
-        let settings = settings(exclusions);
+        let filters =
+            SavedExtensionFilters::new([(repository_root("/repo-a"), hiding_extensions(&["md"]))]);
         let repos = two_repos();
         let mut notes = Vec::new();
 
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &settings,
+            &filters,
             &repos,
             true,
             &mut notes,
@@ -283,9 +261,9 @@ diff --git a/notes.md b/notes.md\n\
 
         assert_eq!(batch.views.len(), 2);
         assert_eq!(batch.views[0].files.len(), 1, "repo-a hides notes.md");
-        assert!(batch.views[0].exclusions.is_some());
+        assert!(batch.views[0].extension_filter.is_some());
         assert_eq!(batch.views[1].files.len(), 2, "repo-b is untouched");
-        assert!(batch.views[1].exclusions.is_none());
+        assert!(batch.views[1].extension_filter.is_none());
     }
 
     #[test]
@@ -301,7 +279,7 @@ diff --git a/notes.md b/notes.md\n\
         let result = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &default_user_settings(),
+            &SavedExtensionFilters::default(),
             &repos,
             false,
             &mut notes,
@@ -321,7 +299,7 @@ diff --git a/notes.md b/notes.md\n\
         let error = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &default_user_settings(),
+            &SavedExtensionFilters::default(),
             &two_repos(),
             true,
             &mut Vec::new(),

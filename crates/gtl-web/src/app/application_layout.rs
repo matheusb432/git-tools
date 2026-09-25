@@ -647,6 +647,21 @@ fn ApplicationLayoutContent() -> Element {
     use_effect(use_reactive((&theme,), move |(theme,)| {
         browser::apply_theme(theme.as_str());
     }));
+    // Only a loaded preference recolors the native icons, so startup does not flash the default.
+    let icon_theme = match &*state {
+        ViewerShellLoad::Ready(shell) => Some(shell.preferences.theme),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
+    };
+    use_effect(use_reactive((&icon_theme,), move |(icon_theme,)| {
+        let Some(theme) = icon_theme else {
+            return;
+        };
+        spawn(async move {
+            if let Err(error) = gtl_client::window::set_theme_icons(theme).await {
+                context.toast.client_error(&error);
+            }
+        });
+    }));
 
     let accessibility = match &*state {
         ViewerShellLoad::Ready(shell) => shell.preferences.accessibility,

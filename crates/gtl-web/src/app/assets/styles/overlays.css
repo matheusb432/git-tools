@@ -12,6 +12,7 @@
   .popover-surface { @apply fixed inset-auto m-0 p-0 overflow-hidden rounded-panel border border-line-2 bg-surface text-left whitespace-normal text-ink shadow-floating; }
   .popover-surface[data-placement="viewport-end"] { @apply top-[3.25rem] right-3 max-h-[calc(100vh-3.75rem)] w-[min(17.25rem,calc(100vw-1rem))] mobile:top-[3.75rem] mobile:right-2 mobile:max-h-[calc(100vh-4.25rem)]; }
   .popover-surface[data-placement="trigger-end"] { @apply mt-1 max-h-[min(18rem,calc(100vh-1rem))] w-[min(19rem,calc(100vw-1rem))] [position-area:bottom_span-left] [position-try-fallbacks:flip-block]; }
+  .popover-surface[data-placement="trigger-start"] { @apply mt-1 max-h-[min(18rem,calc(100vh-1rem))] w-[min(19rem,calc(100vw-1rem))] [position-area:bottom_span-right] [position-try-fallbacks:flip-block]; }
   .icon-popover-trigger {
     @apply group-has-[:popover-open]/icon-popover:border-acc-line group-has-[:popover-open]/icon-popover:bg-acc-soft group-has-[:popover-open]/icon-popover:text-acc;
   }

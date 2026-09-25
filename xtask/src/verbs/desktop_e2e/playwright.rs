@@ -103,17 +103,9 @@ impl ComponentPreviewServer {
         let ready_path = sandbox.logs.join("component-preview-ready.jsonl");
         let stdout =
             File::create(&ready_path).context("create component preview readiness output")?;
-        let mut command = Command::new("cargo");
+        let mut command = Command::new("dx-story");
         command
             .args([
-                "run",
-                "--quiet",
-                "--locked",
-                "--manifest-path",
-                "../../shared-libs/dx-story/Cargo.toml",
-                "-p",
-                "dx-story-cli",
-                "--",
                 "serve",
                 "--no-watch",
                 "--ready-json",
@@ -129,7 +121,7 @@ impl ComponentPreviewServer {
         environment.apply_cargo(&mut command, host_environment);
         let child = command
             .group_spawn()
-            .context("start Dioxus component preview server")?;
+            .context("start dx-story component preview server")?;
         let mut server = Self { child };
         wait_for_component_preview(&mut server.child, address, &ready_path, &log_path)?;
         Ok((server, format!("http://{address}")))

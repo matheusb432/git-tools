@@ -61,6 +61,7 @@ mod tests {
     use std::sync::Arc;
 
     use gtl_models::{
+        diffs::ExtensionSelection,
         git::GitDiffSpec,
         settings::UserSettings,
         viewer::{DiffLayout, RenderOptions, ViewerTabKind},
@@ -78,14 +79,9 @@ mod tests {
     fn metadata_is_available_while_rows_wait_for_full_source() {
         let state = ViewerState::new();
         let options = RenderOptions::new(DiffLayout::Unified, DiffDensity::Full);
-        let settings = FixedUserSettingsStore::new(UserSettings::new(
-            None,
-            options,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            false,
-            gtl_models::diffs::DiffExclusions::default(),
-            gtl_models::settings::PushAllExclusions::default(),
-        ));
+        let settings = FixedUserSettingsStore::new(
+            UserSettings::default().with_viewer_render_options(options),
+        );
         let identity = state
             .update(|session| {
                 let tab = session
@@ -102,7 +98,7 @@ mod tests {
                 let mut view = utils::viewer::empty_view();
                 view.full_context = FullContextDiffState::Deferred(FullContextDiffSource::new(
                     GitDiffSpec::AgainstWorkingTree(utils::git_revision("HEAD")),
-                    Vec::new(),
+                    ExtensionSelection::all(),
                 ));
                 session.publish_labeled_if_current(
                     ticket,

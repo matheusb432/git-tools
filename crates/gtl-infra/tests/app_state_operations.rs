@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Barrier, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
@@ -26,7 +26,7 @@ use gtl_application::{
         work,
     },
 };
-use gtl_infra::app_state::SqliteAppState;
+use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_models::{
     git::CommitCount,
     paths::{ProjectName, RepositoryRoot},
@@ -360,10 +360,8 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
 
     let directory = tempfile::tempdir().unwrap();
     let home = directory.path().canonicalize().unwrap();
-    let root = home.join("alpha");
-    create_project_comparison_repository(&root);
-    commit_project_comparison(&root);
-    let path = repository_root(&root);
+    let repository = project_comparison_repository(home.join("alpha"));
+    let path = repository.root();
     let repositories = vec![ProjectRepository {
         name: ProjectName::try_new("Alpha").unwrap(),
         path: path.clone(),
@@ -395,6 +393,7 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
             pending,
             &FixedUserSettingsStore::default(),
             &HybridGitClient,
+            &gtl_application::utils::SavedExtensionFilters::default(),
             &gtl_application::utils::ProjectComparisons::default(),
         );
         let work::RecipePublication::Published { history } =
@@ -468,44 +467,16 @@ fn assert_viewer_project_recency(
     Ok(())
 }
 
-fn commit_project_comparison(root: &std::path::Path) {
-    for args in [&["add", "."][..], &["commit", "-qm", "feature"][..]] {
-        assert!(
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(root)
-                .args(args)
-                .status()
-                .unwrap()
-                .success()
-        );
-    }
-}
-
-fn create_project_comparison_repository(root: &std::path::Path) {
-    std::fs::create_dir(root).unwrap();
-    let run_git = |args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    };
-    run_git(&["init", "-qb", "main"]);
-    run_git(&["config", "user.email", "test@example.test"]);
-    run_git(&["config", "user.name", "Test"]);
-    std::fs::write(root.join("file.txt"), "base\n").unwrap();
-    run_git(&["add", "."]);
-    run_git(&["commit", "-qm", "base"]);
-    run_git(&["checkout", "-qb", "feature"]);
-    run_git(&["branch", "--set-upstream-to=main"]);
-    std::fs::write(root.join("new.txt"), "new\n").unwrap();
+/// Initializes a `feature` branch one commit ahead of the local `main` it tracks.
+fn project_comparison_repository(path: PathBuf) -> TestRepository {
+    let repository = TestRepository::init(path);
+    repository.write("file.txt", "base\n");
+    repository.commit_all("base");
+    repository.git(&["checkout", "-qb", "feature"]);
+    repository.git(&["branch", "--set-upstream-to=main"]);
+    repository.write("new.txt", "new\n");
+    repository.commit_all("feature");
+    repository
 }
 
 fn assert_live_restores_independently(

@@ -2,7 +2,7 @@ use std::{ops::Deref, sync::Arc};
 
 use gtl_models::paths::RepositoryRelativePath;
 use gtl_wire::viewer::{
-    ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection,
+    ViewerActiveView, ViewerAppliedExtensionFilter, ViewerCommandLine, ViewerCommitSelection,
     ViewerCommitSummary, ViewerDiffDensity, ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary,
     ViewerFooter, ViewerRenderOptions, ViewerRowContentId, ViewerTheme, ViewerViewIdentity,
 };
@@ -254,13 +254,12 @@ pub(super) fn project_diff_view_with_content_id(
         footer: ViewerFooter {
             command: view.foot.cmd.clone(),
         },
-        exclusions: view
-            .exclusions
-            .as_ref()
-            .map(|exclusions| ViewerAppliedExclusions {
-                extensions: exclusions.extensions.clone(),
-                hidden_paths: exclusions.hidden_paths.clone(),
-            }),
+        extension_filter: view.extension_filter.as_ref().map(|applied| {
+            ViewerAppliedExtensionFilter {
+                filter: applied.filter.clone(),
+                hidden_paths: applied.hidden_paths.clone(),
+            }
+        }),
     }
 }
 
@@ -331,7 +330,7 @@ const fn viewer_file_status(status: FileStatus) -> ViewerFileStatus {
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        diffs::{AppliedExclusions, CommitIdAbbreviation, DiffLineCount, ExcludedExtensions},
+        diffs::{AppliedExtensionFilter, CommitIdAbbreviation, DiffLineCount},
         viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
     };
     use gtl_wire::viewer::{
@@ -411,8 +410,8 @@ mod tests {
                 range: "main...feature".into(),
                 trail: " --".into(),
             },
-            exclusions: Some(AppliedExclusions {
-                extensions: ExcludedExtensions::new(["lock"]),
+            extension_filter: Some(AppliedExtensionFilter {
+                filter: utils::hiding_extensions(&["lock"]),
                 hidden_paths: vec![utils::repository_relative_path("Cargo.lock")],
             }),
             ..utils::diffs::view()
@@ -604,7 +603,7 @@ mod tests {
         assert!(active.commits[0].is_merge);
         assert_eq!(
             active
-                .exclusions
+                .extension_filter
                 .unwrap()
                 .hidden_paths
                 .into_iter()

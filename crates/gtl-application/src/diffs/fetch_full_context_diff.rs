@@ -38,7 +38,7 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::git::GitDiffSpec;
+    use gtl_models::{diffs::ExtensionSelection, git::GitDiffSpec};
 
     use super::*;
     use crate::{
@@ -47,7 +47,10 @@ mod tests {
     };
 
     fn source() -> FullContextDiffSource {
-        FullContextDiffSource::new(GitDiffSpec::Range(git_range("a..b")), Vec::new())
+        FullContextDiffSource::new(
+            GitDiffSpec::Range(git_range("a..b")),
+            ExtensionSelection::all(),
+        )
     }
 
     #[test]

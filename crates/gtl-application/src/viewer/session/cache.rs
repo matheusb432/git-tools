@@ -225,7 +225,8 @@ fn view_weight(view: &View) -> ViewCacheWeight {
             .sum::<ViewCacheWeight>()
         + view
             .file_filter
-            .excluded()
+            .filter()
+            .extensions()
             .extensions()
             .iter()
             .map(string_weight)
@@ -237,11 +238,12 @@ fn view_weight(view: &View) -> ViewCacheWeight {
         + string_weight(&view.foot.cmd)
         + full_context_weight(&view.full_context)
         + view
-            .exclusions
+            .extension_filter
             .as_ref()
             .map_or(ViewCacheWeight::default(), |applied| {
                 applied
-                    .extensions
+                    .filter
+                    .extensions()
                     .extensions()
                     .iter()
                     .map(string_weight)
@@ -259,9 +261,11 @@ fn full_context_weight(state: &FullContextDiffState) -> ViewCacheWeight {
         FullContextDiffState::Deferred(source) => {
             ViewCacheWeight::new(source.spec().as_arg().len())
                 + source
-                    .excluded_paths()
+                    .paths()
+                    .extensions()
+                    .extensions()
                     .iter()
-                    .map(|path| path_weight(path.as_path()))
+                    .map(string_weight)
                     .sum()
         }
         FullContextDiffState::Unavailable | FullContextDiffState::Loaded => {
@@ -337,7 +341,7 @@ mod tests {
     fn cached(title: &str) -> CachedView {
         CachedView::new(Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            exclusions: None,
+            extension_filter: None,
             repo_name: project_name("repo"),
             repo_root: repository_root("/repo"),
             branch: GitHead::Detached,
@@ -433,7 +437,7 @@ mod tests {
             .collect::<Vec<_>>();
         let view = Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            exclusions: None,
+            extension_filter: None,
             repo_name: project_name("benchmark"),
             repo_root: repository_root("/fixtures/benchmark"),
             branch: git_head("main"),

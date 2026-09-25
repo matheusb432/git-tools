@@ -2,7 +2,7 @@ use std::path::Path;
 
 use gtl_models::{
     artifacts::{ArtifactCommitRange, ArtifactDiffIdentity},
-    diffs::ExcludedExtensions,
+    diffs::ExtensionFilter,
     paths::{AbsoluteFilePath, RepositoryRoot},
     settings::ViewerLanguage,
     timestamps::MachineTimestamp,
@@ -22,10 +22,10 @@ pub struct ArtifactMeta {
     pub theme: Option<Theme>,
     /// The language of the artifact's copy.
     pub language: ViewerLanguage,
-    /// The extension set that was in force when the artifact rendered (normalized,
-    /// sorted; empty = unfiltered). Part of the range-reuse key: an artifact is
-    /// only reusable by a render running under the same filter.
-    pub excluded_extensions: ExcludedExtensions,
+    /// The extension filter in force when the artifact rendered. Part of the
+    /// range-reuse key: an artifact is only reusable by a render running under
+    /// the same filter.
+    pub extension_filter: ExtensionFilter,
 }
 
 /// Values that must match before a stored commit-range artifact can be reused.
@@ -35,7 +35,7 @@ pub struct ArtifactRangeKey {
     pub render_options: RenderOptions,
     pub theme: Option<Theme>,
     pub language: ViewerLanguage,
-    pub excluded_extensions: ExcludedExtensions,
+    pub extension_filter: ExtensionFilter,
 }
 
 /// Reports whether placement created an artifact or reused an identical one.
@@ -83,7 +83,7 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
     ) -> anyhow::Result<PlacedArtifact>;
 
     /// Find an existing artifact for a validated immutable commit range rendered under the same
-    /// renderer layout, density, theme, language, and exclusion set, or `None` on a miss.
+    /// renderer layout, density, theme, language, and extension filter, or `None` on a miss.
     fn lookup_by_range(
         &self,
         store_root: &Path,

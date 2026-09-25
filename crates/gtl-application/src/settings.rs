@@ -9,10 +9,7 @@ pub mod reset_settings;
 pub mod set_setting_key;
 mod user_settings_patch;
 
-pub use user_settings_patch::{
-    DiffExclusionsUpdate, DuplicateProjectSettingsNameError, ProjectSettingsUpdate,
-    ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
-};
+pub use user_settings_patch::{UserSettingsFieldUpdate, UserSettingsPatch};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserSettingChange {
@@ -45,7 +42,7 @@ mod test_support {
 
     impl UserSettingsReader for FixedUserSettingsEditStore {
         fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
-            Ok(crate::utils::default_user_settings())
+            Ok(UserSettings::default())
         }
     }
 

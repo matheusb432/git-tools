@@ -55,6 +55,6 @@ pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<Viewe
         footer: ViewerFooter {
             command: "gtl diff".to_owned(),
         },
-        exclusions: None,
+        extension_filter: None,
     })
 }

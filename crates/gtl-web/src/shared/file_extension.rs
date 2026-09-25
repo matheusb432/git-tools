@@ -7,7 +7,7 @@ pub(crate) struct InvalidFileExtension;
 
 impl FileExtension {
     pub(crate) fn parse(raw: &str) -> Result<Self, InvalidFileExtension> {
-        let value = raw.trim().trim_start_matches('.').to_lowercase();
+        let value = raw.trim().trim_start_matches('.').to_ascii_lowercase();
         if value.is_empty()
             || value.len() > 255
             || value.contains(['.', '/', '\\', '*', '?', '[', ']', '\0'])

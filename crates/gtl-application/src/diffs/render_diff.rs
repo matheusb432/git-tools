@@ -15,7 +15,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, HtmlRenderer,
-        PlacedArtifact, UserSettingsLoadError, UserSettingsReader,
+        PlacedArtifact, RepositoryPreferenceReader, UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -140,7 +140,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    comparisons: &impl crate::ports::ProjectComparisonReader,
+    preferences: &impl RepositoryPreferenceReader,
 ) -> Result<RenderDiffOk, RenderDiffError> {
     let RenderDiff { cwd, target, name } = req;
     let target = DiffTarget::try_from(target)?;
@@ -151,12 +151,10 @@ pub fn execute(
     let language = settings.language();
     let top = git.top_level(&cwd)?;
     let store_root = super::artifacts::root(top.as_ref());
-    let excluded = settings
-        .diff_exclusions()
-        .for_project_or_default(&top.project_name());
+    let extension_filter = preferences.extension_filter(&top)?;
 
     if name.is_none()
-        && let Some(range) = resolved_range(git, &top, &target, comparisons)
+        && let Some(range) = resolved_range(git, &top, &target, preferences)
         && let Some(hit) = store.lookup_by_range(
             &store_root,
             &top,
@@ -165,7 +163,7 @@ pub fn execute(
                 render_options,
                 theme,
                 language,
-                excluded_extensions: excluded.clone(),
+                extension_filter: extension_filter.clone(),
             },
         )?
     {
@@ -180,9 +178,8 @@ pub fn execute(
         });
     }
 
-    let commit_range = resolved_range(git, &top, &target, comparisons).map(|range| range.commits);
-    let computed =
-        diff_computation::build(git, &top, &target, settings.diff_exclusions(), comparisons)?;
+    let commit_range = resolved_range(git, &top, &target, preferences).map(|range| range.commits);
+    let computed = diff_computation::build(git, &top, &target, &extension_filter, preferences)?;
     let mut view = computed.view;
     let summary = computed.summary;
     notes.extend(computed.notes);
@@ -213,7 +210,7 @@ pub fn execute(
         render_options,
         theme,
         language,
-        excluded_extensions: excluded.clone(),
+        extension_filter,
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -254,7 +251,7 @@ mod tests {
 
     use gtl_models::{
         artifacts::{ArtifactCommitRange, ArtifactRangeKind},
-        diffs::{DiffExclusions, ExcludedExtensions},
+        diffs::ExtensionFilter,
         settings::UserSettings,
         viewer::{RenderOptions, Theme},
     };
@@ -265,8 +262,10 @@ mod tests {
         ports::ArtifactRangeKey,
         shared::notes::Note,
         utils::{
-            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            SavedExtensionFilters, SavedRepositoryPreferences, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
+            hiding_extensions, repository_root,
         },
     };
 
@@ -278,15 +277,12 @@ mod tests {
         }
     }
 
-    fn settings(theme: Option<Theme>, exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(
-            theme,
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            exclusions,
-            gtl_models::settings::PushAllExclusions::default(),
-        )
+    fn settings(theme: Option<Theme>) -> UserSettings {
+        UserSettings::default().with_theme(theme)
+    }
+
+    fn hiding_markdown_in_repo() -> SavedExtensionFilters {
+        SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))])
     }
 
     fn range_key(base_id: &str, head_id: &str) -> ArtifactRangeKey {
@@ -298,7 +294,7 @@ mod tests {
             render_options: RenderOptions::DEFAULT,
             theme: None,
             language: gtl_models::settings::ViewerLanguage::default(),
-            excluded_extensions: ExcludedExtensions::default(),
+            extension_filter: ExtensionFilter::default(),
         }
     }
 
@@ -321,7 +317,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -358,13 +354,7 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedUserSettingsStore::new(settings(
-            Some(Theme::Graphite),
-            DiffExclusions::new(
-                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
-                Some(vec!["txt".to_string()]),
-            ),
-        ));
+        let app_settings = FixedUserSettingsStore::new(settings(Some(Theme::Graphite)));
 
         render_diff::execute(
             RenderDiff {
@@ -377,14 +367,14 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::from(hiding_markdown_in_repo()),
         )
         .unwrap();
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
+        assert_eq!(artifact.meta.extension_filter, hiding_extensions(&["md"]));
         assert!(artifact.html.contains("graphite"));
     }
 
@@ -407,7 +397,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -450,7 +440,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -467,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_path_never_reuses_an_artifact_rendered_under_a_different_exclusion_set() {
+    fn fast_path_never_reuses_an_artifact_rendered_under_a_different_extension_filter() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -492,21 +482,14 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedUserSettingsStore::new(settings(
-            None,
-            DiffExclusions::new(
-                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
-                None,
-            ),
-        ));
         let response = render_diff::execute(
             request,
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::from(hiding_markdown_in_repo()),
         )
         .unwrap();
 
@@ -518,9 +501,9 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
         assert_eq!(
-            artifact.meta.excluded_extensions.extensions(),
-            ["md"],
-            "the active set must be recorded for future range lookups"
+            artifact.meta.extension_filter,
+            hiding_extensions(&["md"]),
+            "the active filter must be recorded for future range lookups"
         );
     }
 
@@ -557,12 +540,12 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedUserSettingsStore::new(settings(Some(Theme::Glacier), DiffExclusions::default())),
+            &FixedUserSettingsStore::new(settings(Some(Theme::Glacier))),
             &source,
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -573,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn fast_path_reuses_an_artifact_rendered_under_the_same_exclusion_set() {
+    fn fast_path_reuses_an_artifact_rendered_under_the_same_extension_filter() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -589,7 +572,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(
             ArtifactRangeKey {
-                excluded_extensions: ExcludedExtensions::new(["md"]),
+                extension_filter: hiding_extensions(&["md"]),
                 ..range_key("id-a", "id-b")
             },
             "/store/filtered.html",
@@ -602,21 +585,14 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedUserSettingsStore::new(settings(
-            None,
-            DiffExclusions::new(
-                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
-                None,
-            ),
-        ));
         let response = render_diff::execute(
             request,
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::from(hiding_markdown_in_repo()),
         )
         .unwrap();
 
@@ -662,7 +638,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -696,7 +672,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap();
 
@@ -731,7 +707,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &SavedRepositoryPreferences::default(),
         )
         .unwrap_err();
 

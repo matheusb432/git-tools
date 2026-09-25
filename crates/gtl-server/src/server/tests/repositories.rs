@@ -1,27 +1,15 @@
-use std::path::Path;
-
+use gtl_infra::testing::TestRepository;
 use gtl_wire::v1::{self, repository_service_client::RepositoryServiceClient};
 use serial_test::serial;
 
-use super::{ServerHarness, TestResult, live_views::git};
-
-fn repository(path: &Path) -> TestResult {
-    git(path, &["init", "-q", "-b", "main"])?;
-    git(path, &["config", "user.name", "Example Author"])?;
-    git(path, &["config", "user.email", "author@example.invalid"])?;
-    git(path, &["config", "commit.gpgsign", "false"])?;
-    git(
-        path,
-        &["commit", "-q", "--allow-empty", "-m", "Initial commit"],
-    )
-}
+use super::{ServerHarness, TestResult};
 
 #[tokio::test]
 #[serial(server_tracing)]
 async fn pulls_one_repository_and_reports_path_and_remote_failures() -> TestResult {
     let data = tempfile::tempdir()?;
-    let checkout = tempfile::tempdir()?;
-    repository(checkout.path())?;
+    let checkout = TestRepository::new();
+    checkout.commit_all("Initial commit");
     let server = ServerHarness::start(data.path(), None).await?;
     let mut client = RepositoryServiceClient::new(server.native_channel());
     let request = || v1::PullRepositoryRequest {
@@ -61,12 +49,7 @@ async fn pulls_one_repository_and_reports_path_and_remote_failures() -> TestResu
     );
 
     let origin = tempfile::tempdir()?;
-    git(origin.path(), &["init", "--bare", "-q"])?;
-    git(
-        checkout.path(),
-        &["remote", "add", "origin", &origin.path().to_string_lossy()],
-    )?;
-    git(checkout.path(), &["push", "-q", "-u", "origin", "main"])?;
+    checkout.add_bare_origin(origin.path());
     let result = client
         .pull_repository(request())
         .await?

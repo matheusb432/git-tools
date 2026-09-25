@@ -3,7 +3,6 @@ use std::{fmt, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{ErrorClass, ExternalDiagnostic, Failure, PublicFailure};
-use crate::paths::ProjectName;
 
 /// Why user settings cannot be read or changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,8 +19,6 @@ pub enum SettingsFailure {
     Locked { wait_seconds: u64 },
     /// The server has no user configuration path to write.
     PathUnavailable,
-    /// A project-settings replacement names the same project more than once.
-    DuplicateProject { name: ProjectName },
 }
 
 impl SettingsFailure {
@@ -30,7 +27,6 @@ impl SettingsFailure {
         match self {
             Self::Invalid { .. } | Self::PathUnavailable => ErrorClass::FailedPrecondition,
             Self::Stale | Self::Locked { .. } => ErrorClass::Aborted,
-            Self::DuplicateProject { .. } => ErrorClass::InvalidArgument,
         }
     }
 }
@@ -67,10 +63,6 @@ impl fmt::Display for SettingsFailure {
             Self::PathUnavailable => {
                 formatter.write_str("The user configuration path is unavailable.")
             }
-            Self::DuplicateProject { name } => write!(
-                formatter,
-                "The project settings name {name} more than once."
-            ),
         }
     }
 }

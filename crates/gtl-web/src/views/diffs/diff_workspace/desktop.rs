@@ -450,7 +450,10 @@ fn ReadyWorkspace(
             open: mobile_panel() == Some(MobilePanel::Files),
             title: t!(language, "workspace-changed-files"),
             onclose: move |()| mobile_panel.set(None),
-            FilesPanel { onnavigate }
+            FilesPanel {
+                onnavigate,
+                extension_filter_id: "mobile-diff-extension-filters",
+            }
         }
         PanelDialog {
             // TODO: organize this more intuitively. not obvious that this is where the mobile view is.

@@ -1,7 +1,10 @@
 use std::{fmt::Write as _, time::Duration};
 
 use gtl_application::live_views::save_live_view::{self, SaveLiveView};
-use gtl_infra::{app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient};
+use gtl_infra::{
+    app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient,
+    testing::TestRepository,
+};
 use gtl_local_transport::LocalEndpoint;
 use gtl_models::live_views::LiveComparison;
 use gtl_wire::{
@@ -14,10 +17,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
-use super::{
-    ServerHarness, TestResult,
-    live_views::{git, ready_shell},
-};
+use super::{ServerHarness, TestResult, live_views::ready_shell};
 
 type Client = v1::viewer_service_client::ViewerServiceClient<Channel>;
 
@@ -42,21 +42,13 @@ async fn fixture_source(
     let directory = tempfile::tempdir()?;
     let database = SqliteAppState::open(directory.path())?;
     for tab in 0..tabs {
-        let repository = directory.path().join(format!("repo-{tab}"));
-        std::fs::create_dir(&repository)?;
-        git(&repository, &["init", "-q", "-b", "main"])?;
-        git(&repository, &["config", "user.name", "Row Session Test"])?;
-        git(
-            &repository,
-            &["config", "user.email", "rows@example.invalid"],
-        )?;
-        std::fs::write(repository.join("work.txt"), "base\n")?;
-        git(&repository, &["add", "."])?;
-        git(&repository, &["commit", "-qm", "base"])?;
-        std::fs::write(repository.join("work.txt"), source)?;
+        let repository = TestRepository::init(directory.path().join(format!("repo-{tab}")));
+        repository.write("work.txt", "base\n");
+        repository.commit_all("base");
+        repository.write("work.txt", source);
         save_live_view::execute(
             SaveLiveView {
-                path: repository,
+                path: repository.path().to_path_buf(),
                 comparison: LiveComparison::LocalChanges,
             },
             &HybridGitClient,

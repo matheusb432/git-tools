@@ -1,16 +1,15 @@
 use gtl_models::{
+    diffs::ExtensionFilter,
+    paths::RepositoryRoot,
     settings::{SettingKeyValue, UserSettings},
     viewer::{DiffDensity, DiffLayout, Theme},
 };
 use gtl_wire::viewer::{
-    EditSettingsRequest, FieldUpdate, SetViewerPreference, ViewerDiffDensity, ViewerDiffExclusions,
-    ViewerDiffLayout, ViewerProjectDiffExclusions, ViewerTheme, ViewerUserSettings,
+    EditSettingsRequest, FieldUpdate, SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout,
+    ViewerTheme, ViewerUserSettings,
 };
 
-use crate::settings::{
-    DuplicateProjectSettingsNameError, ProjectSettingsUpdate, ProjectSettingsUpdates,
-    UserSettingsFieldUpdate, UserSettingsPatch,
-};
+use crate::settings::{UserSettingsFieldUpdate, UserSettingsPatch};
 
 fn application_field_update<Input, Output>(
     update: FieldUpdate<Input>,
@@ -23,31 +22,14 @@ fn application_field_update<Input, Output>(
     }
 }
 
-pub fn settings_patch(
-    request: EditSettingsRequest,
-) -> Result<UserSettingsPatch, DuplicateProjectSettingsNameError> {
-    let projects = match request.projects {
-        FieldUpdate::Update(projects) => {
-            let mut mapped = Vec::with_capacity(projects.len());
-            for project in projects {
-                mapped.push(ProjectSettingsUpdate {
-                    name: project.project_name,
-                    excluded_from_push_all: project.excluded_from_push_all,
-                    diff_exclusions: project.diff_exclusions,
-                });
-            }
-            UserSettingsFieldUpdate::Update(ProjectSettingsUpdates::try_new(mapped)?)
-        }
-        FieldUpdate::Clear => UserSettingsFieldUpdate::Clear,
-        FieldUpdate::Unchanged => UserSettingsFieldUpdate::Unchanged,
-    };
-    Ok(UserSettingsPatch {
+#[must_use]
+pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
+    UserSettingsPatch {
         ui_scale_percent: application_field_update(request.ui_scale_percent, |value| value),
         reduce_motion: application_field_update(request.reduce_motion, |value| value),
         language: application_field_update(request.language, |value| value),
         date_format: application_field_update(request.date_format, |value| value),
         expected_revision: request.expected_revision,
-        diff_exclusions: None,
         focus_window_on_diff: application_field_update(request.focus_window_on_diff, |value| value),
         files_sidebar_visible: application_field_update(request.files_sidebar_visible, |value| {
             value
@@ -79,12 +61,7 @@ pub fn settings_patch(
             request.push_confirmation_required,
             |value| value,
         ),
-        default_diff_exclusions: application_field_update(
-            request.default_diff_exclusions,
-            |value| value,
-        ),
-        projects,
-    })
+    }
 }
 
 #[must_use]
@@ -115,7 +92,6 @@ pub fn project_settings(
     configuration_path: Option<String>,
 ) -> ViewerUserSettings {
     let configured_theme = settings.theme().map(super::project_theme);
-    let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
         accessibility: settings.accessibility(),
         language: settings.language(),
@@ -131,55 +107,28 @@ pub fn project_settings(
         effective_theme: super::project_theme(settings.theme().unwrap_or_default()),
         render_options: super::project_render_options(settings.viewer_render_options()),
         push_confirmation_required: settings.push_confirmation_required(),
-        diff_exclusions: ViewerDiffExclusions {
-            default_extensions: exclusions.default_exclusions().clone(),
-            projects: {
-                let mut names = std::collections::BTreeSet::new();
-                names.extend(
-                    exclusions
-                        .project_exclusions()
-                        .map(|(name, _)| name.clone()),
-                );
-                names.extend(settings.push_all_exclusions().projects().cloned());
-                names
-                    .into_iter()
-                    .map(|project_name| ViewerProjectDiffExclusions {
-                        configured: exclusions.for_project(&project_name).is_some(),
-                        extensions: exclusions
-                            .for_project(&project_name)
-                            .cloned()
-                            .unwrap_or_default(),
-                        excluded_from_push_all: settings
-                            .push_all_exclusions()
-                            .contains(&project_name),
-                        project_name,
-                    })
-                    .collect()
-            },
-        },
     }
 }
 
-#[derive(Clone)]
-pub(super) struct TabSettings<S> {
-    source: S,
-    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
+/// Reads a tab's own filter once set, and the repository's saved filter before that.
+pub(super) struct TabExtensionFilters<'a, F> {
+    saved: &'a F,
+    tab_filter: Option<ExtensionFilter>,
 }
 
-impl<S> TabSettings<S> {
-    pub(super) fn new(source: S, excluded: Option<gtl_models::diffs::ExcludedExtensions>) -> Self {
-        Self { source, excluded }
+impl<'a, F> TabExtensionFilters<'a, F> {
+    pub(super) const fn new(saved: &'a F, tab_filter: Option<ExtensionFilter>) -> Self {
+        Self { saved, tab_filter }
     }
 }
 
-impl<S: crate::ports::UserSettingsReader> crate::ports::UserSettingsReader for TabSettings<S> {
-    fn load(&self) -> Result<UserSettings, crate::ports::UserSettingsLoadError> {
-        let settings = self.source.load()?;
-        Ok(match &self.excluded {
-            Some(excluded) => settings.with_diff_exclusions(
-                gtl_models::diffs::DiffExclusions::new([], Some(excluded.extensions().to_vec())),
-            ),
-            None => settings,
-        })
+impl<F: crate::ports::ExtensionFilterReader> crate::ports::ExtensionFilterReader
+    for TabExtensionFilters<'_, F>
+{
+    fn extension_filter(&self, repository: &RepositoryRoot) -> anyhow::Result<ExtensionFilter> {
+        match &self.tab_filter {
+            Some(filter) => Ok(filter.clone()),
+            None => self.saved.extension_filter(repository),
+        }
     }
 }

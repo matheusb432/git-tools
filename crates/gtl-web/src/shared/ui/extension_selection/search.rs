@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
-use gtl_models::diffs::ExcludedExtensions;
+use gtl_models::diffs::FileExtensions;
 use lucide_dioxus::{Check, Plus, Search, X};
 
-use super::ExtensionExclusionsAction;
+use super::ExtensionSelectionAction;
 use crate::shared::{
     browser,
     file_extension::FileExtension,
@@ -18,9 +18,9 @@ pub(super) fn ExtensionSearch(
     results_id: String,
     add_id: String,
     available: Vec<String>,
-    excluded: ExcludedExtensions,
+    selected: FileExtensions,
     disabled: bool,
-    onchange: EventHandler<ExtensionExclusionsAction>,
+    onchange: EventHandler<ExtensionSelectionAction>,
     onclose: EventHandler<()>,
 ) -> Element {
     let language = use_language();
@@ -29,10 +29,10 @@ pub(super) fn ExtensionSearch(
     let focus_input_id = input_id.clone();
     use_effect(move || browser::focus_element(focus_input_id.clone()));
     let query_value = query();
-    let matches = matching_extensions(&available, &excluded, &query_value);
+    let matches = matching_extensions(&available, &selected, &query_value);
     let create = FileExtension::parse(&query_value).ok().filter(|value| {
         !available.iter().any(|entry| entry == value.as_str())
-            && !excluded
+            && !selected
                 .extensions()
                 .iter()
                 .any(|entry| entry == value.as_str())
@@ -41,8 +41,8 @@ pub(super) fn ExtensionSearch(
         .iter()
         .take(SUGGESTIONS_MAX)
         .cloned()
-        .map(ExtensionExclusionsAction::Toggle)
-        .chain(create.clone().map(ExtensionExclusionsAction::Exclude))
+        .map(ExtensionSelectionAction::Toggle)
+        .chain(create.clone().map(ExtensionSelectionAction::Add))
         .collect::<Vec<_>>();
     let create_index = matches.len().min(SUGGESTIONS_MAX);
     let active_index = active().min(options.len().saturating_sub(1));
@@ -55,11 +55,11 @@ pub(super) fn ExtensionSearch(
             .map(|_| t!(language, "extensions-invalid"))
     };
     let focus_selected_input_id = input_id.clone();
-    let select = use_callback(move |action: ExtensionExclusionsAction| {
+    let select = use_callback(move |action: ExtensionSelectionAction| {
         if disabled {
             return;
         }
-        if matches!(action, ExtensionExclusionsAction::Exclude(_)) {
+        if matches!(action, ExtensionSelectionAction::Add(_)) {
             query.set(String::new());
             active.set(0);
         }
@@ -162,11 +162,11 @@ pub(super) fn ExtensionSearch(
                             results_id: results_id.clone(),
                             index,
                             extension: extension.clone(),
-                            selected: excluded.extensions().contains(&extension),
+                            selected: selected.extensions().contains(&extension),
                             active: index == active_index,
                             disabled,
                             onselect: move |()| {
-                                select.call(ExtensionExclusionsAction::Toggle(extension.clone()));
+                                select.call(ExtensionSelectionAction::Toggle(extension.clone()));
                             },
                         }
                     }
@@ -180,7 +180,7 @@ pub(super) fn ExtensionSearch(
                     active: create_index == active_index,
                     disabled,
                     onselect: move |extension| {
-                        select.call(ExtensionExclusionsAction::Exclude(extension));
+                        select.call(ExtensionSelectionAction::Add(extension));
                     },
                 }
             }
@@ -212,7 +212,7 @@ fn ExtensionOption(
             aria_selected: selected.to_string(),
             tabindex: "-1",
             "data-active": active.to_string(),
-            aria_label: t!(language, "extensions-exclude-named", extension = extension.as_str()),
+            aria_label: t!(language, "extensions-toggle-named", extension = extension.as_str()),
             disabled,
             onclick: move |_| onselect.call(()),
             code { class: "min-w-0 flex-1 truncate", ".{extension}" }
@@ -225,14 +225,14 @@ fn ExtensionOption(
 
 fn matching_extensions(
     available: &[String],
-    excluded: &ExcludedExtensions,
+    selected: &FileExtensions,
     query: &str,
 ) -> Vec<String> {
     let query = query.trim().trim_start_matches('.').to_lowercase();
     available
         .iter()
         .chain(
-            excluded
+            selected
                 .extensions()
                 .iter()
                 .filter(|entry| !available.contains(entry)),

@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use gtl_models::{
+    diffs::ExtensionFilterMode,
     git::{GitHead, GitRevision},
     settings::ViewerLanguage,
 };
-use gtl_wire::viewer::ViewerAppliedExclusions;
+use gtl_wire::viewer::ViewerAppliedExtensionFilter;
 use lucide_dioxus::ChevronsDownUp;
 #[cfg(feature = "component-preview")]
 use lucide_dioxus::Search;
@@ -38,9 +39,10 @@ pub(super) fn ViewTitlebar(
                     upstream: view.upstream.clone(),
                 }
             }
-            ExtensionsControl {
-                artifact: artifact_view_id.is_some(),
-                exclusions: view.exclusions.clone(),
+            if artifact_view_id.is_some() && let Some(applied) = view.extension_filter.clone() {
+                div { class: "mobile:hidden",
+                    HiddenFilesBadge { applied }
+                }
             }
             div { class: "flex-1 mobile:hidden" }
             if let Some(live_actions) = live_actions {
@@ -85,8 +87,8 @@ pub(super) fn PreviewViewTitlebar(
                 compact: mobile,
             }
             if !mobile {
-                if let Some(exclusions) = &view.exclusions {
-                    ExclusionsBadge { exclusions: exclusions.clone() }
+                if let Some(applied) = &view.extension_filter {
+                    HiddenFilesBadge { applied: applied.clone() }
                 }
             }
             if !mobile {
@@ -152,15 +154,16 @@ pub(super) fn BranchRange(
     }
 }
 
+/// Discloses the files a saved extension filter hid from an offline artifact.
 #[component]
-fn ExclusionsBadge(exclusions: ViewerAppliedExclusions) -> Element {
+fn HiddenFilesBadge(applied: ViewerAppliedExtensionFilter) -> Element {
     let language = use_language();
     rsx! {
         Badge {
             class: "flex-none cursor-help whitespace-nowrap px-2 py-0.5 text-xs font-semibold",
             variant: BadgeVariant::Deletion,
-            title: exclusion_tooltip(&exclusions, language),
-            {exclusion_label(&exclusions, language)}
+            title: hidden_files_tooltip(&applied, language),
+            {hidden_files_label(&applied, language)}
         }
     }
 }
@@ -223,80 +226,77 @@ fn CollapseFilesButton(
     }
 }
 
-fn exclusion_label(exclusions: &ViewerAppliedExclusions, language: ViewerLanguage) -> String {
-    let count = exclusions.hidden_paths.len();
-    if exclusions.extensions.is_empty() {
-        return t!(language, "titlebar-hidden-files-configured", count = count);
+fn hidden_files_label(applied: &ViewerAppliedExtensionFilter, language: ViewerLanguage) -> String {
+    let count = applied.hidden_paths.len();
+    let extensions = applied.filter.extensions().extensions().join(", ");
+    match applied.filter.mode() {
+        ExtensionFilterMode::Hide => t!(
+            language,
+            "titlebar-hidden-files",
+            count = count,
+            extensions = extensions
+        ),
+        ExtensionFilterMode::Only => t!(
+            language,
+            "titlebar-hidden-files-only",
+            count = count,
+            extensions = extensions
+        ),
     }
-    t!(
-        language,
-        "titlebar-hidden-files",
-        count = count,
-        extensions = exclusions.extensions.extensions().join(", ")
-    )
 }
 
-fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions, language: ViewerLanguage) -> String {
+fn hidden_files_tooltip(
+    applied: &ViewerAppliedExtensionFilter,
+    language: ViewerLanguage,
+) -> String {
     let mut tooltip = t!(language, "titlebar-hidden-tooltip");
-    for path in &exclusions.hidden_paths {
+    for path in &applied.hidden_paths {
         tooltip.push('\n');
         tooltip.push_str(path.to_string_lossy().as_ref());
     }
     tooltip
 }
 
-#[component]
-fn ExtensionsControl(artifact: bool, exclusions: Option<ViewerAppliedExclusions>) -> Element {
-    #[cfg(feature = "desktop")]
-    if !artifact {
-        return rsx! {
-            super::extension_filters::desktop::ExtensionFilters {}
-        };
-    }
-    let _ = artifact;
-    rsx! {
-        if let Some(exclusions) = exclusions {
-            div { class: "mobile:hidden",
-                ExclusionsBadge { exclusions }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use gtl_models::{diffs::ExcludedExtensions, settings::ViewerLanguage};
-    use gtl_wire::viewer::ViewerAppliedExclusions;
+    use gtl_models::{
+        diffs::{ExtensionFilter, ExtensionFilterMode, FileExtensions},
+        settings::ViewerLanguage,
+    };
+    use gtl_wire::viewer::ViewerAppliedExtensionFilter;
 
-    use super::exclusion_label;
+    use super::hidden_files_label;
     use crate::test_support::{TestResult, repository_relative_path};
 
     #[test]
-    fn hidden_files_label_names_the_extensions_or_the_configuration() -> TestResult {
+    fn hidden_files_label_names_the_filter_rule() -> TestResult {
         let hidden_paths = vec![
             repository_relative_path("Cargo.lock")?,
             repository_relative_path("web/yarn.lock")?,
         ];
-        let by_configuration = ViewerAppliedExclusions {
-            extensions: ExcludedExtensions::default(),
+        let hiding = ViewerAppliedExtensionFilter {
+            filter: ExtensionFilter::new(ExtensionFilterMode::Hide, FileExtensions::new(["lock"])),
             hidden_paths: hidden_paths.clone(),
         };
-        let by_extension = ViewerAppliedExclusions {
-            extensions: ExcludedExtensions::new(["lock"]),
+        let showing_only = ViewerAppliedExtensionFilter {
+            filter: ExtensionFilter::new(
+                ExtensionFilterMode::Only,
+                FileExtensions::new(["rs", "toml"]),
+            ),
             hidden_paths,
         };
 
         assert_eq!(
-            exclusion_label(&by_configuration, ViewerLanguage::EnUs),
-            "2 files hidden · configured"
+            hidden_files_label(&hiding, ViewerLanguage::EnUs),
+            "2 files hidden · lock"
         );
         assert_eq!(
-            exclusion_label(&by_configuration, ViewerLanguage::PtBr),
-            "2 arquivos ocultos pela configuração"
-        );
-        assert_eq!(
-            exclusion_label(&by_extension, ViewerLanguage::PtBr),
+            hidden_files_label(&hiding, ViewerLanguage::PtBr),
             "2 arquivos ocultos · lock"
+        );
+        assert_eq!(
+            hidden_files_label(&showing_only, ViewerLanguage::EnUs),
+            "2 files hidden · only rs, toml"
         );
         Ok(())
     }

@@ -5,7 +5,7 @@ use crate::{
         DiffTarget, FetchFullContextDiff, FullContextDiffState, View, diff_computation,
         fetch_full_context_diff,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
     shared::notes::Note,
 };
 
@@ -40,17 +40,13 @@ pub fn execute(
     req: ComputeDiff,
     app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { repo_root, target } = req;
     let settings = app_settings.load()?;
-    let mut built = diff_computation::build(
-        git,
-        &repo_root,
-        &target,
-        settings.diff_exclusions(),
-        comparisons,
-    )?;
+    let filter = filters.extension_filter(&repo_root)?;
+    let mut built = diff_computation::build(git, &repo_root, &target, &filter, comparisons)?;
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &built.view.full_context
     {
@@ -72,18 +68,17 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        diffs::DiffExclusions,
-        settings::UserSettings,
-        viewer::{DiffDensity, DiffLayout, RenderOptions},
+        diffs::{ExtensionFilterMode, FileExtensions},
+        viewer::DiffDensity,
     };
 
     use super::*;
     use crate::{
         diffs::{DiffTarget, PinnedRange, compute_diff},
         utils::{
-            FakeGitClient, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore, SavedExtensionFilters,
             diffs::{DIFF_SINGLE_FILE, commit},
-            project_name, repository_root,
+            hiding_extensions, repository_root, settings_with_density,
         },
     };
 
@@ -102,6 +97,7 @@ mod tests {
             request,
             &FixedUserSettingsStore::default(),
             source,
+            &SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
     }
@@ -315,36 +311,11 @@ index 333..444 100644\n\
 -plan\n\
 +more plan\n";
 
-    fn excluding(project: &str, extensions: &[&str]) -> DiffExclusions {
-        DiffExclusions::new(
-            [(
-                project_name(project),
-                extensions.iter().map(ToString::to_string).collect(),
-            )],
-            None,
-        )
-    }
-
-    fn settings(exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(
-            None,
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            exclusions,
-            gtl_models::settings::PushAllExclusions::default(),
-        )
-    }
-
-    fn settings_with_density(density: DiffDensity) -> UserSettings {
-        UserSettings::new(
-            None,
-            RenderOptions::new(DiffLayout::Unified, density),
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            DiffExclusions::default(),
-            gtl_models::settings::PushAllExclusions::default(),
-        )
+    fn saved(
+        repository: &str,
+        filter: gtl_models::diffs::ExtensionFilter,
+    ) -> SavedExtensionFilters {
+        SavedExtensionFilters::new([(repository_root(repository), filter)])
     }
 
     #[test]
@@ -363,6 +334,7 @@ index 333..444 100644\n\
             req(DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
             &source,
+            &SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -401,6 +373,7 @@ new file mode 100644\n\
             req(DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::new(settings_with_density(DiffDensity::Full)),
             &source,
+            &SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -414,7 +387,7 @@ new file mode 100644\n\
     }
 
     #[test]
-    fn configured_extensions_are_hidden_and_reported() {
+    fn saved_hidden_extensions_are_hidden_and_reported() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -424,12 +397,12 @@ new file mode 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
         let response = compute_diff::execute(
             request,
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
+            &saved("/repo", hiding_extensions(&["md"])),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -441,8 +414,8 @@ new file mode 100644\n\
             .map(|file| file.path.to_string_lossy().into_owned())
             .collect();
         assert_eq!(paths, ["f.txt"], "the .md file is hidden");
-        let applied = response.view.exclusions.unwrap();
-        assert_eq!(applied.extensions.extensions(), ["md"]);
+        let applied = response.view.extension_filter.unwrap();
+        assert_eq!(applied.filter, hiding_extensions(&["md"]));
         assert_eq!(
             applied
                 .hidden_paths
@@ -453,15 +426,56 @@ new file mode 100644\n\
         );
         assert!(
             response.notes.contains(&Note::info(
-                "diff-artifact: 1 file(s) hidden by config diff.exclude (md)"
+                "diff-artifact: 1 file(s) hidden by the saved extension filter (hide md)"
             )),
-            "exclusion note missing: {:?}",
+            "filter note missing: {:?}",
             response.notes
         );
     }
 
     #[test]
-    fn exclusions_for_another_project_do_not_apply() {
+    fn show_only_filters_hide_every_unlisted_extension() {
+        let source = FakeGitClient {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: CODE_AND_NOTES_DIFF.into(),
+            ..Default::default()
+        };
+        let only_markdown = gtl_models::diffs::ExtensionFilter::new(
+            ExtensionFilterMode::Only,
+            FileExtensions::new(["md"]),
+        );
+
+        let response = compute_diff::execute(
+            req(DiffTarget::Unpushed { pinned: None }),
+            &FixedUserSettingsStore::default(),
+            &source,
+            &saved("/repo", only_markdown.clone()),
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            response
+                .view
+                .files
+                .iter()
+                .map(|file| file.path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            ["docs/notes.md"]
+        );
+        let applied = response.view.extension_filter.unwrap();
+        assert_eq!(applied.filter, only_markdown);
+        assert_eq!(
+            applied.hidden_paths,
+            [crate::utils::repository_relative_path("f.txt")]
+        );
+    }
+
+    #[test]
+    fn filters_saved_for_another_repository_do_not_apply() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -471,23 +485,23 @@ new file mode 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings = FixedUserSettingsStore::new(settings(excluding("other-repo", &["md"])));
 
         let response = compute_diff::execute(
             request,
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
+            &saved("/other/repo", hiding_extensions(&["md"])),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
         assert_eq!(response.view.files.len(), 2);
-        assert_eq!(response.view.exclusions, None);
+        assert_eq!(response.view.extension_filter, None);
         assert!(response.notes.is_empty());
     }
 
     #[test]
-    fn idle_exclusions_matching_nothing_stay_invisible() {
+    fn idle_filters_matching_nothing_stay_invisible() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -497,18 +511,18 @@ new file mode 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
         let response = compute_diff::execute(
             request,
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
+            &saved("/repo", hiding_extensions(&["md"])),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
 
         assert_eq!(response.view.files.len(), 1);
-        assert_eq!(response.view.exclusions, None);
+        assert_eq!(response.view.extension_filter, None);
         assert!(response.notes.is_empty());
     }
 }

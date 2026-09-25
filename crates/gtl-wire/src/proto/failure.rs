@@ -232,11 +232,6 @@ pub fn encode_settings_failure(failure: &SettingsFailure) -> v1::SettingsFailure
         SettingsFailure::PathUnavailable => {
             Reason::PathUnavailable(v1::SettingsFailurePathUnavailable {})
         }
-        SettingsFailure::DuplicateProject { name } => {
-            Reason::DuplicateProject(v1::SettingsFailureDuplicateProject {
-                name: name.to_string(),
-            })
-        }
     };
     v1::SettingsFailure {
         reason: Some(reason),
@@ -257,9 +252,6 @@ pub fn decode_settings_failure(failure: v1::SettingsFailure) -> Option<SettingsF
             wait_seconds: value.wait_seconds,
         },
         Reason::PathUnavailable(_) => SettingsFailure::PathUnavailable,
-        Reason::DuplicateProject(value) => SettingsFailure::DuplicateProject {
-            name: value.name.try_into().ok()?,
-        },
     })
 }
 
@@ -579,9 +571,6 @@ mod tests {
             Failure::Settings(SettingsFailure::Stale),
             Failure::Settings(SettingsFailure::Locked { wait_seconds: 5 }),
             Failure::Settings(SettingsFailure::PathUnavailable),
-            Failure::Settings(SettingsFailure::DuplicateProject {
-                name: "sample_project".try_into().unwrap(),
-            }),
             Failure::Viewer(ViewerFailure::SourcePreparing),
             Failure::Viewer(ViewerFailure::RevealTooLarge),
             Failure::Viewer(ViewerFailure::SnapshotNameInvalid {

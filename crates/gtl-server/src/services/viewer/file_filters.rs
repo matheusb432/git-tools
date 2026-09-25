@@ -1,7 +1,6 @@
 use gtl_application::viewer::{
-    file_filters::FileFiltersError,
     get_viewer_file_filters::{self, GetViewerFileFilters},
-    set_viewer_file_filters, update_diff_exclusions,
+    set_viewer_file_filters,
 };
 use gtl_models::failure::Failure;
 use gtl_wire::{proto, v1};
@@ -21,16 +20,7 @@ pub(super) async fn get(
         .map_err(|_| invalid_request("identity"))?;
     let state = state.clone();
     let result = run_blocking(move || {
-        let connection = state
-            .database
-            .connection_lock()
-            .map_err(FileFiltersError::Database)?;
-        get_viewer_file_filters::execute(
-            &GetViewerFileFilters { tab_id },
-            &state.viewer,
-            &state.user_settings,
-            &connection,
-        )
+        get_viewer_file_filters::execute(&GetViewerFileFilters { tab_id }, &state.viewer)
     })
     .await?
     .into_grpc()?;
@@ -44,7 +34,7 @@ pub(super) async fn set(
     request: Request<v1::SetViewerFileFiltersRequest>,
 ) -> ApiResult<v1::SetViewerFileFiltersResponse> {
     let request = proto::viewer::file_filters::decode_set(request.into_inner())
-        .map_err(|_| invalid_request("exclusions"))?;
+        .map_err(|_| invalid_request("filter"))?;
     let permit = state
         .viewer_file_filter_requests
         .clone()
@@ -53,41 +43,10 @@ pub(super) async fn set(
     let state = state.clone();
     run_blocking(move || {
         let _permit = permit;
-        let prepared = {
-            let connection = state
-                .database
-                .connection_lock()
-                .map_err(FileFiltersError::Database)?;
-            set_viewer_file_filters::prepare(
-                request,
-                &state.viewer,
-                &state.user_settings,
-                &connection,
-            )?
-        };
-        set_viewer_file_filters::execute(
-            prepared,
-            &state.viewer,
-            &mut state.user_settings.clone(),
-            &state.git,
-        )
+        let prepared = set_viewer_file_filters::prepare(request, &state.viewer)?;
+        set_viewer_file_filters::execute(prepared, &state.viewer, &state.git, &state.database)
     })
     .await?
     .into_grpc()?;
     Ok(Response::new(v1::SetViewerFileFiltersResponse {}))
-}
-
-pub(super) async fn defaults(
-    state: &AppState,
-    request: Request<v1::UpdateDiffExclusionsRequest>,
-) -> ApiResult<v1::UpdateDiffExclusionsResponse> {
-    let request = proto::viewer::file_filters::decode_defaults(request.into_inner())
-        .map_err(|_| invalid_request("exclusions"))?;
-    let state = state.clone();
-    run_blocking(move || {
-        update_diff_exclusions::execute(request, &mut state.user_settings.clone(), &state.viewer)
-    })
-    .await?
-    .into_grpc()?;
-    Ok(Response::new(v1::UpdateDiffExclusionsResponse {}))
 }

@@ -146,7 +146,7 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Find an existing artifact for a pure commit range rendered under the same
-/// layout, density, theme, language, and exclusion set. Returns `None` on a miss and
+/// layout, density, theme, language, and extension filter. Returns `None` on a miss and
 /// scans the flat store's validated sidecar projections.
 #[must_use]
 pub fn lookup_by_range(
@@ -161,7 +161,7 @@ pub fn lookup_by_range(
             && artifact.metadata.theme == ArtifactThemeMetadata::Recorded(key.theme)
             && artifact.metadata.language == key.language
             && artifact.metadata.renderer_version == RENDERER_VERSION
-            && artifact.metadata.excluded_extensions == key.excluded_extensions
+            && artifact.metadata.extension_filter == key.extension_filter
         {
             return AbsoluteFilePath::try_new(artifact.html_path).ok();
         }
@@ -215,7 +215,7 @@ fn content_hash_from_stem(stem: &str) -> Option<ArtifactContentHash> {
 mod tests {
     use gtl_models::{
         artifacts::{ArtifactCommitRange, ArtifactRangeKind},
-        diffs::{DiffKind, ExcludedExtensions},
+        diffs::{DiffKind, ExtensionFilter, ExtensionFilterMode, FileExtensions},
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
@@ -277,8 +277,13 @@ mod tests {
             theme_recorded: true,
             language: "en-US".into(),
             renderer_version: RENDERER_VERSION,
-            excluded_extensions: Vec::new(),
+            filter_extensions: Vec::new(),
+            filter_mode: "hide".into(),
         }
+    }
+
+    fn hiding_md() -> ExtensionFilter {
+        ExtensionFilter::new(ExtensionFilterMode::Hide, FileExtensions::new(["md"]))
     }
 
     fn range_key(kind: DiffKind, base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
@@ -290,7 +295,7 @@ mod tests {
             render_options: RenderOptions::DEFAULT,
             theme: None,
             language: gtl_models::settings::ViewerLanguage::EnUs,
-            excluded_extensions: ExcludedExtensions::default(),
+            extension_filter: ExtensionFilter::default(),
         }
     }
 
@@ -505,13 +510,13 @@ mod tests {
     }
 
     #[test]
-    fn lookup_by_range_requires_the_same_exclusion_set() {
+    fn lookup_by_range_requires_the_same_extension_filter() {
         let tmp = tempfile::tempdir().unwrap();
-        // An artifact rendered without exclusions cannot satisfy a filtered lookup.
+        // An artifact rendered without a filter cannot satisfy a filtered lookup.
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>unfiltered</html>", &sc).unwrap();
         let filtered_key = ArtifactRangeKey {
-            excluded_extensions: ExcludedExtensions::new(["md"]),
+            extension_filter: hiding_md(),
             ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
         };
         let filtered = lookup_by_range(tmp.path(), "repo0000", &filtered_key);
@@ -519,7 +524,7 @@ mod tests {
 
         // And a filtered artifact is only reusable under the identical set.
         let mut filtered_sidecar = sidecar(DiffKind::TwoDot, "cccc", "dddd");
-        filtered_sidecar.excluded_extensions = vec!["md".to_string()];
+        filtered_sidecar.filter_extensions = vec!["md".to_string()];
         place(
             tmp.path(),
             "repo0000",
@@ -528,7 +533,7 @@ mod tests {
         )
         .unwrap();
         let matching_key = ArtifactRangeKey {
-            excluded_extensions: ExcludedExtensions::new(["md"]),
+            extension_filter: hiding_md(),
             ..range_key(DiffKind::TwoDot, "cccc", "dddd")
         };
         assert!(lookup_by_range(tmp.path(), "repo0000", &matching_key).is_some());
@@ -541,6 +546,17 @@ mod tests {
             .is_none(),
             "filtered artifact must not serve an unfiltered render"
         );
+        let show_only_key = ArtifactRangeKey {
+            extension_filter: ExtensionFilter::new(
+                ExtensionFilterMode::Only,
+                FileExtensions::new(["md"]),
+            ),
+            ..range_key(DiffKind::TwoDot, "cccc", "dddd")
+        };
+        assert!(
+            lookup_by_range(tmp.path(), "repo0000", &show_only_key).is_none(),
+            "a hiding filter must not serve a show-only render"
+        );
     }
 
     #[test]
@@ -550,13 +566,13 @@ mod tests {
         dark.layout = DiffLayout::Split.to_string();
         dark.density = DiffDensity::Full.to_string();
         dark.theme = Some("dark".to_string());
-        dark.excluded_extensions = vec!["md".to_string()];
+        dark.filter_extensions = vec!["md".to_string()];
         place(tmp.path(), "repo0000", "<html>dark</html>", &dark).unwrap();
 
         let dark_key = ArtifactRangeKey {
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             theme: Some(Theme::Dark),
-            excluded_extensions: ExcludedExtensions::new(["md"]),
+            extension_filter: hiding_md(),
             ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
         };
 

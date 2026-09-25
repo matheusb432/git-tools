@@ -1,7 +1,7 @@
 use std::num::NonZeroU32;
 
 use gtl_models::{
-    diffs::{CommitId, DiffViewTitle, ExcludedExtensions},
+    diffs::{CommitId, DiffViewTitle, ExtensionFilter, ExtensionFilterMode, FileExtensions},
     git::{CommitCount, GitHead, GitRange, GitRevision},
     paths::ProjectName,
     recipes::{RecipeLabel, RecipeLabelChanges},
@@ -32,13 +32,11 @@ use gtl_wire::{
     },
     viewer::{
         self, EditSettingsRequest, FieldUpdate, FindViewerDiff, MoveViewerTab, SearchViewerFiles,
-        ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffExclusions,
-        ViewerDiffFileId, ViewerDiffLayout, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
-        ViewerDiffSearchResult, ViewerFeedback, ViewerFileSearchResult, ViewerHistoryEntry,
-        ViewerHistoryPage, ViewerPreferences, ViewerProjectDiffExclusions,
-        ViewerProjectSettingsUpdate, ViewerRecipeKind, ViewerRowEvent, ViewerShell,
-        ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
-        ViewerUnifiedSourceRow, ViewerUserSettings,
+        ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout,
+        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
+        ViewerFileSearchResult, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
+        ViewerRecipeKind, ViewerRowEvent, ViewerShell, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
+        ViewerTabState, ViewerTheme, ViewerUnifiedSourceRow, ViewerUserSettings,
     },
 };
 
@@ -699,7 +697,7 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 }
 
 #[test]
-fn settings_codec_round_trips_exclusions_and_effective_values() {
+fn settings_codec_round_trips_effective_values() {
     let settings = ViewerUserSettings {
         accessibility: gtl_models::settings::ViewerAccessibility {
             ui_scale_percent: gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
@@ -725,15 +723,6 @@ fn settings_codec_round_trips_exclusions_and_effective_values() {
             density: ViewerDiffDensity::Full,
         },
         push_confirmation_required: true,
-        diff_exclusions: ViewerDiffExclusions {
-            default_extensions: ExcludedExtensions::new(["lock"]),
-            projects: vec![ViewerProjectDiffExclusions {
-                configured: true,
-                project_name: ProjectName::try_new("git-tools").unwrap(),
-                extensions: ExcludedExtensions::new(["snap"]),
-                excluded_from_push_all: true,
-            }],
-        },
     };
 
     for focus_window_on_diff in [true, false] {
@@ -778,12 +767,6 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         layout: FieldUpdate::Unchanged,
         density: FieldUpdate::Update(ViewerDiffDensity::Compact),
         push_confirmation_required: FieldUpdate::Update(false),
-        default_diff_exclusions: FieldUpdate::Update(ExcludedExtensions::default()),
-        projects: FieldUpdate::Update(vec![ViewerProjectSettingsUpdate {
-            project_name: ProjectName::try_new("git-tools").unwrap(),
-            excluded_from_push_all: true,
-            diff_exclusions: ExcludedExtensions::new(["lock"]),
-        }]),
     };
 
     for wrap_lines in [
@@ -801,7 +784,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             ..request.clone()
         };
         assert_eq!(
-            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            decode_edit_settings_request(encode_edit_settings_request(&request)).unwrap(),
             request
         );
     }
@@ -812,12 +795,12 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             ..request.clone()
         };
         assert_eq!(
-            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            decode_edit_settings_request(encode_edit_settings_request(&request)).unwrap(),
             request
         );
     }
 
-    let mut malformed_revision = encode_edit_settings_request(request);
+    let mut malformed_revision = encode_edit_settings_request(&request);
     malformed_revision.expected_revision = Some("not-a-revision".to_owned());
     assert_eq!(
         decode_edit_settings_request(malformed_revision),
@@ -997,42 +980,52 @@ fn project_page_bounds_survive_grpc_and_desktop_json() {
 }
 
 #[test]
-fn exclusion_updates_preserve_presence_and_normalize_the_client_boundary() {
-    use gtl_wire::{proto::viewer::file_filters, viewer::file_filters::UpdateDiffExclusions};
-    for extensions in [
-        FieldUpdate::Unchanged,
-        FieldUpdate::Clear,
-        FieldUpdate::Update(ExcludedExtensions::default()),
-    ] {
-        for expected in [None, Some(ExcludedExtensions::default())] {
-            let request = UpdateDiffExclusions {
-                project: Some(ProjectName::try_new("git-tools").unwrap()),
-                extensions: extensions.clone(),
-                expected,
-            };
-            assert_eq!(
-                file_filters::decode_defaults(file_filters::encode_defaults(request.clone()))
-                    .unwrap(),
-                request
-            );
-        }
+fn file_filter_requests_round_trip_modes_and_normalize_the_client_boundary() {
+    use gtl_wire::{proto::viewer::file_filters, viewer::file_filters::SetViewerFileFilters};
+    for mode in [ExtensionFilterMode::Hide, ExtensionFilterMode::Only] {
+        let request = SetViewerFileFilters {
+            tab_id: gtl_models::viewer::ViewerTabId::try_new(7).unwrap(),
+            filter: ExtensionFilter::new(mode, FileExtensions::new(["lock"])),
+        };
+        assert_eq!(
+            file_filters::decode_set(file_filters::encode_set(request.clone())).unwrap(),
+            request
+        );
     }
-    let decoded = file_filters::decode_defaults(v1::UpdateDiffExclusionsRequest {
-        project: None,
-        expected: None,
-        extensions: Some(v1::ExtensionsFieldUpdate {
-            operation: Some(v1::extensions_field_update::Operation::Update(
-                v1::ExtensionsValue {
-                    extensions: vec![" .MD ".into(), "lock".into(), "md".into()],
-                },
-            )),
+    let decoded = file_filters::decode_set(v1::SetViewerFileFiltersRequest {
+        tab_id: 7,
+        filter: Some(v1::ViewerExtensionFilter {
+            mode: v1::ViewerExtensionFilterMode::Only as i32,
+            extensions: vec![" .MD ".into(), "lock".into(), "md".into()],
         }),
     })
     .unwrap();
     assert_eq!(
-        decoded.extensions,
-        FieldUpdate::Update(ExcludedExtensions::new(["lock", "md"]))
+        decoded.filter,
+        ExtensionFilter::new(
+            ExtensionFilterMode::Only,
+            FileExtensions::new(["lock", "md"])
+        )
     );
+    for invalid in [
+        None,
+        Some(v1::ViewerExtensionFilter {
+            mode: v1::ViewerExtensionFilterMode::Unspecified as i32,
+            extensions: Vec::new(),
+        }),
+        Some(v1::ViewerExtensionFilter {
+            mode: v1::ViewerExtensionFilterMode::Hide as i32,
+            extensions: vec!["a/b".into()],
+        }),
+    ] {
+        assert!(
+            file_filters::decode_set(v1::SetViewerFileFiltersRequest {
+                tab_id: 7,
+                filter: invalid,
+            })
+            .is_err()
+        );
+    }
 }
 
 #[test]
@@ -1047,7 +1040,7 @@ fn accessibility_patch_preserves_clear_and_rejects_invalid_scale() {
             ..Default::default()
         };
         assert_eq!(
-            decode_edit_settings_request(encode_edit_settings_request(request.clone())).unwrap(),
+            decode_edit_settings_request(encode_edit_settings_request(&request)).unwrap(),
             request
         );
     }

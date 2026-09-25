@@ -83,14 +83,14 @@ fn search_all_files() -> Element {
     }
 }
 
-#[story(name = "Filter files by path")]
+#[story(name = "Find a file by path")]
 fn filter_paths() -> Element {
     rsx! {
         ViewerPreview { initial_search: PreviewDiffSearch::Paths }
     }
 }
 
-#[story(name = "Filter files by path on mobile")]
+#[story(name = "Find a file by path on mobile")]
 fn filter_paths_mobile() -> Element {
     rsx! {
         ViewerPreview { mobile: true, initial_search: PreviewDiffSearch::Paths }
@@ -274,7 +274,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
         footer: ViewerFooter {
             command: "gtl diff main".to_owned(),
         },
-        exclusions: None,
+        extension_filter: None,
     };
     let tabs = vec![
         ViewerTab {
@@ -524,7 +524,6 @@ fn SettingsMock() -> Element {
                 }
                 SettingsFormPreview {}
                 SettingsResolved {}
-                SettingsProjects {}
             }
         }
     }
@@ -593,24 +592,6 @@ fn SettingsResolved() -> Element {
                         value: "~/.config/git-tools/config.toml",
                     }
                     SettingsRow { term: "Effective theme", value: "Mirage" }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn SettingsProjects() -> Element {
-    rsx! {
-        SectionedSurface { aria_label: "Project exclusions",
-            SectionedSurfaceHeader { class: "px-4 py-3",
-                h2 { class: "font-semibold text-ink", "Project exclusions" }
-                p { class: "mt-0.5 text-xs text-ink-3", "Repository-specific extension filters." }
-            }
-            SectionedSurfaceBody {
-                dl { class: "divide-y divide-line",
-                    SettingsRow { term: "git-tools", value: "*.lock, *.snap" }
-                    SettingsRow { term: "sample_project", value: "*.wasm" }
                 }
             }
         }

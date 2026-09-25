@@ -76,15 +76,10 @@ settings-resolved-title = Configuração resolvida
 settings-resolved-subtitle = Fontes atuais e valores efetivos.
 settings-configuration-file = Arquivo de configuração
 settings-effective-theme = Tema efetivo
-settings-default-exclusions-title = Exclusões padrão de diff
-settings-default-exclusions-subtitle = Usadas quando um projeto não tem uma lista de exclusões própria.
 settings-edit-stale = As configurações mudaram desde que esta página foi carregada. Recarregue-as antes de salvar de novo.
 settings-edit-field-rejected = Corrija a configuração destacada e salve de novo.
 settings-edit-rejected = Uma ou mais configurações foram rejeitadas. Recarregue os valores salvos e tente de novo.
 settings-edit-invalid-file = O arquivo de configurações ficou inválido. Recarregue-o para corrigi-lo ou redefini-lo.
-settings-exclusions-saved = Exclusões salvas
-settings-exclusions-reload = Recarregar exclusões
-settings-exclusions-save = Salvar
 
 ## Viewer settings form
 
@@ -174,7 +169,6 @@ failure-settings-locked =
        *[other] Outro editor manteve o bloqueio das configurações por { $seconds } segundos. Tente novamente.
     }
 failure-settings-path-unavailable = O caminho da configuração do usuário está indisponível.
-failure-settings-duplicate-project = As configurações de projeto citam { $name } mais de uma vez.
 failure-viewer-source-preparing = A fonte do diff ainda está sendo preparada. Tente novamente em instantes.
 failure-viewer-reveal-too-large = Os arquivos revelados excedem o limite do cache do visualizador.
 failure-viewer-snapshot-name-invalid = Nomes de snapshot precisam ter de 1 a { $characters } caracteres em uma única linha.
@@ -489,18 +483,17 @@ table-sort-ascending = Ordenar { $column } em ordem crescente
 table-sort-by = Ordenar por { $column }
 inline-editor-hint = Enter para salvar, Escape para cancelar
 inline-editor-saving = Salvando o nome
-extensions-excluded = Extensões excluídas
-extensions-none = Nenhuma extensão excluída
-extensions-exclude = Excluir extensão…
-extensions-reveal = Mostrar .{ $extension }
+extensions-none = Nenhuma extensão selecionada
+extensions-add-extension = Adicionar extensão…
+extensions-remove = Remover .{ $extension }
 extensions-search = Busque ou adicione uma extensão
 extensions-search-placeholder = Buscar ou adicionar…
 extensions-clear-search = Limpar a busca de extensões
-extensions-options = Extensões para excluir
+extensions-options = Extensões para filtrar
 extensions-in-diff = Neste diff
-extensions-other = Outras exclusões
+extensions-other = Outras extensões
 extensions-more = Busque para encontrar mais extensões
-extensions-exclude-named = Excluir .{ $extension }
+extensions-toggle-named = Alternar .{ $extension }
 extensions-add = Adicionar .{ $extension }
 extensions-invalid = Informe uma extensão de arquivo final, como .lock ou .md.
 
@@ -658,13 +651,13 @@ titlebar-hidden-files =
         [one] { $count } arquivo oculto
        *[other] { $count } arquivos ocultos
     } · { $extensions }
-titlebar-hidden-files-configured =
+titlebar-hidden-files-only =
     { $count ->
-        [0] 0 arquivos ocultos pela configuração
-        [one] { $count } arquivo oculto pela configuração
-       *[other] { $count } arquivos ocultos pela configuração
-    }
-titlebar-hidden-tooltip = Ocultos pela configuração diff.exclude do git-tools:
+        [0] 0 arquivos ocultos
+        [one] { $count } arquivo oculto
+       *[other] { $count } arquivos ocultos
+    } · só { $extensions }
+titlebar-hidden-tooltip = Ocultos pelo filtro de extensões salvo:
 files-empty = Nenhum arquivo alterado
 files-count =
     { $count ->
@@ -678,18 +671,30 @@ sidebar-toggle-commits = Alternar a barra lateral de commits
 
 ## Path filter
 
-path-filter-label = Filtrar arquivos pelo caminho
+path-filter-label = Encontrar um arquivo pelo caminho
 path-filter-results = Arquivos correspondentes
 path-filter-empty = Nenhum arquivo corresponde
 path-filter-searching = Buscando arquivos...
 
 ## Diff extension filters
 
-extensions-label-none = Extensões excluídas: nenhuma
-extensions-label = Extensões excluídas: { $extensions }
-extensions-summary-none = Nenhuma
-extensions-restore-defaults = Restaurar os padrões globais
-extensions-too-many-changes = Há alterações de exclusão pendentes demais. Tente novamente em instantes.
+extensions-filter-label = Filtrar por extensão
+extensions-filter-label-hide = Filtrar por extensão: ocultando { $extensions }
+extensions-filter-label-only = Filtrar por extensão: mostrando só { $extensions }
+extensions-selected = Extensões filtradas
+extensions-mode-label = Modo do filtro
+extensions-mode-only = Mostrar só
+extensions-mode-hide = Ocultar
+extensions-mode-only-description = Mostra só os arquivos alterados com estas extensões.
+extensions-mode-hide-description = Oculta os arquivos alterados com estas extensões.
+extensions-hidden-count =
+    { $count ->
+        [0] Nenhum arquivo oculto nesta aba
+        [one] { $count } arquivo oculto nesta aba
+       *[other] { $count } arquivos ocultos nesta aba
+    }
+extensions-clear = Limpar o filtro
+extensions-too-many-changes = Há alterações de filtro pendentes demais. Tente novamente em instantes.
 
 ## Project comparisons
 

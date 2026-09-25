@@ -4,12 +4,12 @@ use std::{
 };
 
 use gtl_models::{
-    diffs::{Commit, CommitId},
+    diffs::{Commit, CommitId, ExtensionSelection},
     git::{
         AheadBehind, BranchName, CommitCount, GitDiffSpec, GitEffectMode, GitHead, GitObjectId,
         GitRange, GitRefName, GitRevision, RemoteName, RemoteUrl, TagName,
     },
-    paths::{RepositoryRelativePath, RepositoryRoot},
+    paths::RepositoryRoot,
     repository::{PathCount, working_tree::CommitFile},
     tags::Tag,
 };
@@ -25,13 +25,7 @@ pub enum GitDiffFormat {
 pub struct GitDiffRequest {
     pub spec: GitDiffSpec,
     pub format: GitDiffFormat,
-    pub paths: GitDiffPaths,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GitDiffPaths {
-    Excluding(Vec<RepositoryRelativePath>),
-    Including(Vec<RepositoryRelativePath>),
+    pub paths: ExtensionSelection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -32,7 +32,7 @@ impl ArtifactStore for StoreArtifacts {
             theme: crate::store::ArtifactThemeMetadata::Recorded(meta.theme),
             language: meta.language,
             renderer_version: crate::store::RENDERER_VERSION,
-            excluded_extensions: meta.excluded_extensions.clone(),
+            extension_filter: meta.extension_filter.clone(),
         };
         crate::store::place(store_root, &repo_id, html, &meta.generated_at, &metadata)
     }
@@ -57,7 +57,7 @@ impl ArtifactStore for StoreArtifacts {
 mod tests {
     use gtl_models::{
         artifacts::ArtifactDiffIdentity,
-        diffs::{DiffKind, ExcludedExtensions},
+        diffs::{DiffKind, ExtensionFilter},
         timestamps::MachineTimestamp,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
@@ -79,7 +79,7 @@ mod tests {
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             theme: Some(Theme::Dark),
             language: gtl_models::settings::ViewerLanguage::PtBr,
-            excluded_extensions: ExcludedExtensions::default(),
+            extension_filter: ExtensionFilter::default(),
         };
 
         let placed = StoreArtifacts

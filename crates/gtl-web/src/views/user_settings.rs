@@ -1,5 +1,3 @@
-mod exclusion_editor;
-
 use dioxus::prelude::*;
 use gtl_models::{
     failure::{Failure, SettingsFailure},
@@ -152,20 +150,6 @@ fn SettingsContent(settings: ViewerUserSettings, onchanged: EventHandler<()>) ->
                     SettingsRow { term: t!(language, "settings-effective-theme"),
                         "{viewer_theme_label(settings.effective_theme)}"
                     }
-                }
-            }
-        }
-
-        SectionedSurface { aria_label: t!(language, "settings-default-exclusions-title"),
-            SectionedSurfaceHeader { class: "px-4 py-3",
-                SettingsCardHeading { subtitle: t!(language, "settings-default-exclusions-subtitle"),
-                    {t!(language, "settings-default-exclusions-title")}
-                }
-            }
-            SectionedSurfaceBody {
-                exclusion_editor::ExclusionEditor {
-                    configured: settings.diff_exclusions.default_extensions.clone(),
-                    onchanged,
                 }
             }
         }

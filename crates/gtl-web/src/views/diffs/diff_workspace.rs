@@ -732,7 +732,7 @@ mod artifact_tests {
             footer: ViewerFooter {
                 command: "gtl diff".to_owned(),
             },
-            exclusions: None,
+            extension_filter: None,
         };
         Ok((view, workspace))
     }

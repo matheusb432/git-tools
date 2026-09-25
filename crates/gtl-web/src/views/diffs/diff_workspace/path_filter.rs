@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
-use lucide_dioxus::{File, ListFilter};
+use lucide_dioxus::{File, Search};
 
 use super::{DiffWorkspaceContext, file_search::WorkspaceFileMatches, use_workspace_context};
 use crate::shared::{
@@ -41,7 +41,7 @@ pub(super) fn PathFilterTrigger(artifact_view_id: Option<String>) -> Element {
             "data-gtl-action": artifact_view_id.map(|_| "open-path-filter"),
             onclick: move |_| open_path_filter(workspace),
             span { aria_hidden: "true",
-                ListFilter { size: 16 }
+                Search { size: 16 }
             }
         }
     }

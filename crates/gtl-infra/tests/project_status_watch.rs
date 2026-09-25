@@ -1,36 +1,19 @@
 use std::{
-    path::Path,
-    process::Command,
     sync::atomic::AtomicBool,
     time::{Duration, Instant},
 };
 
-use gtl_infra::project_status_watch::ProjectStatusWatch;
+use gtl_infra::{project_status_watch::ProjectStatusWatch, testing::TestRepository};
 
-fn git(path: &Path, args: &[&str]) -> anyhow::Result<()> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(args)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
-
-fn repository() -> anyhow::Result<tempfile::TempDir> {
-    let repo = tempfile::tempdir()?;
-    git(repo.path(), &["init", "-q", "-b", "main"])?;
-    std::fs::write(repo.path().join(".gitignore"), "/target/\n/forced/\n")?;
-    std::fs::write(repo.path().join("Cargo.lock"), "tracked\n")?;
-    std::fs::create_dir(repo.path().join("forced"))?;
-    std::fs::write(repo.path().join("forced/keep"), "tracked\n")?;
-    git(repo.path(), &["add", ".gitignore", "Cargo.lock"])?;
-    git(repo.path(), &["add", "-f", "forced/keep"])?;
-    Ok(repo)
+/// Stages a lockfile and a force-added file under an ignored directory, without committing.
+fn repository_with_tracked_ignored_paths() -> TestRepository {
+    let repository = TestRepository::new();
+    repository.write(".gitignore", "/target/\n/forced/\n");
+    repository.write("Cargo.lock", "tracked\n");
+    repository.write("forced/keep", "tracked\n");
+    repository.git(&["add", ".gitignore", "Cargo.lock"]);
+    repository.git(&["add", "-f", "forced/keep"]);
+    repository
 }
 
 fn wait_changed(watch: &ProjectStatusWatch) {
@@ -46,29 +29,24 @@ fn wait_changed(watch: &ProjectStatusWatch) {
 
 #[test]
 fn watch_prunes_build_trees_and_observes_tracked_ignored_paths_and_lockfiles() {
-    let repo = repository().unwrap();
-    std::fs::create_dir_all(repo.path().join("target/debug/deps")).unwrap();
+    let repository = repository_with_tracked_ignored_paths();
+    std::fs::create_dir_all(repository.path().join("target/debug/deps")).unwrap();
     for index in 0..600 {
-        std::fs::create_dir(repo.path().join(format!("target/debug/deps/{index}"))).unwrap();
+        std::fs::create_dir(repository.path().join(format!("target/debug/deps/{index}"))).unwrap();
     }
     let mut watch = ProjectStatusWatch::new(1);
-    watch.configure(0, repo.path(), &AtomicBool::new(false));
+    watch.configure(0, repository.path(), &AtomicBool::new(false));
     assert_eq!(watch.interval(0), Duration::from_secs(60));
     assert!(watch.registrations() < 20);
     for index in 0..500 {
-        std::fs::write(
-            repo.path()
-                .join(format!("target/debug/deps/{index}/artifact")),
-            "build",
-        )
-        .unwrap();
+        repository.write(&format!("target/debug/deps/{index}/artifact"), "build");
     }
     std::thread::sleep(Duration::from_millis(1200));
     assert!(!watch.changed(0, Instant::now()));
-    std::fs::write(repo.path().join("forced/keep"), "changed").unwrap();
+    repository.write("forced/keep", "changed");
     wait_changed(&watch);
     let _ = watch.begin_check(0);
-    std::fs::write(repo.path().join("Cargo.lock"), "changed").unwrap();
+    repository.write("Cargo.lock", "changed");
     wait_changed(&watch);
     watch.detach(0);
     assert_eq!(watch.registrations(), 0);
@@ -76,74 +54,58 @@ fn watch_prunes_build_trees_and_observes_tracked_ignored_paths_and_lockfiles() {
 
 #[test]
 fn watch_budget_falls_back_without_retaining_partial_registrations() {
-    let repo = repository().unwrap();
+    let repository = repository_with_tracked_ignored_paths();
     for index in 0..600 {
-        std::fs::create_dir(repo.path().join(format!("source-{index}"))).unwrap();
+        std::fs::create_dir(repository.path().join(format!("source-{index}"))).unwrap();
     }
     let mut watch = ProjectStatusWatch::new(1);
-    watch.configure(0, repo.path(), &AtomicBool::new(false));
+    watch.configure(0, repository.path(), &AtomicBool::new(false));
     assert_eq!(watch.interval(0), Duration::from_secs(30));
     assert_eq!(watch.registrations(), 0);
 }
 
 #[test]
 fn ignore_changes_reconfigure_coverage_and_missing_repositories_can_appear() {
-    let repo = repository().unwrap();
-    std::fs::create_dir_all(repo.path().join("target/new")).unwrap();
+    let repository = repository_with_tracked_ignored_paths();
+    std::fs::create_dir_all(repository.path().join("target/new")).unwrap();
     let mut watch = ProjectStatusWatch::new(1);
-    watch.configure(0, repo.path(), &AtomicBool::new(false));
-    std::fs::write(repo.path().join(".gitignore"), "").unwrap();
+    watch.configure(0, repository.path(), &AtomicBool::new(false));
+    repository.write(".gitignore", "");
     wait_changed(&watch);
     assert!(watch.begin_check(0));
-    watch.configure(0, repo.path(), &AtomicBool::new(false));
-    std::fs::write(repo.path().join("target/new/source"), "new").unwrap();
+    watch.configure(0, repository.path(), &AtomicBool::new(false));
+    repository.write("target/new/source", "new");
     wait_changed(&watch);
 
     let empty = tempfile::tempdir().unwrap();
     watch.configure(0, empty.path(), &AtomicBool::new(false));
     let _ = watch.begin_check(0);
-    git(empty.path(), &["init", "-q", "-b", "main"]).unwrap();
+    let _appeared_repository = TestRepository::init(empty.path());
     wait_changed(&watch);
 }
 
 #[test]
 fn linked_worktrees_watch_common_refs_and_their_own_index() {
-    let repo = repository().unwrap();
-    git(
-        repo.path(),
-        &[
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.test",
-            "commit",
-            "-qm",
-            "initial",
-        ],
-    )
-    .unwrap();
+    let repository = repository_with_tracked_ignored_paths();
+    repository.commit_all("initial");
     let root = tempfile::tempdir().unwrap();
     let worktree = root.path().join("linked");
-    git(
-        repo.path(),
-        &[
-            "worktree",
-            "add",
-            "-qb",
-            "feature",
-            worktree.to_str().unwrap(),
-        ],
-    )
-    .unwrap();
+    repository.git(&[
+        "worktree",
+        "add",
+        "-qb",
+        "feature",
+        worktree.to_str().unwrap(),
+    ]);
     let mut watch = ProjectStatusWatch::new(1);
     watch.configure(0, &worktree, &AtomicBool::new(false));
     assert_eq!(watch.interval(0), Duration::from_secs(60));
     std::fs::write(worktree.join("Cargo.lock"), "changed").unwrap();
     wait_changed(&watch);
     let _ = watch.begin_check(0);
-    git(&worktree, &["add", "Cargo.lock"]).unwrap();
+    TestRepository::open(&worktree).git(&["add", "Cargo.lock"]);
     wait_changed(&watch);
     assert!(watch.begin_check(0));
-    git(repo.path(), &["branch", "another"]).unwrap();
+    repository.git(&["branch", "another"]);
     wait_changed(&watch);
 }

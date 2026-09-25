@@ -106,13 +106,14 @@ pub fn prepare(
     state: &ViewerState,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<LiveViewCheck, RefreshLiveViewError> {
     let Some(request) = state.inspect(|session| session.live_refresh_request(tab_id))? else {
         return Ok(LiveViewCheck::Inactive);
     };
-    let excluded = state.inspect(|session| session.file_exclusions(tab_id))?;
-    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
+    let tab_filter = state.inspect(|session| session.tab_extension_filter(tab_id))?;
+    let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
     let head = inspect_recipe(&request.recipe, git, comparisons)?;
     if request.head.as_ref() == Some(&head) {
         return Ok(LiveViewCheck::Unchanged);
@@ -122,8 +123,9 @@ pub fn prepare(
             recipe: request.recipe.clone(),
             kind: ViewerTabKind::Live,
         },
-        &settings,
+        settings,
         git,
+        &filters,
         comparisons,
     )?;
     if inspect_recipe(&request.recipe, git, comparisons)? != head {

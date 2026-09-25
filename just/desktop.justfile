@@ -34,7 +34,7 @@ package-macos:
 smoke-macos:
     cargo run --quiet -p xtask -- macos-smoke
 
-# Render the viewer icon assets (icon.png + multi-res icon.ico) via the Rust xtask generator.
+# Render the viewer's launcher, favicon, bundle, and per-theme tray and launcher icons.
 [group('desktop')]
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon

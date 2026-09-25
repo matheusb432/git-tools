@@ -1,7 +1,8 @@
 //! Tauri shell for the server-owned git-tools viewer.
 
-use viewer_ipc::{viewer_get_file_filters, viewer_set_file_filters, viewer_update_diff_exclusions};
+use viewer_ipc::{viewer_get_file_filters, viewer_set_file_filters};
 mod project_picker;
+mod theme_icons;
 mod tray_labels;
 mod viewer_ipc;
 mod window_activation;
@@ -207,8 +208,9 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
     app.manage(tray_labels::TrayMenuItems { show, quit });
-    let builder = TrayIconBuilder::new()
-        .icon(tauri::include_image!("icons/tray.png"))
+    // The viewer recolors this icon through `desktop_theme_icons` once its theme loads.
+    let builder = TrayIconBuilder::with_id(theme_icons::TRAY_ID)
+        .icon(theme_icons::DEFAULT_TRAY_ICON)
         .menu(&menu)
         .tooltip(PRODUCT_NAME)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -247,6 +249,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_connect,
             project_picker::desktop_pick_project_folder,
             tray_labels::command::desktop_tray_labels,
+            theme_icons::command::desktop_theme_icons,
             viewer_create_push,
             viewer_get_push,
             viewer_get_push_availability,
@@ -282,7 +285,6 @@ pub fn run() -> anyhow::Result<()> {
             viewer_edit_settings,
             viewer_get_file_filters,
             viewer_set_file_filters,
-            viewer_update_diff_exclusions,
             viewer_open_diff_file,
             viewer_stream_rows_start,
             viewer_stream_rows_next_batch,

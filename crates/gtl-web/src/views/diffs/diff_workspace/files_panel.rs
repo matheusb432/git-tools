@@ -90,6 +90,9 @@ pub(super) fn FilesPanel(
     test_id: Option<String>,
     onnavigate: EventHandler<String>,
     artifact_view_id: Option<String>,
+    /// Keeps the filter popover ID unique when a layout renders more than one panel.
+    #[props(default = "diff-extension-filters".to_owned())]
+    extension_filter_id: String,
 ) -> Element {
     let workspace = super::use_workspace_context();
     let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Files);
@@ -103,7 +106,11 @@ pub(super) fn FilesPanel(
             onmounted: scroll.mount,
             onresize: move |_| scroll.restore.call(()),
             onscroll: scroll.save,
-            FilesPanelHeading { file_count: model.file_count, artifact_view_id }
+            FilesPanelHeading {
+                file_count: model.file_count,
+                artifact_view_id,
+                extension_filter_id,
+            }
             FilesPanelSummary { totals: model.totals }
             if model.file_count == 0 {
                 EmptyNotice { {t!(use_language(), "files-empty")} }
@@ -115,14 +122,32 @@ pub(super) fn FilesPanel(
 }
 
 #[component]
-fn FilesPanelHeading(file_count: usize, artifact_view_id: Option<String>) -> Element {
+fn FilesPanelHeading(
+    file_count: usize,
+    artifact_view_id: Option<String>,
+    extension_filter_id: String,
+) -> Element {
     let language = use_language();
+    #[cfg(feature = "desktop")]
+    let extension_filters = artifact_view_id.is_none().then(|| {
+        rsx! {
+            super::extension_filters::desktop::ExtensionFilters { id: extension_filter_id }
+        }
+    });
+    #[cfg(not(feature = "desktop"))]
+    let extension_filters: Option<Element> = {
+        let _ = extension_filter_id;
+        None
+    };
     rsx! {
         div { class: "mx-1 mb-2 flex items-baseline justify-between gap-2",
             h2 { class: "font-semibold text-ink", {t!(language, "workspace-files")} }
             div { class: "flex items-center gap-1",
                 span { class: "text-xs text-ink-3", {t!(language, "files-count", count = file_count)} }
                 super::path_filter::PathFilterTrigger { artifact_view_id }
+                if let Some(extension_filters) = extension_filters {
+                    {extension_filters}
+                }
             }
         }
     }

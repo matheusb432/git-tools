@@ -118,11 +118,6 @@ fn settings_message(failure: &SettingsFailure, language: ViewerLanguage) -> Stri
             t!(language, "failure-settings-locked", seconds = *wait_seconds)
         }
         SettingsFailure::PathUnavailable => t!(language, "failure-settings-path-unavailable"),
-        SettingsFailure::DuplicateProject { name } => t!(
-            language,
-            "failure-settings-duplicate-project",
-            name = name.to_string()
-        ),
     }
 }
 

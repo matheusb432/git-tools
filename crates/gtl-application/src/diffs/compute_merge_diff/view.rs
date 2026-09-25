@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::{AppliedExclusions, DiffViewTitle},
+    diffs::{AppliedExtensionFilter, DiffViewTitle, ExtensionFilter},
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
 };
@@ -26,11 +26,10 @@ pub(super) fn build(
     top: &RepositoryRoot,
     base: Option<&GitRevision>,
     pinned: Option<&PinnedRange>,
-    exclusions: &gtl_models::diffs::DiffExclusions,
+    filter: &ExtensionFilter,
 ) -> anyhow::Result<MergeViewBuild> {
     let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
-    let excluded = exclusions.for_project_or_default(&repo_name);
     let base = base.cloned().unwrap_or_else(GitRevision::main);
 
     let (io_ranges, view_ranges) = pinned.map_or_else(
@@ -52,12 +51,12 @@ pub(super) fn build(
         files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), excluded)?;
+    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), filter)?;
 
     let view = View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::new(
             io_ranges.diff.clone(),
-            excluded.clone(),
+            filter.clone(),
         ),
         repo_name,
         repo_root: top.clone(),
@@ -69,7 +68,7 @@ pub(super) fn build(
         commits,
         files,
         full_context,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
+        extension_filter: AppliedExtensionFilter::from_hidden(filter, hidden_paths),
     };
     Ok(MergeViewBuild {
         view,

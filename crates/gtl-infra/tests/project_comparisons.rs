@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use std::{path::Path, process::Command};
+use std::path::Path;
 
 use gtl_application::{
     diffs::{
@@ -16,7 +16,7 @@ use gtl_application::{
     utils::FixedUserSettingsStore,
     viewer::{ViewerState, refresh_live_view, work},
 };
-use gtl_infra::{app_state::SqliteAppState, git_client::HybridGitClient};
+use gtl_infra::{app_state::SqliteAppState, git_client::HybridGitClient, testing::TestRepository};
 use gtl_models::{
     paths::RepositoryRoot,
     projects::{
@@ -28,24 +28,11 @@ use gtl_models::{
 };
 use gtl_wire::viewer::FieldUpdate;
 
+/// A repository whose `feature` branch is one commit ahead of `main`, beside an app-state database.
 struct Fixture {
     directory: tempfile::TempDir,
     database: SqliteAppState,
-    repository: RepositoryRoot,
-}
-
-fn git(path: &Path, arguments: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(arguments)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {arguments:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    repository: TestRepository,
 }
 
 impl Fixture {
@@ -54,23 +41,17 @@ impl Fixture {
             .prefix(".gtl-comparison-")
             .tempdir()
             .unwrap();
-        let path = directory.path().join("repository");
-        std::fs::create_dir(&path).unwrap();
-        git(&path, &["init", "-q", "-b", "main"]);
-        git(&path, &["config", "user.email", "test@example.test"]);
-        git(&path, &["config", "user.name", "Test"]);
-        std::fs::write(path.join("base.txt"), "base\n").unwrap();
-        git(&path, &["add", "."]);
-        git(&path, &["commit", "-qm", "base"]);
-        git(&path, &["checkout", "-qb", "feature"]);
-        std::fs::write(path.join("feature.txt"), "feature\n").unwrap();
-        git(&path, &["add", "."]);
-        git(&path, &["commit", "-qm", "feature"]);
+        let repository = TestRepository::init(directory.path().join("repository"));
+        repository.write("base.txt", "base\n");
+        repository.commit_all("base");
+        repository.git(&["checkout", "-qb", "feature"]);
+        repository.write("feature.txt", "feature\n");
+        repository.commit_all("feature");
         let database = SqliteAppState::open(&directory.path().join("state")).unwrap();
         Self {
             directory,
             database,
-            repository: RepositoryRoot::try_new(path).unwrap(),
+            repository,
         }
     }
 
@@ -107,7 +88,7 @@ impl Fixture {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(self.repository.clone()),
+            source: RecipeSource::LocalRepo(self.repository.root()),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
@@ -124,6 +105,7 @@ impl Fixture {
             &FixedUserSettingsStore::default(),
             &HybridGitClient,
             &self.database,
+            &self.database,
         );
         assert!(matches!(
             work::publish_recipe(viewer, computed).unwrap(),
@@ -136,23 +118,23 @@ impl Fixture {
 #[test]
 fn fallback_uses_the_common_ancestor_and_excludes_all_uncommitted_changes() {
     let fixture = Fixture::new();
-    let path = fixture.repository.as_ref();
-    git(path, &["checkout", "-q", "main"]);
-    std::fs::write(path.join("main-only.txt"), "main\n").unwrap();
-    git(path, &["add", "."]);
-    git(path, &["commit", "-qm", "advance main"]);
-    git(path, &["checkout", "-q", "feature"]);
-    std::fs::write(path.join("base.txt"), "staged\n").unwrap();
-    git(path, &["add", "base.txt"]);
-    std::fs::write(path.join("feature.txt"), "unstaged\n").unwrap();
-    std::fs::write(path.join("untracked.txt"), "untracked\n").unwrap();
+    let repository = &fixture.repository;
+    repository.git(&["checkout", "-q", "main"]);
+    repository.write("main-only.txt", "main\n");
+    repository.commit_all("advance main");
+    repository.git(&["checkout", "-q", "feature"]);
+    repository.write("base.txt", "staged\n");
+    repository.git(&["add", "base.txt"]);
+    repository.write("feature.txt", "unstaged\n");
+    repository.write("untracked.txt", "untracked\n");
     let response = compute_diff::execute(
         ComputeDiff {
-            repo_root: fixture.repository.clone(),
+            repo_root: repository.root(),
             target: DiffTarget::Unpushed { pinned: None },
         },
         &FixedUserSettingsStore::default(),
         &HybridGitClient,
+        &fixture.database,
         &fixture.database,
     )
     .unwrap();
@@ -168,27 +150,23 @@ fn fallback_uses_the_common_ancestor_and_excludes_all_uncommitted_changes() {
 #[test]
 fn persisted_settings_inherit_across_worktrees_and_explicit_registration_wins() {
     let fixture = Fixture::new();
-    fixture.register("PRJ", "project", &fixture.repository);
+    let repository = &fixture.repository;
+    let root = repository.root();
+    fixture.register("PRJ", "project", &root);
     assert_eq!(
-        fixture
-            .database
-            .comparison_branch(&fixture.repository)
-            .unwrap(),
+        fixture.database.comparison_branch(&root).unwrap(),
         Some(ComparisonBranch::default())
     );
-    git(fixture.repository.as_ref(), &["branch", "develop", "main"]);
+    repository.git(&["branch", "develop", "main"]);
     fixture.set_branch("project", "main", "develop");
     let linked = fixture.directory.path().join("linked");
-    git(
-        fixture.repository.as_ref(),
-        &["worktree", "add", "-qb", "review", linked.to_str().unwrap()],
-    );
+    repository.git(&["worktree", "add", "-qb", "review", linked.to_str().unwrap()]);
     let linked = RepositoryRoot::try_new(linked).unwrap();
     assert_eq!(
         comparison::configured_comparison(&linked, &HybridGitClient, &fixture.database).unwrap(),
         comparison::ConfiguredComparison {
             branch: ComparisonBranch::try_new("develop").unwrap(),
-            project: Some(fixture.repository.clone()),
+            project: Some(root.clone()),
         }
     );
     fixture.register("WT", "linked", &linked);
@@ -201,11 +179,7 @@ fn persisted_settings_inherit_across_worktrees_and_explicit_registration_wins() 
     );
     let reopened = SqliteAppState::open(&fixture.directory.path().join("state")).unwrap();
     assert_eq!(
-        reopened
-            .comparison_branch(&fixture.repository)
-            .unwrap()
-            .unwrap()
-            .as_ref(),
+        reopened.comparison_branch(&root).unwrap().unwrap().as_ref(),
         "develop"
     );
 }
@@ -213,20 +187,19 @@ fn persisted_settings_inherit_across_worktrees_and_explicit_registration_wins() 
 #[test]
 fn upstream_wins_and_tags_cannot_satisfy_a_local_comparison_branch() {
     let fixture = Fixture::new();
-    fixture.register("PRJ", "project", &fixture.repository);
-    git(fixture.repository.as_ref(), &["tag", "only-tag"]);
+    let repository = &fixture.repository;
+    let root = repository.root();
+    fixture.register("PRJ", "project", &root);
+    repository.git(&["tag", "only-tag"]);
     fixture.set_branch("project", "main", "only-tag");
     assert!(matches!(
-        comparison::resolve(&fixture.repository, &HybridGitClient, &fixture.database),
+        comparison::resolve(&root, &HybridGitClient, &fixture.database),
         Err(comparison::ComparisonError::MissingBranch { project: Some(project), .. })
-            if project == fixture.repository
+            if project == root
     ));
-    git(
-        fixture.repository.as_ref(),
-        &["branch", "--set-upstream-to=main"],
-    );
+    repository.git(&["branch", "--set-upstream-to=main"]);
     assert!(matches!(
-        comparison::resolve(&fixture.repository, &HybridGitClient, &fixture.database).unwrap(),
+        comparison::resolve(&root, &HybridGitClient, &fixture.database).unwrap(),
         comparison::ResolvedComparison::Upstream { .. }
     ));
 }
@@ -235,11 +208,10 @@ fn upstream_wins_and_tags_cannot_satisfy_a_local_comparison_branch() {
 fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() -> anyhow::Result<()>
 {
     let fixture = Fixture::new();
-    fixture.register("PRJ", "project", &fixture.repository);
-    git(
-        fixture.repository.as_ref(),
-        &["branch", "develop", "feature"],
-    );
+    let repository = &fixture.repository;
+    let root = repository.root();
+    fixture.register("PRJ", "project", &root);
+    repository.git(&["branch", "develop", "feature"]);
     let live = ViewerState::new();
     let tab = fixture.open(&live, ViewerTabKind::Live);
     let snapshot = ViewerState::new();
@@ -253,26 +225,23 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
             target: RecipeTarget::Unpushed { pinned: Some(_) }
         }
     ));
-    assert!(matches!(
+    let prepare = || {
         refresh_live_view::prepare(
             tab,
             &live,
             &FixedUserSettingsStore::default(),
             &HybridGitClient,
-            &fixture.database
+            &fixture.database,
+            &fixture.database,
         )
-        .unwrap(),
+        .unwrap()
+    };
+    assert!(matches!(
+        prepare(),
         refresh_live_view::LiveViewCheck::Unchanged
     ));
     fixture.set_branch("project", "main", "develop");
-    let refresh_live_view::LiveViewCheck::Prepared(publication) = refresh_live_view::prepare(
-        tab,
-        &live,
-        &FixedUserSettingsStore::default(),
-        &HybridGitClient,
-        &fixture.database,
-    )
-    .unwrap() else {
+    let refresh_live_view::LiveViewCheck::Prepared(publication) = prepare() else {
         anyhow::bail!("setting change must refresh the live comparison")
     };
     refresh_live_view::publish(*publication, &live).unwrap();
@@ -286,18 +255,8 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
             .unwrap(),
         0
     );
-    git(
-        fixture.repository.as_ref(),
-        &["branch", "-f", "develop", "main"],
-    );
-    let refresh_live_view::LiveViewCheck::Prepared(publication) = refresh_live_view::prepare(
-        tab,
-        &live,
-        &FixedUserSettingsStore::default(),
-        &HybridGitClient,
-        &fixture.database,
-    )
-    .unwrap() else {
+    repository.git(&["branch", "-f", "develop", "main"]);
+    let refresh_live_view::LiveViewCheck::Prepared(publication) = prepare() else {
         anyhow::bail!("base tip change must refresh the live comparison")
     };
     refresh_live_view::publish(*publication, &live).unwrap();
@@ -323,6 +282,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
         &FixedUserSettingsStore::default(),
         &HybridGitClient,
         &fixture.database,
+        &fixture.database,
     );
     work::publish_recipe(&snapshot, computed).unwrap();
     let rebuilt = snapshot
@@ -336,25 +296,21 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
 #[test]
 fn invalid_comparisons_are_reported_and_skipped_in_batches() {
     let fixture = Fixture::new();
-    fixture.register("PRJ", "project", &fixture.repository);
-    git(
-        fixture.repository.as_ref(),
-        &["checkout", "--orphan", "unrelated"],
-    );
-    git(
-        fixture.repository.as_ref(),
-        &["commit", "-qm", "unrelated root"],
-    );
-    git(fixture.repository.as_ref(), &["checkout", "-q", "feature"]);
+    let repository = &fixture.repository;
+    let root = repository.root();
+    fixture.register("PRJ", "project", &root);
+    repository.git(&["checkout", "--orphan", "unrelated"]);
+    repository.commit_all("unrelated root");
+    repository.git(&["checkout", "-q", "feature"]);
     fixture.set_branch("project", "main", "unrelated");
     assert!(matches!(
-        comparison::resolve(&fixture.repository, &HybridGitClient, &fixture.database),
+        comparison::resolve(&root, &HybridGitClient, &fixture.database),
         Err(comparison::ComparisonError::NoCommonAncestor { .. })
     ));
     let result = select_comparison_repositories::execute(
         vec![gtl_models::projects::ProjectRepository {
             name: "project".to_owned().try_into().unwrap(),
-            path: fixture.repository.clone(),
+            path: root,
             remote: None,
         }],
         &HybridGitClient,

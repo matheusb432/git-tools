@@ -1,11 +1,8 @@
 use dioxus::prelude::*;
 use dx_story::{stories, story};
-use gtl_models::diffs::ExcludedExtensions;
+use gtl_models::diffs::{ExtensionFilter, ExtensionFilterMode, FileExtensions};
 
-use crate::{
-    shared::ui::ExtensionExclusionsAction,
-    views::diffs::diff_workspace::extension_filters::ExtensionFilter,
-};
+use crate::views::diffs::diff_workspace::extension_filters::ExtensionFilterMenu;
 
 #[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
@@ -14,7 +11,7 @@ fn thumbnail() -> Element {
     }
 }
 
-/// Excluded chips with a searchable multiselect and immediate selection feedback.
+/// Show-only and hide modes over removable chips and a searchable multiselect.
 #[story]
 fn interactive() -> Element {
     rsx! {
@@ -24,23 +21,27 @@ fn interactive() -> Element {
 
 #[component]
 fn Demo() -> Element {
-    let mut excluded = use_signal(|| ExcludedExtensions::new(["json", "lock"]));
+    let mut filter = use_signal(|| {
+        ExtensionFilter::new(
+            ExtensionFilterMode::Hide,
+            FileExtensions::new(["json", "lock"]),
+        )
+    });
     rsx! {
-        div { class: "flex justify-end rounded-panel border border-line bg-surface p-4",
-            ExtensionFilter {
-                excluded: excluded(),
+        div { class: "flex w-64 items-center justify-between rounded-panel border border-line bg-surface p-4",
+            span { class: "font-semibold text-ink", "Files" }
+            ExtensionFilterMenu {
+                id: "story-diff-extension-filters",
+                filter: filter(),
                 available: ["css", "html", "json", "lock", "md", "rs", "toml", "ts"]
                     .map(str::to_owned)
                     .to_vec(),
-                onchange: move |action: ExtensionExclusionsAction| {
-                    let next = action.apply(&excluded.peek());
-                    excluded.set(next);
-                },
-                onrestore: move |()| excluded.set(ExcludedExtensions::new(["lock"])),
+                hidden_count: 3,
+                onchange: move |next| filter.set(next),
             }
         }
     }
 }
 
-#[stories(id = "extension-filter", name = "Excluded extensions", thumbnail = thumbnail)]
+#[stories(id = "extension-filter", name = "Extension filter", thumbnail = thumbnail)]
 const EXTENSION_FILTER_STORIES: () = &[interactive];

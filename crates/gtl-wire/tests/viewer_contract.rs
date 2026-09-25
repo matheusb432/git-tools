@@ -1,5 +1,5 @@
 use gtl_models::{
-    diffs::{CommitId, ExcludedExtensions},
+    diffs::{CommitId, ExtensionFilter, ExtensionFilterMode, FileExtensions},
     git::{BranchName, GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
@@ -263,8 +263,11 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                 footer: ViewerFooter {
                     command: "gtl diff".into(),
                 },
-                exclusions: Some(ViewerAppliedExclusions {
-                    extensions: ExcludedExtensions::new(["md"]),
+                extension_filter: Some(ViewerAppliedExtensionFilter {
+                    filter: ExtensionFilter::new(
+                        ExtensionFilterMode::Only,
+                        FileExtensions::new(["rs"]),
+                    ),
                     hidden_paths: vec![relative_path("README.md")?],
                 }),
             }),
@@ -358,15 +361,6 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
             density: ViewerDiffDensity::Compact,
         },
         push_confirmation_required: true,
-        diff_exclusions: ViewerDiffExclusions {
-            default_extensions: ExcludedExtensions::new(["md"]),
-            projects: vec![ViewerProjectDiffExclusions {
-                configured: true,
-                project_name: project_name("git-tools")?,
-                extensions: ExcludedExtensions::new(["js"]),
-                excluded_from_push_all: false,
-            }],
-        },
     };
 
     let history_json = serde_json::to_value(&history).unwrap();

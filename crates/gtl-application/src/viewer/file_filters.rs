@@ -5,14 +5,8 @@ pub enum FileFiltersError {
     #[meta(transparent)]
     State(#[from] super::ViewerStateError),
     #[error(transparent)]
-    #[meta(transparent)]
-    Settings(#[from] crate::ports::UserSettingsLoadError),
-    #[error(transparent)]
-    #[meta(transparent)]
-    Edit(#[from] crate::settings::edit_settings::EditSettingsError),
-    #[error(transparent)]
     #[meta(private(Internal))]
-    Diff(#[from] crate::diffs::set_diff_file_exclusions::SetDiffFileExclusionsError),
+    Diff(#[from] crate::diffs::set_diff_extension_filter::SetDiffExtensionFilterError),
     #[error("the viewer changed")]
     #[meta(failure = Failure::Changed)]
     Changed,

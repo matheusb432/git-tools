@@ -176,16 +176,6 @@ pub(super) fn edit(
         .into());
     }
     let document = settings_document(&replacement_path, baseline_bytes.clone())?;
-    if settings_patch
-        .diff_exclusions
-        .as_ref()
-        .is_some_and(|update| !document.exclusions_match(update))
-    {
-        return Err(UserSettingsEditConflict::ConcurrentModification {
-            path: replacement_path,
-        }
-        .into());
-    }
     let UserSettingsDocumentEdit::Changed(raw_new) = document.apply(settings_patch) else {
         return Ok(UserSettingsEditOutcome::Unchanged);
     };
@@ -371,106 +361,6 @@ mod tests {
         BEFORE_PERSIST_HOOK, BeforePersistHook, USER_SETTINGS_LOCK_WAIT_MAX, edit,
         lock_identity_path, lock_path, replacement_path,
     };
-
-    #[test]
-    fn scoped_exclusions_preserve_other_fields_and_distinguish_empty_from_inherited() {
-        use gtl_application::{
-            ports::UserSettingsReader as _,
-            settings::{DiffExclusionsUpdate, UserSettingsFieldUpdate},
-        };
-        use gtl_models::{diffs::ExcludedExtensions, paths::ProjectName};
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
-        let raw = "# preserve comment\n[diff]\nexclude = ['lock']\n[[projects]]\nname = 'first'\nexcluded_from_push_all = true\ndiff = { exclude = ['md'] }\n[[projects]]\nname = 'second'\ndiff = { exclude = ['txt'] }\n";
-        std::fs::write(&path, raw).unwrap();
-        let first = ProjectName::try_new("first").unwrap();
-        let second = ProjectName::try_new("second").unwrap();
-        let mut store = crate::user_config::TomlSettingsStore::new(Some(path.clone()));
-        let update = |extensions, expected| UserSettingsPatch {
-            diff_exclusions: Some(DiffExclusionsUpdate {
-                project: Some(first.clone()),
-                extensions,
-                expected,
-            }),
-            ..UserSettingsPatch::default()
-        };
-        store
-            .edit(update(
-                UserSettingsFieldUpdate::Update(ExcludedExtensions::default()),
-                Some(ExcludedExtensions::new(["md"])),
-            ))
-            .unwrap();
-        let settings = store.load().unwrap();
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project(&first)
-                .unwrap()
-                .is_empty()
-        );
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&first)
-                .is_empty()
-        );
-        assert_eq!(
-            settings
-                .diff_exclusions()
-                .for_project(&second)
-                .unwrap()
-                .extensions(),
-            &["txt"]
-        );
-        assert!(settings.push_all_exclusions().contains(&first));
-        let saved = std::fs::read_to_string(&path).unwrap();
-        assert!(saved.contains("# preserve comment"));
-        assert!(
-            store
-                .edit(update(
-                    UserSettingsFieldUpdate::Clear,
-                    Some(ExcludedExtensions::new(["md"]))
-                ))
-                .is_err()
-        );
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
-        store
-            .edit(update(
-                UserSettingsFieldUpdate::Clear,
-                Some(ExcludedExtensions::default()),
-            ))
-            .unwrap();
-        let settings = store.load().unwrap();
-        assert!(settings.diff_exclusions().for_project(&first).is_none());
-        assert_eq!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&first)
-                .extensions(),
-            &["lock"]
-        );
-        let third = ProjectName::try_new("third").unwrap();
-        store
-            .edit(UserSettingsPatch {
-                diff_exclusions: Some(DiffExclusionsUpdate {
-                    project: Some(third.clone()),
-                    extensions: UserSettingsFieldUpdate::Update(ExcludedExtensions::new(["rs"])),
-                    expected: None,
-                }),
-                ..UserSettingsPatch::default()
-            })
-            .unwrap();
-        assert_eq!(
-            store
-                .load()
-                .unwrap()
-                .diff_exclusions()
-                .for_project(&third)
-                .unwrap()
-                .extensions(),
-            &["rs"]
-        );
-    }
 
     const LOCK_ATTEMPT_WAIT_TEST_MAX: Duration = Duration::from_millis(100);
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);

@@ -86,7 +86,7 @@ fn error() -> Element {
 #[story(name = "Push confirmation")]
 fn push_confirmation() -> Element {
     let preview = gtl_wire::viewer::push::ViewerPushPreview {
-        repository: std::path::PathBuf::from("/workspace/tools/git-tools").try_into()?,
+        repository: std::path::PathBuf::from("/repos/git-tools").try_into()?,
         project: Some("git-tools".to_owned().try_into()?),
         branch: "main".to_owned().try_into()?,
         remote_branch: "main".to_owned().try_into()?,
@@ -97,7 +97,7 @@ fn push_confirmation() -> Element {
         commit: PUSH_COMMIT_SHA.parse()?,
         count: 2,
         command: format!(
-            "git -C /workspace/tools/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin {PUSH_COMMIT_SHA}:refs/heads/main",
+            "git -C /repos/git-tools -c remote.origin.mirror=false push --atomic --porcelain --no-follow-tags --recurse-submodules=no -- origin {PUSH_COMMIT_SHA}:refs/heads/main",
         ),
         command_arguments: vec![
             gtl_wire::viewer::push::ViewerPushCommandArgument::Git,

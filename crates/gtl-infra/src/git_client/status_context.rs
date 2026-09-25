@@ -123,65 +123,39 @@ pub(super) fn with_repository<T>(
 
 #[cfg(test)]
 mod tests {
-    use std::process::Command;
-
     use gtl_application::ports::{GitClient as _, GitEffect};
-    use gtl_models::paths::RepositoryRoot;
 
     use super::*;
+    use crate::testing::TestRepository;
 
     #[test]
     fn cached_status_observes_index_replacement_without_writing_it() -> anyhow::Result<()> {
-        let directory = tempfile::tempdir().unwrap();
-        let path = RepositoryRoot::try_new(directory.path().to_path_buf()).unwrap();
-        let git = |args: &[&str]| {
-            assert!(
-                Command::new("git")
-                    .arg("-C")
-                    .arg(directory.path())
-                    .args(args)
-                    .output()
-                    .unwrap()
-                    .status
-                    .success()
-            );
-        };
-        git(&["init", "-q", "-b", "main"]);
-        std::fs::write(directory.path().join("file"), "initial").unwrap();
-        git(&["add", "file"]);
-        git(&[
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.test",
-            "commit",
-            "-qm",
-            "initial",
-        ]);
-        let index_before = std::fs::read(directory.path().join(".git/index")).unwrap();
+        let repository = TestRepository::new();
+        let root = repository.root();
+        let index_path = repository.path().join(".git/index");
+        repository.write("file", "initial");
+        repository.commit_all("initial");
+        let index_before = std::fs::read(&index_path).unwrap();
         let cancellation = Arc::new(AtomicBool::new(false));
         let scope = StatusContextScope::new(cancellation.clone());
         let GitEffect::Applied(first) = super::super::HybridGitClient
-            .status_snapshot(&path)
+            .status_snapshot(&root)
             .unwrap()
         else {
             anyhow::bail!("status rejected")
         };
-        std::fs::write(directory.path().join("added"), "new").unwrap();
-        git(&["add", "added"]);
-        let index_staged = std::fs::read(directory.path().join(".git/index")).unwrap();
+        repository.write("added", "new");
+        repository.git(&["add", "added"]);
+        let index_staged = std::fs::read(&index_path).unwrap();
         assert_ne!(index_before, index_staged);
         let GitEffect::Applied(staged) = super::super::HybridGitClient
-            .status_snapshot(&path)
+            .status_snapshot(&root)
             .unwrap()
         else {
             anyhow::bail!("status rejected")
         };
         assert_ne!(first.working_tree, staged.working_tree);
-        assert_eq!(
-            std::fs::read(directory.path().join(".git/index")).unwrap(),
-            index_staged
-        );
+        assert_eq!(std::fs::read(&index_path).unwrap(), index_staged);
         assert_eq!(
             CONTEXTS.with_borrow(|contexts| contexts.repositories.len()),
             1
@@ -189,7 +163,7 @@ mod tests {
         cancellation.store(true, Ordering::Relaxed);
         assert!(
             super::super::HybridGitClient
-                .status_snapshot(&path)
+                .status_snapshot(&root)
                 .is_err()
         );
         drop(scope);

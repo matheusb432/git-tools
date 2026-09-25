@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diffs::{
         compute_merge_diff::{self, ComputeMergeDiff},
-        exclusions,
+        extension_filter_note,
         range_view::TITLE_MERGE_DIFF,
     },
     ports::{
-        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        UserSettingsReader,
+        ArtifactMeta, ArtifactStore, Clock, ExtensionFilterReader, GitClient, HtmlRenderer,
+        PlacedArtifact, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -63,6 +63,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
+    filters: &impl ExtensionFilterReader,
 ) -> Result<RenderMergeDiffOk, RenderMergeDiffError> {
     let RenderMergeDiff { cwd, base } = req;
     let repo_root = git.top_level(&cwd)?;
@@ -74,6 +75,7 @@ pub fn execute(
         },
         app_settings,
         git,
+        filters,
     )?;
     let store_root = super::artifacts::root(computed.top.as_ref());
     let view = computed.view;
@@ -105,12 +107,12 @@ pub fn execute(
         render_options: computed.render_options,
         theme: computed.theme,
         language: computed.language,
-        excluded_extensions: computed.excluded_extensions,
+        extension_filter: computed.extension_filter,
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
     let mut notes = Vec::new();
-    notes.extend(exclusions::note(TITLE_MERGE_DIFF, &view));
+    notes.extend(extension_filter_note::note(TITLE_MERGE_DIFF, &view));
     notes.push(Note::info(format!(
         "{TITLE_MERGE_DIFF}: {commit_count} commit{} to merge into {}, {file_count} file{}",
         plural(commit_count),
@@ -133,11 +135,7 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::{
-        diffs::DiffExclusions,
-        settings::UserSettings,
-        viewer::{RenderOptions, Theme},
-    };
+    use gtl_models::{settings::UserSettings, viewer::Theme};
 
     use super::{RenderMergeDiff, RenderMergeDiffError};
     use crate::{
@@ -147,8 +145,10 @@ mod tests {
         },
         shared::notes::Note,
         utils::{
-            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            SavedExtensionFilters, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
+            hiding_extensions, repository_root,
         },
     };
 
@@ -178,6 +178,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             &source,
+            &SavedExtensionFilters::default(),
         )
         .unwrap();
 
@@ -188,6 +189,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &SavedExtensionFilters::default(),
         )
         .unwrap();
 
@@ -209,14 +211,11 @@ mod tests {
         assert_eq!(artifact.meta.repo_root, computed.top);
         assert_eq!(artifact.meta.render_options, computed.render_options);
         assert_eq!(artifact.meta.theme, computed.theme);
-        assert_eq!(
-            artifact.meta.excluded_extensions,
-            computed.excluded_extensions
-        );
+        assert_eq!(artifact.meta.extension_filter, computed.extension_filter);
     }
 
     #[test]
-    fn render_uses_the_settings_theme_language_and_resolved_project_exclusions() {
+    fn render_uses_the_settings_theme_language_and_saved_repository_filter() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -227,15 +226,9 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let app_settings = FixedUserSettingsStore::new(
-            UserSettings::new(
-                Some(Theme::Graphite),
-                RenderOptions::DEFAULT,
-                gtl_models::viewer::ViewerKeybindings::default(),
-                true,
-                DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
-                gtl_models::settings::PushAllExclusions::default(),
-            )
-            .with_language(gtl_models::settings::ViewerLanguage::PtBr),
+            UserSettings::default()
+                .with_theme(Some(Theme::Graphite))
+                .with_language(gtl_models::settings::ViewerLanguage::PtBr),
         );
 
         render_merge_diff::execute(
@@ -248,13 +241,14 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))]),
         )
         .unwrap();
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
-        assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
+        assert_eq!(artifact.meta.extension_filter, hiding_extensions(&["md"]));
         assert!(artifact.html.contains("graphite"));
         assert_eq!(
             artifact.meta.language,
@@ -282,6 +276,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &SavedExtensionFilters::default(),
         )
         .unwrap();
 
@@ -308,6 +303,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
+            &SavedExtensionFilters::default(),
         )
         .unwrap_err();
 

@@ -146,7 +146,7 @@ mod tests {
         utils::{
             FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
-            repository_root,
+            repository_root, settings_with_density,
             viewer::recipe,
         },
         viewer::{ensure_view_full_context, session::CachedView, shell},
@@ -172,6 +172,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             git,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap()
@@ -296,17 +297,6 @@ mod tests {
             matches!(cached, EnsureViewFullContextOk::Ready(view) if Arc::ptr_eq(&view, &loaded))
         );
         Ok(())
-    }
-
-    fn settings_with_density(density: DiffDensity) -> gtl_models::settings::UserSettings {
-        gtl_models::settings::UserSettings::new(
-            None,
-            RenderOptions::new(DiffLayout::Unified, density),
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            gtl_models::diffs::DiffExclusions::default(),
-            gtl_models::settings::PushAllExclusions::default(),
-        )
     }
 
     fn shell_for(state: &ViewerState, density: DiffDensity) -> gtl_wire::viewer::ViewerShell {

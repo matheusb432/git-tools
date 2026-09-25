@@ -56,9 +56,7 @@ const fn push_severity(failure: &PushFailure) -> ToastKind {
 
 const fn settings_severity(failure: &SettingsFailure) -> ToastKind {
     match failure {
-        SettingsFailure::Invalid { .. }
-        | SettingsFailure::PathUnavailable
-        | SettingsFailure::DuplicateProject { .. } => ToastKind::Error,
+        SettingsFailure::Invalid { .. } | SettingsFailure::PathUnavailable => ToastKind::Error,
         // Reloading or retrying recovers from a concurrent edit.
         SettingsFailure::Stale | SettingsFailure::Locked { .. } => ToastKind::Warn,
     }

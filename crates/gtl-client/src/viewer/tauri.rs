@@ -154,7 +154,6 @@ impl ViewerClient {
         edit_settings(EditSettingsRequest) -> () => "viewer_edit_settings";
         get_file_filters(gtl_wire::viewer::ViewerTabRequest) -> gtl_wire::viewer::file_filters::ViewerFileFilters => "viewer_get_file_filters";
         set_file_filters(gtl_wire::viewer::file_filters::SetViewerFileFilters) -> () => "viewer_set_file_filters";
-        update_diff_exclusions(gtl_wire::viewer::file_filters::UpdateDiffExclusions) -> () => "viewer_update_diff_exclusions";
         open_diff_file(OpenViewerDiffFile) -> () => "viewer_open_diff_file";
     }
 

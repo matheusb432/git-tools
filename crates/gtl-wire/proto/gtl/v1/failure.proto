@@ -114,12 +114,13 @@ message PushFailureGitFailed {
 }
 
 message SettingsFailure {
+  reserved 5;
+  reserved "duplicate_project";
   oneof reason {
     SettingsFailureInvalid invalid = 1;
     SettingsFailureStale stale = 2;
     SettingsFailureLocked locked = 3;
     SettingsFailurePathUnavailable path_unavailable = 4;
-    SettingsFailureDuplicateProject duplicate_project = 5;
   }
 }
 
@@ -135,10 +136,6 @@ message SettingsFailureLocked {
 }
 
 message SettingsFailurePathUnavailable {}
-
-message SettingsFailureDuplicateProject {
-  string name = 1;
-}
 
 message ViewerFailure {
   oneof reason {

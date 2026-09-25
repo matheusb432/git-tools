@@ -8,7 +8,7 @@ use crate::{
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
     },
-    ports::{GitClient, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeOp, RecipeTarget},
 };
 
@@ -27,6 +27,7 @@ pub fn execute(
     recipe: Recipe,
     user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<View, ComputeRecipeError> {
     let cwd = recipe.cwd();
@@ -39,6 +40,7 @@ pub fn execute(
                 },
                 user_settings,
                 git,
+                filters,
                 comparisons,
             )?
             .view
@@ -52,6 +54,7 @@ pub fn execute(
                 },
                 user_settings,
                 git,
+                filters,
             )?
             .view
         }
@@ -113,6 +116,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -168,6 +172,7 @@ mod tests {
                 recipe(RecipeOp::Diff { target }),
                 &FixedUserSettingsStore::default(),
                 &source,
+                &crate::utils::SavedExtensionFilters::default(),
                 &crate::utils::ProjectComparisons::default(),
             )
             .unwrap();
@@ -195,6 +200,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -216,6 +222,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -239,6 +246,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap_err();
@@ -249,6 +257,7 @@ mod tests {
             }),
             &FixedUserSettingsStore::default(),
             &source,
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap_err();

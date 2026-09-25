@@ -201,10 +201,8 @@ fn last_non_empty_line(output: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        diffs::DiffExclusions,
         projects::{ProjectRepository, push_ledger::PushLedgerEntry},
         settings::{PushAllExclusions, UserSettings},
-        viewer::RenderOptions,
     };
 
     use super::*;
@@ -252,18 +250,13 @@ mod tests {
     }
 
     fn settings_excluding(projects: &[&str]) -> FixedUserSettingsStore {
-        FixedUserSettingsStore::new(UserSettings::new(
-            None,
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            DiffExclusions::default(),
-            PushAllExclusions::new(
+        FixedUserSettingsStore::new(
+            UserSettings::default().with_push_all_exclusions(PushAllExclusions::new(
                 projects
                     .iter()
                     .map(|project| crate::utils::project_name(project)),
-            ),
-        ))
+            )),
+        )
     }
 
     fn req() -> GitEffectMode {

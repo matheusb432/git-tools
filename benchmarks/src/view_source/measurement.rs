@@ -12,7 +12,6 @@ use gtl_application::{
 };
 use gtl_infra::git_client::HybridGitClient;
 use gtl_models::{
-    diffs::DiffExclusions,
     git::GitRange,
     paths::RepositoryRoot,
     settings::{PushAllExclusions, UserSettings},
@@ -41,7 +40,6 @@ impl UserSettingsReader for CompactSettingsStore {
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
             gtl_models::viewer::ViewerKeybindings::default(),
             true,
-            DiffExclusions::default(),
             PushAllExclusions::default(),
         ))
     }
@@ -276,6 +274,7 @@ fn compute_compact(fixture: &MaterializedFixture, source: HybridGitClient) -> Re
         },
         &CompactSettingsStore,
         &source,
+        &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
     )
     .map(|response| response.view)

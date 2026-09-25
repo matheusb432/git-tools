@@ -20,16 +20,18 @@ use gtl_models::diffs::PinnedRange;
 #[cfg(test)]
 use gtl_models::paths::ProjectName;
 use gtl_models::{
-    diffs::{Commit, CommitId, CommitIdError, DiffExclusions},
+    diffs::{
+        Commit, CommitId, CommitIdError, ExtensionFilter, ExtensionFilterMode, FileExtensions,
+    },
     git::{
         AheadBehind, BranchName, CommitCount, GitEffectMode, GitHead, GitObjectId, GitRange,
         GitRefName, GitRevision, RemoteName, RemoteUrl, TagName,
     },
     paths::{AbsoluteFilePath, RepositoryRelativePath, RepositoryRoot},
     projects::ProjectRepository,
-    settings::{PushAllExclusions, UserSettings},
+    settings::UserSettings,
     timestamps::MachineTimestamp,
-    viewer::{RenderOptions, Theme},
+    viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
 
 #[cfg(test)]
@@ -57,10 +59,11 @@ pub(crate) fn absolute_file_path(path: &str) -> AbsoluteFilePath {
 }
 
 use crate::ports::{
-    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, GitCommitReceipt,
-    GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree,
-    HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError, ProjectClient,
-    ProjectClientError, UserSettingsLoadError, UserSettingsReader,
+    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, ExtensionFilterReader,
+    ExtensionFilterWriter, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect,
+    GitPushReceipt, GitRepositoryState, GitWorkingTree, HtmlRenderer, PlacedArtifact,
+    ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError, UserSettingsLoadError,
+    UserSettingsReader,
 };
 
 fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
@@ -201,6 +204,90 @@ impl GitResponse {
     }
 }
 
+/// Keeps saved extension filters in memory in place of `gtl.db`.
+#[derive(Debug, Default)]
+pub struct SavedExtensionFilters(Mutex<BTreeMap<RepositoryRoot, ExtensionFilter>>);
+
+impl SavedExtensionFilters {
+    #[must_use]
+    pub fn new(filters: impl IntoIterator<Item = (RepositoryRoot, ExtensionFilter)>) -> Self {
+        Self(Mutex::new(filters.into_iter().collect()))
+    }
+
+    #[must_use]
+    pub fn saved(&self) -> BTreeMap<RepositoryRoot, ExtensionFilter> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl ExtensionFilterReader for SavedExtensionFilters {
+    fn extension_filter(&self, repository: &RepositoryRoot) -> anyhow::Result<ExtensionFilter> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(repository)
+            .cloned()
+            .unwrap_or_default())
+    }
+}
+
+impl ExtensionFilterWriter for SavedExtensionFilters {
+    fn save_extension_filter(
+        &self,
+        repository: &RepositoryRoot,
+        filter: &ExtensionFilter,
+    ) -> anyhow::Result<()> {
+        let mut saved = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if filter.is_active() {
+            saved.insert(repository.clone(), filter.clone());
+        } else {
+            saved.remove(repository);
+        }
+        Ok(())
+    }
+}
+
+/// Pairs in-memory extension filters and comparison branches in place of `gtl.db`.
+#[derive(Default)]
+pub struct SavedRepositoryPreferences {
+    pub filters: SavedExtensionFilters,
+    pub comparisons: ProjectComparisons,
+}
+
+impl From<SavedExtensionFilters> for SavedRepositoryPreferences {
+    fn from(filters: SavedExtensionFilters) -> Self {
+        Self {
+            filters,
+            comparisons: ProjectComparisons::default(),
+        }
+    }
+}
+
+impl ExtensionFilterReader for SavedRepositoryPreferences {
+    fn extension_filter(&self, repository: &RepositoryRoot) -> anyhow::Result<ExtensionFilter> {
+        self.filters.extension_filter(repository)
+    }
+}
+
+impl crate::ports::ProjectComparisonReader for SavedRepositoryPreferences {
+    fn comparison_branch(
+        &self,
+        path: &RepositoryRoot,
+    ) -> anyhow::Result<Option<gtl_models::projects::comparison::ComparisonBranch>> {
+        self.comparisons.comparison_branch(path)
+    }
+}
+
+/// Builds a filter that hides `extensions`.
+#[must_use]
+pub fn hiding_extensions(extensions: &[&str]) -> ExtensionFilter {
+    ExtensionFilter::new(ExtensionFilterMode::Hide, FileExtensions::new(extensions))
+}
+
 #[derive(Debug, Clone)]
 pub struct FixedUserSettingsStore {
     settings: UserSettings,
@@ -213,21 +300,16 @@ impl FixedUserSettingsStore {
     }
 }
 
+/// Builds default settings that render unified diffs at `density`.
 #[must_use]
-pub fn default_user_settings() -> UserSettings {
-    UserSettings::new(
-        None,
-        RenderOptions::DEFAULT,
-        gtl_models::viewer::ViewerKeybindings::default(),
-        true,
-        DiffExclusions::default(),
-        PushAllExclusions::default(),
-    )
+pub fn settings_with_density(density: DiffDensity) -> UserSettings {
+    UserSettings::default()
+        .with_viewer_render_options(RenderOptions::new(DiffLayout::Unified, density))
 }
 
 impl Default for FixedUserSettingsStore {
     fn default() -> Self {
-        Self::new(default_user_settings())
+        Self::new(UserSettings::default())
     }
 }
 

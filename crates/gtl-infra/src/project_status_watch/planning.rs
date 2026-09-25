@@ -270,6 +270,7 @@ fn collect_refs(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::testing::TestRepository;
 
     #[test]
     fn symlinked_roots_accept_canonical_events_for_present_and_missing_repositories() {
@@ -292,39 +293,20 @@ mod tests {
     #[test]
     fn linked_worktrees_accept_canonical_events_for_aliased_git_metadata() {
         let temporary = tempfile::tempdir().unwrap();
-        let actual = temporary.path().join("actual");
-        std::fs::create_dir(&actual).unwrap();
-        let actual = actual.canonicalize().unwrap();
+        let repository =
+            TestRepository::init(temporary.path().canonicalize().unwrap().join("actual"));
+        let actual = repository.path();
         let alias = temporary.path().join("alias");
-        std::os::unix::fs::symlink(&actual, &alias).unwrap();
+        std::os::unix::fs::symlink(actual, &alias).unwrap();
         let linked = temporary.path().join("linked");
-        for args in [
-            vec!["init", "-q", "-b", "main"],
-            vec![
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.test",
-                "commit",
-                "--allow-empty",
-                "-qm",
-                "initial",
-            ],
-            vec![
-                "worktree",
-                "add",
-                "-qb",
-                "feature",
-                linked.to_str().unwrap(),
-            ],
-        ] {
-            let output = std::process::Command::new("git")
-                .current_dir(&actual)
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{output:?}");
-        }
+        repository.commit_all("initial");
+        repository.git(&[
+            "worktree",
+            "add",
+            "-qb",
+            "feature",
+            linked.to_str().unwrap(),
+        ]);
         std::fs::write(
             linked.join(".git"),
             format!("gitdir: {}/.git/worktrees/linked\n", alias.display()),

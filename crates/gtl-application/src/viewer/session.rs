@@ -179,7 +179,7 @@ pub(crate) enum MoveOutcome {
 #[derive(Debug, Clone)]
 pub struct SessionTab {
     pub history_id: Option<super::RenderHistoryId>,
-    file_exclusions: Option<gtl_models::diffs::ExcludedExtensions>,
+    extension_filter: Option<gtl_models::diffs::ExtensionFilter>,
     pub tab: ViewerTab,
     pub recipe: Recipe,
     pub batch_id: RecipeBatchId,
@@ -278,7 +278,7 @@ impl ViewerSession {
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.push(SessionTab {
             history_id: None,
-            file_exclusions: None,
+            extension_filter: None,
             tab: ViewerTab::new(id, label, kind, ViewerTabState::Pending),
             recipe,
             batch_id,
@@ -349,8 +349,8 @@ impl ViewerSession {
         {
             tab.selection = CommitSelection::None;
         }
-        tab.file_exclusions
-            .get_or_insert_with(|| value.view.file_filter.excluded().clone());
+        tab.extension_filter
+            .get_or_insert_with(|| value.view.file_filter.filter().clone());
         let label = tab
             .recipe
             .name
@@ -1302,7 +1302,7 @@ mod tests {
     fn view(title: &str) -> Arc<View> {
         Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            exclusions: None,
+            extension_filter: None,
             repo_name: project_name("repo"),
             repo_root: repository_root("/repo"),
             branch: git_head("feature"),
@@ -1653,17 +1653,7 @@ mod tests {
                 .content_id(options),
             expected_id
         );
-        let settings = gtl_models::settings::UserSettings::new(
-            None,
-            super::super::RenderOptions::new(
-                super::super::DiffLayout::Unified,
-                super::super::DiffDensity::Full,
-            ),
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            gtl_models::diffs::DiffExclusions::default(),
-            gtl_models::settings::PushAllExclusions::default(),
-        );
+        let settings = crate::utils::settings_with_density(super::super::DiffDensity::Full);
         let active = crate::viewer::shell::project(&mut session, &settings)
             .unwrap()
             .active;

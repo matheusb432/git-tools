@@ -39,7 +39,11 @@ impl RecentRenderRecord {
     /// Names the render as a snapshot tab of it would.
     #[must_use]
     pub fn label(&self) -> RecipeLabel {
-        recipe_label::rendered(&self.recipe, self.repo_name.clone(), &self.label_parts)
+        recipe_label::rendered(
+            &self.recipe,
+            self.repo_name.clone(),
+            self.label_parts.clone(),
+        )
     }
 }
 

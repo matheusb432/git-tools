@@ -130,11 +130,11 @@ async fn assert_sidebar_toggles(page: &Page) -> anyhow::Result<()> {
 }
 
 async fn assert_path_filter_popup(page: &Page) -> anyhow::Result<()> {
-    support::get_button(page, "Filter files by path")
+    support::get_button(page, "Find a file by path")
         .click(None)
         .await?;
-    let input = page.get_by_placeholder("Filter files by path", true);
-    expect(page.locator("input[placeholder='Filter files by path']:focus"))
+    let input = page.get_by_placeholder("Find a file by path", true);
+    expect(page.locator("input[placeholder='Find a file by path']:focus"))
         .to_be_visible()
         .await?;
     input.fill("alpha.rs", None).await?;

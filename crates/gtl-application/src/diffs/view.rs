@@ -1,11 +1,11 @@
 use gtl_models::{
-    diffs::{AppliedExclusions, Commit, DiffViewTitle},
+    diffs::{AppliedExtensionFilter, Commit, DiffViewTitle, ExtensionSelection},
     git::{GitDiffSpec, GitHead, GitRevision},
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
 };
 
 use super::file::FileDiff;
-use crate::ports::{GitDiffFormat, GitDiffPaths, GitDiffRequest};
+use crate::ports::{GitDiffFormat, GitDiffRequest};
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,12 +35,12 @@ pub struct FullContextDiffSource {
 
 impl FullContextDiffSource {
     #[must_use]
-    pub fn new(spec: GitDiffSpec, excluded_paths: Vec<RepositoryRelativePath>) -> Self {
+    pub fn new(spec: GitDiffSpec, paths: ExtensionSelection) -> Self {
         Self {
             git_request: GitDiffRequest {
                 spec,
                 format: GitDiffFormat::FullContext,
-                paths: GitDiffPaths::Excluding(excluded_paths),
+                paths,
             },
         }
     }
@@ -53,10 +53,8 @@ impl FullContextDiffSource {
         &self.git_request.spec
     }
 
-    pub(crate) fn excluded_paths(&self) -> &[RepositoryRelativePath] {
-        match &self.git_request.paths {
-            GitDiffPaths::Excluding(paths) | GitDiffPaths::Including(paths) => paths,
-        }
+    pub(crate) fn paths(&self) -> &ExtensionSelection {
+        &self.git_request.paths
     }
 }
 
@@ -94,13 +92,13 @@ pub struct View {
     pub foot: Foot,
     pub full_context: FullContextDiffState,
     /// Renderers must disclose hidden files when this is present.
-    pub exclusions: Option<AppliedExclusions>,
+    pub extension_filter: Option<AppliedExtensionFilter>,
 }
 
 impl View {
     #[must_use]
     pub fn has_diff_content(&self) -> bool {
-        !self.commits.is_empty() || !self.files.is_empty() || self.exclusions.is_some()
+        !self.commits.is_empty() || !self.files.is_empty() || self.extension_filter.is_some()
     }
 
     /// Applies fetched full-context source to a deferred view.
@@ -267,7 +265,7 @@ new file mode 100644\n\
         view.files = compact;
         view.full_context = FullContextDiffState::Deferred(FullContextDiffSource::new(
             gtl_models::git::GitDiffSpec::Range(crate::utils::git_range("a..b")),
-            Vec::new(),
+            ExtensionSelection::all(),
         ));
 
         let view = view

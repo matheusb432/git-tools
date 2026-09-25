@@ -156,20 +156,6 @@ impl ViewerClient {
         Ok(())
     }
 
-    pub async fn update_diff_exclusions(
-        &mut self,
-        request: gtl_wire::viewer::file_filters::UpdateDiffExclusions,
-    ) -> Result<(), ViewerClientError> {
-        let response = self
-            .client
-            .update_diff_exclusions(proto::viewer::file_filters::encode_defaults(request))
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(|status| decode_status(&status))?;
-        let _ = response;
-        Ok(())
-    }
-
     pub async fn close_other_tabs(
         &mut self,
         request: ViewerTabRequest,
@@ -445,7 +431,7 @@ impl ViewerClient {
         request: EditSettingsRequest,
     ) -> Result<(), ViewerClientError> {
         self.client
-            .edit_settings(proto::viewer::encode_edit_settings_request(request))
+            .edit_settings(proto::viewer::encode_edit_settings_request(&request))
             .await
             .map_err(|status| decode_status(&status))?;
         Ok(())

@@ -1,12 +1,12 @@
 use gtl_models::{
-    diffs::{Commit, ExcludedExtensions},
+    diffs::{Commit, ExtensionFilter, ExtensionSelection},
     git::{GitDiffSpec, GitRange},
     paths::{RepositoryRelativePath, RepositoryRoot},
 };
 
 use crate::{
     diffs::{FileDiff, FileStatus, FullContextDiffSource, FullContextDiffState, unified_diff},
-    ports::{GitClient, GitDiffFormat, GitDiffPaths, GitDiffRequest},
+    ports::{GitClient, GitDiffFormat, GitDiffRequest},
 };
 
 pub(super) struct DiffData {
@@ -21,23 +21,23 @@ pub(super) fn assemble(
     repo_path: &RepositoryRoot,
     diff_spec: &GitDiffSpec,
     log_range: Option<&GitRange>,
-    excluded: &ExcludedExtensions,
+    filter: &ExtensionFilter,
 ) -> anyhow::Result<DiffData> {
     let commits = log_range
         .map(|range| git.log_commits(repo_path, range))
         .transpose()?
         .unwrap_or_default();
 
-    let hidden_paths = hidden_paths(git, repo_path, diff_spec, excluded)?;
+    let hidden_paths = hidden_paths(git, repo_path, diff_spec, filter)?;
     let content_request = GitDiffRequest {
         spec: diff_spec.clone(),
         format: GitDiffFormat::Unified,
-        paths: GitDiffPaths::Excluding(hidden_paths.clone()),
+        paths: filter.shown(),
     };
-    // Enforce exclusions even when the Git adapter ignores pathspecs.
-    let (files, _) = filter_excluded_files(
+    // Enforce the filter even when the Git adapter ignores pathspecs.
+    let (files, _) = filter_hidden_files(
         unified_diff::parse(&git.diff(repo_path, &content_request)?)?,
-        excluded,
+        filter,
     );
     let full_context = if files
         .iter()
@@ -45,7 +45,7 @@ pub(super) fn assemble(
     {
         FullContextDiffState::Deferred(FullContextDiffSource::new(
             content_request.spec,
-            hidden_paths.clone(),
+            content_request.paths,
         ))
     } else {
         FullContextDiffState::Loaded
@@ -58,16 +58,15 @@ pub(super) fn assemble(
     })
 }
 
-fn filter_excluded_files(
+fn filter_hidden_files(
     files: Vec<FileDiff>,
-    excluded: &ExcludedExtensions,
+    filter: &ExtensionFilter,
 ) -> (Vec<FileDiff>, Vec<RepositoryRelativePath>) {
-    if excluded.is_empty() {
+    if !filter.is_active() {
         return (files, Vec::new());
     }
-    let (hidden, kept): (Vec<FileDiff>, Vec<FileDiff>) = files
-        .into_iter()
-        .partition(|file| excluded.matches(&file.path));
+    let (hidden, kept): (Vec<FileDiff>, Vec<FileDiff>) =
+        files.into_iter().partition(|file| filter.hides(&file.path));
     (kept, hidden.into_iter().map(|file| file.path).collect())
 }
 
@@ -75,9 +74,9 @@ fn hidden_paths(
     git: &impl GitClient,
     repo_path: &RepositoryRoot,
     spec: &GitDiffSpec,
-    excluded: &ExcludedExtensions,
+    filter: &ExtensionFilter,
 ) -> anyhow::Result<Vec<RepositoryRelativePath>> {
-    if excluded.is_empty() {
+    if !filter.is_active() {
         return Ok(Vec::new());
     }
     Ok(git
@@ -86,15 +85,17 @@ fn hidden_paths(
             &GitDiffRequest {
                 spec: spec.clone(),
                 format: GitDiffFormat::NamesOnly,
-                paths: GitDiffPaths::Excluding(Vec::new()),
+                paths: ExtensionSelection::all(),
             },
         )?
         .lines()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(|path| RepositoryRelativePath::try_new(path.into()).map_err(anyhow::Error::from))
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let path = unified_diff::unquote_git_path(line)?;
+            RepositoryRelativePath::try_new(path.into()).map_err(anyhow::Error::from)
+        })
         .collect::<anyhow::Result<Vec<_>>>()?
         .into_iter()
-        .filter(|path| excluded.matches(path))
+        .filter(|path| filter.hides(path))
         .collect())
 }

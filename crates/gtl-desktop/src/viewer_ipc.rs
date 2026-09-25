@@ -803,13 +803,6 @@ viewer_request_command!(
 );
 
 viewer_request_command!(
-    viewer_update_diff_exclusions,
-    gtl_wire::viewer::file_filters::UpdateDiffExclusions,
-    (),
-    update_diff_exclusions
-);
-
-viewer_request_command!(
     viewer_create_push,
     gtl_wire::viewer::push::CreateViewerPush,
     gtl_wire::viewer::push::ViewerPushRequest,

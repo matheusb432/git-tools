@@ -38,6 +38,7 @@ mod tests {
     use gtl_application::ports::TextEditorClient;
 
     use super::GitTextEditorClient;
+    use crate::testing::TestRepository;
 
     const EDITOR_TEST_REPOSITORY: &str = "GTL_EDITOR_TEST_REPOSITORY";
     const EDITOR_TEST_HELPER: &str =
@@ -45,31 +46,16 @@ mod tests {
 
     #[test]
     fn reads_the_repository_local_text_editor_command() {
-        let temporary = tempfile::tempdir().unwrap();
-        assert!(
-            Command::new("git")
-                .args(["init", "-q"])
-                .current_dir(temporary.path())
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(
-            Command::new("git")
-                .args([
-                    "config",
-                    "core.editor",
-                    r#"code --wait --profile "Work Tree""#,
-                ])
-                .current_dir(temporary.path())
-                .status()
-                .unwrap()
-                .success()
-        );
+        let repository = TestRepository::new();
+        repository.git(&[
+            "config",
+            "core.editor",
+            r#"code --wait --profile "Work Tree""#,
+        ]);
 
         let output = Command::new(std::env::current_exe().unwrap())
             .args([EDITOR_TEST_HELPER, "--exact", "--ignored", "--nocapture"])
-            .env(EDITOR_TEST_REPOSITORY, temporary.path())
+            .env(EDITOR_TEST_REPOSITORY, repository.path())
             .env_remove("GIT_EDITOR")
             .env_remove("VISUAL")
             .env_remove("EDITOR")

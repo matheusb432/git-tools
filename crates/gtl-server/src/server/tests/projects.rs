@@ -1,4 +1,4 @@
-use gtl_infra::app_state::SqliteAppState;
+use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_wire::v1::{self, project_service_client::ProjectServiceClient};
 use serial_test::serial;
 
@@ -171,7 +171,7 @@ async fn viewer_discovers_and_imports_repositories_with_independent_row_results(
 #[serial(server_tracing)]
 async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_disconnect()
 -> TestResult {
-    use std::{process::Command, time::Duration};
+    use std::time::Duration;
 
     use gtl_wire::{
         proto::viewer::projects::decode_status_update, viewer::projects::ViewerProjectStatusUpdate,
@@ -190,43 +190,21 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
         .await?
     }
     let home = directories::BaseDirs::new().ok_or("home unavailable")?;
-    let repo = tempfile::Builder::new()
+    let directory = tempfile::Builder::new()
         .prefix(".gtl-watch-")
         .tempdir_in(home.home_dir())?;
-    let git = |args: &[&str]| -> TestResult {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo.path())
-            .args(args)
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        Ok(())
-    };
-    git(&["init", "-q", "-b", "main"])?;
-    std::fs::write(repo.path().join(".gitignore"), "/target/\n")?;
-    std::fs::write(repo.path().join("file"), "initial\n")?;
-    git(&["add", "."])?;
-    git(&[
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.test",
-        "commit",
-        "-qm",
-        "initial",
-    ])?;
-    std::fs::create_dir_all(repo.path().join("target/debug/deps"))?;
+    let repository = TestRepository::init(directory.path());
+    repository.write(".gitignore", "/target/\n");
+    repository.write("file", "initial\n");
+    repository.commit_all("initial");
+    std::fs::create_dir_all(repository.path().join("target/debug/deps"))?;
     let data = tempfile::tempdir()?;
     let server = ServerHarness::start(data.path(), None).await?;
     let mut projects = ProjectServiceClient::new(server.native_channel());
     let mut create = creation("TST", "Status watch");
     create.project.as_mut().unwrap().source = Some(v1::ProjectSource {
         source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
-            path: repo.path().to_string_lossy().into_owned(),
+            path: repository.path().to_string_lossy().into_owned(),
         })),
     });
     projects.create_project(create).await?;
@@ -260,10 +238,7 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
     assert_eq!(before.0, 1);
     assert!(before.1 > 0);
     for index in 0..500 {
-        std::fs::write(
-            repo.path().join(format!("target/debug/deps/{index}")),
-            "build",
-        )?;
+        repository.write(&format!("target/debug/deps/{index}"), "build");
     }
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(
@@ -272,7 +247,7 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
         "ignored builds must not run status"
     );
     for index in 0..20 {
-        std::fs::write(repo.path().join("file"), format!("edit {index}\n"))?;
+        repository.write("file", format!("edit {index}\n"));
     }
     let ViewerProjectStatusUpdate::Status(changed) = next(&mut stream).await? else {
         return Err("changed status unavailable".into());
@@ -283,7 +258,7 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
         before.0 + 1,
         "save burst must coalesce"
     );
-    git(&["checkout", "-qb", "feature"])?;
+    repository.git(&["checkout", "-qb", "feature"]);
     let ViewerProjectStatusUpdate::Status(branch) = next(&mut stream).await? else {
         return Err("branch status unavailable".into());
     };
@@ -297,7 +272,7 @@ async fn project_status_watch_coalesces_edits_ignores_builds_and_releases_on_dis
         }
     })
     .await?;
-    std::fs::write(repo.path().join("untracked"), "new")?;
+    repository.write("untracked", "new");
     let mut stream = viewer.watch_viewer(request).await?.into_inner();
     let _cached = next(&mut stream).await?;
     let ViewerProjectStatusUpdate::Status(fresh) = next(&mut stream).await? else {

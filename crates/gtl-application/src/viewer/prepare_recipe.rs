@@ -55,6 +55,7 @@ pub fn execute(
     query: PrepareRecipe,
     user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
     let PrepareRecipe { mut recipe, kind } = query;
@@ -85,7 +86,7 @@ pub fn execute(
             target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
         };
     }
-    let view = compute_recipe::execute(recipe.clone(), user_settings, git, comparisons)?;
+    let view = compute_recipe::execute(recipe.clone(), user_settings, git, filters, comparisons)?;
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
         kind,
@@ -138,6 +139,7 @@ mod tests {
                 repository_state: Some(GitRepositoryState::NotFound),
                 ..Default::default()
             },
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -156,6 +158,7 @@ mod tests {
             },
             &FixedUserSettingsStore::default(),
             &source(),
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();

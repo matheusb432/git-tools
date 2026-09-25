@@ -75,15 +75,10 @@ settings-resolved-title = Resolved configuration
 settings-resolved-subtitle = Current sources and effective values.
 settings-configuration-file = Configuration file
 settings-effective-theme = Effective theme
-settings-default-exclusions-title = Default diff exclusions
-settings-default-exclusions-subtitle = Used when a project has no project-specific exclusion list.
 settings-edit-stale = Settings changed since this page loaded. Reload them before saving again.
 settings-edit-field-rejected = Correct the highlighted setting and save again.
 settings-edit-rejected = One or more settings were rejected. Reload the saved values and try again.
 settings-edit-invalid-file = The settings file became invalid. Reload it to repair or reset it.
-settings-exclusions-saved = Exclusions saved
-settings-exclusions-reload = Reload exclusions
-settings-exclusions-save = Save
 
 ## Viewer settings form
 
@@ -173,7 +168,6 @@ failure-settings-locked =
        *[other] Another editor held the settings lock for { $seconds } seconds. Try again.
     }
 failure-settings-path-unavailable = The user configuration path is unavailable.
-failure-settings-duplicate-project = The project settings name { $name } more than once.
 failure-viewer-source-preparing = The diff source is still being prepared. Try again shortly.
 failure-viewer-reveal-too-large = The revealed files exceed the viewer cache limit.
 failure-viewer-snapshot-name-invalid = Snapshot names need 1 to { $characters } characters on a single line.
@@ -475,18 +469,17 @@ table-sort-ascending = Sort { $column } ascending
 table-sort-by = Sort by { $column }
 inline-editor-hint = Enter to save, Escape to cancel
 inline-editor-saving = Saving name
-extensions-excluded = Excluded extensions
-extensions-none = No excluded extensions
-extensions-exclude = Exclude extension…
-extensions-reveal = Reveal .{ $extension }
+extensions-none = No extensions selected
+extensions-add-extension = Add extension…
+extensions-remove = Remove .{ $extension }
 extensions-search = Search or add an extension
 extensions-search-placeholder = Search or add…
 extensions-clear-search = Clear extension search
-extensions-options = Extensions to exclude
+extensions-options = Extensions to filter
 extensions-in-diff = In this diff
-extensions-other = Other exclusions
+extensions-other = Other extensions
 extensions-more = Search to find more extensions
-extensions-exclude-named = Exclude .{ $extension }
+extensions-toggle-named = Toggle .{ $extension }
 extensions-add = Add .{ $extension }
 extensions-invalid = Enter a final file extension, such as .lock or .md.
 
@@ -642,12 +635,12 @@ titlebar-hidden-files =
         [one] { $count } file hidden
        *[other] { $count } files hidden
     } · { $extensions }
-titlebar-hidden-files-configured =
+titlebar-hidden-files-only =
     { $count ->
-        [one] { $count } file hidden · configured
-       *[other] { $count } files hidden · configured
-    }
-titlebar-hidden-tooltip = Hidden by git-tools config diff.exclude:
+        [one] { $count } file hidden
+       *[other] { $count } files hidden
+    } · only { $extensions }
+titlebar-hidden-tooltip = Hidden by the saved extension filter:
 files-empty = No changed files
 files-count =
     { $count ->
@@ -660,18 +653,29 @@ sidebar-toggle-commits = Toggle Commits sidebar
 
 ## Path filter
 
-path-filter-label = Filter files by path
+path-filter-label = Find a file by path
 path-filter-results = Matching files
 path-filter-empty = No files match
 path-filter-searching = Searching files...
 
 ## Diff extension filters
 
-extensions-label-none = Excluded extensions: none
-extensions-label = Excluded extensions: { $extensions }
-extensions-summary-none = None
-extensions-restore-defaults = Restore global defaults
-extensions-too-many-changes = Too many pending exclusion changes. Try again shortly.
+extensions-filter-label = Filter by extension
+extensions-filter-label-hide = Filter by extension: hiding { $extensions }
+extensions-filter-label-only = Filter by extension: showing only { $extensions }
+extensions-selected = Filtered extensions
+extensions-mode-label = Filter mode
+extensions-mode-only = Show only
+extensions-mode-hide = Hide
+extensions-mode-only-description = Show only changed files with these extensions.
+extensions-mode-hide-description = Hide changed files with these extensions.
+extensions-hidden-count =
+    { $count ->
+        [one] { $count } file hidden in this tab
+       *[other] { $count } files hidden in this tab
+    }
+extensions-clear = Clear filter
+extensions-too-many-changes = Too many pending filter changes. Try again shortly.
 
 ## Project comparisons
 

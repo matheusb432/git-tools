@@ -416,7 +416,7 @@ mod tests {
             footer: ViewerFooter {
                 command: "git diff".to_owned(),
             },
-            exclusions: None,
+            extension_filter: None,
         })
     }
 }

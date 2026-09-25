@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 15]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 16]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -250,6 +250,9 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 15]> = LazyLock::new(|| {
         ),
         M::up(include_str!(
             "../../db/migrations/0015_recent_render_label_parts.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0016_repository_extension_filters.sql"
         )),
     ]
 });
@@ -829,7 +832,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
-        assert_eq!(user_version, 15);
+        assert_eq!(user_version, i64::try_from(MIGRATIONS_SLICE.len()).unwrap());
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -1064,7 +1067,7 @@ mod tests {
                 "render_sources_value_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 15);
+        assert_eq!(user_version, i64::try_from(MIGRATIONS_SLICE.len()).unwrap());
     }
 
     #[test]

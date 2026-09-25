@@ -1,26 +1,26 @@
-use gtl_models::{diffs::ExcludedExtensions, git::GitDiffSpec};
+use gtl_models::{diffs::ExtensionFilter, git::GitDiffSpec};
 
 use super::FileDiff;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DiffFileFilter {
     pub(super) source: Option<GitDiffSpec>,
-    pub(super) excluded: ExcludedExtensions,
+    pub(super) filter: ExtensionFilter,
     pub(super) hidden_files: Vec<FileDiff>,
 }
 
 impl DiffFileFilter {
-    pub(crate) fn new(source: GitDiffSpec, excluded: ExcludedExtensions) -> Self {
+    pub(crate) fn new(source: GitDiffSpec, filter: ExtensionFilter) -> Self {
         Self {
             source: Some(source),
-            excluded,
+            filter,
             hidden_files: Vec::new(),
         }
     }
 
     #[must_use]
-    pub fn excluded(&self) -> &ExcludedExtensions {
-        &self.excluded
+    pub fn filter(&self) -> &ExtensionFilter {
+        &self.filter
     }
 
     pub(crate) fn hidden_files(&self) -> &[FileDiff] {

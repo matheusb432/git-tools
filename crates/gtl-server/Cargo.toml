@@ -38,6 +38,7 @@ uuid.workspace = true
 [dev-dependencies]
 gtl-client.workspace = true
 gtl-application = { workspace = true, features = ["testing"] }
+gtl-infra = { workspace = true, features = ["testing"] }
 prost-types.workspace = true
 serde_json.workspace = true
 serial_test.workspace = true

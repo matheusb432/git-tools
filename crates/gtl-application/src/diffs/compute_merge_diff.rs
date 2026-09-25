@@ -1,7 +1,7 @@
 mod view;
 
 use gtl_models::{
-    diffs::ExcludedExtensions,
+    diffs::ExtensionFilter,
     failure::ErrorMeta,
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
@@ -12,7 +12,7 @@ use crate::{
     diffs::{
         FetchFullContextDiff, FullContextDiffState, PinnedRange, View, fetch_full_context_diff,
     },
-    ports::{GitClient, UserSettingsLoadError, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +31,7 @@ pub struct ComputeMergeDiffOk {
     pub render_options: gtl_models::viewer::RenderOptions,
     pub theme: Option<Theme>,
     pub language: gtl_models::settings::ViewerLanguage,
-    pub excluded_extensions: ExcludedExtensions,
+    pub extension_filter: ExtensionFilter,
 }
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]
@@ -49,6 +49,7 @@ pub fn execute(
     req: ComputeMergeDiff,
     app_settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
 ) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
     let settings = app_settings.load()?;
     let ComputeMergeDiff {
@@ -56,12 +57,13 @@ pub fn execute(
         base,
         pinned,
     } = req;
+    let extension_filter = filters.extension_filter(&repo_root)?;
     let mut built = view::build(
         git,
         &repo_root,
         base.as_ref(),
         pinned.as_ref(),
-        settings.diff_exclusions(),
+        &extension_filter,
     )?;
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &built.view.full_context
@@ -74,11 +76,6 @@ pub fn execute(
             .with_full_context(full_context)
             .map_err(anyhow::Error::from)?;
     }
-    let excluded_extensions = settings
-        .diff_exclusions()
-        .for_project_or_default(&built.view.repo_name)
-        .clone();
-
     Ok(ComputeMergeDiffOk {
         view: built.view,
         top: built.top,
@@ -87,21 +84,21 @@ pub fn execute(
         render_options: settings.viewer_render_options(),
         theme: settings.theme(),
         language: settings.language(),
-        excluded_extensions,
+        extension_filter,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
+    use gtl_models::viewer::RenderOptions;
 
     use super::*;
     use crate::{
         diffs::compute_merge_diff,
         utils::{
-            FakeGitClient, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore, SavedExtensionFilters,
             diffs::{DIFF_SINGLE_FILE, commit},
-            project_name, repository_root,
+            hiding_extensions, repository_root,
         },
     };
 
@@ -124,7 +121,12 @@ index 333..444 100644\n\
         request: ComputeMergeDiff,
         source: &FakeGitClient,
     ) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
-        compute_merge_diff::execute(request, &FixedUserSettingsStore::default(), source)
+        compute_merge_diff::execute(
+            request,
+            &FixedUserSettingsStore::default(),
+            source,
+            &SavedExtensionFilters::default(),
+        )
     }
 
     #[test]
@@ -143,9 +145,7 @@ index 333..444 100644\n\
             pinned: None,
         };
 
-        let response =
-            compute_merge_diff::execute(request, &FixedUserSettingsStore::default(), &source)
-                .unwrap();
+        let response = execute_default_settings(request, &source).unwrap();
 
         assert_eq!(
             response.view.repo_root.as_ref(),
@@ -156,11 +156,11 @@ index 333..444 100644\n\
         assert_eq!(response.diff_range.as_arg(), "main...HEAD");
         assert_eq!(response.render_options, RenderOptions::DEFAULT);
         assert_eq!(response.theme, None);
-        assert!(response.excluded_extensions.is_empty());
+        assert!(!response.extension_filter.is_active());
     }
 
     #[test]
-    fn app_settings_exclusions_apply_to_the_resolved_repository() {
+    fn saved_filters_apply_to_the_resolved_repository() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -169,14 +169,8 @@ index 333..444 100644\n\
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
-            None,
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            DiffExclusions::new([(project_name("repo"), vec!["md"])], None),
-            gtl_models::settings::PushAllExclusions::default(),
-        ));
+        let filters =
+            SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))]);
 
         let response = compute_merge_diff::execute(
             ComputeMergeDiff {
@@ -184,18 +178,19 @@ index 333..444 100644\n\
                 base: None,
                 pinned: None,
             },
-            &app_settings,
+            &FixedUserSettingsStore::default(),
             &source,
+            &filters,
         )
         .unwrap();
 
         assert_eq!(response.view.files.len(), 1);
-        assert_eq!(response.excluded_extensions.extensions(), ["md"]);
+        assert_eq!(response.extension_filter, hiding_extensions(&["md"]));
         assert_eq!(response.view.files[0].path.to_string_lossy(), "f.txt");
         assert_eq!(
             response
                 .view
-                .exclusions
+                .extension_filter
                 .unwrap()
                 .hidden_paths
                 .iter()

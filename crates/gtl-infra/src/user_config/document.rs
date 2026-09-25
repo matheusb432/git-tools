@@ -1,10 +1,7 @@
 use std::{collections::BTreeMap, string::FromUtf8Error};
 
-use gtl_application::settings::{
-    ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
-};
+use gtl_application::settings::{UserSettingsFieldUpdate, UserSettingsPatch};
 use gtl_models::{
-    diffs::{DiffExclusions, ExcludedExtensions},
     paths::{ProjectName, ProjectNameError},
     settings::{
         ProjectsPageSize, ProjectsPreferences, ProjectsSort, ProjectsViewMode, PushAllExclusions,
@@ -22,7 +19,7 @@ use gtl_models::{
 };
 use serde::Deserialize;
 use thiserror::Error;
-use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
+use toml_edit::{DocumentMut, Item, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 pub(super) enum UserSettingsDocumentKey {
@@ -64,8 +61,6 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsToggleFilesSidebar,
     #[strum(to_string = "keybindings.toggle_commits_sidebar")]
     KeybindingsToggleCommitsSidebar,
-    #[strum(to_string = "diff.exclude")]
-    DefaultDiffExclusions,
     #[strum(to_string = "tags")]
     DefaultTagPatterns,
     #[strum(to_string = "tags.default")]
@@ -78,8 +73,6 @@ pub(super) enum UserSettingsDocumentKey {
     ProjectName { index: usize },
     #[strum(to_string = "projects[{index}].excluded_from_push_all")]
     ProjectExcludedFromPushAll { index: usize },
-    #[strum(to_string = "projects[{index}].diff.exclude")]
-    ProjectDiffExclusions { index: usize },
     #[strum(to_string = "projects[{index}].tags")]
     ProjectTagPatterns { index: usize },
     #[strum(to_string = "projects[{index}].tags.default")]
@@ -110,14 +103,12 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
             | Self::KeybindingsToggleCommitsSidebar => "keybindings",
-            Self::DefaultDiffExclusions => "diff",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable => "tags",
             Self::Projects
             | Self::ProjectName { .. }
             | Self::ProjectExcludedFromPushAll { .. }
-            | Self::ProjectDiffExclusions { .. }
             | Self::ProjectTagPatterns { .. }
             | Self::ProjectTagPatternName { .. }
             | Self::ProjectTagPatternTable { .. } => "projects",
@@ -145,7 +136,6 @@ impl UserSettingsDocumentKey {
             Self::KeybindingsSearchTextInAllFiles => "search_text_in_all_files",
             Self::KeybindingsToggleFilesSidebar => "toggle_files_sidebar",
             Self::KeybindingsToggleCommitsSidebar => "toggle_commits_sidebar",
-            Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "exclude",
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
             Self::ProjectExcludedFromPushAll { .. } => "excluded_from_push_all",
@@ -176,7 +166,6 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
             | Self::KeybindingsToggleCommitsSidebar => "keybindings",
-            Self::DefaultDiffExclusions | Self::ProjectDiffExclusions { .. } => "diff",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable
@@ -206,10 +195,6 @@ pub(super) enum UserSettingsDocumentError {
     ExpectedString { key: UserSettingsDocumentKey },
     #[error("`{key}` must be a boolean")]
     ExpectedBoolean { key: UserSettingsDocumentKey },
-    #[error("`{key}` must be an array of strings")]
-    ExpectedStringArray { key: UserSettingsDocumentKey },
-    #[error("`{key}` must contain only strings")]
-    ExpectedStringArrayElement { key: UserSettingsDocumentKey },
     #[error("`{key}` is required")]
     MissingField { key: UserSettingsDocumentKey },
     #[error("`{key}` is invalid: {source}")]
@@ -303,17 +288,6 @@ impl UserSettingsDocument {
         (self.settings, self.projects_preferences)
     }
 
-    pub(super) fn exclusions_match(
-        &self,
-        update: &gtl_application::settings::DiffExclusionsUpdate,
-    ) -> bool {
-        let configured = match &update.project {
-            Some(project) => self.settings.diff_exclusions().for_project(project),
-            None => Some(self.settings.diff_exclusions().default_exclusions()),
-        };
-        configured == update.expected.as_ref()
-    }
-
     pub(super) fn apply(mut self, patch: UserSettingsPatch) -> UserSettingsDocumentEdit {
         apply_settings_patch(&mut self.editable, patch);
         let edited = self.editable.to_string();
@@ -363,8 +337,6 @@ struct RawUserSettingsDocument {
     #[serde(default)]
     keybindings: Option<RawKeybindingsDocument>,
     #[serde(default)]
-    diff: Option<RawDiffSettingsDocument>,
-    #[serde(default)]
     tags: Option<RawTagSettingsDocument>,
     #[serde(default)]
     projects: Vec<RawProjectSettingsDocument>,
@@ -399,20 +371,11 @@ struct RawKeybindingsDocument {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawDiffSettingsDocument {
-    #[serde(default)]
-    exclude: Option<RawSettingValue>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct RawProjectSettingsDocument {
     #[serde(default)]
     name: Option<RawSettingValue>,
     #[serde(default)]
     excluded_from_push_all: Option<RawSettingValue>,
-    #[serde(default)]
-    diff: Option<RawDiffSettingsDocument>,
     #[serde(default)]
     tags: Option<RawTagSettingsDocument>,
 }
@@ -545,10 +508,6 @@ fn parse_settings(
         document.push.and_then(|push| push.confirm),
     )?
     .unwrap_or(UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT);
-    let diff_exclusions_default = excluded_extensions(
-        UserSettingsDocumentKey::DefaultDiffExclusions,
-        document.diff.and_then(|diff| diff.exclude),
-    )?;
     let tag_patterns_default = document
         .tags
         .map(|tags| tag_pattern_set(TagPatternScope::UserDefault, tags))
@@ -561,7 +520,6 @@ fn parse_settings(
             RenderOptions::new(layout, density).with_wrap_lines(wrap_lines),
             keybindings,
             push_confirmation_required,
-            DiffExclusions::new(projects.diff_exclusions, diff_exclusions_default),
             projects.push_all_exclusions,
         )
         .with_accessibility(accessibility)
@@ -702,33 +660,7 @@ fn optional_bool(
         .transpose()
 }
 
-fn excluded_extensions(
-    key: UserSettingsDocumentKey,
-    value: Option<RawSettingValue>,
-) -> Result<Option<Vec<String>>, UserSettingsDocumentError> {
-    value.map(|value| string_array(key, value)).transpose()
-}
-
-fn string_array(
-    key: UserSettingsDocumentKey,
-    value: RawSettingValue,
-) -> Result<Vec<String>, UserSettingsDocumentError> {
-    let RawSettingValue::Array(values) = value else {
-        return Err(UserSettingsDocumentError::ExpectedStringArray { key });
-    };
-    values
-        .into_iter()
-        .map(|value| {
-            value
-                .as_str()
-                .map(str::to_owned)
-                .ok_or(UserSettingsDocumentError::ExpectedStringArrayElement { key })
-        })
-        .collect()
-}
-
 struct ProjectSettingsDocuments {
-    diff_exclusions: BTreeMap<ProjectName, Vec<String>>,
     push_all_exclusions: PushAllExclusions,
     tag_patterns: BTreeMap<ProjectName, TagPatternSet>,
 }
@@ -736,7 +668,6 @@ struct ProjectSettingsDocuments {
 fn project_settings(
     projects: Vec<RawProjectSettingsDocument>,
 ) -> Result<ProjectSettingsDocuments, UserSettingsDocumentError> {
-    let mut diff_exclusions = BTreeMap::new();
     let mut push_all_exclusions = Vec::new();
     let mut tag_patterns = BTreeMap::new();
     let mut project_names = std::collections::BTreeSet::new();
@@ -758,12 +689,6 @@ fn project_settings(
             });
         }
 
-        let diff_key = UserSettingsDocumentKey::ProjectDiffExclusions { index };
-        if let Some(exclusions) =
-            excluded_extensions(diff_key, project.diff.and_then(|diff| diff.exclude))?
-        {
-            diff_exclusions.insert(name.clone(), exclusions);
-        }
         if let Some(tags) = project.tags {
             tag_patterns.insert(
                 name.clone(),
@@ -781,7 +706,6 @@ fn project_settings(
     }
 
     Ok(ProjectSettingsDocuments {
-        diff_exclusions,
         push_all_exclusions: PushAllExclusions::new(push_all_exclusions),
         tag_patterns,
     })
@@ -867,15 +791,6 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         UserSettingsDocumentKey::PushConfirmation,
         &patch.push_confirmation_required,
     );
-    apply_nested_exclusions(
-        document,
-        UserSettingsDocumentKey::DefaultDiffExclusions,
-        patch.default_diff_exclusions,
-    );
-    apply_projects(document, patch.projects);
-    if let Some(update) = patch.diff_exclusions {
-        apply_diff_exclusions(document, update);
-    }
 }
 
 fn apply_root_string<T: ToString>(
@@ -909,81 +824,6 @@ fn apply_nested_bool(
     }
 }
 
-fn apply_nested_exclusions(
-    document: &mut DocumentMut,
-    key: UserSettingsDocumentKey,
-    update: UserSettingsFieldUpdate<ExcludedExtensions>,
-) {
-    match update {
-        UserSettingsFieldUpdate::Update(extensions) => {
-            let (section, field) = key.nested();
-            set_value(
-                &mut document[section][field],
-                Value::Array(extension_array(&extensions)),
-            );
-        }
-        UserSettingsFieldUpdate::Clear => remove_nested(document, key),
-        UserSettingsFieldUpdate::Unchanged => {}
-    }
-}
-
-fn apply_projects(
-    document: &mut DocumentMut,
-    update: UserSettingsFieldUpdate<ProjectSettingsUpdates>,
-) {
-    match update {
-        UserSettingsFieldUpdate::Update(projects) => {
-            let mut retained_tags = retained_project_tags(document);
-            let mut tables = ArrayOfTables::new();
-            for (index, project) in projects.into_iter().enumerate() {
-                let mut table = Table::new();
-                table[UserSettingsDocumentKey::ProjectName { index }.leaf()] =
-                    toml_edit::value(project.name.to_string());
-                if let Some(tags) = retained_tags.remove(project.name.as_ref()) {
-                    table[UserSettingsDocumentKey::ProjectTagPatterns { index }.leaf()] = tags;
-                }
-                table[UserSettingsDocumentKey::ProjectExcludedFromPushAll { index }.leaf()] =
-                    toml_edit::value(project.excluded_from_push_all);
-                let mut diff = Table::new();
-                diff[UserSettingsDocumentKey::ProjectDiffExclusions { index }.leaf()] =
-                    Item::Value(Value::Array(extension_array(&project.diff_exclusions)));
-                table[UserSettingsDocumentKey::ProjectDiffExclusions { index }.container()] =
-                    Item::Table(diff);
-                tables.push(table);
-            }
-            document[UserSettingsDocumentKey::Projects.root()] = Item::ArrayOfTables(tables);
-        }
-        UserSettingsFieldUpdate::Clear => {
-            document.remove(UserSettingsDocumentKey::Projects.root());
-        }
-        UserSettingsFieldUpdate::Unchanged => {}
-    }
-}
-
-fn retained_project_tags(document: &DocumentMut) -> BTreeMap<String, Item> {
-    let name_key = UserSettingsDocumentKey::ProjectName { index: 0 }.leaf();
-    let tags_key = UserSettingsDocumentKey::ProjectTagPatterns { index: 0 }.leaf();
-    document
-        .get(UserSettingsDocumentKey::Projects.root())
-        .and_then(Item::as_array_of_tables)
-        .into_iter()
-        .flatten()
-        .filter_map(|table| {
-            let name = table.get(name_key)?.as_str()?.to_owned();
-            let tags = table.get(tags_key)?.clone();
-            Some((name, tags))
-        })
-        .collect()
-}
-
-fn extension_array(extensions: &ExcludedExtensions) -> Array {
-    let mut values = Array::new();
-    for extension in extensions.extensions() {
-        values.push(extension.as_str());
-    }
-    values
-}
-
 fn set_value(item: &mut Item, mut replacement: Value) {
     if let Item::Value(current) = item {
         if same_value(current, &replacement) {
@@ -1002,10 +842,6 @@ fn same_value(current: &Value, replacement: &Value) -> bool {
         (Value::Boolean(current), Value::Boolean(replacement)) => {
             current.value() == replacement.value()
         }
-        (Value::Array(current), Value::Array(replacement)) => current
-            .iter()
-            .map(Value::as_str)
-            .eq(replacement.iter().map(Value::as_str)),
         _ => false,
     }
 }
@@ -1022,73 +858,10 @@ fn remove_nested(document: &mut DocumentMut, key: UserSettingsDocumentKey) {
     }
 }
 
-fn apply_diff_exclusions(
-    document: &mut DocumentMut,
-    update: gtl_application::settings::DiffExclusionsUpdate,
-) {
-    let Some(project) = update.project else {
-        apply_nested_exclusions(
-            document,
-            UserSettingsDocumentKey::DefaultDiffExclusions,
-            update.extensions,
-        );
-        return;
-    };
-    if matches!(update.extensions, UserSettingsFieldUpdate::Unchanged) {
-        return;
-    }
-    let root = UserSettingsDocumentKey::Projects.root();
-    if document.get(root).is_none() {
-        if matches!(update.extensions, UserSettingsFieldUpdate::Clear) {
-            return;
-        }
-        document[root] = Item::ArrayOfTables(ArrayOfTables::new());
-    }
-    let Some(projects) = document[root].as_array_of_tables_mut() else {
-        return;
-    };
-    if let Some(table) = projects
-        .iter_mut()
-        .find(|table| table.get("name").and_then(Item::as_str) == Some(project.as_str()))
-    {
-        apply_project_diff_exclusions(table, update.extensions);
-        return;
-    }
-    if let UserSettingsFieldUpdate::Update(extensions) = update.extensions {
-        let mut table = Table::new();
-        table["name"] = toml_edit::value(project.to_string());
-        apply_project_diff_exclusions(&mut table, UserSettingsFieldUpdate::Update(extensions));
-        projects.push(table);
-    }
-}
-
-fn apply_project_diff_exclusions(
-    table: &mut Table,
-    update: UserSettingsFieldUpdate<ExcludedExtensions>,
-) {
-    match update {
-        UserSettingsFieldUpdate::Update(extensions) => {
-            set_value(
-                &mut table["diff"]["exclude"],
-                Value::Array(extension_array(&extensions)),
-            );
-        }
-        UserSettingsFieldUpdate::Clear => {
-            if let Some(diff) = table.get_mut("diff").and_then(Item::as_table_like_mut) {
-                diff.remove("exclude");
-            }
-        }
-        UserSettingsFieldUpdate::Unchanged => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use gtl_application::settings::{
-        ProjectSettingsUpdate, ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
-    };
+    use gtl_application::settings::{UserSettingsFieldUpdate, UserSettingsPatch};
     use gtl_models::{
-        diffs::ExcludedExtensions,
         paths::ProjectName,
         tags::TagPatternName,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
@@ -1108,10 +881,6 @@ mod tests {
             UserSettingsDocumentKey::PushConfirmation.to_string(),
             "push.confirm"
         );
-        assert_eq!(
-            UserSettingsDocumentKey::DefaultDiffExclusions.to_string(),
-            "diff.exclude"
-        );
         assert_eq!(UserSettingsDocumentKey::Projects.to_string(), "projects");
         assert_eq!(
             UserSettingsDocumentKey::ProjectName { index: 3 }.to_string(),
@@ -1120,10 +889,6 @@ mod tests {
         assert_eq!(
             UserSettingsDocumentKey::ProjectExcludedFromPushAll { index: 3 }.to_string(),
             "projects[3].excluded_from_push_all"
-        );
-        assert_eq!(
-            UserSettingsDocumentKey::ProjectDiffExclusions { index: 3 }.to_string(),
-            "projects[3].diff.exclude"
         );
     }
 
@@ -1135,12 +900,10 @@ theme = "glacier"
 layout = "split"
 density = "full"
 push = { confirm = false }
-diff = { exclude = ["md"] }
 
 [[projects]]
 name = "git-tools"
 excluded_from_push_all = true
-diff = { exclude = ["js"] }
 "#
             .to_vec(),
         )
@@ -1201,20 +964,10 @@ diff = { exclude = ["js"] }
             }
         ));
         assert!(matches!(
-            UserSettingsDocument::parse(b"[diff]\nexclude = true\n".to_vec())
+            UserSettingsDocument::parse(b"[diff]\nexclude = [\"md\"]\n".to_vec())
                 .err()
                 .unwrap(),
-            UserSettingsDocumentError::ExpectedStringArray {
-                key: UserSettingsDocumentKey::DefaultDiffExclusions
-            }
-        ));
-        assert!(matches!(
-            UserSettingsDocument::parse(b"[diff]\nexclude = [\"md\", 3]\n".to_vec())
-                .err()
-                .unwrap(),
-            UserSettingsDocumentError::ExpectedStringArrayElement {
-                key: UserSettingsDocumentKey::DefaultDiffExclusions
-            }
+            UserSettingsDocumentError::TomlSchema(_)
         ));
         assert!(matches!(
             UserSettingsDocument::parse(b"[[projects]]\nexcluded_from_push_all = true\n".to_vec())
@@ -1366,57 +1119,6 @@ patterns = { dev = "{n}" }
     }
 
     #[test]
-    fn project_replacement_retains_hand_edited_tag_patterns() {
-        let document = UserSettingsDocument::parse(
-            br#"
-[[projects]]
-name = "sample_project"
-[projects.tags]
-default = "dev"
-patterns = { dev = "{n}" }
-
-[[projects]]
-name = "gone"
-[projects.tags]
-patterns = { dev = "{n}" }
-"#
-            .to_vec(),
-        )
-        .unwrap();
-        let projects = ProjectSettingsUpdates::try_new([ProjectSettingsUpdate {
-            name: ProjectName::try_from("sample_project").unwrap(),
-            excluded_from_push_all: false,
-            diff_exclusions: ExcludedExtensions::new(["lock"]),
-        }])
-        .unwrap();
-        let patch = UserSettingsPatch {
-            projects: UserSettingsFieldUpdate::Update(projects),
-            ..UserSettingsPatch::default()
-        };
-
-        let edit = document.apply(patch);
-        assert!(matches!(&edit, UserSettingsDocumentEdit::Changed(_)));
-        let UserSettingsDocumentEdit::Changed(raw) = edit else {
-            return;
-        };
-        let reparsed = UserSettingsDocument::parse(raw.into_bytes())
-            .unwrap()
-            .into_viewer_settings()
-            .0;
-        let selected_default = |project: &str| {
-            reparsed
-                .tag_patterns()
-                .for_project_or_default(&ProjectName::try_from(project).unwrap())
-                .select(None)
-                .unwrap()
-                .0
-                .to_string()
-        };
-        assert_eq!(selected_default("sample_project"), "dev");
-        assert_eq!(selected_default("gone"), "semver");
-    }
-
-    #[test]
     fn equal_explicit_scalar_is_an_exact_no_op() {
         let document = UserSettingsDocument::parse(b"theme = 'dark'\n".to_vec()).unwrap();
         let patch = UserSettingsPatch {
@@ -1432,16 +1134,12 @@ patterns = { dev = "{n}" }
 
     #[test]
     fn typed_patch_handles_inline_tables_and_preserves_an_equal_scalar() {
-        let document = UserSettingsDocument::parse(
-            b"theme = 'dark'\npush = { confirm = true }\ndiff = { exclude = [\"md\"] }\n".to_vec(),
-        )
-        .unwrap();
+        let document =
+            UserSettingsDocument::parse(b"theme = 'dark'\npush = { confirm = true }\n".to_vec())
+                .unwrap();
         let patch = UserSettingsPatch {
             theme: UserSettingsFieldUpdate::Update(Theme::Dark),
             push_confirmation_required: UserSettingsFieldUpdate::Clear,
-            default_diff_exclusions: UserSettingsFieldUpdate::Update(ExcludedExtensions::new([
-                "md",
-            ])),
             ..UserSettingsPatch::default()
         };
 
@@ -1452,29 +1150,5 @@ patterns = { dev = "{n}" }
         };
         assert!(raw.contains("theme = 'dark'"));
         assert!(raw.contains("push = {}"));
-        assert!(raw.contains("diff = { exclude = [\"md\"] }"));
-    }
-
-    #[test]
-    fn project_replacement_uses_the_checked_ordered_collection() {
-        let document = UserSettingsDocument::parse(Vec::new()).unwrap();
-        let projects = ProjectSettingsUpdates::try_new([ProjectSettingsUpdate {
-            name: ProjectName::try_from("git-tools").unwrap(),
-            excluded_from_push_all: true,
-            diff_exclusions: ExcludedExtensions::new(["lock"]),
-        }])
-        .unwrap();
-        let patch = UserSettingsPatch {
-            projects: UserSettingsFieldUpdate::Update(projects),
-            ..UserSettingsPatch::default()
-        };
-
-        let edit = document.apply(patch);
-        assert!(matches!(&edit, UserSettingsDocumentEdit::Changed(_)));
-        let UserSettingsDocumentEdit::Changed(raw) = edit else {
-            return;
-        };
-        assert!(raw.contains("[[projects]]"));
-        assert!(raw.contains("name = \"git-tools\""));
     }
 }

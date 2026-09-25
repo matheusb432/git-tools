@@ -23,7 +23,6 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        diffs::DiffExclusions,
         settings::UserSettings,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
@@ -37,17 +36,10 @@ mod tests {
 
     #[test]
     fn query_returns_the_complete_validated_settings_snapshot() {
-        let settings = UserSettings::new(
-            Some(Theme::Mirage),
-            RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-            gtl_models::viewer::ViewerKeybindings::default(),
-            false,
-            DiffExclusions::new(
-                [(crate::utils::project_name("git-tools"), vec!["js"])],
-                Some(vec!["md"]),
-            ),
-            gtl_models::settings::PushAllExclusions::default(),
-        );
+        let settings = UserSettings::default()
+            .with_theme(Some(Theme::Mirage))
+            .with_viewer_render_options(RenderOptions::new(DiffLayout::Split, DiffDensity::Full))
+            .with_push_confirmation_required(false);
         let store = FixedUserSettingsStore::new(settings.clone());
 
         let response = get_user_settings::execute(GetUserSettings, &store).unwrap();

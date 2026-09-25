@@ -1,20 +1,20 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use gtl_models::diffs::{AppliedExclusions, ExcludedExtensions};
+use gtl_models::diffs::{AppliedExtensionFilter, ExtensionFilter};
 
 use super::{
     FullContextDiff, FullContextDiffSource, FullContextDiffState, View, unified_diff,
     view::{attach_full_context, sort_files_tree_order},
 };
-use crate::ports::{GitClient, GitDiffFormat, GitDiffPaths, GitDiffRequest};
+use crate::ports::{GitClient, GitDiffFormat, GitDiffRequest};
 
-pub struct SetDiffFileExclusions {
+pub struct SetDiffExtensionFilter {
     pub view: Arc<View>,
-    pub excluded: ExcludedExtensions,
+    pub filter: ExtensionFilter,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SetDiffFileExclusionsError {
+pub enum SetDiffExtensionFilterError {
     #[error("the diff source is unavailable")]
     SourceUnavailable,
     #[error(transparent)]
@@ -23,38 +23,39 @@ pub enum SetDiffFileExclusionsError {
 
 #[cqrsy::command]
 pub fn execute(
-    request: SetDiffFileExclusions,
+    request: SetDiffExtensionFilter,
     git: &impl GitClient,
-) -> Result<View, SetDiffFileExclusionsError> {
-    let SetDiffFileExclusions { view, excluded } = request;
+) -> Result<View, SetDiffExtensionFilterError> {
+    let SetDiffExtensionFilter { view, filter } = request;
     let mut result = (*view).clone();
     let mut hidden_paths = view
-        .exclusions
+        .extension_filter
         .as_ref()
         .map(|value| value.hidden_paths.iter().cloned().collect::<BTreeSet<_>>())
         .unwrap_or_default();
+    let loaded_hidden_paths = view
+        .file_filter
+        .hidden_files
+        .iter()
+        .map(|file| &file.path)
+        .collect::<BTreeSet<_>>();
     let missing = hidden_paths
         .iter()
-        .filter(|path| !excluded.matches(path))
-        .filter(|path| {
-            !view
-                .file_filter
-                .hidden_files
-                .iter()
-                .any(|file| file.path == **path)
-        })
+        .filter(|path| !filter.hides(path) && !loaded_hidden_paths.contains(path))
         .cloned()
-        .collect::<Vec<_>>();
+        .collect::<BTreeSet<_>>();
     if !missing.is_empty() {
         let spec = view
             .file_filter
             .source
             .clone()
-            .ok_or(SetDiffFileExclusionsError::SourceUnavailable)?;
+            .ok_or(SetDiffExtensionFilterError::SourceUnavailable)?;
         let mut request = GitDiffRequest {
             spec,
             format: GitDiffFormat::Unified,
-            paths: GitDiffPaths::Including(missing.clone()),
+            paths: filter
+                .shown()
+                .intersection(&view.file_filter.filter.hidden()),
         };
         let mut files = unified_diff::parse(&git.diff(&view.repo_root, &request)?)?;
         files.retain(|file| missing.contains(&file.path));
@@ -73,8 +74,8 @@ pub fn execute(
     (result.file_filter.hidden_files, result.files) = result
         .files
         .into_iter()
-        .partition(|file| excluded.matches(&file.path));
-    hidden_paths.retain(|path| excluded.matches(path));
+        .partition(|file| filter.hides(&file.path));
+    hidden_paths.retain(|path| filter.hides(path));
     hidden_paths.extend(
         result
             .file_filter
@@ -86,11 +87,11 @@ pub fn execute(
     if let FullContextDiffState::Deferred(source) = &view.full_context {
         result.full_context = FullContextDiffState::Deferred(FullContextDiffSource::new(
             source.spec().clone(),
-            hidden_paths.clone(),
+            filter.shown(),
         ));
     }
-    result.exclusions = AppliedExclusions::from_hidden(&excluded, hidden_paths);
-    result.file_filter.excluded = excluded;
+    result.extension_filter = AppliedExtensionFilter::from_hidden(&filter, hidden_paths);
+    result.file_filter.filter = filter;
     sort_files_tree_order(&mut result.files);
     Ok(result)
 }

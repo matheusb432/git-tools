@@ -203,13 +203,6 @@ viewer_request!(
 );
 
 viewer_request!(
-    update_diff_exclusions,
-    gtl_wire::viewer::file_filters::UpdateDiffExclusions,
-    (),
-    update_diff_exclusions
-);
-
-viewer_request!(
     create_push,
     gtl_wire::viewer::push::CreateViewerPush,
     gtl_wire::viewer::push::ViewerPushRequest,

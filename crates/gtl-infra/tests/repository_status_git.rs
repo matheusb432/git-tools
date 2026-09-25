@@ -1,24 +1,17 @@
 #![cfg(test)]
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use gtl_application::{
     ports::{GitClient as _, GitEffect, GitStatusSnapshot, GitWorkingTree},
     repositories::get_recursive_repository_statuses::{self, GetRecursiveRepositoryStatuses},
 };
-use gtl_infra::git_client::HybridGitClient;
+use gtl_infra::{git_client::HybridGitClient, testing::TestRepository};
 use gtl_models::{
     git::{BranchName, CommitCount, GitHead, GitRefName},
     paths::RepositoryRoot,
     repository::{PathCount, traversal::RepositoryTraversalScope},
 };
-
-fn repository_root(path: &Path) -> RepositoryRoot {
-    RepositoryRoot::try_new(path.to_path_buf()).unwrap()
-}
 
 fn status_snapshot(root: &RepositoryRoot, expectation: &str) -> GitStatusSnapshot {
     let result = HybridGitClient.status_snapshot(root).unwrap();
@@ -32,30 +25,17 @@ fn status_snapshot(root: &RepositoryRoot, expectation: &str) -> GitStatusSnapsho
 #[test]
 fn status_snapshot_reads_real_branch_upstream_and_changes() {
     let temporary = tempfile::tempdir().unwrap();
-    let repository = temporary.path().join("repository");
-    init_repo(&repository);
-    let origin = temporary.path().join("origin.git");
-    git(
-        &repository,
-        &["init", "--bare", "-q", origin.to_str().unwrap()],
-    );
-    git(
-        &repository,
-        &["remote", "add", "origin", origin.to_str().unwrap()],
-    );
-    git(&repository, &["push", "-q", "-u", "origin", "main"]);
+    let repository = committed_repository(&temporary.path().join("repository"));
+    repository.add_bare_origin(temporary.path().join("origin.git"));
 
-    std::fs::write(repository.join("ahead.txt"), "ahead\n").unwrap();
-    git(&repository, &["add", "ahead.txt"]);
-    git(&repository, &["commit", "-qm", "ahead"]);
-    std::fs::write(repository.join("tracked.txt"), "changed\n").unwrap();
-    std::fs::write(repository.join("staged.txt"), "staged\n").unwrap();
-    git(&repository, &["add", "staged.txt"]);
-    std::fs::write(repository.join("untracked.txt"), "untracked\n").unwrap();
+    repository.write("ahead.txt", "ahead\n");
+    repository.commit_all("ahead");
+    repository.write("tracked.txt", "changed\n");
+    repository.write("staged.txt", "staged\n");
+    repository.git(&["add", "staged.txt"]);
+    repository.write("untracked.txt", "untracked\n");
 
-    let result = HybridGitClient
-        .status_snapshot(&repository_root(&repository))
-        .unwrap();
+    let result = HybridGitClient.status_snapshot(&repository.root()).unwrap();
     let snapshot = match result {
         GitEffect::Applied(snapshot) => Some(snapshot),
         GitEffect::Rejected(_) => None,
@@ -95,17 +75,14 @@ fn status_snapshot_reads_real_branch_upstream_and_changes() {
 #[test]
 fn recursive_status_reports_a_linked_worktree_root_and_its_submodules() {
     let temporary = tempfile::tempdir().unwrap();
-    let (_, worktree) = repository_with_feature_worktree(temporary.path());
-    git(
-        &worktree,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-        ],
-    );
+    let (_repository, worktree) = repository_with_feature_worktree(temporary.path());
+    TestRepository::open(&worktree).git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+    ]);
 
     assert_eq!(
         recursive_branch_labels(&worktree),
@@ -120,26 +97,20 @@ fn recursive_status_reports_a_linked_worktree_root_and_its_submodules() {
 fn recursive_status_reports_submodule_checkouts_that_are_linked_worktrees() {
     let temporary = tempfile::tempdir().unwrap();
     let (repository, worktree) = repository_with_feature_worktree(temporary.path());
-    git(
-        &repository,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-        ],
-    );
-    git(
-        &repository.join("lib/submodule"),
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "--detach",
-            worktree.join("lib/submodule").to_str().unwrap(),
-        ],
-    );
+    repository.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+    ]);
+    TestRepository::open(repository.path().join("lib/submodule")).git(&[
+        "worktree",
+        "add",
+        "-q",
+        "--detach",
+        worktree.join("lib/submodule").to_str().unwrap(),
+    ]);
 
     assert_eq!(
         recursive_branch_labels(&worktree),
@@ -150,24 +121,21 @@ fn recursive_status_reports_submodule_checkouts_that_are_linked_worktrees() {
     );
 }
 
-fn repository_with_feature_worktree(directory: &Path) -> (PathBuf, PathBuf) {
-    let submodule_source = directory.join("submodule-source");
-    init_repo(&submodule_source);
-    let repository = directory.join("repository");
-    init_repo(&repository);
+/// Returns a repository that added `lib/submodule` and the path of its `feature` linked worktree,
+/// where the submodule is not checked out yet.
+fn repository_with_feature_worktree(directory: &Path) -> (TestRepository, PathBuf) {
+    let submodule_source = committed_repository(&directory.join("submodule-source"));
+    let repository = committed_repository(&directory.join("repository"));
     add_submodule(&repository, &submodule_source, "lib/submodule");
-    let worktree = repository.join(".worktrees/feature");
-    git(
-        &repository,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "feature",
-            worktree.to_str().unwrap(),
-        ],
-    );
+    let worktree = repository.path().join(".worktrees/feature");
+    repository.git(&[
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "feature",
+        worktree.to_str().unwrap(),
+    ]);
     (repository, worktree)
 }
 
@@ -190,75 +158,46 @@ fn recursive_branch_labels(root: &Path) -> Vec<(String, Option<String>)> {
     .collect()
 }
 
-fn git(repository: &Path, arguments: &[&str]) {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repository)
-        .args(arguments)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "git {arguments:?} failed in {}: {}",
-        repository.display(),
-        String::from_utf8_lossy(&output.stderr)
-    );
+/// Initializes a repository at `path` with `tracked.txt` committed as `tracked`.
+fn committed_repository(path: &Path) -> TestRepository {
+    let repository = TestRepository::init(path);
+    repository.write("tracked.txt", "tracked\n");
+    repository.commit_all("initial");
+    repository
 }
 
-fn init_repo(repository: &Path) {
-    std::fs::create_dir_all(repository).unwrap();
-    git(repository, &["init", "-q", "-b", "main"]);
-    git(
-        repository,
-        &["config", "user.email", "test@example.invalid"],
-    );
-    git(repository, &["config", "user.name", "Test"]);
-    std::fs::write(repository.join("tracked.txt"), "tracked\n").unwrap();
-    git(repository, &["add", "."]);
-    git(repository, &["commit", "-qm", "initial"]);
-}
-
-fn add_submodule(repository: &Path, source: &Path, destination: &str) {
-    git(
-        repository,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "add",
-            source.to_str().unwrap(),
-            destination,
-        ],
-    );
-    git(repository, &["commit", "-qam", "add submodule"]);
+fn add_submodule(repository: &TestRepository, source: &TestRepository, destination: &str) {
+    repository.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        source.path().to_str().unwrap(),
+        destination,
+    ]);
+    repository.commit_all("add submodule");
 }
 
 #[test]
 fn status_queries_read_nested_submodule_repositories() {
     let temporary = tempfile::tempdir().unwrap();
-    let nested_source = temporary.path().join("nested-source");
-    init_repo(&nested_source);
+    let nested_source = committed_repository(&temporary.path().join("nested-source"));
 
-    let submodule_source = temporary.path().join("submodule-source");
-    init_repo(&submodule_source);
+    let submodule_source = committed_repository(&temporary.path().join("submodule-source"));
     add_submodule(&submodule_source, &nested_source, "ext/nested");
 
-    let repository = temporary.path().join("repository");
-    init_repo(&repository);
+    let repository = committed_repository(&temporary.path().join("repository"));
     add_submodule(&repository, &submodule_source, "lib/submodule");
-    git(
-        &repository,
-        &[
-            "-c",
-            "protocol.file.allow=always",
-            "submodule",
-            "update",
-            "--init",
-            "--recursive",
-        ],
-    );
+    repository.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+        "--recursive",
+    ]);
 
-    let root = repository_root(&repository);
+    let root = repository.root();
     let snapshot = status_snapshot(&root, "inspect a repository with nested submodules");
 
     assert_eq!(
@@ -270,7 +209,7 @@ fn status_queries_read_nested_submodule_repositories() {
 
     let recursive = get_recursive_repository_statuses::execute(
         GetRecursiveRepositoryStatuses {
-            root: repository.clone(),
+            root: repository.path().to_path_buf(),
             scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         },
         &HybridGitClient,
@@ -287,11 +226,7 @@ fn status_queries_read_nested_submodule_repositories() {
 
     assert_eq!(working_tree, GitEffect::Applied(GitWorkingTree::default()));
 
-    std::fs::write(
-        repository.join("lib/submodule/ext/nested/tracked.txt"),
-        "changed\n",
-    )
-    .unwrap();
+    repository.write("lib/submodule/ext/nested/tracked.txt", "changed\n");
     let dirty_snapshot = status_snapshot(&root, "inspect a dirty nested submodule");
 
     assert_eq!(dirty_snapshot.working_tree.files.len(), 1);
@@ -302,37 +237,20 @@ fn status_queries_read_nested_submodule_repositories() {
     );
     assert_eq!(dirty_snapshot.working_tree.unprepared, PathCount::new(1));
 
-    git(
-        &repository,
-        &["config", "submodule.lib/submodule.ignore", "dirty"],
-    );
+    repository.git(&["config", "submodule.lib/submodule.ignore", "dirty"]);
     let ignored_dirty = status_snapshot(&root, "honor dirty-submodule configuration");
     assert_eq!(ignored_dirty.working_tree, GitWorkingTree::default());
 
-    git(
-        &repository,
-        &["config", "submodule.lib/submodule.ignore", "untracked"],
-    );
+    repository.git(&["config", "submodule.lib/submodule.ignore", "untracked"]);
     let tracked_change = status_snapshot(&root, "report tracked submodule changes");
     assert_eq!(tracked_change.working_tree.files.len(), 1);
 
-    std::fs::write(
-        repository.join("lib/submodule/ext/nested/tracked.txt"),
-        "tracked\n",
-    )
-    .unwrap();
-    std::fs::write(
-        repository.join("lib/submodule/ext/nested/untracked.txt"),
-        "untracked\n",
-    )
-    .unwrap();
+    repository.write("lib/submodule/ext/nested/tracked.txt", "tracked\n");
+    repository.write("lib/submodule/ext/nested/untracked.txt", "untracked\n");
     let ignored_untracked = status_snapshot(&root, "honor untracked-submodule configuration");
     assert_eq!(ignored_untracked.working_tree, GitWorkingTree::default());
 
-    git(
-        &repository,
-        &["config", "submodule.lib/submodule.ignore", "none"],
-    );
+    repository.git(&["config", "submodule.lib/submodule.ignore", "none"]);
     let visible_untracked = status_snapshot(&root, "include configured nested untracked files");
     assert_eq!(visible_untracked.working_tree.files.len(), 1);
 }

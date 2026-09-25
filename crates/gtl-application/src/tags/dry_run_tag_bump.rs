@@ -231,13 +231,14 @@ fn local_tags(
 mod tests {
     use gtl_models::{
         paths::ProjectName,
+        settings::UserSettings,
         tags::{TagPatternName, TagPatternSet, TagPatternSettings, TagSlot},
     };
 
     use super::{DryRunTagBump, DryRunTagBumpOk};
     use crate::{
         tags::{BumpLevel, dry_run_tag_bump},
-        utils::{FixedUserSettingsStore, ScriptedGitClient, default_user_settings},
+        utils::{FixedUserSettingsStore, ScriptedGitClient},
     };
 
     fn scripted_repo(tags: &str) -> ScriptedGitClient {
@@ -265,7 +266,7 @@ mod tests {
             Some(TagPatternName::try_new("dev").unwrap()),
         )
         .unwrap();
-        FixedUserSettingsStore::new(default_user_settings().with_tag_patterns(
+        FixedUserSettingsStore::new(UserSettings::default().with_tag_patterns(
             TagPatternSettings::new(
                 None,
                 [(

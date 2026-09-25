@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use anyhow::{Context as _, anyhow};
-use gtl_application::ports::{GitDiffFormat, GitDiffPaths, GitDiffRequest};
+use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
 use gtl_models::{
-    diffs::{Commit, CommitId},
+    diffs::{Commit, CommitId, ExtensionSelection, FileExtensions},
     git::{GitDiffSpec, GitRange, GitRevision},
     timestamps::MachineTimestamp,
 };
@@ -41,14 +41,33 @@ pub(crate) fn diff(
     request: &GitDiffRequest,
 ) -> anyhow::Result<String> {
     let repo_path = repo_path.as_ref();
-    if matches!(&request.paths, GitDiffPaths::Including(paths) if paths.is_empty()) {
-        return Ok(String::new());
-    }
+    let pathspecs = match &request.paths {
+        ExtensionSelection::Listed(extensions) => {
+            let pathspecs = extension_pathspecs("glob,icase", extensions);
+            if pathspecs.is_empty() {
+                return Ok(String::new());
+            }
+            pathspecs
+        }
+        ExtensionSelection::Unlisted(extensions) => {
+            extension_pathspecs("exclude,glob,icase", extensions)
+        }
+    };
     let temporary_index = match &request.spec {
         GitDiffSpec::AgainstWorkingTree(_) => Some(working_tree_index(repo_path)?),
         GitDiffSpec::Range(_) => None,
     };
-    let mut args = vec!["diff".to_string()];
+    // Pin the output the parser reads against user configuration such as `diff.noprefix`,
+    // `diff.mnemonicPrefix`, `color.ui=always`, and `diff.external`.
+    let mut args = [
+        "diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        "--no-color",
+        "--no-ext-diff",
+    ]
+    .map(String::from)
+    .to_vec();
     match request.format {
         GitDiffFormat::NamesOnly => args.push("--name-only".to_string()),
         GitDiffFormat::Unified => {}
@@ -70,17 +89,9 @@ pub(crate) fn diff(
         _ => request.spec.to_string(),
     };
     args.push(base);
-    let (paths, magic) = match &request.paths {
-        GitDiffPaths::Excluding(paths) => (paths, ":(exclude,literal)"),
-        GitDiffPaths::Including(paths) => (paths, ":(literal)"),
-    };
-    if !paths.is_empty() {
+    if !pathspecs.is_empty() {
         args.push("--".to_string());
-        args.extend(
-            paths
-                .iter()
-                .map(|path| format!("{magic}{}", path.display())),
-        );
+        args.extend(pathspecs);
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     let index = temporary_index
@@ -89,6 +100,29 @@ pub(crate) fn diff(
     let output = crate::git_process::run_with_index(repo_path, &args, index.as_deref())?;
     anyhow::ensure!(output.success(), "{}", output.error_line());
     Ok(output.stdout)
+}
+
+/// Builds one pathspec per extension that matches exactly the paths
+/// [`FileExtensions::contains_extension_of`] accepts, so the argument count stays independent of
+/// the number of changed files.
+fn extension_pathspecs(magic: &str, extensions: &FileExtensions) -> Vec<String> {
+    extensions
+        .extensions()
+        .iter()
+        // A final extension never contains a dot or a separator, so these match no path.
+        .filter(|extension| !extension.contains(['.', '/']))
+        .map(|extension| {
+            // `?*` demands a file stem: a bare dotfile such as `.lock` has no extension.
+            let mut pathspec = format!(":({magic})**/?*.");
+            for character in extension.chars() {
+                if matches!(character, '*' | '?' | '[' | '\\') {
+                    pathspec.push('\\');
+                }
+                pathspec.push(character);
+            }
+            pathspec
+        })
+        .collect()
 }
 
 fn working_tree_index(repo_path: &Path) -> anyhow::Result<tempfile::TempDir> {
@@ -176,6 +210,7 @@ pub(crate) fn parse_commit_log(raw: &str) -> anyhow::Result<Vec<Commit>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TestRepository;
 
     const COMMIT_ID_ONE: &str = "1111111111111111111111111111111111111111";
     const COMMIT_ID_TWO: &str = "2222222222222222222222222222222222222222";
@@ -259,32 +294,80 @@ mod tests {
     }
 
     #[test]
+    fn extension_pathspecs_select_the_paths_the_extension_rule_selects() {
+        let repository = TestRepository::new();
+        repository.git(&["config", "core.quotePath", "false"]);
+        repository.commit_all("base");
+        let paths = [
+            "main.rs",
+            "src/nested/lib.RS",
+            ".rs",
+            "..rs",
+            "Cargo.lock",
+            ".lock",
+            "dir.lock/inner.rs",
+            "dir.rs/Makefile",
+            "Makefile",
+            "bundle.tar.gz",
+            "x.äb",
+            "x.ÄB",
+            "glob.a*",
+            "glob.ab",
+        ];
+        for path in paths {
+            repository.write(path, "content\n");
+        }
+        repository.commit_all("files");
+        let spec = GitDiffSpec::Range(GitRange::try_new("HEAD~1..HEAD").unwrap());
+        let listed =
+            |extensions: &[&str]| ExtensionSelection::Listed(FileExtensions::new(extensions));
+        let unlisted =
+            |extensions: &[&str]| ExtensionSelection::Unlisted(FileExtensions::new(extensions));
+
+        for selection in [
+            listed(&["rs"]),
+            unlisted(&["lock"]),
+            listed(&["lock", "rs"]),
+            unlisted(&["lock", "rs"]),
+            listed(&["äb"]),
+            unlisted(&["äb"]),
+            listed(&["a*"]),
+            unlisted(&["tar.gz"]),
+            listed(&["tar.gz"]),
+            ExtensionSelection::all(),
+        ] {
+            let output = diff(
+                repository.path(),
+                &GitDiffRequest {
+                    spec: spec.clone(),
+                    format: GitDiffFormat::NamesOnly,
+                    paths: selection.clone(),
+                },
+            )
+            .unwrap();
+            let mut selected_by_git = output.lines().collect::<Vec<_>>();
+            selected_by_git.sort_unstable();
+            let mut selected_by_rule = paths
+                .into_iter()
+                .filter(|path| {
+                    selection.contains(
+                        &gtl_models::paths::RepositoryRelativePath::try_new((*path).into())
+                            .unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            selected_by_rule.sort_unstable();
+            assert_eq!(selected_by_git, selected_by_rule, "{selection:?}");
+        }
+    }
+
+    #[test]
     fn root_commit_returns_oldest_root_sha() {
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        let g = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(d)
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        };
-        g(&["init", "-q"]);
-        g(&["config", "user.email", "t@t"]);
-        g(&["config", "user.name", "t"]);
-        std::fs::write(d.join("a.txt"), "a\n").unwrap();
-        g(&["add", "."]);
-        g(&["commit", "-qm", "first"]);
-        let root = root_commit(d.to_str().unwrap()).unwrap();
+        let repository = TestRepository::new();
+        repository.write("a.txt", "a\n");
+        let head = repository.commit_all("first");
+        let root = root_commit(repository.path()).unwrap();
         assert_eq!(root.as_ref().len(), 40);
-        let head = run_git(d, &["rev-parse", "HEAD"])
-            .unwrap()
-            .trim()
-            .to_string();
         assert_eq!(root.as_ref(), head); // single commit ⇒ root == HEAD
     }
 }

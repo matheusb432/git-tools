@@ -13,7 +13,7 @@ fn user_settings(criterion: &mut Criterion) {
         require(
             writeln!(
                 raw,
-                "\n[[projects]]\nname = \"project-{index}\"\nexcluded_from_push_all = true\ndiff = {{ exclude = [\"md\", \"lock\"] }}"
+                "\n[[projects]]\nname = \"project-{index}\"\nexcluded_from_push_all = true"
             ),
             "appending project settings",
         );

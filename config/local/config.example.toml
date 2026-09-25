@@ -15,10 +15,6 @@ search_text_in_all_files = "ctrl+f"
 # Defaults to true when omitted.
 confirm = true
 
-# Default diff exclusions for projects without an explicit override.
-[diff]
-exclude = ["md", "lock"]
-
 [tags]
 default = "semver"
 [tags.patterns]
@@ -30,8 +26,6 @@ alpha = "{major}.{minor}.{patch}-alpha.{n}.{n}"
 [[projects]]
 name = "git-tools"
 excluded_from_push_all = true
-# overrides [diff].exclude
-diff = { exclude = ["md", "lock", "js"] }
 # overrides [tags] and [tags.patterns]
 [projects.tags]
 default = "dev"

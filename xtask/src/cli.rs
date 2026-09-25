@@ -104,7 +104,7 @@ pub enum Command {
     /// Compile every parser feature for the browser target with the managed C toolchain.
     #[command(hide = true)]
     CheckParserWasm,
-    /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
+    /// Render the viewer's launcher, favicon, bundle, and per-theme tray and launcher icons.
     GenIcon,
     /// Cross-build Windows CLI, viewer, and server artifacts with cargo-xwin.
     Ship {

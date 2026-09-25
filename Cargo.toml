@@ -55,7 +55,7 @@ gtl-server = { path = "crates/gtl-server" }
 gtl-infra = { path = "crates/gtl-infra" }
 gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
-dx-story = { path = "../../shared-libs/dx-story/crates/dx-story" }
+dx-story = "0.1.0"
 
 anyhow = "1"
 assert_cmd = "2"

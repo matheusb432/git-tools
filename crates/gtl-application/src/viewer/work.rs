@@ -21,13 +21,13 @@ use crate::{
     diffs::compute_commit_patch::{self, ComputeCommitPatch, ComputeCommitPatchError},
     history::{RecentRenderRecord, record_render::RecordRender},
     live_views::{LiveViewRecord, recipe_for_record},
-    ports::{GitClient, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind, recipe_label},
 };
 
 #[derive(Debug)]
 pub struct ReservedRecipeWork {
-    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
+    tab_filter: Option<gtl_models::diffs::ExtensionFilter>,
     recipe: Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
@@ -47,7 +47,7 @@ impl ReservedRecipeWork {
 
 #[derive(Debug)]
 pub struct ReservedCommitWork {
-    excluded: Option<gtl_models::diffs::ExcludedExtensions>,
+    tab_filter: Option<gtl_models::diffs::ExtensionFilter>,
     repo_root: gtl_models::paths::RepositoryRoot,
     commit: gtl_models::diffs::Commit,
     ticket: CommitPatchTicket,
@@ -137,7 +137,7 @@ pub fn reserve_open(
             .ok_or(ReserveRecipeError::UnknownTab)?;
         session.request_focus();
         Ok(ReservedRecipeWork {
-            excluded: session.file_exclusions(ticket.tab_id),
+            tab_filter: session.tab_extension_filter(ticket.tab_id),
             recipe,
             kind,
             ticket,
@@ -261,7 +261,7 @@ fn reserve_refresh_in_session(
         .refresh(tab_id)
         .ok_or(ReserveRecipeError::UnknownTab)?;
     Ok(ReservedRecipeWork {
-        excluded: session.file_exclusions(ticket.tab_id),
+        tab_filter: session.tab_extension_filter(ticket.tab_id),
         recipe,
         kind,
         ticket,
@@ -272,15 +272,16 @@ pub fn compute_recipe(
     work: ReservedRecipeWork,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
-        excluded,
+        tab_filter,
         recipe,
         kind,
         ticket,
     } = work;
-    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
+    let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
     let head_before = (kind == ViewerTabKind::Live)
         .then(|| super::refresh_live_view::inspect_recipe(&recipe, git, comparisons).ok())
         .flatten();
@@ -289,8 +290,9 @@ pub fn compute_recipe(
             recipe: recipe.clone(),
             kind,
         },
-        &settings,
+        settings,
         git,
+        &filters,
         comparisons,
     );
     let head = head_before.filter(|before| {
@@ -398,7 +400,7 @@ pub fn reserve_selected_commit_reload(
         };
         let (ticket, repo_root, commit) = session.begin_commit_selection(tab_id, &commit_id)?;
         Ok(Some(ReservedCommitWork {
-            excluded: session.file_exclusions(ticket.tab_id),
+            tab_filter: session.tab_extension_filter(ticket.tab_id),
             repo_root,
             commit,
             ticket,
@@ -414,7 +416,7 @@ pub fn reserve_commit(
     state.update(|session| {
         let (ticket, repo_root, commit) = session.begin_commit_selection(tab_id, commit_id)?;
         Ok(ReservedCommitWork {
-            excluded: session.file_exclusions(ticket.tab_id),
+            tab_filter: session.tab_extension_filter(ticket.tab_id),
             repo_root,
             commit,
             ticket,
@@ -426,16 +428,21 @@ pub fn compute_commit(
     work: ReservedCommitWork,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
 ) -> ComputedCommitWork {
     let ReservedCommitWork {
-        excluded,
+        tab_filter,
         repo_root,
         commit,
         ticket,
     } = work;
-    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
-    let result =
-        compute_commit_patch::execute(ComputeCommitPatch { repo_root, commit }, &settings, git);
+    let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
+    let result = compute_commit_patch::execute(
+        ComputeCommitPatch { repo_root, commit },
+        settings,
+        git,
+        &filters,
+    );
     ComputedCommitWork { ticket, result }
 }
 
@@ -515,6 +522,7 @@ mod tests {
             work,
             &FixedUserSettingsStore::default(),
             &crate::utils::FakeGitClient::default(),
+            &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         );
 

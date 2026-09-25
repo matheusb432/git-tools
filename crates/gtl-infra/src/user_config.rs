@@ -16,25 +16,10 @@ use gtl_application::{
     },
     settings::UserSettingsPatch,
 };
-use gtl_models::{
-    diffs::DiffExclusions,
-    settings::{ProjectsPreferences, PushAllExclusions, UserSettings, UserSettingsRevision},
-    viewer::{RenderOptions, ViewerKeybindings},
-};
+use gtl_models::settings::{ProjectsPreferences, UserSettings, UserSettingsRevision};
 use parking_lot::Mutex;
 
 use self::document::UserSettingsDocument;
-
-fn default_settings() -> UserSettings {
-    UserSettings::new(
-        None,
-        RenderOptions::DEFAULT,
-        ViewerKeybindings::default(),
-        UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT,
-        DiffExclusions::default(),
-        PushAllExclusions::default(),
-    )
-}
 
 fn settings_document(
     path: &Path,
@@ -45,19 +30,10 @@ fn settings_document(
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct UserSettingsCache {
     bytes: Vec<u8>,
     viewer_settings: (UserSettings, ProjectsPreferences),
-}
-
-impl Default for UserSettingsCache {
-    fn default() -> Self {
-        Self {
-            bytes: Vec::new(),
-            viewer_settings: (default_settings(), ProjectsPreferences::default()),
-        }
-    }
 }
 
 /// TOML-backed user settings with a parsed cache shared by every clone.
@@ -196,13 +172,15 @@ mod tests {
     use std::io::Write;
 
     use gtl_application::settings::{
-        ProjectSettingsUpdate, ProjectSettingsUpdates, UserSettingsFieldUpdate, UserSettingsPatch,
-        remove_setting_key, set_setting_key,
+        UserSettingsFieldUpdate, UserSettingsPatch, remove_setting_key, set_setting_key,
     };
     use gtl_models::{
-        paths::{ProjectName, RepositoryRelativePath},
+        paths::ProjectName,
         settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode},
-        viewer::{DiffDensity, DiffLayout, Theme, ViewerKeybinding, ViewerKeybindingAction},
+        viewer::{
+            DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybinding,
+            ViewerKeybindingAction, ViewerKeybindings,
+        },
     };
     use tempfile::NamedTempFile;
 
@@ -280,11 +258,11 @@ mod tests {
             "layout = \"diagonal\"\n",
             "[push]\nconfirm = \"yes\"\n",
             "[push]\nconfrm = false\n",
-            "[diff]\nexclude = \"md\"\n",
+            "[diff]\nexclude = [\"md\"]\n",
             "[keybindings]\nsearch_files = false\n",
             "[[projects]]\nexcluded_from_push_all = true\n",
             "[[projects]]\nname = \"repo\"\nexcluded_from_push_all = \"yes\"\n",
-            "[[projects]]\nname = \"repo\"\ndiff = { exclude = \"md\" }\n",
+            "[[projects]]\nname = \"repo\"\ndiff = { exclude = [\"md\"] }\n",
         ] {
             std::fs::write(file.path(), raw).unwrap();
             assert!(matches!(
@@ -344,50 +322,24 @@ search_text_in_all_files = "ctrl+f"
     }
 
     #[test]
-    fn strict_project_settings_map_defaults_overrides_and_push_exclusions() {
+    fn strict_project_settings_map_push_exclusions() {
         let settings = parse_settings(
             Path::new("config.toml"),
             r#"
-[diff]
-exclude = ["md", "lock"]
-
 [[projects]]
 name = "git-tools"
 excluded_from_push_all = true
-diff = { exclude = ["js"] }
 
 [[projects]]
 name = "sample_project"
-diff = { exclude = [] }
 "#,
         )
         .unwrap();
         let git_tools = ProjectName::try_from("git-tools").unwrap();
         let sample_project = ProjectName::try_from("sample_project").unwrap();
-        let unconfigured = ProjectName::try_from("unconfigured").unwrap();
 
         assert!(settings.push_all_exclusions().contains(&git_tools));
         assert!(!settings.push_all_exclusions().contains(&sample_project));
-        assert_eq!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&git_tools)
-                .extensions(),
-            ["js"]
-        );
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&sample_project)
-                .is_empty()
-        );
-        assert_eq!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&unconfigured)
-                .extensions(),
-            ["lock", "md"]
-        );
     }
 
     #[test]
@@ -409,21 +361,6 @@ excluded_from_push_all = true
             error
                 .to_string()
                 .contains("duplicate project name `git-tools`")
-        );
-    }
-
-    #[test]
-    fn map_based_diff_exclusions_are_invalid() {
-        let error = parse_settings(
-            Path::new("config.toml"),
-            "[diff.exclude]\ndefaults = [\"md\"]\ngit-tools = [\"js\"]\n",
-        )
-        .unwrap_err();
-
-        assert!(
-            error
-                .to_string()
-                .contains("`diff.exclude` must be an array of strings")
         );
     }
 
@@ -453,18 +390,6 @@ excluded_from_push_all = true
         assert!(settings.push_confirmation_required());
         let git_tools = ProjectName::try_from("git-tools").unwrap();
         assert!(settings.push_all_exclusions().contains(&git_tools));
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&git_tools)
-                .matches(&RepositoryRelativePath::try_new("frontend.js".into()).unwrap(),)
-        );
-        assert!(
-            settings
-                .diff_exclusions()
-                .for_project_or_default(&ProjectName::try_from("unconfigured").unwrap(),)
-                .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap(),)
-        );
     }
 
     #[test]
@@ -520,8 +445,6 @@ excluded_from_push_all = true
 
     #[test]
     fn batch_edit_applies_every_field_atomically_and_clear_restores_defaults() {
-        use gtl_models::diffs::ExcludedExtensions;
-
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
@@ -536,7 +459,6 @@ excluded_from_push_all = true
                 gtl_models::settings::ViewerDateFormat::Relative,
             ),
             expected_revision: None,
-            diff_exclusions: None,
             focus_window_on_diff: UserSettingsFieldUpdate::Update(false),
             files_sidebar_visible: UserSettingsFieldUpdate::Update(false),
             commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
@@ -548,17 +470,6 @@ excluded_from_push_all = true
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
             density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
             push_confirmation_required: UserSettingsFieldUpdate::Update(false),
-            default_diff_exclusions: UserSettingsFieldUpdate::Update(ExcludedExtensions::new([
-                ".MD",
-            ])),
-            projects: UserSettingsFieldUpdate::Update(
-                ProjectSettingsUpdates::try_new([ProjectSettingsUpdate {
-                    name: ProjectName::try_from("git-tools").unwrap(),
-                    excluded_from_push_all: true,
-                    diff_exclusions: ExcludedExtensions::new(["lock"]),
-                }])
-                .unwrap(),
-            ),
         };
 
         assert_eq!(
@@ -586,15 +497,6 @@ excluded_from_push_all = true
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)
         );
         assert!(!settings.push_confirmation_required());
-        assert_eq!(
-            settings.diff_exclusions().default_exclusions().extensions(),
-            ["md"]
-        );
-        assert!(
-            settings
-                .push_all_exclusions()
-                .contains(&ProjectName::try_from("git-tools").unwrap())
-        );
     }
 
     #[test]

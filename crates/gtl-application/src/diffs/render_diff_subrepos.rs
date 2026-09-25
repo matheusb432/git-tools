@@ -4,7 +4,7 @@
 //! this application request with the resulting [`RepoRef`] values.
 
 use gtl_models::{
-    artifacts::ArtifactDiffIdentity, diffs::ExcludedExtensions, failure::ErrorMeta,
+    artifacts::ArtifactDiffIdentity, diffs::ExtensionFilter, failure::ErrorMeta,
     paths::RepositoryRoot,
 };
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        UserSettingsLoadError, UserSettingsReader,
+        RepositoryPreferenceReader, UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -70,7 +70,7 @@ pub fn execute(
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    comparisons: &impl crate::ports::ProjectComparisonReader,
+    preferences: &impl RepositoryPreferenceReader,
 ) -> Result<RenderDiffSubreposOk, RenderDiffSubreposError> {
     let RenderDiffSubrepos {
         root,
@@ -84,11 +84,11 @@ pub fn execute(
     let batch = render_batch(
         git,
         &target,
-        &settings,
+        preferences,
         &repos,
         true,
         &mut notes,
-        comparisons,
+        preferences,
     )?;
 
     if batch.views.is_empty() {
@@ -116,7 +116,7 @@ pub fn execute(
         render_options,
         theme,
         language,
-        excluded_extensions: ExcludedExtensions::default(),
+        extension_filter: ExtensionFilter::default(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -142,18 +142,15 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::{
-        diffs::DiffExclusions,
-        settings::UserSettings,
-        viewer::{RenderOptions, Theme},
-    };
+    use gtl_models::{settings::UserSettings, viewer::Theme};
 
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef};
     use crate::{
         diffs::{DiffTargetRequest, render_diff_subrepos},
         shared::notes::Note,
         utils::{
-            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            SavedExtensionFilters, SavedRepositoryPreferences, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -179,6 +176,7 @@ mod tests {
             top: crate::utils::repository_root("/repo-a"),
             label: crate::utils::project_name("repo-a"),
         }];
+        let filters = SavedRepositoryPreferences::default();
 
         let response = render_diff_subrepos::execute(
             req(repos),
@@ -187,7 +185,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
 
@@ -227,6 +225,7 @@ mod tests {
             top: crate::utils::repository_root("/repo-a"),
             label: crate::utils::project_name("repo-a"),
         }];
+        let filters = SavedRepositoryPreferences::default();
 
         let response = render_diff_subrepos::execute(
             req(repos),
@@ -235,7 +234,7 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
 
@@ -268,14 +267,12 @@ diff --git a/notes.md b/notes.md\n\
             diff_output: TWO_FILE_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
-            Some(Theme::Graphite),
-            RenderOptions::DEFAULT,
-            gtl_models::viewer::ViewerKeybindings::default(),
-            true,
-            DiffExclusions::new([(crate::utils::project_name("repo-a"), vec!["md"])], None),
-            gtl_models::settings::PushAllExclusions::default(),
-        ));
+        let app_settings =
+            FixedUserSettingsStore::new(UserSettings::default().with_theme(Some(Theme::Graphite)));
+        let filters = SavedRepositoryPreferences::from(SavedExtensionFilters::new([(
+            crate::utils::repository_root("/repo-a"),
+            crate::utils::hiding_extensions(&["md"]),
+        )]));
         let store = InMemoryArtifactStore::default();
 
         render_diff_subrepos::execute(
@@ -292,7 +289,7 @@ diff --git a/notes.md b/notes.md\n\
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &crate::utils::ProjectComparisons::default(),
+            &filters,
         )
         .unwrap();
 

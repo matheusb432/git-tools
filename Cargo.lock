@@ -2224,6 +2224,8 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 [[package]]
 name = "dx-story"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0e1571f1f01dbfe75f941a1ad78f9458b191482b38cd21ba8fbea5f51074e45"
 dependencies = [
  "const_format",
  "dioxus",
@@ -2236,6 +2238,8 @@ dependencies = [
 [[package]]
 name = "dx-story-macros"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4145b9f891d0d6c2d090913b9bdea3537cef717932e50d2151e32e5332b8ac0"
 dependencies = [
  "prettyplease 0.3.0",
  "proc-macro-crate 3.5.0",
@@ -4054,6 +4058,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "toml 1.1.3+spec-1.1.0",
  "x11-dl",
@@ -4086,6 +4091,7 @@ dependencies = [
  "directories",
  "gix",
  "gtl-application",
+ "gtl-infra",
  "gtl-models",
  "gtl-wire",
  "libc",

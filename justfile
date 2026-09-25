@@ -27,7 +27,7 @@ up:
 # Serve the development-only component story catalog in a browser.
 [group('build')]
 preview-components *args:
-    cargo run --quiet --manifest-path ../../shared-libs/dx-story/Cargo.toml -p dx-story-cli -- serve {{ args }}
+    dx-story serve {{ args }}
 
 # Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]

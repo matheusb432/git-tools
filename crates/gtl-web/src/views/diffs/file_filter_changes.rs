@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use dioxus::{core::spawn_forever, prelude::*};
-use gtl_models::{diffs::ExcludedExtensions, failure::Failure, viewer::ViewerTabId};
-use gtl_wire::viewer::{FieldUpdate, file_filters::SetViewerFileFilters};
+use gtl_models::{diffs::ExtensionFilter, failure::Failure, viewer::ViewerTabId};
+use gtl_wire::viewer::file_filters::SetViewerFileFilters;
 
 use crate::{
     app::application_layout::ViewerContext,
@@ -32,8 +32,7 @@ enum ChangeStatus {
 struct FileFilterChange {
     ticket: ChangeTicket,
     tab_id: ViewerTabId,
-    exclusions: FieldUpdate<ExcludedExtensions>,
-    displayed: ExcludedExtensions,
+    filter: ExtensionFilter,
     status: ChangeStatus,
 }
 
@@ -46,12 +45,7 @@ struct FileFilterChanges {
 }
 
 impl FileFilterChanges {
-    fn submit(
-        &mut self,
-        tab_id: ViewerTabId,
-        exclusions: FieldUpdate<ExcludedExtensions>,
-        displayed: ExcludedExtensions,
-    ) -> Option<bool> {
+    fn submit(&mut self, tab_id: ViewerTabId, filter: ExtensionFilter) -> Option<bool> {
         self.entries.retain(|entry| entry.tab_id != tab_id);
         if self.entries.len() >= RETAINED_CHANGES_MAX {
             self.entries
@@ -64,8 +58,7 @@ impl FileFilterChanges {
         self.entries.push(FileFilterChange {
             ticket: ChangeTicket(self.revision),
             tab_id,
-            exclusions,
-            displayed,
+            filter,
             status: ChangeStatus::Queued,
         });
         let start = !self.running;
@@ -101,13 +94,13 @@ impl FileFilterChanges {
         true
     }
 
-    fn displayed(&self, tab_id: ViewerTabId, fetched_epoch: u64) -> Option<&ExcludedExtensions> {
+    fn displayed(&self, tab_id: ViewerTabId, fetched_epoch: u64) -> Option<&ExtensionFilter> {
         self.entries
             .iter()
             .find(|entry| entry.tab_id == tab_id)
             .and_then(|entry| match entry.status {
                 ChangeStatus::Finished(epoch) if fetched_epoch >= epoch => None,
-                _ => Some(&entry.displayed),
+                _ => Some(&entry.filter),
             })
     }
 }
@@ -147,7 +140,7 @@ impl FileFilterController {
         self,
         tab_id: ViewerTabId,
         fetched_epoch: u64,
-    ) -> Option<ExcludedExtensions> {
+    ) -> Option<ExtensionFilter> {
         self.changes
             .read()
             .displayed(tab_id, fetched_epoch)
@@ -165,13 +158,8 @@ impl FileFilterController {
             })
     }
 
-    pub(crate) fn submit(
-        mut self,
-        tab_id: ViewerTabId,
-        exclusions: FieldUpdate<ExcludedExtensions>,
-        displayed: ExcludedExtensions,
-    ) {
-        let start = self.changes.write().submit(tab_id, exclusions, displayed);
+    pub(crate) fn submit(mut self, tab_id: ViewerTabId, filter: ExtensionFilter) {
+        let start = self.changes.write().submit(tab_id, filter);
         let write = async move { run_changes(&mut self).await };
         match start {
             Some(true) => {
@@ -193,7 +181,7 @@ impl FileFilterController {
             .find(|entry| entry.tab_id == tab_id)
             .cloned();
         if let Some(entry) = entry {
-            self.submit(tab_id, entry.exclusions, entry.displayed);
+            self.submit(tab_id, entry.filter);
         }
     }
 }
@@ -231,35 +219,36 @@ async fn write_change(
     context: &ViewerContext,
     server: Option<&str>,
 ) -> Result<(), ViewerClientError> {
-    let current = viewer_server::get_file_filters(gtl_wire::viewer::ViewerTabRequest {
-        tab_id: change.tab_id,
-    })
-    .await?;
     if context.server_instance_id().as_deref() != server {
         return Err(ViewerClientError::Failed(Failure::Changed));
     }
     viewer_server::set_file_filters(SetViewerFileFilters {
         tab_id: change.tab_id,
-        exclusions: change.exclusions.clone(),
-        expected: current.saved,
+        filter: change.filter.clone(),
     })
     .await
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::diffs::{ExtensionFilterMode, FileExtensions};
+
     use super::*;
     use crate::test_support::{TestResult, viewer_tab_id};
+
+    fn hiding(extensions: &[&str]) -> ExtensionFilter {
+        ExtensionFilter::new(
+            ExtensionFilterMode::Hide,
+            FileExtensions::new(extensions.iter().copied()),
+        )
+    }
 
     fn change(
         queue: &mut FileFilterChanges,
         tab: ViewerTabId,
         extensions: &[&str],
     ) -> TestResult<ChangeTicket> {
-        let excluded = ExcludedExtensions::new(extensions.iter().copied());
-        queue
-            .submit(tab, FieldUpdate::Update(excluded.clone()), excluded)
-            .ok_or("queue full")?;
+        queue.submit(tab, hiding(extensions)).ok_or("queue full")?;
         Ok(queue.entries.last().ok_or("missing change")?.ticket)
     }
 
@@ -270,35 +259,29 @@ mod tests {
         let first = change(&mut queue, tab, &["lock"])?;
         let latest = change(&mut queue, tab, &["lock", "json"])?;
         assert!(queue.begin(first).is_none());
-        assert_eq!(
-            queue.displayed(tab, 0),
-            Some(&ExcludedExtensions::new(["lock", "json"]))
-        );
+        assert_eq!(queue.displayed(tab, 0), Some(&hiding(&["lock", "json"])));
         assert!(queue.begin(latest).is_some());
         assert!(queue.next().is_none());
         Ok(())
     }
 
     #[test]
-    fn stale_completion_cannot_replace_a_newer_edit_or_restore() -> TestResult {
+    fn stale_completion_cannot_replace_a_newer_edit_or_clear() -> TestResult {
         let mut queue = FileFilterChanges::default();
         let tab = viewer_tab_id(1)?;
         let first = change(&mut queue, tab, &["json"])?;
         queue.begin(first).ok_or("missing first write")?;
-        let defaults = ExcludedExtensions::new(["lock"]);
-        assert_eq!(
-            queue.submit(tab, FieldUpdate::Clear, defaults.clone()),
-            Some(false)
-        );
+        let cleared = ExtensionFilter::default();
+        assert_eq!(queue.submit(tab, cleared.clone()), Some(false));
         assert!(!queue.complete(first, Err(ViewerClientError::Disconnected)));
-        assert_eq!(queue.displayed(tab, queue.refresh_epoch), Some(&defaults));
-        let next = queue.next().ok_or("restore lost")?;
-        let restore = queue.begin(next).ok_or("restore unavailable")?;
-        assert!(matches!(restore.exclusions, FieldUpdate::Clear));
+        assert_eq!(queue.displayed(tab, queue.refresh_epoch), Some(&cleared));
+        let next = queue.next().ok_or("clear lost")?;
+        let clear = queue.begin(next).ok_or("clear unavailable")?;
+        assert_eq!(clear.filter, cleared);
         assert!(queue.complete(next, Ok(())));
         assert_eq!(
             queue.displayed(tab, queue.refresh_epoch - 1),
-            Some(&defaults)
+            Some(&cleared)
         );
         assert!(queue.displayed(tab, queue.refresh_epoch).is_none());
         Ok(())
@@ -323,7 +306,7 @@ mod tests {
         queue.complete(other, Ok(()));
         assert_eq!(
             queue.displayed(first_tab, queue.refresh_epoch),
-            Some(&ExcludedExtensions::new(["lock"]))
+            Some(&hiding(&["lock"]))
         );
         let retry = change(&mut queue, first_tab, &["lock"])?;
         assert!(queue.begin(retry).is_some());

@@ -5,7 +5,7 @@ use gtl_wire::viewer::SetViewerModifiedFiles;
 
 use super::{ViewerState, ViewerStateError, compute_recipe, session::PublishOutcome};
 use crate::{
-    ports::{GitClient, ProjectComparisonReader, UserSettingsReader},
+    ports::{ExtensionFilterReader, GitClient, ProjectComparisonReader, UserSettingsReader},
     recipes::{RecipeOp, RecipeTarget},
 };
 
@@ -31,6 +31,7 @@ pub fn execute(
     state: &ViewerState,
     settings: &impl UserSettingsReader,
     git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
     comparisons: &impl ProjectComparisonReader,
 ) -> Result<(), SetModifiedFilesError> {
     if !request.visible {
@@ -47,9 +48,9 @@ pub fn execute(
             rev: gtl_models::git::GitRevision::head(),
         },
     };
-    let excluded = state.inspect(|session| session.file_exclusions(request.tab_id))?;
-    let settings = super::settings::TabSettings::new(settings.clone(), excluded);
-    let view = compute_recipe::execute(recipe, &settings, git, comparisons)?;
+    let tab_filter = state.inspect(|session| session.tab_extension_filter(request.tab_id))?;
+    let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
+    let view = compute_recipe::execute(recipe, settings, git, &filters, comparisons)?;
     let snapshot = state.prepare_snapshot(Arc::new(view))?;
     match state.update(|session| session.publish_modified_files(ticket, snapshot))? {
         PublishOutcome::Published => Ok(()),

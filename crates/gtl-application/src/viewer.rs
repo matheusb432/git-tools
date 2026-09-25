@@ -41,4 +41,3 @@ pub mod rename_snapshot;
 pub mod file_filters;
 pub mod get_viewer_file_filters;
 pub mod set_viewer_file_filters;
-pub mod update_diff_exclusions;

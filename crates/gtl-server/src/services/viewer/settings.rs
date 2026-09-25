@@ -88,7 +88,7 @@ pub(super) async fn edit_settings(
 ) -> ApiResult<v1::EditSettingsResponse> {
     let request = proto::viewer::decode_edit_settings_request(request.into_inner())
         .map_err(|error| invalid_request(error.field().unwrap_or("patch")))?;
-    let request = viewer::settings::settings_patch(request).into_grpc()?;
+    let request = viewer::settings::settings_patch(request);
     let mut store = state.user_settings.clone();
     let viewer = state.viewer.clone();
     let change = run_blocking(move || edit_settings::execute(request, &mut store, &viewer))

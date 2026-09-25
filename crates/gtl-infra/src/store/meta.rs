@@ -3,7 +3,7 @@ use anyhow::{Context as _, bail};
 pub use gtl_models::diffs::DiffKind;
 use gtl_models::{
     artifacts::{ArtifactDiffIdentity, RepositoryStoreId},
-    diffs::{CommitId, ExcludedExtensions, PinnedRange},
+    diffs::{CommitId, ExtensionFilter, ExtensionFilterMode, FileExtensions, PinnedRange},
     settings::ViewerLanguage,
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
@@ -20,6 +20,11 @@ fn density_default() -> String {
 /// Sidecars written before artifacts were localized describe English artifacts.
 fn language_default() -> String {
     ViewerLanguage::EnUs.as_str().to_owned()
+}
+
+/// Sidecars written before show-only filters hid their listed extensions.
+fn extension_filter_mode_default() -> String {
+    ExtensionFilterMode::Hide.as_str().to_owned()
 }
 
 /// Bumped when the renderer's HTML output changes materially so range reuse never serves an
@@ -65,11 +70,15 @@ pub(crate) struct Sidecar {
     /// stored version to the current one.
     #[serde(default)]
     pub(crate) renderer_version: u32,
-    /// Extension set in force at render time (normalized, sorted; empty =
-    /// unfiltered). Defaults keep pre-exclusion sidecars readable, and their
-    /// empty set correctly means "rendered without exclusions".
-    #[serde(default)]
-    pub(crate) excluded_extensions: Vec<String>,
+    /// Extensions of the filter in force at render time (normalized, sorted;
+    /// empty = unfiltered). The key predates show-only filters. Defaults keep
+    /// pre-filter sidecars readable, and their empty set correctly means
+    /// "rendered without a filter".
+    #[serde(default, rename = "excluded_extensions")]
+    pub(crate) filter_extensions: Vec<String>,
+    /// Whether the filter hid or showed only its extensions.
+    #[serde(default = "extension_filter_mode_default")]
+    pub(crate) filter_mode: String,
 }
 
 /// Whether theme metadata was recorded by the renderer version that wrote a sidecar.
@@ -88,7 +97,7 @@ pub struct ArtifactMetadata {
     pub theme: ArtifactThemeMetadata,
     pub language: ViewerLanguage,
     pub renderer_version: u32,
-    pub excluded_extensions: ExcludedExtensions,
+    pub extension_filter: ExtensionFilter,
 }
 
 impl Sidecar {
@@ -138,6 +147,10 @@ impl Sidecar {
             .language
             .parse::<ViewerLanguage>()
             .context("sidecar has an invalid language")?;
+        let filter_mode = self
+            .filter_mode
+            .parse::<ExtensionFilterMode>()
+            .context("sidecar has an invalid extension filter mode")?;
 
         Ok(ArtifactMetadata {
             repo_id,
@@ -146,7 +159,10 @@ impl Sidecar {
             theme,
             language,
             renderer_version: self.renderer_version,
-            excluded_extensions: ExcludedExtensions::new(self.excluded_extensions),
+            extension_filter: ExtensionFilter::new(
+                filter_mode,
+                FileExtensions::new(self.filter_extensions),
+            ),
         })
     }
 
@@ -172,7 +188,8 @@ impl Sidecar {
             theme_recorded,
             language: metadata.language.as_str().to_owned(),
             renderer_version: metadata.renderer_version,
-            excluded_extensions: metadata.excluded_extensions.extensions().to_vec(),
+            filter_extensions: metadata.extension_filter.extensions().extensions().to_vec(),
+            filter_mode: metadata.extension_filter.mode().as_str().to_owned(),
         }
     }
 }
@@ -212,7 +229,8 @@ mod tests {
             theme_recorded: true,
             language: "pt-BR".into(),
             renderer_version: RENDERER_VERSION,
-            excluded_extensions: vec![".MD".into(), "md".into()],
+            filter_extensions: vec![".MD".into(), "md".into()],
+            filter_mode: "only".into(),
         }
     }
 
@@ -235,6 +253,18 @@ mod tests {
         assert_eq!(
             sidecar.try_into_metadata().unwrap().language,
             ViewerLanguage::EnUs
+        );
+    }
+
+    #[test]
+    fn sidecars_without_a_filter_mode_hid_their_extensions() {
+        let mut json = serde_json::to_value(valid_sidecar()).unwrap();
+        json.as_object_mut().unwrap().remove("filter_mode");
+        let sidecar: Sidecar = serde_json::from_value(json).unwrap();
+
+        assert_eq!(
+            sidecar.try_into_metadata().unwrap().extension_filter,
+            ExtensionFilter::new(ExtensionFilterMode::Hide, FileExtensions::new(["md"]))
         );
     }
 
@@ -287,11 +317,13 @@ mod tests {
             metadata.theme,
             ArtifactThemeMetadata::Recorded(Some(Theme::Dark))
         );
-        assert_eq!(metadata.excluded_extensions.extensions(), ["md"]);
         assert_eq!(
-            Sidecar::from_metadata(&metadata).excluded_extensions,
-            ["md"]
+            metadata.extension_filter,
+            ExtensionFilter::new(ExtensionFilterMode::Only, FileExtensions::new(["md"]))
         );
+        let rewritten = Sidecar::from_metadata(&metadata);
+        assert_eq!(rewritten.filter_extensions, ["md"]);
+        assert_eq!(rewritten.filter_mode, "only");
     }
 
     #[test]

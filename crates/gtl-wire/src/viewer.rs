@@ -1,7 +1,7 @@
 //! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
 
 use gtl_models::{
-    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExcludedExtensions},
+    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExtensionFilter},
     failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 47;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 48;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -290,8 +290,8 @@ pub struct ViewerFooter {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerAppliedExclusions {
-    pub extensions: ExcludedExtensions,
+pub struct ViewerAppliedExtensionFilter {
+    pub filter: ExtensionFilter,
     pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
@@ -330,7 +330,7 @@ pub struct ViewerActiveView {
     pub commits: Vec<ViewerCommitSummary>,
     pub commit_selection: ViewerCommitSelection,
     pub footer: ViewerFooter,
-    pub exclusions: Option<ViewerAppliedExclusions>,
+    pub extension_filter: Option<ViewerAppliedExtensionFilter>,
 }
 
 // TODO: move this logic to a client context once a context to manage ViewerActiveView state is
@@ -483,20 +483,6 @@ pub struct ViewerHistoryPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerProjectDiffExclusions {
-    pub configured: bool,
-    pub project_name: ProjectName,
-    pub extensions: ExcludedExtensions,
-    pub excluded_from_push_all: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerDiffExclusions {
-    pub default_extensions: ExcludedExtensions,
-    pub projects: Vec<ViewerProjectDiffExclusions>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
     pub accessibility: gtl_models::settings::ViewerAccessibility,
     pub language: gtl_models::settings::ViewerLanguage,
@@ -512,7 +498,6 @@ pub struct ViewerUserSettings {
     pub effective_theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
     pub push_confirmation_required: bool,
-    pub diff_exclusions: ViewerDiffExclusions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -521,13 +506,6 @@ pub enum FieldUpdate<T> {
     Clear,
     #[default]
     Unchanged,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerProjectSettingsUpdate {
-    pub project_name: ProjectName,
-    pub excluded_from_push_all: bool,
-    pub diff_exclusions: ExcludedExtensions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -548,8 +526,6 @@ pub struct EditSettingsRequest {
     pub layout: FieldUpdate<ViewerDiffLayout>,
     pub density: FieldUpdate<ViewerDiffDensity>,
     pub push_confirmation_required: FieldUpdate<bool>,
-    pub default_diff_exclusions: FieldUpdate<ExcludedExtensions>,
-    pub projects: FieldUpdate<Vec<ViewerProjectSettingsUpdate>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

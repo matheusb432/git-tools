@@ -1,4 +1,7 @@
-use gtl_wire::window::{TrayLabels, WindowAction, WindowState};
+use gtl_wire::{
+    viewer::ViewerTheme,
+    window::{TrayLabels, WindowAction, WindowState},
+};
 
 use crate::ViewerClientError;
 
@@ -24,6 +27,19 @@ pub async fn set_tray_labels(labels: TrayLabels) -> Result<(), ViewerClientError
 #[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
 pub fn set_tray_labels(
     _labels: TrayLabels,
+) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
+    std::future::ready(Err(ViewerClientError::Disconnected))
+}
+
+/// Draws the tray and installed launcher icons in the viewer theme.
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub async fn set_theme_icons(theme: ViewerTheme) -> Result<(), ViewerClientError> {
+    crate::viewer::tauri::invoke_with_request("desktop_theme_icons", theme).await
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
+pub fn set_theme_icons(
+    _theme: ViewerTheme,
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
     std::future::ready(Err(ViewerClientError::Disconnected))
 }

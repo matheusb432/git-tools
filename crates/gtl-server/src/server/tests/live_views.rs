@@ -1,7 +1,10 @@
-use std::{path::Path, process::Command, time::Duration};
+use std::time::Duration;
 
 use gtl_application::live_views::save_live_view::{self, SaveLiveView};
-use gtl_infra::{app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient};
+use gtl_infra::{
+    app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient,
+    testing::TestRepository,
+};
 use gtl_models::live_views::LiveComparison;
 use gtl_wire::{
     proto, v1,
@@ -12,18 +15,6 @@ use tonic::transport::Channel;
 use super::{ServerHarness, TestResult};
 
 type Client = v1::viewer_service_client::ViewerServiceClient<Channel>;
-
-pub(super) fn git(path: &Path, args: &[&str]) -> TestResult {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(args)
-        .output()?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
-    }
-    Ok(())
-}
 
 async fn shell(client: &mut Client) -> TestResult<ViewerShell> {
     Ok(proto::viewer::decode_get_viewer_shell_response(
@@ -63,23 +54,15 @@ async fn next_check(
 #[tokio::test]
 async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnect() -> TestResult {
     let directory = tempfile::tempdir()?;
-    let repository = directory.path().join("repo");
-    std::fs::create_dir(&repository)?;
-    git(&repository, &["init", "-q", "-b", "main"])?;
-    git(&repository, &["config", "user.name", "Live Test"])?;
-    git(
-        &repository,
-        &["config", "user.email", "live@example.invalid"],
-    )?;
-    std::fs::write(repository.join("work.txt"), "base\n")?;
-    git(&repository, &["add", "."])?;
-    git(&repository, &["commit", "-qm", "base"])?;
-    git(&repository, &["switch", "-qc", "feature"])?;
-    git(&repository, &["branch", "--set-upstream-to", "main"])?;
+    let repository = TestRepository::init(directory.path().join("repo"));
+    repository.write("work.txt", "base\n");
+    repository.commit_all("base");
+    repository.git(&["switch", "-qc", "feature"]);
+    repository.git(&["branch", "--set-upstream-to", "main"]);
     let database = SqliteAppState::open(directory.path())?;
     save_live_view::execute(
         SaveLiveView {
-            path: repository.clone(),
+            path: repository.path().to_path_buf(),
             comparison: LiveComparison::LocalChanges,
         },
         &HybridGitClient,
@@ -97,29 +80,29 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     let mut stream = client.watch_viewer(request).await?.into_inner();
     assert!(next_check(&mut stream).await?.failure.is_none());
     let initial = shell(&mut client).await?;
-    std::fs::write(repository.join("work.txt"), "uncommitted\n")?;
+    repository.write("work.txt", "uncommitted\n");
     assert!(next_check(&mut stream).await?.failure.is_none());
     assert_eq!(shell(&mut client).await?.version, initial.version);
-    git(&repository, &["commit", "--allow-empty", "-qm", "new HEAD"])?;
+    repository.git(&["commit", "--allow-empty", "-qm", "new HEAD"]);
     assert!(next_check(&mut stream).await?.failure.is_none());
     let committed = shell(&mut client).await?;
     assert!(committed.version > initial.version);
-    git(&repository, &["switch", "-qc", "same-commit"])?;
+    repository.git(&["switch", "-qc", "same-commit"]);
     assert!(next_check(&mut stream).await?.failure.is_none());
     let switched = shell(&mut client).await?;
     assert!(switched.version > committed.version);
-    git(&repository, &["switch", "--detach", "-q"])?;
+    repository.git(&["switch", "--detach", "-q"]);
     assert!(next_check(&mut stream).await?.failure.is_none());
     let detached = shell(&mut client).await?;
     assert!(detached.version > switched.version);
-    git(
-        &repository,
-        &["commit", "--amend", "--allow-empty", "-qm", "amended HEAD"],
-    )?;
+    repository.git(&["commit", "--amend", "--allow-empty", "-qm", "amended HEAD"]);
     assert!(next_check(&mut stream).await?.failure.is_none());
     let amended = shell(&mut client).await?;
     assert!(amended.version > detached.version);
-    std::fs::rename(repository.join(".git"), repository.join("git-unavailable"))?;
+    std::fs::rename(
+        repository.path().join(".git"),
+        repository.path().join("git-unavailable"),
+    )?;
     assert_eq!(
         next_check(&mut stream)
             .await?
@@ -128,13 +111,13 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
         Some(gtl_models::failure::Failure::Unexpected)
     );
     assert_eq!(shell(&mut client).await?, amended);
-    std::fs::rename(repository.join("git-unavailable"), repository.join(".git"))?;
+    std::fs::rename(
+        repository.path().join("git-unavailable"),
+        repository.path().join(".git"),
+    )?;
     assert!(next_check(&mut stream).await?.failure.is_none());
     drop(stream);
-    git(
-        &repository,
-        &["commit", "--allow-empty", "-qm", "while disconnected"],
-    )?;
+    repository.git(&["commit", "--allow-empty", "-qm", "while disconnected"]);
     tokio::time::sleep(Duration::from_millis(2200)).await;
     assert_eq!(shell(&mut client).await?.version, amended.version);
     let mut stream = client
@@ -155,29 +138,18 @@ async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> Tes
     use std::fmt::Write as _;
 
     let directory = tempfile::tempdir()?;
-    let repository = directory.path().join("repo");
-    std::fs::create_dir(&repository)?;
-    git(&repository, &["init", "-q", "-b", "main"])?;
-    git(&repository, &["config", "user.name", "Content Test"])?;
-    git(
-        &repository,
-        &["config", "user.email", "content@example.invalid"],
-    )?;
+    let repository = TestRepository::init(directory.path().join("repo"));
     let mut original = String::new();
     for index in 0..30 {
         writeln!(&mut original, "line {index}")?;
     }
-    std::fs::write(repository.join("work.txt"), &original)?;
-    git(&repository, &["add", "."])?;
-    git(&repository, &["commit", "-qm", "base"])?;
-    std::fs::write(
-        repository.join("work.txt"),
-        original.replace("line 15", "alpha"),
-    )?;
+    repository.write("work.txt", &original);
+    repository.commit_all("base");
+    repository.write("work.txt", original.replace("line 15", "alpha"));
     let database = SqliteAppState::open(directory.path())?;
     save_live_view::execute(
         SaveLiveView {
-            path: repository.clone(),
+            path: repository.path().to_path_buf(),
             comparison: LiveComparison::LocalChanges,
         },
         &HybridGitClient,
@@ -192,10 +164,7 @@ async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> Tes
     let ViewerActiveState::Ready { view: first } = first.active else {
         return Err("expected initial ready view".into());
     };
-    std::fs::write(
-        repository.join("work.txt"),
-        original.replace("line 15", "bravo"),
-    )?;
+    repository.write("work.txt", original.replace("line 15", "bravo"));
     client
         .refresh_viewer_tab(v1::RefreshViewerTabRequest {
             tab_id: first.identity.tab_id.into(),

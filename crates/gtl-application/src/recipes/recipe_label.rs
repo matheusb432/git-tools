@@ -48,14 +48,14 @@ impl RecipeLabelParts {
 
 /// Names `recipe` before its render is computed.
 pub(crate) fn pending(recipe: &Recipe) -> RecipeLabel {
-    rendered(recipe, recipe.cwd().project_name(), &RecipeLabelParts::None)
+    rendered(recipe, recipe.cwd().project_name(), RecipeLabelParts::None)
 }
 
 /// Names a render of `recipe` in `repository` with the `parts` its computation found.
 pub(crate) fn rendered(
     recipe: &Recipe,
     repository: ProjectName,
-    parts: &RecipeLabelParts,
+    parts: RecipeLabelParts,
 ) -> RecipeLabel {
     match &recipe.name {
         Some(name) => RecipeLabel::Named { name: name.clone() },
@@ -66,79 +66,68 @@ pub(crate) fn rendered(
     }
 }
 
-fn changes(op: &RecipeOp, parts: &RecipeLabelParts) -> RecipeLabelChanges {
-    match (op, parts) {
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { .. },
-            },
-            RecipeLabelParts::UnpushedCommits { count },
-        ) => RecipeLabelChanges::UnpushedCommits { count: *count },
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { .. },
-            },
-            _,
-        ) => RecipeLabelChanges::Unpushed,
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Base { rev },
-            },
-            _,
-        ) => RecipeLabelChanges::WorkingTree { base: rev.clone() },
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Range { range, .. },
-            },
-            _,
-        ) => RecipeLabelChanges::Range {
-            range: range.clone(),
+/// Names a live tab by the repository it follows when its range moves with `HEAD`.
+pub(crate) fn live(recipe: &Recipe) -> Option<RecipeLabel> {
+    if !follows_head(&recipe.op) {
+        return None;
+    }
+    Some(match &recipe.name {
+        Some(name) => RecipeLabel::Named { name: name.clone() },
+        None => RecipeLabel::Repository {
+            repository: recipe.cwd().project_name(),
         },
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Merge { .. },
-            }
-            | RecipeOp::MergeDiff { .. },
-            RecipeLabelParts::Merge { branch, upstream },
-        ) => RecipeLabelChanges::Merge {
-            branch: branch.clone(),
-            upstream: upstream.clone(),
-        },
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Merge { base, .. },
-            },
-            _,
-        ) => RecipeLabelChanges::MergeInto { base: base.clone() },
-        (RecipeOp::MergeDiff { base, .. }, _) => RecipeLabelChanges::MergeInto {
-            base: base.clone().unwrap_or_else(GitRevision::main),
-        },
-        (
-            RecipeOp::Diff {
-                target: RecipeTarget::Last { count, .. },
-            },
-            _,
-        ) => RecipeLabelChanges::LastCommits { count: *count },
+    })
+}
+
+fn follows_head(op: &RecipeOp) -> bool {
+    match op {
+        RecipeOp::Diff {
+            target: RecipeTarget::Base { rev },
+        } => *rev == GitRevision::head(),
+        RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { .. },
+        } => true,
+        RecipeOp::Diff { .. } | RecipeOp::MergeDiff { .. } => false,
     }
 }
 
-/// Names a live tab by the repository it follows when its range moves with `HEAD`.
-pub(crate) fn live(recipe: &Recipe) -> Option<RecipeLabel> {
-    match &recipe.op {
-        RecipeOp::Diff {
-            target: RecipeTarget::Base { rev },
-        } if *rev == GitRevision::head() => {}
-        RecipeOp::Diff {
-            target: RecipeTarget::Unpushed { .. },
-        } => {}
-        _ => return None,
+/// Describes the changes `op` compares, refined by the computed `parts` that match it.
+fn changes(op: &RecipeOp, parts: RecipeLabelParts) -> RecipeLabelChanges {
+    match op {
+        RecipeOp::Diff { target } => diff_changes(target, parts),
+        RecipeOp::MergeDiff {
+            base: Some(base), ..
+        } => merge_changes(base, parts),
+        RecipeOp::MergeDiff { base: None, .. } => merge_changes(&GitRevision::main(), parts),
     }
-    Some(recipe.name.clone().map_or_else(
-        || RecipeLabel::Repository {
-            repository: recipe.cwd().project_name(),
+}
+
+fn diff_changes(target: &RecipeTarget, parts: RecipeLabelParts) -> RecipeLabelChanges {
+    match target {
+        RecipeTarget::Unpushed { .. } => match parts {
+            RecipeLabelParts::UnpushedCommits { count } => {
+                RecipeLabelChanges::UnpushedCommits { count }
+            }
+            RecipeLabelParts::None | RecipeLabelParts::Merge { .. } => RecipeLabelChanges::Unpushed,
         },
-        |name| RecipeLabel::Named { name },
-    ))
+        RecipeTarget::Base { rev } => RecipeLabelChanges::WorkingTree { base: rev.clone() },
+        RecipeTarget::Range { range, .. } => RecipeLabelChanges::Range {
+            range: range.clone(),
+        },
+        RecipeTarget::Merge { base, .. } => merge_changes(base, parts),
+        RecipeTarget::Last { count, .. } => RecipeLabelChanges::LastCommits { count: *count },
+    }
+}
+
+fn merge_changes(base: &GitRevision, parts: RecipeLabelParts) -> RecipeLabelChanges {
+    match parts {
+        RecipeLabelParts::Merge { branch, upstream } => {
+            RecipeLabelChanges::Merge { branch, upstream }
+        }
+        RecipeLabelParts::None | RecipeLabelParts::UnpushedCommits { .. } => {
+            RecipeLabelChanges::MergeInto { base: base.clone() }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -148,12 +137,16 @@ mod tests {
     use super::*;
     use crate::{
         recipes::RecipeSource,
-        utils::viewer::{empty_view, recipe},
+        utils::{
+            diffs::commit,
+            git_range, git_revision, project_name, repository_root,
+            viewer::{empty_view, recipe},
+        },
     };
 
     fn changes_label(changes: RecipeLabelChanges) -> RecipeLabel {
         RecipeLabel::Changes {
-            repository: crate::utils::project_name("project"),
+            repository: project_name("project"),
             changes,
         }
     }
@@ -165,18 +158,18 @@ mod tests {
             },
             RecipeOp::Diff {
                 target: RecipeTarget::Base {
-                    rev: crate::utils::git_revision("v1"),
+                    rev: git_revision("v1"),
                 },
             },
             RecipeOp::Diff {
                 target: RecipeTarget::Range {
-                    range: crate::utils::git_range("v1..v2"),
+                    range: git_range("v1..v2"),
                     pinned: None,
                 },
             },
             RecipeOp::Diff {
                 target: RecipeTarget::Merge {
-                    base: crate::utils::git_revision("release"),
+                    base: git_revision("release"),
                     pinned: None,
                 },
             },
@@ -191,7 +184,7 @@ mod tests {
                 pinned: None,
             },
             RecipeOp::MergeDiff {
-                base: Some(crate::utils::git_revision("release")),
+                base: Some(git_revision("release")),
                 pinned: None,
             },
         ]
@@ -202,22 +195,22 @@ mod tests {
         let expected = [
             RecipeLabelChanges::Unpushed,
             RecipeLabelChanges::WorkingTree {
-                base: crate::utils::git_revision("v1"),
+                base: git_revision("v1"),
             },
             RecipeLabelChanges::Range {
-                range: crate::utils::git_range("v1..v2"),
+                range: git_range("v1..v2"),
             },
             RecipeLabelChanges::MergeInto {
-                base: crate::utils::git_revision("release"),
+                base: git_revision("release"),
             },
             RecipeLabelChanges::LastCommits {
                 count: NonZeroU32::new(2).unwrap(),
             },
             RecipeLabelChanges::MergeInto {
-                base: crate::utils::git_revision("main"),
+                base: git_revision("main"),
             },
             RecipeLabelChanges::MergeInto {
-                base: crate::utils::git_revision("release"),
+                base: git_revision("release"),
             },
         ];
 
@@ -229,7 +222,7 @@ mod tests {
     #[test]
     fn rendered_labels_add_the_computed_parts_their_recipe_shows() {
         let mut view = empty_view();
-        view.commits = vec![crate::utils::diffs::commit("abc1234")];
+        view.commits = vec![commit("abc1234")];
         let merge = RecipeLabelChanges::Merge {
             branch: view.branch.clone(),
             upstream: view.upstream.clone(),
@@ -239,10 +232,10 @@ mod tests {
                 count: CommitCount::new(1),
             },
             RecipeLabelChanges::WorkingTree {
-                base: crate::utils::git_revision("v1"),
+                base: git_revision("v1"),
             },
             RecipeLabelChanges::Range {
-                range: crate::utils::git_range("v1..v2"),
+                range: git_range("v1..v2"),
             },
             merge.clone(),
             RecipeLabelChanges::LastCommits {
@@ -257,7 +250,7 @@ mod tests {
             let parts = RecipeLabelParts::from_view(&recipe, &view);
 
             assert_eq!(
-                rendered(&recipe, view.repo_name.clone(), &parts),
+                rendered(&recipe, view.repo_name.clone(), parts),
                 changes_label(expected)
             );
         }
@@ -268,18 +261,14 @@ mod tests {
         let mut named = recipe(RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         });
-        named.name = Some(crate::utils::project_name("Release review"));
+        named.name = Some(project_name("Release review"));
         let expected = RecipeLabel::Named {
-            name: crate::utils::project_name("Release review"),
+            name: project_name("Release review"),
         };
 
         assert_eq!(pending(&named), expected);
         assert_eq!(
-            rendered(
-                &named,
-                crate::utils::project_name("project"),
-                &RecipeLabelParts::None
-            ),
+            rendered(&named, project_name("project"), RecipeLabelParts::None),
             expected
         );
         assert_eq!(live(&named), Some(expected));
@@ -288,7 +277,7 @@ mod tests {
     #[test]
     fn live_labels_name_the_repository_only_when_the_range_follows_head() {
         let repository = RecipeLabel::Repository {
-            repository: crate::utils::project_name("project"),
+            repository: project_name("project"),
         };
 
         assert_eq!(
@@ -308,7 +297,7 @@ mod tests {
         assert_eq!(
             live(&recipe(RecipeOp::Diff {
                 target: RecipeTarget::Base {
-                    rev: crate::utils::git_revision("v1"),
+                    rev: git_revision("v1"),
                 },
             })),
             None
@@ -321,14 +310,14 @@ mod tests {
             base: None,
             pinned: None,
         });
-        root.source = RecipeSource::LocalRepo(crate::utils::repository_root("/"));
+        root.source = RecipeSource::LocalRepo(repository_root("/"));
 
         assert_eq!(
             pending(&root),
             RecipeLabel::Changes {
-                repository: crate::utils::project_name("repo"),
+                repository: project_name("repo"),
                 changes: RecipeLabelChanges::MergeInto {
-                    base: crate::utils::git_revision("main"),
+                    base: git_revision("main"),
                 },
             }
         );

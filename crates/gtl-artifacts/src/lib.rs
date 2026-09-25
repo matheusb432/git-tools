@@ -49,7 +49,7 @@ mod tests {
     pub(crate) fn sample_view() -> View {
         View {
             file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
-            exclusions: None,
+            extension_filter: None,
             repo_name: gtl_models::paths::ProjectName::try_from("api").unwrap(),
             repo_root: gtl_models::paths::RepositoryRoot::try_new("/repo/api".into()).unwrap(),
             branch: GitHead::Branch(BranchName::try_new("main").unwrap()),

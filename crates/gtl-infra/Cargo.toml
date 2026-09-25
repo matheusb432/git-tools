@@ -4,6 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
+[features]
+testing = []
+
 [dependencies]
 anyhow.workspace = true
 gtl-application.workspace = true
@@ -33,6 +36,7 @@ notify = { workspace = true, features = ["macos_fsevent"] }
 [dev-dependencies]
 gtl-wire.workspace = true
 gtl-application = { workspace = true, features = ["testing"] }
+gtl-infra = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

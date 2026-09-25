@@ -30,8 +30,7 @@ Ubuntu 24.04 supports the full development and verification toolchain. macOS sup
 builds and installation through `just update`. Windows 11 is a release target.
 
 On a Mac, install the Xcode Command Line Tools and have Git, Mise, and Deno available in your
-shell. The workspace also needs the private `dx-story` checkout at `../../shared-libs/dx-story`.
-From this checkout, install the build tools and configure the local installation:
+shell. From this checkout, install the build tools and configure the local installation:
 
 ```sh
 mise trust

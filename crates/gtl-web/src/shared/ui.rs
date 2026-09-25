@@ -16,7 +16,7 @@ pub(crate) mod data_table;
 mod dialog;
 mod empty_notice;
 #[cfg(feature = "interactive-ui")]
-mod extension_exclusions;
+mod extension_selection;
 mod field_error;
 #[cfg(feature = "interactive-ui")]
 mod field_label;
@@ -68,7 +68,7 @@ pub(crate) use button::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVar
 pub(crate) use count_badge::CountBadge;
 pub(crate) use empty_notice::EmptyNotice;
 #[cfg(feature = "interactive-ui")]
-pub(crate) use extension_exclusions::{ExtensionExclusionsAction, ExtensionExclusionsInput};
+pub(crate) use extension_selection::{ExtensionSelectionAction, ExtensionSelectionInput};
 pub(crate) use field_error::FieldError;
 #[cfg(feature = "interactive-ui")]
 pub(crate) use field_label::FieldLabel;

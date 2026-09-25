@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gtl_models::diffs::ExcludedExtensions;
+use gtl_models::diffs::ExtensionFilter;
 
 use super::{
     ActiveContentIdentity, CachedView, CommitSelection, CommitSelectionSnapshot, ViewerSession,
@@ -19,8 +19,12 @@ pub(in crate::viewer) struct FileFilterViews {
 }
 
 impl ViewerSession {
-    pub(in crate::viewer) fn file_exclusions(&self, id: ViewerTabId) -> Option<ExcludedExtensions> {
-        self.tab(id).and_then(|tab| tab.file_exclusions.clone())
+    /// Returns the filter a tab applies once its first computation has seeded it.
+    pub(in crate::viewer) fn tab_extension_filter(
+        &self,
+        id: ViewerTabId,
+    ) -> Option<ExtensionFilter> {
+        self.tab(id).and_then(|tab| tab.extension_filter.clone())
     }
 
     pub(in crate::viewer) fn file_filter_views(
@@ -57,7 +61,7 @@ impl ViewerSession {
     pub(in crate::viewer) fn publish_file_filters(
         &mut self,
         views: FileFilterViews,
-        excluded: ExcludedExtensions,
+        filter: ExtensionFilter,
     ) -> Result<(), FileFiltersError> {
         if self.content_identity(views.identity.tab_id) != Some(views.identity)
             || !self
@@ -82,7 +86,7 @@ impl ViewerSession {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
             return Err(FileFiltersError::Changed);
         };
-        tab.file_exclusions = Some(excluded);
+        tab.extension_filter = Some(filter);
         tab.generation = tab.generation.next();
         tab.selection_generation = tab.selection_generation.next();
         if let CommitSelection::Ready { transient, .. } = &mut tab.selection {
