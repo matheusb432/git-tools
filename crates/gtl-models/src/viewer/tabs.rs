@@ -13,19 +13,10 @@ pub enum ViewerTabState {
     Pending,
     /// Indicates that the tab has a corresponding rendered view.
     Ready,
-    /// Indicates that the live view source is broken; updates resume when it recovers.
+    /// Indicates that the tab's source is broken; a live tab updates again when it recovers.
     Broken { failure: ViewerFailure },
     /// Indicates that computing or rendering the view failed.
     Error { failure: Failure },
-}
-
-/// Distinguishes immutable snapshots from regenerating live tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewerTabKind {
-    /// Represents an immutable stored render.
-    Snapshot,
-    /// Represents a view regenerated from a source recipe.
-    Live,
 }
 
 /// Places a moved viewer tab relative to another tab with stable identity.
@@ -39,27 +30,25 @@ pub enum ViewerTabPlacement {
 }
 
 /// Holds one tab-strip entry whose identity and rendering state are authoritative.
+///
+/// Every tab shows a snapshot of its recipe; a live tab updates that snapshot when its source
+/// changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewerTab {
     id: ViewerTabId,
     label: RecipeLabel,
-    kind: ViewerTabKind,
+    live: bool,
     state: ViewerTabState,
 }
 
 impl ViewerTab {
     /// Creates a tab-strip entry from validated identity and closed state values.
     #[must_use]
-    pub fn new(
-        id: ViewerTabId,
-        label: RecipeLabel,
-        kind: ViewerTabKind,
-        state: ViewerTabState,
-    ) -> Self {
+    pub fn new(id: ViewerTabId, label: RecipeLabel, live: bool, state: ViewerTabState) -> Self {
         Self {
             id,
             label,
-            kind,
+            live,
             state,
         }
     }
@@ -76,10 +65,10 @@ impl ViewerTab {
         &self.label
     }
 
-    /// Returns whether the tab is a snapshot or live view.
+    /// Returns whether the tab updates when its source changes.
     #[must_use]
-    pub const fn kind(&self) -> ViewerTabKind {
-        self.kind
+    pub const fn live(&self) -> bool {
+        self.live
     }
 
     /// Returns the tab's authoritative rendering state.

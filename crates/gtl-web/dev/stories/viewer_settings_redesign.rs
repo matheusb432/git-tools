@@ -16,7 +16,7 @@ use gtl_wire::viewer::{
     ViewerActiveView, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine, ViewerCommitSelection,
     ViewerCommitSummary, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileRows,
     ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerRows, ViewerTab,
-    ViewerTabKind, ViewerTabState, ViewerUnifiedRow, ViewerUnifiedSourceRow, ViewerViewIdentity,
+    ViewerTabState, ViewerUnifiedRow, ViewerUnifiedSourceRow, ViewerViewIdentity,
 };
 use lucide_dioxus::Settings;
 
@@ -284,7 +284,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             label: gtl_models::recipes::RecipeLabel::Repository {
                 repository: gtl_models::paths::ProjectName::try_new("git-tools")?,
             },
-            kind: ViewerTabKind::Live,
+            live: true,
             state: ViewerTabState::Ready,
         },
         ViewerTab {
@@ -294,7 +294,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             label: gtl_models::recipes::RecipeLabel::Named {
                 name: gtl_models::paths::ProjectName::try_new("config-cleanup")?,
             },
-            kind: ViewerTabKind::Snapshot,
+            live: false,
             state: ViewerTabState::Ready,
         },
     ];
@@ -653,7 +653,7 @@ mod tests {
         assert!(html.contains(r#"class="viewer-tab group/viewer-tab" data-active="true""#));
         assert!(html.contains(r#"class="viewer-tab-selection-indicator" data-active="true""#));
         let styles = include_str!("../../src/app/assets/styles/viewer-tabs.css");
-        assert!(styles.contains("min-w-24 max-w-72 shrink-0"));
+        assert!(styles.contains("min-w-24 max-w-80 shrink-0"));
         assert!(
             styles.contains(r#".viewer-tab[data-active="true"] { @apply bg-surface-2 text-ink; }"#)
         );

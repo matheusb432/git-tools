@@ -5,7 +5,7 @@ use dx_story::{stories, story};
 use gtl_models::{
     paths::ProjectName, recipes::RecipeLabel, settings::ViewerLanguage, viewer::ViewerTabId,
 };
-use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
+use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
 
 use crate::shared::{
     recipe_label::recipe_label_text,
@@ -356,48 +356,20 @@ fn preview_tabs_with_active() -> PreviewResult<(Vec<ViewerTab>, ViewerTab)> {
 
 fn preview_tabs() -> PreviewResult<Vec<ViewerTab>> {
     let fixtures = [
-        ("Working tree", ViewerTabKind::Live, ViewerTabState::Ready),
-        (
-            "Feature branch",
-            ViewerTabKind::Snapshot,
-            ViewerTabState::Ready,
-        ),
-        (
-            "Remote comparison",
-            ViewerTabKind::Live,
-            ViewerTabState::Pending,
-        ),
-        (
-            "Refactor preview",
-            ViewerTabKind::Snapshot,
-            ViewerTabState::Ready,
-        ),
-        (
-            "Release candidate",
-            ViewerTabKind::Snapshot,
-            ViewerTabState::Broken,
-        ),
-        (
-            "Dependency update",
-            ViewerTabKind::Live,
-            ViewerTabState::Ready,
-        ),
-        (
-            "Archived snapshot",
-            ViewerTabKind::Snapshot,
-            ViewerTabState::Error,
-        ),
-        (
-            "Documentation edits",
-            ViewerTabKind::Live,
-            ViewerTabState::Ready,
-        ),
+        ("Working tree", true, ViewerTabState::Ready),
+        ("Feature branch", false, ViewerTabState::Ready),
+        ("Remote comparison", true, ViewerTabState::Pending),
+        ("Refactor preview", false, ViewerTabState::Ready),
+        ("Release candidate", false, ViewerTabState::Broken),
+        ("Dependency update", true, ViewerTabState::Ready),
+        ("Archived snapshot", false, ViewerTabState::Error),
+        ("Documentation edits", true, ViewerTabState::Ready),
     ];
 
     fixtures
         .into_iter()
         .enumerate()
-        .map(|(index, (label, kind, state))| {
+        .map(|(index, (label, live, state))| {
             Ok(ViewerTab {
                 custom_name: None,
                 pinned: false,
@@ -405,7 +377,7 @@ fn preview_tabs() -> PreviewResult<Vec<ViewerTab>> {
                 label: RecipeLabel::Named {
                     name: ProjectName::try_new(label)?,
                 },
-                kind,
+                live,
                 state,
             })
         })

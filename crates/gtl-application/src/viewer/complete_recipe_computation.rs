@@ -1,18 +1,18 @@
 use std::sync::Arc;
 
-use gtl_models::recipes::RecipeLabel;
+use gtl_models::{git::GitRevision, recipes::RecipeLabel};
 
-use super::ViewerTabKind;
 use crate::{
     diffs::View,
-    recipes::{Recipe, RecipeLabelParts, recipe_label},
+    recipes::{Recipe, recipe_label},
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompleteRecipeComputation {
     pub recipe: Recipe,
-    pub kind: ViewerTabKind,
     pub view: View,
+    /// Names the upstream or comparison branch an unpushed recipe compared against.
+    pub comparison_name: Option<GitRevision>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,84 +23,121 @@ pub struct CompleteRecipeComputationOk {
 
 #[cqrsy::command]
 pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationOk {
-    let CompleteRecipeComputation { recipe, kind, view } = command;
-    let rendered = || {
-        let parts = RecipeLabelParts::from_view(&recipe, &view);
-        recipe_label::rendered(&recipe, view.repo_name.clone(), parts)
-    };
+    let CompleteRecipeComputation {
+        recipe,
+        view,
+        comparison_name,
+    } = command;
     CompleteRecipeComputationOk {
-        label: if kind == ViewerTabKind::Live {
-            recipe_label::live(&recipe).unwrap_or_else(rendered)
-        } else {
-            rendered()
-        },
+        label: recipe_label::compared(&recipe, &view, comparison_name.as_ref()),
         view: Arc::new(view),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::{
-        git::CommitCount,
-        recipes::{RecipeLabel, RecipeLabelChanges},
-    };
+    use std::num::NonZeroU32;
+
+    use gtl_models::{git::GitHead, recipes::RecipeLabelHead};
 
     use super::*;
     use crate::{
         recipes::{RecipeOp, RecipeTarget},
         utils::{
-            diffs::commit,
+            git_range, git_revision, pinned_range, project_name,
             viewer::{empty_view, recipe},
         },
         viewer::complete_recipe_computation,
     };
 
-    fn unpushed() -> Recipe {
-        recipe(RecipeOp::Diff {
-            target: RecipeTarget::Unpushed { pinned: None },
+    fn label(op: RecipeOp, comparison_name: Option<&str>) -> RecipeLabel {
+        let mut view = empty_view();
+        view.branch = GitHead::try_from("feature".to_owned()).unwrap();
+        complete_recipe_computation::execute(CompleteRecipeComputation {
+            recipe: recipe(op),
+            view,
+            comparison_name: comparison_name.map(git_revision),
         })
+        .label
     }
 
-    fn published_label(recipe: Recipe, kind: ViewerTabKind) -> RecipeLabel {
-        let mut view = empty_view();
-        view.commits = vec![commit("abc1234")];
-        complete_recipe_computation::execute(CompleteRecipeComputation { recipe, kind, view }).label
+    fn compared(base: &str, head: RecipeLabelHead) -> RecipeLabel {
+        RecipeLabel::Compared {
+            repository: project_name("project"),
+            base: git_revision(base),
+            head,
+        }
+    }
+
+    fn revision(head: &str) -> RecipeLabelHead {
+        RecipeLabelHead::Revision {
+            revision: git_revision(head),
+        }
     }
 
     #[test]
-    fn live_tabs_name_their_repository_while_snapshots_show_computed_changes() {
-        let project = crate::utils::project_name("project");
+    fn tabs_name_the_compared_branches_when_they_are_known() {
+        let pin = pinned_range(&"a".repeat(40), &"b".repeat(40));
+        let unpushed = |pinned| RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { pinned },
+        };
 
         assert_eq!(
-            published_label(unpushed(), ViewerTabKind::Live),
-            RecipeLabel::Repository {
-                repository: project.clone(),
-            }
+            label(unpushed(Some(pin.clone())), Some("origin/feature")),
+            compared("origin/feature", revision("feature"))
         );
         assert_eq!(
-            published_label(unpushed(), ViewerTabKind::Snapshot),
-            RecipeLabel::Changes {
-                repository: project.clone(),
-                changes: RecipeLabelChanges::UnpushedCommits {
-                    count: CommitCount::new(1),
+            label(unpushed(Some(pin)), None),
+            compared("aaaaaa", revision("feature"))
+        );
+        assert_eq!(
+            label(
+                RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
                 },
-            }
-        );
-        assert_eq!(
-            published_label(
-                recipe(RecipeOp::Diff {
-                    target: RecipeTarget::Base {
-                        rev: crate::utils::git_revision("v1"),
-                    },
-                }),
-                ViewerTabKind::Live,
+                None,
             ),
-            RecipeLabel::Changes {
-                repository: project,
-                changes: RecipeLabelChanges::WorkingTree {
-                    base: crate::utils::git_revision("v1"),
+            compared("main", revision("feature"))
+        );
+    }
+
+    #[test]
+    fn tabs_shorten_commit_ids_and_keep_written_revisions() {
+        assert_eq!(
+            label(
+                RecipeOp::Diff {
+                    target: RecipeTarget::Base {
+                        rev: git_revision("0123456789abcdef"),
+                    },
                 },
-            }
+                None,
+            ),
+            compared("012345", RecipeLabelHead::WorkingTree)
+        );
+        assert_eq!(
+            label(
+                RecipeOp::Diff {
+                    target: RecipeTarget::Range {
+                        range: git_range("v1..v2"),
+                        pinned: None,
+                    },
+                },
+                None,
+            ),
+            compared("v1", revision("v2"))
+        );
+        assert_eq!(
+            label(
+                RecipeOp::Diff {
+                    target: RecipeTarget::Last {
+                        count: NonZeroU32::new(3).unwrap(),
+                        pinned: None,
+                    },
+                },
+                None,
+            ),
+            compared("HEAD~3", revision("feature"))
         );
     }
 
@@ -110,12 +147,19 @@ mod tests {
             base: None,
             pinned: None,
         });
-        named.name = Some(crate::utils::project_name("Release review"));
+        named.name = Some(project_name("Release review"));
+
+        let label = complete_recipe_computation::execute(CompleteRecipeComputation {
+            recipe: named,
+            view: empty_view(),
+            comparison_name: None,
+        })
+        .label;
 
         assert_eq!(
-            published_label(named, ViewerTabKind::Live),
+            label,
             RecipeLabel::Named {
-                name: crate::utils::project_name("Release review"),
+                name: project_name("Release review"),
             }
         );
     }

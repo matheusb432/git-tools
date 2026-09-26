@@ -43,9 +43,14 @@ pub(crate) fn restore_viewer_tabs(state: &AppState) -> anyhow::Result<ViewerTabS
         tracing::error!(error = ?error, "saved viewer tabs are unreadable; starting without them");
         Vec::new()
     });
-    if let Some(work) = saved_tabs::restore(&state.viewer, saved.clone())? {
-        spawn_recipe(state.clone(), work);
-    }
+    let restored = saved_tabs::restore(&state.viewer, saved.clone())?;
+    let worker = state.clone();
+    // One tab at a time bounds startup work; activating a waiting tab computes it at once.
+    tokio::task::spawn_blocking(move || {
+        for work in restored {
+            run_recipe(&worker, work);
+        }
+    });
     Ok(ViewerTabSaving::spawn(state.clone(), saved))
 }
 
@@ -109,60 +114,63 @@ async fn save_changed_tabs(state: &AppState, saved: &mut Vec<SavedViewerTab>) {
 }
 
 pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
-    tokio::task::spawn_blocking(move || {
-        let ticket = work.ticket();
-        let render_id = start_history(&state, &work);
-        let work = work::compute_recipe(
-            work,
-            &state.user_settings,
-            &state.git,
-            &state.database,
-            &state.database,
-        );
-        match work::publish_recipe(&state.viewer, work) {
-            Ok(RecipePublication::Published { history }) => {
-                if let Some(render_id) = render_id {
-                    succeed_history(&state, ticket, render_id, &history);
-                }
-            }
-            Ok(RecipePublication::Skipped { path }) => {
-                if let Some(render_id) = render_id {
-                    discard_history(&state, render_id);
-                }
-                record_project_renders(&state, &[path]);
-            }
-            Ok(RecipePublication::Broken { state: broken }) => {
-                if let Some(render_id) = render_id {
-                    fail_history(&state, render_id, &broken_failure(&broken));
-                }
-            }
-            Ok(RecipePublication::Failed { error }) => {
-                if let Some(render_id) = render_id {
-                    fail_history(
-                        &state,
-                        render_id,
-                        &RenderFailure::from_error(RenderErrorCode::RenderFailed, &error),
-                    );
-                }
-                tracing::error!(error = ?error, "viewer recipe computation failed");
-            }
-            Ok(RecipePublication::Stale) => {
-                if let Some(render_id) = render_id {
-                    discard_history(&state, render_id);
-                }
-            }
-            Err(error) => {
-                if let Some(render_id) = render_id {
-                    fail_history(
-                        &state,
-                        render_id,
-                        &RenderFailure::from_error(RenderErrorCode::PublicationFailed, &error),
-                    );
-                }
-                tracing::error!(error = ?error, "viewer recipe publication failed");
+    tokio::task::spawn_blocking(move || run_recipe(&state, work));
+}
+
+/// Computes reserved work on the calling thread, publishes it, and records its history.
+fn run_recipe(state: &AppState, work: ReservedRecipeWork) {
+    let ticket = work.ticket();
+    let render_id = start_history(state, &work);
+    let work = work::compute_recipe(
+        work,
+        &state.user_settings,
+        &state.git,
+        &state.database,
+        &state.database,
+    );
+    match work::publish_recipe(&state.viewer, work) {
+        Ok(RecipePublication::Published { history }) => {
+            if let Some(render_id) = render_id {
+                succeed_history(state, ticket, render_id, &history);
             }
         }
-    });
+        Ok(RecipePublication::Skipped { path }) => {
+            if let Some(render_id) = render_id {
+                discard_history(state, render_id);
+            }
+            record_project_renders(state, &[path]);
+        }
+        Ok(RecipePublication::Broken { state: broken }) => {
+            if let Some(render_id) = render_id {
+                fail_history(state, render_id, &broken_failure(&broken));
+            }
+        }
+        Ok(RecipePublication::Failed { error }) => {
+            if let Some(render_id) = render_id {
+                fail_history(
+                    state,
+                    render_id,
+                    &RenderFailure::from_error(RenderErrorCode::RenderFailed, &error),
+                );
+            }
+            tracing::error!(error = ?error, "viewer recipe computation failed");
+        }
+        Ok(RecipePublication::Stale) => {
+            if let Some(render_id) = render_id {
+                discard_history(state, render_id);
+            }
+        }
+        Err(error) => {
+            if let Some(render_id) = render_id {
+                fail_history(
+                    state,
+                    render_id,
+                    &RenderFailure::from_error(RenderErrorCode::PublicationFailed, &error),
+                );
+            }
+            tracing::error!(error = ?error, "viewer recipe publication failed");
+        }
+    }
 }
 
 pub(crate) fn spawn_full_context(

@@ -4,7 +4,6 @@ pub mod artifacts;
 pub mod diffs;
 pub mod failure;
 pub mod git;
-pub mod live_views;
 pub mod paths;
 pub mod projects;
 pub mod recipes;

@@ -1,10 +1,10 @@
 use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, RenameViewerSnapshot,
-    SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabPinned,
-    StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult, ViewerFileSearchResult,
-    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
-    ViewerUserSettings,
+    SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerTabLive,
+    SetViewerTabPinned, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
+    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell,
+    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
         DiscoverProjectRepositories, ImportProjectRepositories, ListViewerProjects,
         OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery, ProjectImportResult,
@@ -117,6 +117,8 @@ viewer_request!(activate_tab, ViewerTabRequest, ViewerShell, activate_tab);
 viewer_request!(move_tab, MoveViewerTab, ViewerShell, move_tab);
 viewer_request!(close_tab, ViewerTabRequest, ViewerShell, close_tab);
 viewer_request!(refresh_tab, ViewerTabRequest, ViewerShell, refresh_tab);
+viewer_request!(update_tab, ViewerTabRequest, ViewerShell, update_tab);
+viewer_request!(set_tab_live, SetViewerTabLive, ViewerShell, set_tab_live);
 viewer_request!(
     select_commit,
     SelectViewerCommit,

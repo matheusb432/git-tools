@@ -5,7 +5,7 @@ use gtl_models::{
 use gtl_wire::viewer::RenameViewerSnapshot;
 use rusqlite::{Connection, params};
 
-use super::{ViewerState, ViewerStateError, ViewerTabKind};
+use super::{ViewerState, ViewerStateError};
 
 /// Longest accepted snapshot name, in Unicode scalar values.
 pub const SNAPSHOT_NAME_CHARACTERS_MAX: u32 = 200;
@@ -21,9 +21,6 @@ pub enum RenameSnapshotError {
     #[error("viewer tab is not available")]
     #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
-    #[error("only snapshots can be renamed")]
-    #[meta(failure = ViewerFailure::NotSnapshot)]
-    NotSnapshot,
     #[error("wait for the snapshot to be saved before renaming it")]
     #[meta(failure = ViewerFailure::SnapshotPending)]
     NotSaved,
@@ -54,9 +51,6 @@ pub fn execute(
         ProjectName::try_new(text.to_owned()).map_err(|_| RenameSnapshotError::InvalidName)?;
     state.update(|session| {
         let tab = session.tab(request.tab_id).ok_or(RenameSnapshotError::UnknownTab)?;
-        if tab.tab.kind() != ViewerTabKind::Snapshot {
-            return Err(RenameSnapshotError::NotSnapshot);
-        }
         let history_id = tab.history_id.ok_or(RenameSnapshotError::NotSaved)?;
         let changed = connection.execute(
             "UPDATE recent_renders SET recipe_name = ?1 WHERE id = ?2 AND render_status = 'success'",
@@ -101,7 +95,7 @@ mod tests {
         }
     }
 
-    fn fixture(kind: ViewerTabKind) -> (ViewerState, Connection, gtl_models::viewer::ViewerTabId) {
+    fn fixture(live: bool) -> (ViewerState, Connection, gtl_models::viewer::ViewerTabId) {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE recent_renders (id INTEGER PRIMARY KEY, recipe_name TEXT, render_status TEXT);
             INSERT INTO recent_renders VALUES (1, NULL, 'success');").unwrap();
@@ -109,9 +103,11 @@ mod tests {
         let recipe = utils::viewer::recipe(RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         });
-        let work =
-            work::reserve_open(&state, recipe.clone(), RecipeBatchId::generate(), kind).unwrap();
+        let work = work::reserve_open(&state, recipe.clone(), RecipeBatchId::generate()).unwrap();
         let ticket = work.ticket();
+        state
+            .update(|session| session.set_live(ticket.tab_id, live))
+            .unwrap();
         state
             .update(|session| {
                 session.publish_labeled_if_current(
@@ -146,13 +142,8 @@ mod tests {
                 target: RecipeTarget::Unpushed { pinned: None },
             });
             recipe.name = explicit.map(utils::project_name);
-            let work = work::reserve_open(
-                &state,
-                recipe.clone(),
-                RecipeBatchId::generate(),
-                ViewerTabKind::Snapshot,
-            )
-            .unwrap();
+            let work =
+                work::reserve_open(&state, recipe.clone(), RecipeBatchId::generate()).unwrap();
             recipe.name = Some(utils::project_name("Saved review"));
             let record = RecentRenderRecord {
                 id: RenderHistoryId::try_new(1).unwrap(),
@@ -176,7 +167,7 @@ mod tests {
 
     #[test]
     fn rename_persists_history_without_changing_tab_identity() {
-        let (state, connection, tab_id) = fixture(ViewerTabKind::Snapshot);
+        let (state, connection, tab_id) = fixture(false);
         rename_snapshot::execute(
             &RenameViewerSnapshot {
                 tab_id,
@@ -205,7 +196,7 @@ mod tests {
 
     #[test]
     fn a_missing_history_record_keeps_the_label() {
-        let (state, connection, tab_id) = fixture(ViewerTabKind::Snapshot);
+        let (state, connection, tab_id) = fixture(false);
         connection
             .execute_batch("DELETE FROM recent_renders")
             .unwrap();
@@ -228,19 +219,32 @@ mod tests {
     }
 
     #[test]
-    fn live_tabs_and_invalid_names_cannot_be_renamed() {
-        let (state, connection, tab_id) = fixture(ViewerTabKind::Live);
-        assert!(matches!(
-            rename_snapshot::execute(
-                &RenameViewerSnapshot {
-                    tab_id,
-                    name: "Live name".into()
-                },
-                &state,
-                &connection
-            ),
-            Err(RenameSnapshotError::NotSnapshot)
-        ));
+    fn live_tabs_are_renamed_like_every_snapshot() {
+        let (state, connection, tab_id) = fixture(true);
+
+        rename_snapshot::execute(
+            &RenameViewerSnapshot {
+                tab_id,
+                name: "Live name".into(),
+            },
+            &state,
+            &connection,
+        )
+        .unwrap();
+
+        state
+            .inspect(|session| {
+                assert_eq!(
+                    session.tab(tab_id).unwrap().tab.label(),
+                    &named("Live name")
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn invalid_names_are_rejected() {
+        let (state, connection, tab_id) = fixture(false);
         for name in [" ".into(), "two\nlines".into(), "a".repeat(201)] {
             assert!(matches!(
                 rename_snapshot::execute(

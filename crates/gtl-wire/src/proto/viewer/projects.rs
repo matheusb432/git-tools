@@ -15,8 +15,7 @@ use crate::{
         ImportProjectRepositories, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
         ProjectDiscovery, ProjectDiscoveryState, ProjectImportOutcome, ProjectImportResult,
         ProjectImportSelection, UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison,
-        ViewerProjectDiffMode, ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor,
-        ViewerProjectsPageSize,
+        ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor, ViewerProjectsPageSize,
     },
 };
 
@@ -398,26 +397,15 @@ fn decode_changes(changes: v1::RepositoryStatusChanges) -> Result<StatusChanges,
 pub fn encode_open(request: &OpenViewerProject) -> v1::OpenViewerProjectRequest {
     v1::OpenViewerProjectRequest {
         path: request.path.to_string(),
-        mode: match request.mode {
-            ViewerProjectDiffMode::Snapshot => v1::ViewerProjectDiffMode::Snapshot,
-            ViewerProjectDiffMode::Live => v1::ViewerProjectDiffMode::Live,
-        }
-        .into(),
     }
 }
 
 pub fn decode_open(
     request: v1::OpenViewerProjectRequest,
 ) -> Result<OpenViewerProject, ViewerCodecError> {
-    let mode = match v1::ViewerProjectDiffMode::try_from(request.mode) {
-        Ok(v1::ViewerProjectDiffMode::Snapshot) => ViewerProjectDiffMode::Snapshot,
-        Ok(v1::ViewerProjectDiffMode::Live) => ViewerProjectDiffMode::Live,
-        _ => return Err(ViewerCodecError::InvalidMessage),
-    };
     Ok(OpenViewerProject {
         path: gtl_models::paths::RepositoryRoot::try_new(request.path.into())
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        mode,
     })
 }
 

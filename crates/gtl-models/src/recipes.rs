@@ -2,7 +2,7 @@ mod label;
 
 use std::{fmt, str::FromStr};
 
-pub use label::{RecipeLabel, RecipeLabelChanges};
+pub use label::{RecipeLabel, RecipeLabelChanges, RecipeLabelHead};
 use uuid::Uuid;
 
 /// Identifies one recipe batch with a validated UUID.

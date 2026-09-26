@@ -4,10 +4,12 @@ use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_models::recipes::RecipeLabel;
 use gtl_wire::{
     v1,
-    viewer::{ViewerActiveState, ViewerTab},
+    viewer::{ViewerActiveState, ViewerTab, ViewerTabState},
 };
 
 use super::{ServerHarness, TestResult, live_views::ready_shell};
+
+type Client = v1::viewer_service_client::ViewerServiceClient<tonic::transport::Channel>;
 
 fn changed_repository(path: std::path::PathBuf) -> TestRepository {
     let repository = TestRepository::init(path);
@@ -20,10 +22,23 @@ fn changed_repository(path: std::path::PathBuf) -> TestRepository {
 fn repository_name(tab: &ViewerTab) -> String {
     match &tab.label {
         RecipeLabel::Named { name } => name.to_string(),
-        RecipeLabel::Repository { repository } | RecipeLabel::Changes { repository, .. } => {
-            repository.to_string()
-        }
+        RecipeLabel::Repository { repository }
+        | RecipeLabel::Changes { repository, .. }
+        | RecipeLabel::Compared { repository, .. } => repository.to_string(),
     }
+}
+
+/// Waits until no restored tab is still waiting for its first render.
+async fn every_tab_ready(client: &mut Client) -> TestResult {
+    while !ready_shell(client)
+        .await?
+        .tabs
+        .iter()
+        .all(|tab| tab.state == ViewerTabState::Ready)
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -68,11 +83,21 @@ async fn open_tabs_survive_a_restart_with_their_order_pins_and_active_tab() -> T
         shell.tabs.iter().map(|tab| tab.pinned).collect::<Vec<_>>(),
         [true, false]
     );
-    assert!(shell.tabs.iter().all(|tab| tab.kind.is_live()));
+    assert!(shell.tabs.iter().all(|tab| tab.live));
+    assert_eq!(
+        shell.tabs[0].label,
+        RecipeLabel::Compared {
+            repository: gtl_models::paths::ProjectName::try_new("second")?,
+            base: gtl_models::git::GitRevision::head(),
+            head: gtl_models::recipes::RecipeLabelHead::WorkingTree,
+        },
+        "a restored tab shows its saved label before it renders again"
+    );
     let ViewerActiveState::Ready { view } = shell.active else {
         return Err("expected the restored active tab to render".into());
     };
     assert_eq!(view.identity.tab_id, shell.tabs[1].id);
+    tokio::time::timeout(Duration::from_secs(10), every_tab_ready(&mut client)).await??;
     server.stop().await?;
     Ok(())
 }

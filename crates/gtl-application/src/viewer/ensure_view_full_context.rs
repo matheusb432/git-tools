@@ -136,7 +136,7 @@ fn prepare_source(
 mod tests {
     use gtl_models::{
         recipes::RecipeBatchId,
-        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabKind},
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
     };
 
     use super::*;
@@ -191,7 +191,6 @@ mod tests {
                             target: RecipeTarget::Unpushed { pinned: None },
                         }),
                         RecipeBatchId::generate(),
-                        ViewerTabKind::Snapshot,
                     )
                     .unwrap();
                 let ticket = session.begin_compute(id).unwrap();

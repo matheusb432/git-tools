@@ -2,7 +2,7 @@
 //! history entries in the displayed language.
 
 use gtl_models::{
-    recipes::{RecipeLabel, RecipeLabelChanges},
+    recipes::{RecipeLabel, RecipeLabelChanges, RecipeLabelHead},
     settings::ViewerLanguage,
 };
 
@@ -17,6 +17,20 @@ pub(crate) fn recipe_label_text(label: &RecipeLabel, language: ViewerLanguage) -
             repository,
             changes,
         } => changes_text(repository.as_str(), changes, language),
+        RecipeLabel::Compared {
+            repository,
+            base,
+            head,
+        } => t!(
+            language,
+            "recipe-label-compared",
+            repository = repository.as_str(),
+            base = base.as_ref(),
+            head = match head {
+                RecipeLabelHead::Revision { revision } => revision.to_string(),
+                RecipeLabelHead::WorkingTree => t!(language, "recipe-label-working-tree-head"),
+            },
+        ),
     }
 }
 
@@ -128,6 +142,18 @@ mod tests {
             changes(RecipeLabelChanges::LastCommits {
                 count: NonZeroU32::new(2).unwrap(),
             }),
+            RecipeLabel::Compared {
+                repository: ProjectName::try_new("git-tools").unwrap(),
+                base: revision("origin/main"),
+                head: RecipeLabelHead::Revision {
+                    revision: revision("feature"),
+                },
+            },
+            RecipeLabel::Compared {
+                repository: ProjectName::try_new("git-tools").unwrap(),
+                base: revision("a1b2c3"),
+                head: RecipeLabelHead::WorkingTree,
+            },
         ]
         .iter()
         .map(|label| recipe_label_text(label, language))
@@ -151,6 +177,8 @@ mod tests {
                 "git-tools: merge feature->origin/main",
                 "git-tools: last 1 commit",
                 "git-tools: last 2 commits",
+                "git-tools | origin/main->feature",
+                "git-tools | a1b2c3->working",
             ]
         );
     }
@@ -172,6 +200,8 @@ mod tests {
                 "git-tools: merge feature->origin/main",
                 "git-tools: último commit",
                 "git-tools: últimos 2 commits",
+                "git-tools | origin/main->feature",
+                "git-tools | a1b2c3->working tree",
             ]
         );
     }

@@ -1,8 +1,7 @@
 //! Recipe values describe how to produce a view: source identity plus operation, never view data.
-//! The application persists recipes through its history and live-view operations.
-//! `Recipe::unpinned()` equality is the snapshot-tab dedupe identity (pins
-//! differ across runs of the same repo + operation); live recipes are always
-//! unpinned, so full `Recipe` equality still governs their identity.
+//! The application persists recipes through its history and saved viewer tabs.
+//! A computed recipe pins the commits it showed; `Recipe::unpinned()` is the intent that an
+//! update resolves again and that tab reuse compares.
 //! Every enum serializes its persisted and copied JSON tag in `snake_case`.
 
 use std::num::NonZeroU32;
@@ -17,8 +16,7 @@ use serde::{Deserialize, Serialize};
 
 /// The identity of the repository a recipe renders from.
 ///
-/// Recipe JSON uses the `local_repo` tag. The live-view store's separate
-/// `source_kind` identity remains the stable `LocalRepo` string.
+/// Recipe JSON uses the `local_repo` tag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum RecipeSource {
@@ -113,24 +111,18 @@ impl Recipe {
         }
         recipe
     }
+
+    /// Whether the recipe names exact commits rather than revisions resolved when it renders.
+    #[must_use]
+    pub fn is_pinned(&self) -> bool {
+        *self != self.unpinned()
+    }
 }
 
-/// Identifies how every recipe in a [`RecipeBatch`] behaves in the viewer.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum RecipeBatchKind {
-    /// Opens immutable snapshot tabs.
-    #[default]
-    Snapshot,
-    /// Opens persisted, refreshable live tabs.
-    Live,
-}
-
-/// A homogeneous batch of recipes submitted to the viewer together.
+/// Recipes submitted to the viewer together, each opening a snapshot tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecipeBatch {
     pub batch_id: RecipeBatchId,
-    /// The viewer behavior shared by every recipe in this batch.
-    pub kind: RecipeBatchKind,
     pub recipes: Vec<Recipe>,
 }
 

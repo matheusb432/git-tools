@@ -1,7 +1,7 @@
 use gtl_models::{
     failure::{ErrorMeta, Failure, ViewerFailure},
     git::GitHeadState,
-    viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
+    viewer::{ViewerTabId, ViewerTabState},
 };
 
 use super::{
@@ -15,10 +15,10 @@ use crate::{
     recipes::Recipe,
 };
 
-/// Why a live view could not be refreshed.
+/// Why a live tab could not be refreshed.
 #[derive(Debug, thiserror::Error, ErrorMeta)]
 pub enum RefreshLiveViewError {
-    /// The live source cannot produce a view for a typed reason.
+    /// The tab's source cannot produce a view for a typed reason.
     #[error(transparent)]
     #[meta(failure)]
     Refused(Failure),
@@ -36,16 +36,11 @@ pub enum RefreshLiveViewError {
     Unexpected(#[from] anyhow::Error),
 }
 
+/// The source state a tab's content reflects; a live tab updates when it changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LiveViewState {
     head: GitHeadState,
     comparison: Option<crate::projects::comparison::ResolvedComparison>,
-}
-
-impl LiveViewState {
-    pub(super) const fn is_branch_comparison(&self) -> bool {
-        self.comparison.is_some()
-    }
 }
 
 pub(super) fn inspect_recipe(
@@ -99,6 +94,7 @@ pub struct LiveViewPublication {
     head: LiveViewState,
     value: CachedView,
     label: gtl_models::recipes::RecipeLabel,
+    recipe: Recipe,
 }
 
 pub fn prepare(
@@ -121,7 +117,6 @@ pub fn prepare(
     let result = prepare_recipe::execute(
         PrepareRecipe {
             recipe: request.recipe.clone(),
-            kind: ViewerTabKind::Live,
         },
         settings,
         git,
@@ -132,14 +127,17 @@ pub fn prepare(
         return Ok(LiveViewCheck::ChangedDuringComputation);
     }
     match result {
-        PrepareRecipeOk::Publish { label, view, .. } => {
-            Ok(LiveViewCheck::Prepared(Box::new(LiveViewPublication {
-                ticket: request.ticket,
-                head,
-                value: CachedView::from_snapshot(state.prepare_snapshot(view)?),
-                label,
-            })))
-        }
+        PrepareRecipeOk::Publish {
+            label,
+            view,
+            history,
+        } => Ok(LiveViewCheck::Prepared(Box::new(LiveViewPublication {
+            ticket: request.ticket,
+            head,
+            value: CachedView::from_snapshot(state.prepare_snapshot(view)?),
+            label,
+            recipe: history.recipe,
+        }))),
         PrepareRecipeOk::Broken { state } => Err(match state {
             ViewerTabState::Error { failure } => RefreshLiveViewError::Refused(failure),
             ViewerTabState::Broken { failure } => RefreshLiveViewError::Refused(failure.into()),
@@ -147,7 +145,7 @@ pub fn prepare(
                 RefreshLiveViewError::Refused(ViewerFailure::SourcePreparing.into())
             }
             ViewerTabState::Ready => {
-                anyhow::anyhow!("a broken live comparison reported a ready tab").into()
+                anyhow::anyhow!("a broken live tab source reported a ready tab").into()
             }
         }),
     }
@@ -158,6 +156,12 @@ pub fn publish(
     state: &ViewerState,
 ) -> Result<PublishOutcome, super::ViewerStateError> {
     state.update(|session| {
-        session.publish_live_if_current(work.ticket, work.head, work.value, work.label)
+        session.publish_live_if_current(
+            work.ticket,
+            work.head,
+            work.value,
+            work.label,
+            &work.recipe,
+        )
     })
 }

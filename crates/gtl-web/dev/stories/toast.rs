@@ -38,7 +38,7 @@ fn ToastControls() -> Element {
 
     rsx! {
         div { class: "flex flex-wrap gap-3",
-            Button { onclick: move |_| toast.ok("Live view saved."), "Success" }
+            Button { onclick: move |_| toast.ok("Tab updated."), "Success" }
             Button {
                 variant: ButtonVariant::Secondary,
                 onclick: move |_| toast.info("Rendering continues in the background."),

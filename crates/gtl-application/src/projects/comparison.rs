@@ -29,6 +29,17 @@ impl ResolvedComparison {
         }
     }
 
+    /// Names the compared upstream or local branch as a user writes it.
+    #[must_use]
+    pub fn name(&self) -> GitRevision {
+        match self {
+            Self::Upstream { reference } => reference.clone(),
+            Self::Branch { branch, .. } => {
+                GitRevision::try_new(branch.to_string()).unwrap_or_else(|_| branch.revision())
+            }
+        }
+    }
+
     #[must_use]
     pub fn commit_range(&self) -> GitRange {
         GitRange::two_dot(&self.reference(), &GitRevision::head())

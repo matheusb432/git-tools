@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectDiffMode};
+use gtl_wire::viewer::projects::ViewerProject;
 use lucide_dioxus::{GitBranch, GitCompare};
 
 use super::{
@@ -119,17 +119,8 @@ pub(super) fn ProjectCard(project: ViewerProject, disabled: bool) -> Element {
             div { class: "flex items-center gap-2 border-t border-line pt-3",
                 ProjectComparisonAction {
                     path: project.path.clone(),
-                    mode: ViewerProjectDiffMode::Live,
                     shape: ProjectActionShape::Labeled,
                     disabled: disabled || !local.is_available(),
-                }
-                if ahead.has_changes() {
-                    ProjectComparisonAction {
-                        path: project.path.clone(),
-                        mode: ViewerProjectDiffMode::Snapshot,
-                        shape: ProjectActionShape::Labeled,
-                        disabled,
-                    }
                 }
             }
             if let Some(issue) = issue {

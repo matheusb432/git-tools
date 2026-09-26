@@ -3,7 +3,6 @@
 use gtl_models::{
     failure::ErrorMeta,
     recipes::{RecipeBatchId, RecipeLabel},
-    viewer::ViewerTabKind,
 };
 use rusqlite::{Connection, params};
 
@@ -60,7 +59,7 @@ pub fn project(session: &ViewerSession) -> Vec<SavedViewerTab> {
             recipe: tab.recipe.clone(),
             label: tab.tab.label().clone(),
             pinned: tab.pinned,
-            live: tab.tab.kind() == ViewerTabKind::Live,
+            live: tab.tab.live(),
             active: session.active() == Some(tab.tab.id()),
         })
         .collect()
@@ -121,7 +120,7 @@ pub fn load(connection: &Connection) -> Result<Vec<SavedViewerTab>, LoadViewerTa
             serde_json::from_str(&recipe).map_err(|error| invalid("recipe", error))?;
         let label = match label {
             Some(label) => serde_json::from_str(&label).map_err(|error| invalid("label", error))?,
-            None => recipe_label::pending(&recipe),
+            None => recipe_label::pending_tab(&recipe),
         };
         Ok(SavedViewerTab {
             recipe,
@@ -134,34 +133,37 @@ pub fn load(connection: &Connection) -> Result<Vec<SavedViewerTab>, LoadViewerTa
     .collect()
 }
 
-/// Reopens `tabs` in order and reserves work for the restored active tab only; the others
-/// compute when activated.
+/// Reopens `tabs` in order and reserves work for every restored tab, the active tab first.
 pub fn restore(
     state: &ViewerState,
     tabs: Vec<SavedViewerTab>,
-) -> Result<Option<ReservedRecipeWork>, ReserveRecipeError> {
+) -> Result<Vec<ReservedRecipeWork>, ReserveRecipeError> {
     state.update(|session| {
+        let mut ids = Vec::with_capacity(tabs.len());
         let mut active = None;
         for tab in tabs {
-            let kind = if tab.live {
-                ViewerTabKind::Live
-            } else {
-                ViewerTabKind::Snapshot
-            };
             let id = session
-                .open_labeled(tab.recipe, RecipeBatchId::generate(), kind, tab.label)
+                .open_labeled(tab.recipe, RecipeBatchId::generate(), tab.label)
                 .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
+            session.set_live(id, tab.live);
             if tab.pinned {
                 session.set_pinned(id, true);
             }
             if tab.active {
                 active = Some(id);
             }
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
         }
         if let Some(id) = active {
             session.activate(id);
+            ids.retain(|restored| *restored != id);
+            ids.insert(0, id);
         }
-        work::reserve_active_if_needed(session)
+        ids.into_iter()
+            .map(|id| work::reserve_refresh_in_session(session, id))
+            .collect()
     })?
 }
 
@@ -236,7 +238,7 @@ mod tests {
 
         assert_eq!(
             load(&connection).unwrap()[0].label,
-            recipe_label::pending(&tab.recipe)
+            recipe_label::pending_tab(&tab.recipe)
         );
     }
 
@@ -258,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_reopens_every_tab_and_computes_only_the_active_one() {
+    fn restore_reopens_every_tab_and_computes_the_active_one_first() {
         let state = ViewerState::new();
         let tabs = vec![
             saved("/repos/pinned", true, false, false),
@@ -266,12 +268,20 @@ mod tests {
             saved("/repos/live", false, true, false),
         ];
 
-        let work = restore(&state, tabs.clone()).unwrap().unwrap();
+        let work = restore(&state, tabs.clone()).unwrap();
 
         state
             .inspect(|session| {
                 assert_eq!(project(session), tabs);
-                assert_eq!(session.active(), Some(work.ticket().tab_id));
+                let order = work
+                    .iter()
+                    .map(|work| session.tab(work.ticket().tab_id).unwrap().recipe.cwd())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    order,
+                    ["/repos/active", "/repos/pinned", "/repos/live"].map(utils::repository_root)
+                );
+                assert_eq!(session.active(), Some(work[0].ticket().tab_id));
                 assert!(
                     session
                         .tabs()

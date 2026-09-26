@@ -5,7 +5,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "proto/gtl/v1/diff.proto",
         "proto/gtl/v1/diff_presentation.proto",
         "proto/gtl/v1/failure.proto",
-        "proto/gtl/v1/live_view.proto",
         "proto/gtl/v1/project.proto",
         "proto/gtl/v1/repository.proto",
         "proto/gtl/v1/repository_status.proto",

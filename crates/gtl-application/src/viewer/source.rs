@@ -64,7 +64,7 @@ mod tests {
         diffs::ExtensionSelection,
         git::GitDiffSpec,
         settings::UserSettings,
-        viewer::{DiffLayout, RenderOptions, ViewerTabKind},
+        viewer::{DiffLayout, RenderOptions},
     };
 
     use super::*;
@@ -91,7 +91,6 @@ mod tests {
                             pinned: None,
                         }),
                         RecipeBatchId::generate(),
-                        ViewerTabKind::Snapshot,
                     )
                     .unwrap();
                 let ticket = session.begin_compute(tab).unwrap();

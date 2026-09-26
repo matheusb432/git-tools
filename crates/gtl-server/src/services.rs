@@ -1,5 +1,4 @@
 mod diff;
-mod live_view;
 mod project;
 mod repository;
 mod settings;
@@ -16,7 +15,6 @@ use gtl_models::{
     paths::RepositoryRoot,
 };
 use gtl_wire::{proto::failure::encode_status, v1};
-pub(crate) use live_view::LiveViewGrpcService;
 pub(crate) use project::ProjectGrpcService;
 pub(crate) use repository::RepositoryGrpcService;
 pub(crate) use settings::SettingsGrpcService;

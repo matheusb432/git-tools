@@ -7,9 +7,7 @@ use std::{
 };
 
 use criterion::{Criterion, criterion_group};
-use gtl_application::recipes::{
-    Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget,
-};
+use gtl_application::recipes::{Recipe, RecipeBatch, RecipeOp, RecipeSource, RecipeTarget};
 use gtl_benchmarks::require;
 use gtl_client::GtlClient;
 use gtl_local_transport::LocalEndpoint;
@@ -356,7 +354,6 @@ async fn wait_for_ready_view(client: &BenchmarkViewerClient) -> v1::ViewerViewId
 fn viewer_recipe_batch(repository_path: &str) -> RecipeBatch {
     RecipeBatch {
         batch_id: RecipeBatchId::generate(),
-        kind: RecipeBatchKind::Snapshot,
         recipes: vec![Recipe {
             source: RecipeSource::LocalRepo(require(
                 RepositoryRoot::try_new(PathBuf::from(repository_path)),

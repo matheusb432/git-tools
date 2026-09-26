@@ -6,7 +6,7 @@ use gtl_models::{
     diffs::CommitId,
     failure::{Classified as _, ErrorMeta, Failure, Resource, ViewerFailure},
     recipes::RecipeLabel,
-    viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
+    viewer::{ViewerTabId, ViewerTabState},
 };
 
 use super::{
@@ -21,16 +21,17 @@ use crate::{
     diffs::compute_commit_patch::{self, ComputeCommitPatch, ComputeCommitPatchError},
     history::{RecentRenderRecord, record_render::RecordRender},
     ports::{ExtensionFilterReader, GitClient, UserSettingsReader},
-    recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind, recipe_label},
+    recipes::{Recipe, RecipeBatch, RecipeBatchId, recipe_label},
 };
 
 #[derive(Debug)]
 pub struct ReservedRecipeWork {
     tab_filter: Option<gtl_models::diffs::ExtensionFilter>,
+    /// The recipe to compute: pinned to reload the displayed commits, or unpinned to resolve
+    /// the tab's revisions again.
     recipe: Recipe,
-    kind: ViewerTabKind,
     ticket: ComputeTicket,
-    /// Closes an unpinned snapshot whose opening computation finds nothing to show.
+    /// Closes an unpinned tab whose opening computation finds nothing to show.
     skip_empty: bool,
 }
 
@@ -124,15 +125,36 @@ pub enum ReserveCommitError {
     Selection(#[from] BeginCommitSelectionError),
 }
 
+/// Opens `recipe` in a focused tab and reserves its computation; an empty result stays open.
 pub fn reserve_open(
     state: &ViewerState,
     recipe: Recipe,
     batch_id: RecipeBatchId,
-    kind: ViewerTabKind,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    reserve_opened(state, recipe, batch_id, false)
+}
+
+/// Opens every batch recipe; a recipe that finds nothing to show closes its unpinned tab.
+pub fn reserve_recipe_batch(
+    state: &ViewerState,
+    batch: RecipeBatch,
+) -> Result<Vec<ReservedRecipeWork>, ReserveRecipeError> {
+    batch
+        .recipes
+        .into_iter()
+        .map(|recipe| reserve_opened(state, recipe, batch.batch_id, true))
+        .collect()
+}
+
+fn reserve_opened(
+    state: &ViewerState,
+    recipe: Recipe,
+    batch_id: RecipeBatchId,
+    skip_empty: bool,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     state.update(move |session| {
         let tab_id = session
-            .open(recipe.clone(), batch_id, kind)
+            .open(recipe.clone(), batch_id)
             .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
         let ticket = session
             .begin_compute(tab_id)
@@ -141,38 +163,17 @@ pub fn reserve_open(
         Ok(ReservedRecipeWork {
             tab_filter: session.tab_extension_filter(ticket.tab_id),
             recipe,
-            kind,
             ticket,
-            skip_empty: true,
+            skip_empty,
         })
     })?
-}
-
-pub fn reserve_recipe_batch(
-    state: &ViewerState,
-    batch: RecipeBatch,
-) -> Result<Vec<ReservedRecipeWork>, ReserveRecipeError> {
-    let kind = match batch.kind {
-        RecipeBatchKind::Snapshot => ViewerTabKind::Snapshot,
-        RecipeBatchKind::Live => ViewerTabKind::Live,
-    };
-    batch
-        .recipes
-        .into_iter()
-        .map(|recipe| reserve_open(state, recipe, batch.batch_id, kind))
-        .collect()
 }
 
 pub fn reserve_history_open(
     state: &ViewerState,
     record: RecentRenderRecord,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
-    reserve_open(
-        state,
-        record.recipe,
-        RecipeBatchId::generate(),
-        ViewerTabKind::Snapshot,
-    )
+    reserve_open(state, record.recipe, RecipeBatchId::generate())
 }
 
 pub fn activate_tab(
@@ -187,11 +188,20 @@ pub fn activate_tab(
     })?
 }
 
+/// Recomputes the tab's displayed commits, or a live tab's current source.
 pub fn reserve_refresh(
     state: &ViewerState,
     tab_id: ViewerTabId,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     state.update(|session| reserve_refresh_in_session(session, tab_id))?
+}
+
+/// Recomputes the tab from its recipe's revisions as they resolve now.
+pub fn reserve_update(
+    state: &ViewerState,
+    tab_id: ViewerTabId,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    state.update(|session| reserve_compute_in_session(session, tab_id, true))?
 }
 
 pub(crate) fn reserve_active_if_needed(
@@ -216,20 +226,30 @@ fn active_needs_refresh(session: &mut ViewerSession) -> bool {
     pending || (ready && session.cached_view_snapshot(active).is_none())
 }
 
-fn reserve_refresh_in_session(
+pub(crate) fn reserve_refresh_in_session(
     session: &mut ViewerSession,
     tab_id: ViewerTabId,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    reserve_compute_in_session(session, tab_id, false)
+}
+
+fn reserve_compute_in_session(
+    session: &mut ViewerSession,
+    tab_id: ViewerTabId,
+    update: bool,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     let tab = session.tab(tab_id).ok_or(ReserveRecipeError::UnknownTab)?;
-    let recipe = tab.recipe.clone();
-    let kind = tab.tab.kind();
+    let recipe = if update || tab.tab.live() {
+        tab.recipe.unpinned()
+    } else {
+        tab.recipe.clone()
+    };
     let ticket = session
         .refresh(tab_id)
         .ok_or(ReserveRecipeError::UnknownTab)?;
     Ok(ReservedRecipeWork {
         tab_filter: session.tab_extension_filter(ticket.tab_id),
         recipe,
-        kind,
         ticket,
         skip_empty: false,
     })
@@ -245,18 +265,17 @@ pub fn compute_recipe(
     let ReservedRecipeWork {
         tab_filter,
         recipe,
-        kind,
         ticket,
         skip_empty,
     } = work;
     let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
-    let head_before = (kind == ViewerTabKind::Live)
+    // Only a computation that resolves the tab's revisions shows the source's current state.
+    let head_before = (!recipe.is_pinned())
         .then(|| super::refresh_live_view::inspect_recipe(&recipe, git, comparisons).ok())
         .flatten();
     let result = prepare_recipe::execute(
         PrepareRecipe {
             recipe: recipe.clone(),
-            kind,
         },
         settings,
         git,
@@ -474,24 +493,32 @@ mod tests {
         }
     }
 
-    fn reserve_pending(state: &ViewerState, path: &str, kind: ViewerTabKind) -> ReservedRecipeWork {
-        reserve_open(state, recipe_at(path), RecipeBatchId::generate(), kind).unwrap()
+    /// Reserves `path` as a one-recipe batch, which closes the tab when it finds nothing.
+    fn reserve_pending(state: &ViewerState, path: &str) -> ReservedRecipeWork {
+        reserve_recipe_batch(
+            state,
+            RecipeBatch {
+                batch_id: RecipeBatchId::generate(),
+                recipes: vec![recipe_at(path)],
+            },
+        )
+        .unwrap()
+        .remove(0)
     }
 
     #[test]
     fn failed_computation_publishes_a_safe_error_without_reusing_the_lock() {
         let state = ViewerState::new();
-        let work = reserve_open(
-            &state,
-            recipe(),
-            RecipeBatchId::generate(),
-            ViewerTabKind::Snapshot,
-        )
-        .unwrap();
+        let work = reserve_open(&state, recipe(), RecipeBatchId::generate()).unwrap();
         let work = compute_recipe(
             work,
             &FixedUserSettingsStore::default(),
-            &crate::utils::FakeGitClient::default(),
+            &crate::utils::FakeGitClient {
+                repository_state: Some(crate::ports::GitRepositoryState::Repository {
+                    top_level: repository_root("/repo"),
+                }),
+                ..Default::default()
+            },
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
         );
@@ -527,7 +554,7 @@ mod tests {
     #[test]
     fn pinned_empty_snapshot_shows_its_empty_view() {
         let state = ViewerState::new();
-        let reserved = reserve_pending(&state, "/repo/empty", ViewerTabKind::Snapshot);
+        let reserved = reserve_pending(&state, "/repo/empty");
         let tab_id = reserved.ticket().tab_id;
         state
             .update(|session| session.set_pinned(tab_id, true))
@@ -547,9 +574,43 @@ mod tests {
     }
 
     #[test]
+    fn an_explicitly_opened_empty_tab_shows_its_empty_view() {
+        let state = ViewerState::new();
+        let reserved =
+            reserve_open(&state, recipe_at("/repo/empty"), RecipeBatchId::generate()).unwrap();
+
+        let publication = publish_recipe(&state, computed_empty(&reserved)).unwrap();
+
+        assert!(matches!(publication, RecipePublication::Published { .. }));
+    }
+
+    #[test]
+    fn refresh_reloads_the_displayed_commits_while_update_and_live_tabs_resolve_them_again() {
+        let state = ViewerState::new();
+        let pinned = Recipe {
+            op: RecipeOp::MergeDiff {
+                base: Some(git_revision("main")),
+                pinned: Some(crate::utils::pinned_range("a", "b")),
+            },
+            ..recipe()
+        };
+        let tab_id = reserve_open(&state, pinned.clone(), RecipeBatchId::generate())
+            .unwrap()
+            .ticket()
+            .tab_id;
+
+        assert_eq!(reserve_refresh(&state, tab_id).unwrap().recipe(), &pinned);
+        assert_eq!(reserve_update(&state, tab_id).unwrap().recipe(), &recipe());
+        state
+            .update(|session| session.set_live(tab_id, true))
+            .unwrap();
+        assert_eq!(reserve_refresh(&state, tab_id).unwrap().recipe(), &recipe());
+    }
+
+    #[test]
     fn skipped_snapshot_reaches_the_next_shell_once() {
         let state = ViewerState::new();
-        let reserved = reserve_pending(&state, "/repo/empty", ViewerTabKind::Snapshot);
+        let reserved = reserve_pending(&state, "/repo/empty");
         let label = crate::recipes::recipe_label::pending(reserved.recipe());
         let work = computed_empty(&reserved);
         let shell_feedback = || {
@@ -574,7 +635,7 @@ mod tests {
     #[test]
     fn activating_a_pending_tab_reserves_its_refresh() {
         let state = ViewerState::new();
-        let initial = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
+        let initial = reserve_pending(&state, "/repo");
 
         let refresh = activate_tab(&state, initial.ticket().tab_id)
             .unwrap()
@@ -587,7 +648,7 @@ mod tests {
     #[test]
     fn reopening_the_same_tab_requests_focus_but_refreshing_does_not() {
         let state = ViewerState::new();
-        let first = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
+        let first = reserve_pending(&state, "/repo");
         let focus_first = state
             .inspect(|session| session.focus_request_version())
             .unwrap();
@@ -602,7 +663,7 @@ mod tests {
             focus_first
         );
 
-        let reopened = reserve_pending(&state, "/repo", ViewerTabKind::Snapshot);
+        let reopened = reserve_pending(&state, "/repo");
         let focus_reopened = state
             .inspect(|session| session.focus_request_version())
             .unwrap();

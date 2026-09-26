@@ -9,6 +9,5 @@ mod types;
 pub use recipe_label::RecipeLabelParts;
 pub(crate) use resolution::build_resolved;
 pub use types::{
-    PinnedRange, Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind, RecipeOp, RecipeSource,
-    RecipeTarget,
+    PinnedRange, Recipe, RecipeBatch, RecipeBatchId, RecipeOp, RecipeSource, RecipeTarget,
 };

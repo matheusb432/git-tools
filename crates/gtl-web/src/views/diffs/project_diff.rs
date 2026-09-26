@@ -1,9 +1,6 @@
 use dioxus::prelude::*;
 use gtl_models::{paths::RepositoryRoot, viewer::ViewerTabId};
-use gtl_wire::viewer::{
-    ViewerTab,
-    projects::{OpenViewerProject, ViewerProjectDiffMode},
-};
+use gtl_wire::viewer::{ViewerTab, projects::OpenViewerProject};
 
 use crate::{
     app::{
@@ -70,12 +67,9 @@ pub(crate) fn use_project_diff_destinations_provider() {
 }
 
 #[component]
-pub(crate) fn ProjectDiffView(
-    path: Option<RepositoryRoot>,
-    mode: ViewerProjectDiffMode,
-) -> Element {
+pub(crate) fn ProjectDiffView(path: Option<RepositoryRoot>) -> Element {
     let language = use_language();
-    let mut opening = use_project_diff(path.as_ref(), mode);
+    let mut opening = use_project_diff(path.as_ref());
     rsx! {
         main { class: "h-full",
             match &*opening.read() {
@@ -103,22 +97,19 @@ pub(crate) fn ProjectDiffView(
     }
 }
 
-fn use_project_diff(
-    path: Option<&RepositoryRoot>,
-    mode: ViewerProjectDiffMode,
-) -> Resource<Result<(), ViewerClientError>> {
+fn use_project_diff(path: Option<&RepositoryRoot>) -> Resource<Result<(), ViewerClientError>> {
     let viewer = use_context::<ViewerContext>();
     let destinations = use_context::<Signal<ProjectDiffDestinations>>();
     let navigator = use_navigator();
     let path = path.cloned();
-    use_resource(use_reactive((&path, &mode), move |(path, mode)| {
-        open_project_diff(path, mode, viewer, navigator, destinations)
+    use_resource(use_reactive((&path,), move |(path,)| {
+        open_project_diff(path, viewer, navigator, destinations)
     }))
 }
 
+/// Shows the project's open tab, or opens one; an open tab updates only when asked.
 async fn open_project_diff(
     path: Option<RepositoryRoot>,
-    mode: ViewerProjectDiffMode,
     viewer: ViewerContext,
     navigator: dioxus::router::Navigator,
     mut destinations: Signal<ProjectDiffDestinations>,
@@ -130,7 +121,7 @@ async fn open_project_diff(
         return Ok(());
     }
     let path = path.ok_or(ViewerClientError::InvalidMessage)?;
-    let request = OpenViewerProject { path, mode };
+    let request = OpenViewerProject { path };
     let cached = match &*viewer.shell().peek() {
         ViewerShellLoad::Ready(shell) => {
             destinations
@@ -139,9 +130,7 @@ async fn open_project_diff(
         }
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
     };
-    if request.mode == ViewerProjectDiffMode::Live
-        && let Some(tab_id) = cached
-    {
+    if let Some(tab_id) = cached {
         navigator.replace(Route::Diff { tab_id });
         return Ok(());
     }
@@ -163,15 +152,14 @@ async fn open_project_diff(
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::viewer::{ViewerTabKind, ViewerTabState};
+    use gtl_wire::viewer::ViewerTabState;
 
     use super::*;
     use crate::test_support::{TestResult, recipe_label, viewer_tab_id};
 
-    fn request(path: &str, mode: ViewerProjectDiffMode) -> TestResult<OpenViewerProject> {
+    fn request(path: &str) -> TestResult<OpenViewerProject> {
         Ok(OpenViewerProject {
             path: RepositoryRoot::try_new(path.into())?,
-            mode,
         })
     }
 
@@ -181,43 +169,29 @@ mod tests {
             pinned: false,
             id: viewer_tab_id(id)?,
             label: recipe_label("Project")?,
-            kind: ViewerTabKind::Snapshot,
+            live: false,
             state: ViewerTabState::Ready,
         })
     }
 
     #[test]
-    fn destinations_resolve_by_repository_and_mode() -> TestResult {
+    fn destinations_resolve_by_repository() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let local = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
-        let unpushed = request("/tmp/alpha", ViewerProjectDiffMode::Live)?;
-        let other = request("/tmp/beta", ViewerProjectDiffMode::Snapshot)?;
-        let tabs = [tab(1)?, tab(2)?, tab(3)?];
-        for (request, tab) in [
-            (&local, &tabs[0]),
-            (&unpushed, &tabs[1]),
-            (&other, &tabs[2]),
-        ] {
-            destinations.record("server".to_owned(), request.clone(), tab.id);
-        }
+        let alpha = request("/tmp/alpha")?;
+        let beta = request("/tmp/beta")?;
+        let tabs = [tab(1)?, tab(2)?];
+        destinations.record("server".to_owned(), alpha.clone(), tabs[0].id);
+        destinations.record("server".to_owned(), beta.clone(), tabs[1].id);
         assert_eq!(
-            destinations.resolve("server", &local, &tabs),
+            destinations.resolve("server", &alpha, &tabs),
             Some(tabs[0].id)
         );
         assert_eq!(
-            destinations.resolve("server", &unpushed, &tabs),
+            destinations.resolve("server", &beta, &tabs),
             Some(tabs[1].id)
         );
         assert_eq!(
-            destinations.resolve("server", &other, &tabs),
-            Some(tabs[2].id)
-        );
-        assert_eq!(
-            destinations.resolve(
-                "server",
-                &request("/tmp/beta", ViewerProjectDiffMode::Live)?,
-                &tabs,
-            ),
+            destinations.resolve("server", &request("/tmp/gamma")?, &tabs),
             None
         );
         Ok(())
@@ -226,7 +200,7 @@ mod tests {
     #[test]
     fn closed_destinations_are_discarded_before_reopening() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let request = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
+        let request = request("/tmp/alpha")?;
         let closed = tab(1)?;
         let remaining = tab(2)?;
         destinations.record("server".to_owned(), request.clone(), closed.id);
@@ -245,7 +219,7 @@ mod tests {
     #[test]
     fn server_replacement_discards_destinations_even_when_tab_ids_match() -> TestResult {
         let mut destinations = ProjectDiffDestinations::default();
-        let request = request("/tmp/alpha", ViewerProjectDiffMode::Snapshot)?;
+        let request = request("/tmp/alpha")?;
         let tabs = [tab(1)?];
         destinations.record("old".to_owned(), request.clone(), tabs[0].id);
         assert_eq!(destinations.resolve("new", &request, &tabs), None);

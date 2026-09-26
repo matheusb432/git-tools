@@ -25,7 +25,7 @@ fn empty() -> Element {
         PageNotice {
             class: "min-h-64 px-5",
             title: "No diff is open",
-            message: "Run a git-tools diff command to open a snapshot or live view.",
+            message: "Run a git-tools diff command or open a project to see a diff.",
             icon: rsx! {
                 FileDiff { size: 22 }
             },

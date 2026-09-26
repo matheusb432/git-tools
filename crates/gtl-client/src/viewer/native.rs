@@ -1,4 +1,4 @@
-use gtl_wire::viewer::{SetViewerModifiedFiles, SetViewerTabPinned};
+use gtl_wire::viewer::{SetViewerModifiedFiles, SetViewerTabLive, SetViewerTabPinned};
 mod row_sessions;
 
 use gtl_local_transport::LocalEndpoint;
@@ -338,6 +338,10 @@ impl ViewerClient {
             encode_close_viewer_tab_request, close_viewer_tab, decode_close_viewer_tab_response;
         refresh_tab(ViewerTabRequest) -> ViewerShell =>
             encode_refresh_viewer_tab_request, refresh_viewer_tab, decode_refresh_viewer_tab_response;
+        update_tab(ViewerTabRequest) -> ViewerShell =>
+            encode_update_viewer_tab_request, update_viewer_tab, decode_update_viewer_tab_response;
+        set_tab_live(SetViewerTabLive) -> ViewerShell =>
+            encode_set_viewer_tab_live_request, set_viewer_tab_live, decode_set_viewer_tab_live_response;
         select_commit(SelectViewerCommit) -> ViewerShell =>
             encode_select_viewer_commit_request, select_viewer_commit, decode_select_viewer_commit_response;
         clear_commit_selection(ViewerTabRequest) -> ViewerShell =>

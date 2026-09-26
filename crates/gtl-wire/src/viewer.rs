@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 48;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 50;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -128,23 +128,6 @@ impl ViewerRowContentId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewerTabKind {
-    Snapshot,
-    Live,
-    LiveLocalChanges,
-    LiveUnpushedCommits,
-    LiveBranchChanges,
-}
-
-impl ViewerTabKind {
-    #[must_use]
-    pub const fn is_live(self) -> bool {
-        !matches!(self, Self::Snapshot)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ViewerTabState {
@@ -162,7 +145,8 @@ pub struct ViewerTab {
     pub pinned: bool,
     pub id: ViewerTabId,
     pub label: RecipeLabel,
-    pub kind: ViewerTabKind,
+    /// Whether the tab updates its snapshot whenever its source changes.
+    pub live: bool,
     pub state: ViewerTabState,
 }
 
@@ -870,6 +854,12 @@ pub struct SetViewerModifiedFiles {
 pub struct SetViewerTabPinned {
     pub tab_id: ViewerTabId,
     pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SetViewerTabLive {
+    pub tab_id: ViewerTabId,
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

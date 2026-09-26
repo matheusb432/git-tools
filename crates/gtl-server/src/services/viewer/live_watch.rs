@@ -13,7 +13,7 @@ use tonic::Status;
 use super::super::status::failure;
 use crate::state::AppState;
 
-/// Why one live view check could not complete.
+/// Why one live tab check could not complete.
 #[derive(Debug, thiserror::Error, ErrorMeta)]
 enum LiveCheckError {
     #[error(transparent)]

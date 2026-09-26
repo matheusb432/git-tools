@@ -19,7 +19,7 @@ use std::pin::Pin;
 use gtl_application::viewer::{
     self,
     close_viewer_tabs::{self, CloseViewerTabs},
-    move_viewer_tab, set_modified_files, set_viewer_tab_pinned, work,
+    move_viewer_tab, set_modified_files, set_viewer_tab_live, set_viewer_tab_pinned, work,
 };
 use gtl_models::{
     diffs::CommitId,
@@ -41,7 +41,6 @@ use self::{
 use super::{
     run_blocking,
     status::{GrpcResultExt as _, invalid_request, status},
-    unexpected,
 };
 use crate::{state::AppState, viewer_runtime};
 
@@ -313,18 +312,10 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::CloseOtherViewerTabsRequest>,
     ) -> Result<Response<v1::CloseOtherViewerTabsResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        let state = self.state.clone();
-        let closed = run_blocking(move || {
-            let mut connection = state.database.connection_lock()?;
-            Ok::<_, anyhow::Error>(close_viewer_tabs::execute(
-                CloseViewerTabs::Others(tab_id),
-                &mut connection,
-                &state.viewer,
-            ))
-        })
-        .await?
-        .map_err(|error| unexpected(error, "open viewer database"))?;
-        if let Some(work) = closed.into_grpc()? {
+        let closed =
+            close_viewer_tabs::execute(CloseViewerTabs::Others(tab_id), &self.state.viewer)
+                .into_grpc()?;
+        if let Some(work) = closed {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseOtherViewerTabsResponse {}))
@@ -335,18 +326,9 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::CloseViewerTabRequest>,
     ) -> Result<Response<v1::CloseViewerTabResponse>, Status> {
         let tab_id = tab_id(request.into_inner().tab_id)?;
-        let state = self.state.clone();
-        let closed = run_blocking(move || {
-            let mut connection = state.database.connection_lock()?;
-            Ok::<_, anyhow::Error>(close_viewer_tabs::execute(
-                CloseViewerTabs::One(tab_id),
-                &mut connection,
-                &state.viewer,
-            ))
-        })
-        .await?
-        .map_err(|error| unexpected(error, "open viewer database"))?;
-        if let Some(work) = closed.into_grpc()? {
+        let closed = close_viewer_tabs::execute(CloseViewerTabs::One(tab_id), &self.state.viewer)
+            .into_grpc()?;
+        if let Some(work) = closed {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
@@ -362,6 +344,33 @@ impl ViewerService for ViewerGrpcService {
         let work = work::reserve_refresh(&self.state.viewer, tab_id).into_grpc()?;
         viewer_runtime::spawn_recipe(self.state.clone(), work);
         Ok(Response::new(v1::RefreshViewerTabResponse {
+            shell: Some(project_shell(&self.state)?),
+        }))
+    }
+
+    async fn update_viewer_tab(
+        &self,
+        request: Request<v1::UpdateViewerTabRequest>,
+    ) -> Result<Response<v1::UpdateViewerTabResponse>, Status> {
+        let tab_id = tab_id(request.into_inner().tab_id)?;
+        let work = work::reserve_update(&self.state.viewer, tab_id).into_grpc()?;
+        viewer_runtime::spawn_recipe(self.state.clone(), work);
+        Ok(Response::new(v1::UpdateViewerTabResponse {
+            shell: Some(project_shell(&self.state)?),
+        }))
+    }
+
+    async fn set_viewer_tab_live(
+        &self,
+        request: Request<v1::SetViewerTabLiveRequest>,
+    ) -> Result<Response<v1::SetViewerTabLiveResponse>, Status> {
+        let request = request.into_inner();
+        let request = gtl_wire::viewer::SetViewerTabLive {
+            tab_id: tab_id(request.tab_id)?,
+            live: request.live,
+        };
+        set_viewer_tab_live::execute(request, &self.state.viewer).into_grpc()?;
+        Ok(Response::new(v1::SetViewerTabLiveResponse {
             shell: Some(project_shell(&self.state)?),
         }))
     }

@@ -116,8 +116,6 @@ pub struct DiffArgs {
 pub enum DiffSub {
     /// Render a merge diff artifact (three-dot diff) against a base branch.
     Merge(MergeArgs),
-    /// Save and open a live upstream or local-branch comparison.
-    Live(LiveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -131,14 +129,6 @@ pub struct MergeArgs {
     /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct LiveArgs {
-    /// Repo to save + open a live view for (default: every managed repo with
-    /// commits ahead of its upstream or local comparison branch).
-    #[arg(long)]
-    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Args, Default)]

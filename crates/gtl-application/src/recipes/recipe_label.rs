@@ -1,9 +1,10 @@
 //! Names recipes with the typed labels that tabs, feedback, and history share.
 
 use gtl_models::{
-    git::{CommitCount, GitHead, GitRevision},
+    diffs::CommitId,
+    git::{CommitCount, GitHead, GitRange, GitRevision},
     paths::ProjectName,
-    recipes::{RecipeLabel, RecipeLabelChanges},
+    recipes::{RecipeLabel, RecipeLabelChanges, RecipeLabelHead},
 };
 
 use super::{Recipe, RecipeOp, RecipeTarget};
@@ -66,29 +67,98 @@ pub(crate) fn rendered(
     }
 }
 
-/// Names a live tab by the repository it follows when its range moves with `HEAD`.
-pub(crate) fn live(recipe: &Recipe) -> Option<RecipeLabel> {
-    if !follows_head(&recipe.op) {
-        return None;
-    }
-    Some(match &recipe.name {
+/// Names a tab before its render resolves the revisions it compares.
+pub(crate) fn pending_tab(recipe: &Recipe) -> RecipeLabel {
+    match &recipe.name {
         Some(name) => RecipeLabel::Named { name: name.clone() },
         None => RecipeLabel::Repository {
             repository: recipe.cwd().project_name(),
         },
-    })
+    }
 }
 
-fn follows_head(op: &RecipeOp) -> bool {
-    match op {
-        RecipeOp::Diff {
-            target: RecipeTarget::Base { rev },
-        } => *rev == GitRevision::head(),
-        RecipeOp::Diff {
-            target: RecipeTarget::Unpushed { .. },
-        } => true,
-        RecipeOp::Diff { .. } | RecipeOp::MergeDiff { .. } => false,
+/// Names a tab by the revisions its render of `recipe` compared, preferring names to commit IDs.
+///
+/// `comparison` names the upstream or comparison branch an unpushed recipe compared against.
+pub(crate) fn compared(
+    recipe: &Recipe,
+    view: &View,
+    comparison: Option<&GitRevision>,
+) -> RecipeLabel {
+    if let Some(name) = &recipe.name {
+        return RecipeLabel::Named { name: name.clone() };
     }
+    let branch = || RecipeLabelHead::Revision {
+        revision: head_revision(&view.branch),
+    };
+    let (base, head) = match &recipe.op {
+        RecipeOp::Diff { target } => match target {
+            RecipeTarget::Unpushed { pinned } => (
+                comparison
+                    .cloned()
+                    .or_else(|| pinned.as_ref().map(|pin| short_commit(&pin.base)))
+                    .unwrap_or_else(|| view.upstream.clone()),
+                branch(),
+            ),
+            RecipeTarget::Base { rev } => (short_revision(rev), RecipeLabelHead::WorkingTree),
+            RecipeTarget::Range { range, .. } => range_endpoints(range).map_or_else(
+                || (GitRevision::from(range), branch()),
+                |(base, head)| (base, RecipeLabelHead::Revision { revision: head }),
+            ),
+            RecipeTarget::Merge { base, .. } => (base.clone(), branch()),
+            RecipeTarget::Last { count, pinned } => (
+                pinned.as_ref().map_or_else(
+                    || GitRevision::head_ancestor(*count),
+                    |pin| short_commit(&pin.base),
+                ),
+                branch(),
+            ),
+        },
+        RecipeOp::MergeDiff { base, .. } => {
+            (base.clone().unwrap_or_else(GitRevision::main), branch())
+        }
+    };
+    RecipeLabel::Compared {
+        repository: view.repo_name.clone(),
+        base,
+        head,
+    }
+}
+
+fn head_revision(head: &GitHead) -> GitRevision {
+    match head {
+        GitHead::Branch(branch) => {
+            GitRevision::try_new(branch.to_string()).unwrap_or_else(|_| GitRevision::head())
+        }
+        GitHead::Detached => GitRevision::head(),
+    }
+}
+
+/// Characters a tab label keeps of a commit ID; the label already names the repository.
+const TAB_COMMIT_ID_CHARACTERS: usize = 6;
+
+fn short_commit(id: &CommitId) -> GitRevision {
+    short_revision(&GitRevision::from(id))
+}
+
+/// Shortens a revision written as a commit ID; branch, tag, and relative names stay as written.
+fn short_revision(revision: &GitRevision) -> GitRevision {
+    let text = revision.as_ref();
+    if text.len() > TAB_COMMIT_ID_CHARACTERS && text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        GitRevision::try_new(text[..TAB_COMMIT_ID_CHARACTERS].to_owned())
+            .unwrap_or_else(|_| revision.clone())
+    } else {
+        revision.clone()
+    }
+}
+
+fn range_endpoints(range: &GitRange) -> Option<(GitRevision, GitRevision)> {
+    let text = range.as_ref();
+    let (base, head) = text.split_once("...").or_else(|| text.split_once(".."))?;
+    Some((
+        short_revision(&GitRevision::try_new(base.to_owned()).ok()?),
+        short_revision(&GitRevision::try_new(head.to_owned()).ok()?),
+    ))
 }
 
 /// Describes the changes `op` compares, refined by the computed `parts` that match it.
@@ -270,37 +340,6 @@ mod tests {
         assert_eq!(
             rendered(&named, project_name("project"), RecipeLabelParts::None),
             expected
-        );
-        assert_eq!(live(&named), Some(expected));
-    }
-
-    #[test]
-    fn live_labels_name_the_repository_only_when_the_range_follows_head() {
-        let repository = RecipeLabel::Repository {
-            repository: project_name("project"),
-        };
-
-        assert_eq!(
-            live(&recipe(RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
-            })),
-            Some(repository.clone())
-        );
-        assert_eq!(
-            live(&recipe(RecipeOp::Diff {
-                target: RecipeTarget::Base {
-                    rev: GitRevision::head(),
-                },
-            })),
-            Some(repository)
-        );
-        assert_eq!(
-            live(&recipe(RecipeOp::Diff {
-                target: RecipeTarget::Base {
-                    rev: git_revision("v1"),
-                },
-            })),
-            None
         );
     }
 

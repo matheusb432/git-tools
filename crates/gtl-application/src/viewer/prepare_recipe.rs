@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gtl_models::{failure::ErrorMeta, recipes::RecipeLabel};
 
 use super::{
-    ViewerTabKind, ViewerTabState,
+    ViewerTabState,
     complete_recipe_computation::{self, CompleteRecipeComputation, CompleteRecipeComputationOk},
     compute_recipe,
     probe_recipe::{self, ProbeRecipe, ProbeRecipeOutcome},
@@ -21,7 +21,6 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrepareRecipe {
     pub recipe: Recipe,
-    pub kind: ViewerTabKind,
 }
 
 /// The application decision the process root applies to its session.
@@ -48,8 +47,8 @@ pub enum PrepareRecipeError {
     Compute(#[from] compute_recipe::ComputeRecipeError),
 }
 
-/// Probes the source, computes the view, and decides whether the result is broken or
-/// publishable content.
+/// Probes the source, pins unpushed commits, computes the view, and decides whether the result
+/// is broken or publishable content.
 #[cqrsy::query]
 pub fn execute(
     query: PrepareRecipe,
@@ -58,11 +57,10 @@ pub fn execute(
     filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
-    let PrepareRecipe { mut recipe, kind } = query;
+    let PrepareRecipe { mut recipe } = query;
     let probe = probe_recipe::execute(
         ProbeRecipe {
             recipe: recipe.clone(),
-            kind,
         },
         git,
     )?;
@@ -70,27 +68,39 @@ pub fn execute(
         return Ok(PrepareRecipeOk::Broken { state });
     }
 
-    if kind == ViewerTabKind::Snapshot
-        && let crate::recipes::RecipeOp::Diff {
-            target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
-        } = &recipe.op
+    let mut comparison_name = None;
+    if let crate::recipes::RecipeOp::Diff {
+        target: crate::recipes::RecipeTarget::Unpushed { pinned },
+    } = &recipe.op
     {
-        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons)
-            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
-            .map_err(compute_recipe::ComputeRecipeError::from)?;
-        let pin = comparison
-            .pin(&recipe.cwd(), git)
-            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
-            .map_err(compute_recipe::ComputeRecipeError::from)?;
-        recipe.op = crate::recipes::RecipeOp::Diff {
-            target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
-        };
+        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons);
+        if pinned.is_some() {
+            // The pin fixes the content; the comparison only names it when it still resolves.
+            comparison_name = comparison.ok().map(|comparison| comparison.name());
+        } else {
+            let comparison = comparison
+                .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+                .map_err(compute_recipe::ComputeRecipeError::from)?;
+            let pin = comparison
+                .pin(&recipe.cwd(), git)
+                .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+                .map_err(compute_recipe::ComputeRecipeError::from)?;
+            comparison_name = Some(comparison.name());
+            recipe.op = crate::recipes::RecipeOp::Diff {
+                target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
+            };
+        }
     }
-    let view = compute_recipe::execute(recipe.clone(), user_settings, git, filters, comparisons)?;
+    let mut view =
+        compute_recipe::execute(recipe.clone(), user_settings, git, filters, comparisons)?;
+    if let Some(name) = &comparison_name {
+        // The titlebar names the compared branch as the tab label does, not the pinned commit.
+        view.upstream = name.clone();
+    }
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
-        kind,
         view,
+        comparison_name,
     });
     let CompleteRecipeComputationOk { label, view } = completed;
     let history = Box::new(RecordRender {
@@ -126,13 +136,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_live_source_stops_before_computation() {
+    fn missing_source_stops_before_computation() {
         let response = prepare_recipe::execute(
             PrepareRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),
-                kind: ViewerTabKind::Live,
             },
             &FixedUserSettingsStore::default(),
             &FakeGitClient {
@@ -148,13 +157,12 @@ mod tests {
     }
 
     #[test]
-    fn ready_live_recipe_returns_a_publish_decision() {
+    fn ready_recipe_returns_a_publish_decision_for_its_pinned_commits() {
         let response = prepare_recipe::execute(
             PrepareRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),
-                kind: ViewerTabKind::Live,
             },
             &FixedUserSettingsStore::default(),
             &source(),
@@ -163,6 +171,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(matches!(response, PrepareRecipeOk::Publish { .. }));
+        assert!(matches!(
+            response,
+            PrepareRecipeOk::Publish { view, history, .. }
+                if history.recipe.is_pinned() && view.upstream.as_ref() == "main"
+        ));
     }
 }

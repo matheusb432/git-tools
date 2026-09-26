@@ -1,6 +1,6 @@
 use gtl_models::{
     failure::{ErrorMeta, Failure, Resource, ViewerFailure},
-    viewer::{ViewerTabKind, ViewerTabState},
+    viewer::ViewerTabState,
 };
 use gtl_wire::viewer::SetViewerTabPinned;
 
@@ -19,7 +19,8 @@ pub enum SetViewerTabPinnedError {
     UnknownTab,
 }
 
-/// Pins or unpins a tab; a snapshot must finish rendering so its pin keeps the reviewed range.
+/// Pins or unpins a tab; a tab that is not live must finish rendering so its pin keeps the
+/// reviewed commits.
 #[cqrsy::command]
 pub fn execute(
     request: SetViewerTabPinned,
@@ -29,10 +30,7 @@ pub fn execute(
         let tab = session
             .tab(request.tab_id)
             .ok_or(SetViewerTabPinnedError::UnknownTab)?;
-        if request.pinned
-            && tab.tab.kind() == ViewerTabKind::Snapshot
-            && !matches!(tab.tab.state(), ViewerTabState::Ready)
-        {
+        if request.pinned && !tab.tab.live() && !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(SetViewerTabPinnedError::SnapshotPending);
         }
         session.set_pinned(request.tab_id, request.pinned);
@@ -60,7 +58,6 @@ mod tests {
                 target: RecipeTarget::Unpushed { pinned: None },
             }),
             RecipeBatchId::generate(),
-            ViewerTabKind::Snapshot,
         )
         .unwrap();
         let tab_id = work.ticket().tab_id;

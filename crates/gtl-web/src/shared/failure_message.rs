@@ -130,7 +130,6 @@ fn viewer_message(failure: &ViewerFailure, language: ViewerLanguage) -> String {
             "failure-viewer-snapshot-name-invalid",
             characters = *characters_max
         ),
-        ViewerFailure::NotSnapshot => t!(language, "failure-viewer-not-snapshot"),
         ViewerFailure::SnapshotPending => t!(language, "failure-viewer-snapshot-pending"),
         ViewerFailure::ModifiedFilesUnavailable => {
             t!(language, "failure-viewer-modified-files-unavailable")

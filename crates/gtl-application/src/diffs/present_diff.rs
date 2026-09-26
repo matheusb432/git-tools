@@ -5,7 +5,7 @@ use gtl_models::{
 
 use crate::{
     ports::{DiffRenderOutcome, DiffRenderRequest, DiffViewerClient, GitClient},
-    recipes::{Recipe, RecipeBatch, RecipeBatchKind, RecipeOp},
+    recipes::{Recipe, RecipeBatch, RecipeOp},
     shared::notes::Note,
 };
 
@@ -122,11 +122,7 @@ fn build_batch(
         .into_iter()
         .map(|intent| build_recipe(intent, git))
         .collect();
-    RecipeBatch {
-        batch_id,
-        kind: RecipeBatchKind::Snapshot,
-        recipes,
-    }
+    RecipeBatch { batch_id, recipes }
 }
 
 fn build_recipe(intent: DiffRecipeIntent, git: &impl GitClient) -> Recipe {

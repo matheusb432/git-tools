@@ -4,9 +4,9 @@ use gtl_wire::viewer::{
     EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
     ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, RenameViewerSnapshot,
     SearchViewerFiles, SelectViewerCommit, SetViewerModifiedFiles, SetViewerPreference,
-    SetViewerTabPinned, StreamViewerRows, ViewerCommitPage, ViewerDiffSearchResult,
-    ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerRowStreamItem,
-    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
+    SetViewerTabLive, SetViewerTabPinned, StreamViewerRows, ViewerCommitPage,
+    ViewerDiffSearchResult, ViewerFileSearchResult, ViewerHistoryCopyPayload, ViewerHistoryPage,
+    ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
         DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
         ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
@@ -136,6 +136,8 @@ impl ViewerClient {
         move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";
         close_tab(ViewerTabRequest) -> ViewerShell => "viewer_close_tab";
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
+        update_tab(ViewerTabRequest) -> ViewerShell => "viewer_update_tab";
+        set_tab_live(SetViewerTabLive) -> ViewerShell => "viewer_set_tab_live";
         select_commit(SelectViewerCommit) -> ViewerShell => "viewer_select_commit";
         rename_snapshot(RenameViewerSnapshot) -> () => "viewer_rename_snapshot";
         set_tab_pinned(SetViewerTabPinned) -> () => "viewer_set_tab_pinned";

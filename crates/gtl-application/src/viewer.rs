@@ -29,7 +29,7 @@ pub use diff_view::{
 };
 pub use gtl_models::viewer::{
     DiffDensity, DiffLayout, ParseRenderOptionError, RenderHistoryId, RenderOptions, Theme,
-    ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
+    ViewerTab, ViewerTabId, ViewerTabState,
 };
 pub use state::{ViewerState, ViewerStateError};
 
@@ -37,6 +37,7 @@ pub mod set_modified_files;
 
 pub mod rename_snapshot;
 pub mod saved_tabs;
+pub mod set_viewer_tab_live;
 pub mod set_viewer_tab_pinned;
 
 pub mod file_filters;

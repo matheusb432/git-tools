@@ -169,9 +169,7 @@ pub(super) async fn open_viewer_project(
     state: &AppState,
     request: Request<v1::OpenViewerProjectRequest>,
 ) -> Result<Response<v1::OpenViewerProjectResponse>, Status> {
-    use gtl_application::projects::open_viewer_project::{
-        self, OpenProjectComparison, OpenViewerProjectError,
-    };
+    use gtl_application::projects::open_viewer_project::{self, OpenProjectComparison};
     let project = proto::viewer::projects::decode_open(request.into_inner())
         .map_err(|_| invalid_request("comparison"))?;
     let repositories = state
@@ -182,18 +180,12 @@ pub(super) async fn open_viewer_project(
     let state = state.clone();
     let runtime_state = state.clone();
     let work = run_blocking(move || {
-        let mut connection = state
-            .database
-            .connection_lock()
-            .map_err(OpenViewerProjectError::from)?;
         open_viewer_project::execute(
             OpenProjectComparison {
                 project,
                 repositories,
             },
             &state.git,
-            &mut connection,
-            &state.clock,
             &state.viewer,
         )
     })

@@ -12,17 +12,6 @@ JOIN project_sources USING ([source_id])
 WHERE projects.[paused_at] IS NULL
   AND projects.[unmanaged_at] IS NULL;
 
-CREATE TABLE "live_views" (
-  id INTEGER PRIMARY KEY,
-  source_kind TEXT NOT NULL,
-  source_value TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  last_opened_at TEXT,
-  comparison TEXT NOT NULL DEFAULT 'unpushed_commits' CHECK (comparison IN ('local_changes', 'unpushed_commits')),
-  UNIQUE (source_kind, source_value, comparison)
-) STRICT;
-
 CREATE TABLE project_groups (
     [project_id] TEXT NOT NULL
         REFERENCES projects ([id]) ON DELETE CASCADE,

@@ -138,11 +138,13 @@ message SettingsFailureLocked {
 message SettingsFailurePathUnavailable {}
 
 message ViewerFailure {
+  reserved 4;
+  reserved "not_snapshot";
+
   oneof reason {
     ViewerFailureSourcePreparing source_preparing = 1;
     ViewerFailureRevealTooLarge reveal_too_large = 2;
     ViewerFailureSnapshotNameInvalid snapshot_name_invalid = 3;
-    ViewerFailureNotSnapshot not_snapshot = 4;
     ViewerFailureSnapshotPending snapshot_pending = 5;
     ViewerFailureModifiedFilesUnavailable modified_files_unavailable = 6;
     ViewerFailureRangeTooLarge range_too_large = 7;
@@ -169,8 +171,6 @@ message ViewerFailureRevealTooLarge {}
 message ViewerFailureSnapshotNameInvalid {
   uint32 characters_max = 1;
 }
-
-message ViewerFailureNotSnapshot {}
 
 message ViewerFailureSnapshotPending {}
 

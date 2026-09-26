@@ -83,6 +83,7 @@ impl ViewerRenderCommandTicket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewerRenderCommand {
     RefreshTab(ViewerTabRequest),
+    UpdateTab(ViewerTabRequest),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -331,6 +332,11 @@ impl ViewerContext {
         self.schedule_render_command(ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id }));
     }
 
+    /// Recomputes the tab from its recipe's current revisions.
+    pub(crate) fn update_tab(self, tab_id: ViewerTabId) {
+        self.schedule_render_command(ViewerRenderCommand::UpdateTab(ViewerTabRequest { tab_id }));
+    }
+
     fn schedule_render_command(mut self, command: ViewerRenderCommand) {
         if !self.actions_enabled() {
             self.toast.client_error(&ViewerClientError::Disconnected);
@@ -446,8 +452,10 @@ async fn run_render_command(
     ticket: ViewerRenderCommandTicket,
     command: ViewerRenderCommand,
 ) {
-    let ViewerRenderCommand::RefreshTab(request) = command;
-    let result = viewer_server::refresh_tab(request).await;
+    let result = match command {
+        ViewerRenderCommand::RefreshTab(request) => viewer_server::refresh_tab(request).await,
+        ViewerRenderCommand::UpdateTab(request) => viewer_server::update_tab(request).await,
+    };
     context.complete_render_command(ticket, result);
 }
 
@@ -544,11 +552,7 @@ fn ApplicationLayoutContent() -> Element {
                     let displayed =
                         matches!(route, Route::CurrentDiff {}) || route.tab_id() == active;
                     active.filter(|id| {
-                        displayed
-                            && shell
-                                .tabs
-                                .iter()
-                                .any(|tab| tab.id == *id && tab.kind.is_live())
+                        displayed && shell.tabs.iter().any(|tab| tab.id == *id && tab.live)
                     })
                 }
                 _ => None,
@@ -833,7 +837,7 @@ mod tests {
                         pinned: false,
                         id: viewer_tab_id(id)?,
                         label: recipe_label(&format!("Diff {id}"))?,
-                        kind: gtl_wire::viewer::ViewerTabKind::Snapshot,
+                        live: false,
                         state: gtl_wire::viewer::ViewerTabState::Pending,
                     })
                 })

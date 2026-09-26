@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use gtl_models::settings::ProjectsSort;
-use gtl_wire::viewer::projects::{ViewerProject, ViewerProjectDiffMode};
+use gtl_wire::viewer::projects::ViewerProject;
 use lucide_dioxus::{ArrowUp, Check, FilePenLine, FilePlus, GitBranch, TriangleAlert};
 
 use super::{
@@ -103,8 +103,8 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
         ahead,
         ..
     } = project_presentation(&project, result, language);
-    let destination = (!disabled && local.is_available())
-        .then(|| Route::project_diff(&project.path, ViewerProjectDiffMode::Live));
+    let destination =
+        (!disabled && local.is_available()).then(|| Route::project_diff(&project.path));
     rsx! {
         DataTableRow {
             "data-testid": "project-table-row",
@@ -161,19 +161,8 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
             }
             TableColumn { class: "text-right",
                 DataTableActions {
-                    span { class: "inline-flex w-8 shrink-0",
-                        if ahead.has_changes() {
-                            ProjectComparisonAction {
-                                path: project.path.clone(),
-                                mode: ViewerProjectDiffMode::Snapshot,
-                                shape: ProjectActionShape::Icon,
-                                disabled,
-                            }
-                        }
-                    }
                     ProjectComparisonAction {
                         path: project.path.clone(),
-                        mode: ViewerProjectDiffMode::Live,
                         shape: ProjectActionShape::Icon,
                         disabled: disabled || !local.is_available(),
                     }

@@ -15,7 +15,6 @@ fn confirmations_and_results_follow_the_cli_contract() -> Result<()> {
     verify_noops_and_cancellation(&fixture)?;
     verify_push_review(&fixture)?;
     verify_tag_preview_and_publication(&fixture)?;
-    verify_live_view_results(&fixture);
     verify_partial_failures(&fixture)?;
     verify_project_selection(&fixture)?;
     verify_recursive_push_preserves_changes()?;
@@ -97,17 +96,6 @@ fn verify_tag_preview_and_publication(fixture: &CliFixture) -> Result<()> {
         "Created tag example-label\n",
     );
     Ok(())
-}
-
-fn verify_live_view_results(fixture: &CliFixture) {
-    fixture.succeeds(
-        &["diff", "live", "--path", "."],
-        "Saved live view for example-project\n",
-    );
-    fixture.succeeds(
-        &["diff", "live", "--path", "."],
-        "Refreshed live view for example-project\n",
-    );
 }
 
 fn verify_partial_failures(fixture: &CliFixture) -> Result<()> {

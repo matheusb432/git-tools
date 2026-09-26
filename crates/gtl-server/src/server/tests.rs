@@ -621,7 +621,6 @@ async fn assert_health_serving(channel: Channel) -> TestResult {
     for service in [
         "",
         "gtl.v1.DiffService",
-        "gtl.v1.LiveViewService",
         "gtl.v1.ProjectService",
         "gtl.v1.RepositoryService",
         "gtl.v1.SettingsService",
@@ -684,7 +683,6 @@ async fn assert_reflection_describes_gtl_contract(channel: Channel) -> TestResul
             "grpc.health.v1.Health",
             "grpc.reflection.v1.ServerReflection",
             "gtl.v1.DiffService",
-            "gtl.v1.LiveViewService",
             "gtl.v1.ProjectService",
             "gtl.v1.RepositoryService",
             "gtl.v1.SettingsService",
@@ -770,24 +768,17 @@ async fn next_reflection_response(
 
 #[tokio::test]
 #[serial(server_tracing)]
-async fn rejects_invalid_project_modes_before_catalogue_access() -> TestResult {
+async fn rejects_relative_project_paths_before_catalogue_access() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client = ViewerServiceClient::new(server.native_channel());
-    for (path, mode) in [
-        ("relative", 1),
-        ("/repos/project", 0),
-        ("/repos/project", 99),
-    ] {
-        let error = client
-            .open_viewer_project(gtl_wire::v1::OpenViewerProjectRequest {
-                path: path.into(),
-                mode,
-            })
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), tonic::Code::InvalidArgument);
-    }
+    let error = client
+        .open_viewer_project(gtl_wire::v1::OpenViewerProjectRequest {
+            path: "relative".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
     server.stop().await?;
     Ok(())
 }

@@ -1,11 +1,6 @@
 #![cfg(test)]
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Barrier, Mutex, mpsc},
-    thread,
-    time::{Duration, Instant},
-};
+use std::path::{Path, PathBuf};
 
 use gtl_application::{
     history::{
@@ -13,16 +8,11 @@ use gtl_application::{
         list_recent_render_page::{self, ListRecentRenderPage},
         record_render::{self, RecordRender, RecordRenderError},
     },
-    live_views::{
-        list_live_views::{self, ListLiveViews},
-        save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
-    },
-    ports::{Clock, GitRepositoryState},
+    ports::Clock,
     recipes::{Recipe, RecipeLabelParts, RecipeOp, RecipeSource, RecipeTarget},
-    utils::FakeGitClient,
     viewer::{
         ViewerState,
-        close_viewer_tabs::{self, CloseViewerTabs},
+        saved_tabs::{self, SavedViewerTab},
         work,
     },
 };
@@ -30,29 +20,8 @@ use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_models::{
     git::CommitCount,
     paths::{ProjectName, RepositoryRoot},
-    recipes::RecipeBatchId,
     timestamps::MachineTimestamp,
-    viewer::ViewerTabKind,
 };
-use rusqlite::Connection;
-
-const CONCURRENT_SAVE_BUSY_RETRY_COUNT_MAX: i32 = 4_000;
-const CONCURRENT_SAVE_BUSY_RETRY_DELAY: Duration = Duration::from_millis(1);
-static CONCURRENT_SAVE_BUSY_SIGNAL_SENDER: Mutex<Option<mpsc::SyncSender<()>>> = Mutex::new(None);
-
-fn concurrent_save_busy_signal_sender_set(sender: Option<mpsc::SyncSender<()>>) {
-    *CONCURRENT_SAVE_BUSY_SIGNAL_SENDER.lock().unwrap() = sender;
-}
-
-fn concurrent_save_busy_handler(retry_count: i32) -> bool {
-    if retry_count == 0
-        && let Some(sender) = CONCURRENT_SAVE_BUSY_SIGNAL_SENDER.lock().unwrap().as_ref()
-    {
-        let _ = sender.try_send(());
-    }
-    thread::sleep(CONCURRENT_SAVE_BUSY_RETRY_DELAY);
-    retry_count < CONCURRENT_SAVE_BUSY_RETRY_COUNT_MAX
-}
 
 #[derive(Clone)]
 struct ClockTest;
@@ -67,15 +36,6 @@ fn repository_root(path: &Path) -> RepositoryRoot {
     RepositoryRoot::try_new(path.to_path_buf()).unwrap()
 }
 
-fn git(top_level: &Path) -> FakeGitClient {
-    FakeGitClient {
-        repository_state: Some(GitRepositoryState::Repository {
-            top_level: repository_root(top_level),
-        }),
-        ..Default::default()
-    }
-}
-
 fn unpushed_diff_recipe() -> Recipe {
     Recipe {
         source: RecipeSource::LocalRepo(repository_root(Path::new("/repos/alpha"))),
@@ -86,39 +46,34 @@ fn unpushed_diff_recipe() -> Recipe {
     }
 }
 
-fn save_live_view(state: &SqliteAppState, top_level: &Path) {
-    let mut connection = state.connection_lock().unwrap();
-    let response = save_live_view::execute(
-        SaveLiveView {
-            comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
-            path: top_level.to_path_buf(),
+fn saved_tab(recipe: Recipe) -> SavedViewerTab {
+    SavedViewerTab {
+        label: gtl_models::recipes::RecipeLabel::Repository {
+            repository: recipe.cwd().project_name(),
         },
-        &git(top_level),
-        &mut connection,
-        &ClockTest,
-    )
-    .unwrap();
-    assert!(matches!(
-        response.outcome,
-        SaveLiveViewOutcome::Created { .. }
-    ));
+        recipe,
+        pinned: false,
+        live: true,
+        active: true,
+    }
 }
 
-fn list_live_views(state: &SqliteAppState) -> Vec<gtl_application::live_views::LiveViewRecord> {
-    let connection = state.connection_lock().unwrap();
-    list_live_views::execute(ListLiveViews, &connection).unwrap()
+fn save_tabs(state: &SqliteAppState, tabs: &[SavedViewerTab]) {
+    saved_tabs::save(&mut state.connection_lock().unwrap(), tabs).unwrap();
+}
+
+fn load_tabs(state: &SqliteAppState) -> Vec<SavedViewerTab> {
+    saved_tabs::load(&state.connection_lock().unwrap()).unwrap()
 }
 
 #[test]
 fn public_operations_use_the_migrated_schema() {
     let directory = tempfile::tempdir().unwrap();
     let state = SqliteAppState::open(directory.path()).unwrap();
-    let top_level = Path::new("/repos/alpha");
 
-    save_live_view(&state, top_level);
-    let live_views = list_live_views(&state);
-    assert_eq!(live_views.len(), 1);
-    assert_eq!(live_views[0].display_name.as_str(), "alpha");
+    let tabs = [saved_tab(unpushed_diff_recipe())];
+    save_tabs(&state, &tabs);
+    assert_eq!(load_tabs(&state), tabs);
 
     {
         let mut connection = state.connection_lock().unwrap();
@@ -152,139 +107,18 @@ fn public_operations_use_the_migrated_schema() {
             count: CommitCount::new(2),
         }
     );
-
-    let viewer = ViewerState::new();
-    let tab_id = work::reserve_open(
-        &viewer,
-        unpushed_diff_recipe(),
-        RecipeBatchId::generate(),
-        ViewerTabKind::Live,
-    )
-    .unwrap()
-    .ticket()
-    .tab_id;
-    let refresh = {
-        let mut connection = state.connection_lock().unwrap();
-        close_viewer_tabs::execute(CloseViewerTabs::One(tab_id), &mut connection, &viewer).unwrap()
-    };
-    assert!(refresh.is_none());
-    assert!(list_live_views(&state).is_empty());
 }
 
 #[test]
 fn second_process_style_connection_observes_committed_rows() {
     let directory = tempfile::tempdir().unwrap();
     let state_first = SqliteAppState::open(directory.path()).unwrap();
-    save_live_view(&state_first, Path::new("/repos/reopened"));
+    let tabs = [saved_tab(unpushed_diff_recipe())];
+    save_tabs(&state_first, &tabs);
 
     let state_second = SqliteAppState::open(directory.path()).unwrap();
 
-    assert_eq!(list_live_views(&state_second).len(), 1);
-}
-
-#[test]
-fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
-    concurrent_save_busy_signal_sender_set(None);
-    let directory = tempfile::tempdir().unwrap();
-    let state_first = SqliteAppState::open(directory.path()).unwrap();
-    let state_second = SqliteAppState::open(directory.path()).unwrap();
-    let reservation = Connection::open(directory.path().join("gtl.db")).unwrap();
-    reservation.execute_batch("BEGIN IMMEDIATE").unwrap();
-
-    for state in [&state_first, &state_second] {
-        state
-            .connection_lock()
-            .unwrap()
-            .busy_handler(Some(concurrent_save_busy_handler))
-            .unwrap();
-    }
-
-    let (busy_signal_sender, busy_signal_receiver) = mpsc::sync_channel(2);
-    concurrent_save_busy_signal_sender_set(Some(busy_signal_sender));
-    let barrier = Arc::new(Barrier::new(2));
-    let (completion_sender, completion_receiver) = mpsc::sync_channel(2);
-    let handles: Vec<_> = [state_first, state_second]
-        .into_iter()
-        .map(|state| {
-            let barrier = Arc::clone(&barrier);
-            let completion_sender = completion_sender.clone();
-            thread::spawn(move || {
-                barrier.wait();
-                let mut connection = state.connection_lock().unwrap();
-                let result = save_live_view::execute(
-                    SaveLiveView {
-                        comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
-                        path: "/repos/concurrent".into(),
-                    },
-                    &git(Path::new("/repos/concurrent")),
-                    &mut connection,
-                    &ClockTest,
-                )
-                .map_err(|error| error.to_string())
-                .and_then(|response| match response.outcome {
-                    SaveLiveViewOutcome::Created { .. } => Ok(false),
-                    SaveLiveViewOutcome::Refreshed { .. } => Ok(true),
-                    SaveLiveViewOutcome::Rejected { rejection } => Err(rejection.to_string()),
-                });
-                let _ = completion_sender.send(result);
-            })
-        })
-        .collect();
-    drop(completion_sender);
-
-    let busy_signal_deadline = Instant::now() + Duration::from_secs(2);
-    let mut busy_signal_results = Vec::with_capacity(2);
-    for _ in 0..2 {
-        busy_signal_results.push(
-            busy_signal_receiver
-                .recv_timeout(busy_signal_deadline.saturating_duration_since(Instant::now())),
-        );
-    }
-    let completion_pending = completion_receiver.recv_timeout(Duration::from_millis(100));
-
-    concurrent_save_busy_signal_sender_set(None);
-    let reservation_release_result = reservation.execute_batch("ROLLBACK");
-
-    let mut completion_results = Vec::with_capacity(2);
-    if let Ok(result) = completion_pending.as_ref() {
-        completion_results.push(result.clone());
-    }
-    let completion_deadline = Instant::now() + Duration::from_millis(4_500);
-    let mut completion_receive_error = None;
-    while completion_results.len() < 2 {
-        match completion_receiver
-            .recv_timeout(completion_deadline.saturating_duration_since(Instant::now()))
-        {
-            Ok(result) => completion_results.push(result),
-            Err(error) => {
-                completion_receive_error = Some(error);
-                break;
-            }
-        }
-    }
-    let join_results: Vec<_> = handles.into_iter().map(thread::JoinHandle::join).collect();
-
-    assert!(
-        busy_signal_results.iter().all(Result::is_ok),
-        "both connections must reach SQLite write contention: {busy_signal_results:?}"
-    );
-    assert!(
-        matches!(completion_pending, Err(mpsc::RecvTimeoutError::Timeout)),
-        "both saves must remain pending while the reservation is held"
-    );
-    reservation_release_result.unwrap();
-    assert_eq!(completion_receive_error, None);
-    assert!(
-        join_results.iter().all(Result::is_ok),
-        "save workers must not panic"
-    );
-
-    let mut refresh_flags: Vec<_> = completion_results
-        .into_iter()
-        .map(|result| result.unwrap())
-        .collect();
-    refresh_flags.sort_unstable();
-    assert_eq!(refresh_flags, vec![false, true]);
+    assert_eq!(load_tabs(&state_second), tabs);
 }
 
 #[test]
@@ -348,15 +182,14 @@ fn prune_failure_rolls_back_the_render_insertion() {
 }
 
 #[test]
-fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
--> anyhow::Result<()> {
+fn project_comparisons_reopen_their_tab_and_repeat_renders_update_recency() -> anyhow::Result<()> {
     use gtl_application::{
         projects::open_viewer_project::{self, OpenProjectComparison},
         utils::{FixedClock, FixedUserSettingsStore},
     };
     use gtl_infra::git_client::HybridGitClient;
     use gtl_models::projects::ProjectRepository;
-    use gtl_wire::viewer::projects::{OpenViewerProject, ViewerProjectDiffMode};
+    use gtl_wire::viewer::projects::OpenViewerProject;
 
     let directory = tempfile::tempdir().unwrap();
     let home = directory.path().canonicalize().unwrap();
@@ -370,65 +203,48 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
     let state = SqliteAppState::open(directory.path()).unwrap();
     let viewer = ViewerState::new();
     let mut connection = state.connection_lock().unwrap();
-    let mut ids = Vec::new();
-    for mode in [ViewerProjectDiffMode::Snapshot, ViewerProjectDiffMode::Live] {
-        let request = OpenViewerProject {
-            path: path.clone(),
-            mode,
-        };
-        let pending = open_viewer_project::execute(
-            OpenProjectComparison {
-                project: request.clone(),
-                repositories: repositories.clone(),
-            },
-            &HybridGitClient,
-            &mut connection,
-            &ClockTest,
-            &viewer,
-        )
-        .unwrap();
-        let id = pending.ticket().tab_id;
-        ids.push(id);
-        let computed = work::compute_recipe(
-            pending,
-            &FixedUserSettingsStore::default(),
-            &HybridGitClient,
-            &gtl_application::utils::SavedExtensionFilters::default(),
-            &gtl_application::utils::ProjectComparisons::default(),
-        );
-        let work::RecipePublication::Published { history } =
-            work::publish_recipe(&viewer, computed).unwrap()
-        else {
-            anyhow::bail!("valid comparison must publish");
-        };
+    let request = OpenViewerProject { path };
+    let pending = open_viewer_project::execute(
+        OpenProjectComparison {
+            project: request.clone(),
+            repositories: repositories.clone(),
+        },
+        &HybridGitClient,
+        &viewer,
+    )
+    .unwrap();
+    let id = pending.ticket().tab_id;
+    let computed = work::compute_recipe(
+        pending,
+        &FixedUserSettingsStore::default(),
+        &HybridGitClient,
+        &gtl_application::utils::SavedExtensionFilters::default(),
+        &gtl_application::utils::ProjectComparisons::default(),
+    );
+    let work::RecipePublication::Published { history } =
+        work::publish_recipe(&viewer, computed).unwrap()
+    else {
+        anyhow::bail!("valid comparison must publish");
+    };
+    for rendered_at in ["2026-09-06T10:00:00Z", "2026-09-06T11:00:00Z"] {
         record_render::execute(
             &history,
             &mut connection,
-            &FixedClock::new("2026-09-06T10:00:00Z".try_into().unwrap()),
+            &FixedClock::new(rendered_at.try_into().unwrap()),
         )
         .unwrap();
-        record_render::execute(
-            &history,
-            &mut connection,
-            &FixedClock::new("2026-09-06T11:00:00Z".try_into().unwrap()),
-        )
-        .unwrap();
-        let repeated = open_viewer_project::execute(
-            OpenProjectComparison {
-                project: request,
-                repositories: repositories.clone(),
-            },
-            &HybridGitClient,
-            &mut connection,
-            &ClockTest,
-            &viewer,
-        )
-        .unwrap();
-        assert_eq!(repeated.ticket().tab_id, id);
     }
-    assert_ne!(ids[0], ids[1]);
+    let repeated = open_viewer_project::execute(
+        OpenProjectComparison {
+            project: request,
+            repositories,
+        },
+        &HybridGitClient,
+        &viewer,
+    )
+    .unwrap();
+    assert_eq!(repeated.ticket().tab_id, id);
     assert_viewer_project_recency(&home, &connection)?;
-    assert_closing_the_live_tab_forgets_its_view(&mut connection, &viewer, ids[1]);
     Ok(())
 }
 
@@ -477,25 +293,6 @@ fn project_comparison_repository(path: PathBuf) -> TestRepository {
     repository.write("new.txt", "new\n");
     repository.commit_all("feature");
     repository
-}
-
-fn assert_closing_the_live_tab_forgets_its_view(
-    connection: &mut rusqlite::Connection,
-    viewer: &ViewerState,
-    live_tab: gtl_models::viewer::ViewerTabId,
-) {
-    assert_eq!(
-        list_live_views::execute(ListLiveViews, connection)
-            .unwrap()
-            .len(),
-        1
-    );
-    close_viewer_tabs::execute(CloseViewerTabs::One(live_tab), connection, viewer).unwrap();
-    assert!(
-        list_live_views::execute(ListLiveViews, connection)
-            .unwrap()
-            .is_empty()
-    );
 }
 
 fn register_viewer_project(

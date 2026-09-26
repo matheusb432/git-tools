@@ -34,8 +34,8 @@ use crate::{
         ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
         ViewerRecipeKind, ViewerRenderOptions, ViewerRowEvent, ViewerRowStreamItem, ViewerShell,
         ViewerSplitCell, ViewerSplitRow, ViewerStateChanged, ViewerSyntaxClass, ViewerTab,
-        ViewerTabKind, ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow,
-        ViewerUnifiedSourceRow, ViewerUserSettings, ViewerViewIdentity,
+        ViewerTabRequest, ViewerTabState, ViewerTheme, ViewerUnifiedRow, ViewerUnifiedSourceRow,
+        ViewerUserSettings, ViewerViewIdentity,
     },
 };
 
@@ -115,6 +115,8 @@ viewer_tab_codecs! {
     decode_close_viewer_tab_response <= CloseViewerTabResponse;
     encode_refresh_viewer_tab_request => RefreshViewerTabRequest;
     decode_refresh_viewer_tab_response <= RefreshViewerTabResponse;
+    encode_update_viewer_tab_request => UpdateViewerTabRequest;
+    decode_update_viewer_tab_response <= UpdateViewerTabResponse;
     encode_clear_viewer_commit_selection_request => ClearViewerCommitSelectionRequest;
     decode_clear_viewer_commit_selection_response <= ClearViewerCommitSelectionResponse;
 }
@@ -191,13 +193,7 @@ fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
         custom_name: tab.custom_name,
         id: u64::from(tab.id),
         recipe_label: Some(recipe_label::encode(tab.label)),
-        kind: match tab.kind {
-            ViewerTabKind::Snapshot => v1::ViewerTabKind::Snapshot,
-            ViewerTabKind::Live => v1::ViewerTabKind::Live,
-            ViewerTabKind::LiveLocalChanges => v1::ViewerTabKind::LiveLocalChanges,
-            ViewerTabKind::LiveBranchChanges => v1::ViewerTabKind::LiveBranchChanges,
-            ViewerTabKind::LiveUnpushedCommits => v1::ViewerTabKind::LiveUnpushedCommits,
-        } as i32,
+        live: tab.live,
         state: match tab.state {
             ViewerTabState::Pending => v1::ViewerTabState::Pending,
             ViewerTabState::Ready => v1::ViewerTabState::Ready,
@@ -1311,16 +1307,7 @@ fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> 
         custom_name: tab.custom_name,
         id: ViewerTabId::try_new(tab.id).map_err(|_| ViewerCodecError::InvalidMessage)?,
         label: recipe_label::decode(required(tab.recipe_label)?)?,
-        kind: match v1::ViewerTabKind::try_from(tab.kind) {
-            Ok(v1::ViewerTabKind::Snapshot) => ViewerTabKind::Snapshot,
-            Ok(v1::ViewerTabKind::Live) => ViewerTabKind::Live,
-            Ok(v1::ViewerTabKind::LiveLocalChanges) => ViewerTabKind::LiveLocalChanges,
-            Ok(v1::ViewerTabKind::LiveBranchChanges) => ViewerTabKind::LiveBranchChanges,
-            Ok(v1::ViewerTabKind::LiveUnpushedCommits) => ViewerTabKind::LiveUnpushedCommits,
-            Ok(v1::ViewerTabKind::Unspecified) | Err(_) => {
-                return Err(ViewerCodecError::InvalidMessage);
-            }
-        },
+        live: tab.live,
         state: match v1::ViewerTabState::try_from(tab.state) {
             Ok(v1::ViewerTabState::Pending) => ViewerTabState::Pending,
             Ok(v1::ViewerTabState::Ready) => ViewerTabState::Ready,
@@ -2090,6 +2077,22 @@ pub fn encode_set_viewer_tab_pinned_request(
         pinned: request.pinned,
     }
 }
+#[must_use]
+pub fn encode_set_viewer_tab_live_request(
+    request: crate::viewer::SetViewerTabLive,
+) -> v1::SetViewerTabLiveRequest {
+    v1::SetViewerTabLiveRequest {
+        tab_id: u64::from(request.tab_id),
+        live: request.live,
+    }
+}
+
+pub fn decode_set_viewer_tab_live_response(
+    response: v1::SetViewerTabLiveResponse,
+) -> Result<ViewerShell, ViewerCodecError> {
+    decode_viewer_shell(required(response.shell)?)
+}
+
 #[must_use]
 pub fn encode_close_other_viewer_tabs_request(
     request: crate::viewer::ViewerTabRequest,

@@ -36,6 +36,8 @@ service ViewerService {
   rpc MoveViewerTab(MoveViewerTabRequest) returns (MoveViewerTabResponse);
   rpc CloseViewerTab(CloseViewerTabRequest) returns (CloseViewerTabResponse);
   rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
+  rpc UpdateViewerTab(UpdateViewerTabRequest) returns (UpdateViewerTabResponse);
+  rpc SetViewerTabLive(SetViewerTabLiveRequest) returns (SetViewerTabLiveResponse);
   rpc SelectViewerCommit(SelectViewerCommitRequest) returns (SelectViewerCommitResponse);
   rpc ClearViewerCommitSelection(ClearViewerCommitSelectionRequest) returns (ClearViewerCommitSelectionResponse);
   rpc SetViewerPreference(SetViewerPreferenceRequest) returns (SetViewerPreferenceResponse);
@@ -174,15 +176,6 @@ message ViewerViewIdentity {
   ViewerRenderOptions render_options = 4;
 }
 
-enum ViewerTabKind {
-  VIEWER_TAB_KIND_UNSPECIFIED = 0;
-  VIEWER_TAB_KIND_SNAPSHOT = 1;
-  VIEWER_TAB_KIND_LIVE = 2;
-  VIEWER_TAB_KIND_LIVE_LOCAL_CHANGES = 3;
-  VIEWER_TAB_KIND_LIVE_UNPUSHED_COMMITS = 4;
-  VIEWER_TAB_KIND_LIVE_BRANCH_CHANGES = 5;
-}
-
 enum ViewerTabState {
   VIEWER_TAB_STATE_UNSPECIFIED = 0;
   VIEWER_TAB_STATE_PENDING = 1;
@@ -192,11 +185,11 @@ enum ViewerTabState {
 }
 
 message ViewerTab {
-  reserved 2;
-  reserved "label";
+  reserved 2, 3;
+  reserved "label", "kind";
 
   uint64 id = 1;
-  ViewerTabKind kind = 3;
+  bool live = 8;
   ViewerTabState state = 4;
   bool pinned = 5;
   optional string custom_name = 6;
@@ -209,6 +202,17 @@ message ViewerRecipeLabel {
     string name = 1;
     string repository = 2;
     ViewerRecipeChangesLabel changes = 3;
+    ViewerRecipeComparedLabel compared = 4;
+  }
+}
+
+// Names a tab by the revisions its diff compares.
+message ViewerRecipeComparedLabel {
+  string repository = 1;
+  string base = 2;
+  oneof head {
+    string head_revision = 3;
+    Empty working_tree = 4;
   }
 }
 
@@ -476,6 +480,25 @@ message RefreshViewerTabRequest {
 }
 
 message RefreshViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+// Recomputes a tab from its recipe's current state instead of its displayed revisions.
+message UpdateViewerTabRequest {
+  uint64 tab_id = 1;
+}
+
+message UpdateViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+// Makes a tab update whenever its source changes, or stops those updates.
+message SetViewerTabLiveRequest {
+  uint64 tab_id = 1;
+  bool live = 2;
+}
+
+message SetViewerTabLiveResponse {
   ViewerShell shell = 1;
 }
 
@@ -967,16 +990,10 @@ message UpdateViewerProjectRequest {
   string expected_comparison_branch = 3;
 }
 message UpdateViewerProjectResponse {}
-enum ViewerProjectDiffMode {
-  VIEWER_PROJECT_DIFF_MODE_UNSPECIFIED = 0;
-  VIEWER_PROJECT_DIFF_MODE_SNAPSHOT = 1;
-  VIEWER_PROJECT_DIFF_MODE_LIVE = 2;
-}
 message OpenViewerProjectRequest {
-  reserved 2;
-  reserved "comparison";
+  reserved 2, 3;
+  reserved "comparison", "mode";
   string path = 1;
-  ViewerProjectDiffMode mode = 3;
 }
 message OpenViewerProjectResponse {
   uint64 tab_id = 1;

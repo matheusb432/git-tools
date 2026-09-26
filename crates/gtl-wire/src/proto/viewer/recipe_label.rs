@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use gtl_models::{
     git::{CommitCount, GitHead, GitRange, GitRevision},
     paths::ProjectName,
-    recipes::{RecipeLabel, RecipeLabelChanges},
+    recipes::{RecipeLabel, RecipeLabelChanges, RecipeLabelHead},
 };
 
 use super::{ViewerCodecError, required};
@@ -21,6 +21,22 @@ pub(super) fn encode(label: RecipeLabel) -> v1::ViewerRecipeLabel {
         } => Label::Changes(v1::ViewerRecipeChangesLabel {
             repository: repository.to_string(),
             changes: Some(encode_changes(changes)),
+        }),
+        RecipeLabel::Compared {
+            repository,
+            base,
+            head,
+        } => Label::Compared(v1::ViewerRecipeComparedLabel {
+            repository: repository.to_string(),
+            base: base.to_string(),
+            head: Some(match head {
+                RecipeLabelHead::Revision { revision } => {
+                    v1::viewer_recipe_compared_label::Head::HeadRevision(revision.to_string())
+                }
+                RecipeLabelHead::WorkingTree => {
+                    v1::viewer_recipe_compared_label::Head::WorkingTree(v1::Empty {})
+                }
+            }),
         }),
     };
     v1::ViewerRecipeLabel { label: Some(label) }
@@ -60,6 +76,20 @@ pub(super) fn decode(label: v1::ViewerRecipeLabel) -> Result<RecipeLabel, Viewer
         Label::Changes(changes) => RecipeLabel::Changes {
             repository: project_name(changes.repository)?,
             changes: decode_changes(required(changes.changes)?)?,
+        },
+        Label::Compared(compared) => RecipeLabel::Compared {
+            repository: project_name(compared.repository)?,
+            base: revision(compared.base)?,
+            head: match required(compared.head)? {
+                v1::viewer_recipe_compared_label::Head::HeadRevision(head) => {
+                    RecipeLabelHead::Revision {
+                        revision: revision(head)?,
+                    }
+                }
+                v1::viewer_recipe_compared_label::Head::WorkingTree(v1::Empty {}) => {
+                    RecipeLabelHead::WorkingTree
+                }
+            },
         },
     })
 }

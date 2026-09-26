@@ -35,7 +35,7 @@ use gtl_wire::{
         ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout,
         ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
         ViewerFileSearchResult, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
-        ViewerRecipeKind, ViewerRowEvent, ViewerShell, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
+        ViewerRecipeKind, ViewerRowEvent, ViewerShell, ViewerSyntaxClass, ViewerTab,
         ViewerTabState, ViewerTheme, ViewerUnifiedSourceRow, ViewerUserSettings,
     },
 };
@@ -124,6 +124,18 @@ fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
         changes_label(RecipeLabelChanges::LastCommits {
             count: NonZeroU32::MIN.saturating_add(4),
         })?,
+        RecipeLabel::Compared {
+            repository: ProjectName::try_new("git-tools")?,
+            base: GitRevision::try_new("origin/main")?,
+            head: gtl_models::recipes::RecipeLabelHead::Revision {
+                revision: GitRevision::try_new("feature")?,
+            },
+        },
+        RecipeLabel::Compared {
+            repository: ProjectName::try_new("git-tools")?,
+            base: GitRevision::try_new("a1b2c3")?,
+            head: gtl_models::recipes::RecipeLabelHead::WorkingTree,
+        },
     ])
 }
 
@@ -133,7 +145,7 @@ fn tab(id: u64, label: RecipeLabel) -> TestResult<ViewerTab> {
         pinned: false,
         id: ViewerTabId::try_new(id)?,
         label,
-        kind: ViewerTabKind::Live,
+        live: true,
         state: ViewerTabState::Ready,
     })
 }
@@ -833,28 +845,19 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
         projects::decode_projects(response).unwrap(),
         ViewerProjectPage::try_new(vec![project.clone()], 1, 0).unwrap()
     );
-    for mode in [
-        gtl_wire::viewer::projects::ViewerProjectDiffMode::Snapshot,
-        gtl_wire::viewer::projects::ViewerProjectDiffMode::Live,
-    ] {
-        let request = OpenViewerProject {
-            path: project.path.clone(),
-            mode,
-        };
-        assert_eq!(
-            projects::decode_open(projects::encode_open(&request)).unwrap(),
-            request
-        );
-    }
-    for (path, mode) in [("relative", 1), ("/repos/alpha", 0), ("/repos/alpha", 99)] {
-        assert!(
-            projects::decode_open(v1::OpenViewerProjectRequest {
-                path: path.into(),
-                mode
-            })
-            .is_err()
-        );
-    }
+    let request = OpenViewerProject {
+        path: project.path.clone(),
+    };
+    assert_eq!(
+        projects::decode_open(projects::encode_open(&request)).unwrap(),
+        request
+    );
+    assert!(
+        projects::decode_open(v1::OpenViewerProjectRequest {
+            path: "relative".into(),
+        })
+        .is_err()
+    );
     assert!(
         projects::decode_projects(v1::ListViewerProjectsResponse {
             projects: vec![v1::ViewerProject {

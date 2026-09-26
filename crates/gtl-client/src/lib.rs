@@ -12,8 +12,7 @@ use std::time::Duration;
 use gtl_local_transport::LocalEndpoint;
 #[cfg(not(target_arch = "wasm32"))]
 use gtl_wire::v1::{
-    self, diff_service_client::DiffServiceClient, live_view_service_client::LiveViewServiceClient,
-    project_service_client::ProjectServiceClient,
+    self, diff_service_client::DiffServiceClient, project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     settings_service_client::SettingsServiceClient, tag_service_client::TagServiceClient,
     viewer_service_client::ViewerServiceClient,
@@ -418,28 +417,6 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn save_and_present_live_view(
-        &self,
-        request: v1::SaveAndPresentLiveViewRequest,
-    ) -> Result<v1::SaveAndPresentLiveViewResponse, ClientError> {
-        self.live_view_client()
-            .save_and_present_live_view(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn save_and_present_project_live_views(
-        &self,
-        request: v1::SaveAndPresentProjectLiveViewsRequest,
-    ) -> Result<v1::SaveAndPresentProjectLiveViewsResponse, ClientError> {
-        self.live_view_client()
-            .save_and_present_project_live_views(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
     pub async fn plan_tag_bump(
         &self,
         request: v1::PlanTagBumpRequest,
@@ -536,12 +513,6 @@ impl GtlClient {
 
     fn diff_client(&self) -> DiffServiceClient<Channel> {
         DiffServiceClient::new(self.channel.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-    }
-
-    fn live_view_client(&self) -> LiveViewServiceClient<Channel> {
-        LiveViewServiceClient::new(self.channel.clone())
             .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
             .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }

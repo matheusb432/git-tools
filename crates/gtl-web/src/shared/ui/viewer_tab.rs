@@ -1,9 +1,9 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
 use gtl_models::{settings::ViewerLanguage, viewer::ViewerTabId};
-use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabKind, ViewerTabState};
-use lucide_dioxus::{ArrowUp, FileDiff, Pin, Radio, TriangleAlert, X};
+use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use lucide_dioxus::{Check, ChevronDown};
+use lucide_dioxus::{Pin, TriangleAlert, X};
 
 use super::{
     Button, ButtonSize, ButtonVariant, InlineTextEditor, InlineTextSubmission, LoadingSpinner,
@@ -98,7 +98,6 @@ pub(crate) fn ViewerTabItem(
             },
             if editing() {
                 div { class: "viewer-tab-trigger",
-                    ViewerTabKindIndicator { kind: tab.kind }
                     InlineTextEditor {
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
                         label: t!(language, "tab-snapshot-name"),
@@ -131,7 +130,7 @@ pub(crate) fn ViewerTabItem(
                     "data-viewer-state": presentation_state.dom_state(),
                     aria_controls: "viewer-active-view",
                     tabindex: if active { "0" } else { "-1" },
-                    title: tab_description(&label, tab.kind, language),
+                    title: tab_description(&label, tab.live, language),
                     onpointerdown: move |event: PointerEvent| {
                         if reorderable {
                             drag.start.call(event.clone());
@@ -174,7 +173,7 @@ pub(crate) fn ViewerTabItem(
                 Button {
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
-                    class: "mr-1 text-acc",
+                    class: "mr-0.5 text-acc",
                     aria_label: t!(language, "tab-unpin-named", tab = label.as_str()),
                     title: t!(language, "tab-unpin"),
                     onclick: move |_| {
@@ -197,8 +196,7 @@ pub(crate) fn ViewerTabItem(
                     trigger_id: viewer_tab_element_id(tab_id),
                     pinned: tab.pinned,
                     position: menu_position(),
-                    onrename: (tab.kind == ViewerTabKind::Snapshot && onrename.is_some())
-                        .then(|| EventHandler::new(move |()| editing.set(true))),
+                    onrename: onrename.is_some().then(|| EventHandler::new(move |()| editing.set(true))),
                     onpin,
                     onclose,
                     oncloseothers,
@@ -232,31 +230,23 @@ pub(crate) fn ViewerTabRailMeasurementItem(
 
     rsx! {
         div {
-            class: "flex h-9 min-w-24 max-w-72 shrink-0 select-none items-center",
+            class: "flex h-9 min-w-24 max-w-80 shrink-0 select-none items-center",
             "data-viewer-tab-measurement": "true",
             aria_hidden: "true",
-            span { class: "flex h-full min-w-0 flex-1 items-center gap-1.5 pr-1 pl-2",
+            span { class: "flex h-full min-w-0 flex-1 items-center gap-1 pr-0.5 pl-1.5",
                 {viewer_tab_rail_content(&tab, &label, presentation_state)}
             }
-            span { class: "mr-1 size-6 flex-none", aria_hidden: "true" }
+            span { class: "mr-0.5 size-6 flex-none", aria_hidden: "true" }
         }
     }
 }
 
-fn tab_description(label: &str, kind: ViewerTabKind, language: ViewerLanguage) -> String {
-    tab_comparison_name(kind, language).map_or_else(
-        || label.to_owned(),
-        |comparison| format!("{label} - {comparison}"),
-    )
-}
-
-/// Names the comparison a live tab follows, when it follows one.
-fn tab_comparison_name(kind: ViewerTabKind, language: ViewerLanguage) -> Option<String> {
-    match kind {
-        ViewerTabKind::LiveLocalChanges => Some(t!(language, "comparison-local-changes")),
-        ViewerTabKind::LiveBranchChanges => Some(t!(language, "comparison-branch-changes")),
-        ViewerTabKind::LiveUnpushedCommits => Some(t!(language, "comparison-unpushed-commits")),
-        ViewerTabKind::Snapshot | ViewerTabKind::Live => None,
+/// Describes a tab in its tooltip; a live tab says so there rather than in its label.
+fn tab_description(label: &str, live: bool, language: ViewerLanguage) -> String {
+    if live {
+        format!("{label} - {}", t!(language, "tab-live"))
+    } else {
+        label.to_owned()
     }
 }
 
@@ -266,12 +256,13 @@ fn viewer_tab_rail_content(
     presentation_state: TabPresentationState,
 ) -> Element {
     rsx! {
-        if presentation_state == TabPresentationState::Ready {
-            ViewerTabKindIndicator { kind: tab.kind }
-        } else {
+        if presentation_state != TabPresentationState::Ready {
             TabStateMarker { state: presentation_state }
         }
         span { class: "min-w-0 truncate", "{label}" }
+        if tab.live {
+            span { class: "sr-only", {format!(", {}", t!(use_language(), "tab-live"))} }
+        }
     }
 }
 
@@ -286,7 +277,7 @@ fn ViewerTabCloseButton(
         Button {
             size: ButtonSize::IconCompact,
             variant: ButtonVariant::Bare,
-            class: "viewer-tab-close mr-1 group/viewer-tab-close",
+            class: "viewer-tab-close mr-0.5 group/viewer-tab-close",
             aria_label: t!(language, "tab-close-named", tab = label),
             "data-testid": test_id,
             onclick,
@@ -301,37 +292,6 @@ fn ViewerTabCloseButton(
                 aria_hidden: "true",
                 X { size: 14, stroke_width: 4 }
             }
-        }
-    }
-}
-
-#[component]
-fn ViewerTabKindIndicator(kind: ViewerTabKind) -> Element {
-    let language = use_language();
-    let label = match (kind, tab_comparison_name(kind, language)) {
-        (ViewerTabKind::Snapshot, _) => String::new(),
-        (_, None) => format!(", {}", t!(language, "tab-kind-live")),
-        (_, Some(comparison)) => format!(", {}, {comparison}", t!(language, "tab-kind-live")),
-    };
-    rsx! {
-        span { class: "viewer-tab-kind-indicator size-3.5", aria_hidden: "true",
-            match kind {
-                ViewerTabKind::Snapshot => rsx! {},
-                ViewerTabKind::Live => rsx! {
-                    Radio { size: 13 }
-                },
-                ViewerTabKind::LiveLocalChanges => rsx! {
-                    FileDiff { size: 13 }
-                },
-                ViewerTabKind::LiveUnpushedCommits | ViewerTabKind::LiveBranchChanges => {
-                    rsx! {
-                        ArrowUp { size: 13 }
-                    }
-                }
-            }
-        }
-        if !label.is_empty() {
-            span { class: "sr-only", "{label}" }
         }
     }
 }
@@ -384,9 +344,6 @@ pub(crate) fn ViewerTabOverflowMenu(
                 aria_controls: id.clone(),
                 title: trigger_label,
                 "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_TRIGGER.value(),
-                if let Some(tab) = &active_tab {
-                    ViewerTabKindIndicator { kind: tab.kind }
-                }
                 span { class: "min-w-0 flex-1 truncate font-medium", "{active_tab_label}" }
                 if let Some(state) = active_tab_state {
                     TabStateMarker { state }
@@ -524,7 +481,6 @@ fn ViewerTabOverflowMenuItem(
             },
             if editing() {
                 div { class: "viewer-tab-menu-trigger",
-                    ViewerTabKindIndicator { kind: tab.kind }
                     InlineTextEditor {
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
                         label: t!(language, "tab-snapshot-name"),
@@ -590,7 +546,6 @@ fn ViewerTabOverflowMenuItem(
                         activation_gesture.write().cancel();
                         drag.cancel.call(());
                     },
-                    ViewerTabKindIndicator { kind: tab.kind }
                     strong { class: "min-w-0 flex-1 truncate text-xs font-semibold text-inherit",
                         "{label}"
                     }
@@ -637,8 +592,7 @@ fn ViewerTabOverflowMenuItem(
                     trigger_id: format!("viewer-overflow-tab-{tab_id}-trigger"),
                     pinned: tab.pinned,
                     position: menu_position(),
-                    onrename: (tab.kind == ViewerTabKind::Snapshot && onrename.is_some())
-                        .then(|| EventHandler::new(move |()| editing.set(true))),
+                    onrename: onrename.is_some().then(|| EventHandler::new(move |()| editing.set(true))),
                     onpin: move |pinned| onpin.call((tab_id, pinned)),
                     onclose: move |_| onclose.call(tab_id),
                     oncloseothers: move |()| {
@@ -735,7 +689,7 @@ fn TabStateMarker(state: TabPresentationState) -> Element {
 #[cfg(test)]
 mod tests {
     use dioxus::prelude::*;
-    use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
+    use gtl_wire::viewer::{ViewerTab, ViewerTabState};
 
     use super::{
         MouseButton, TabPresentationState, TabStateMarker, ViewerTabActivationGesture,
@@ -821,7 +775,7 @@ mod tests {
                 pinned: false,
                 id: tab_id,
                 label,
-                kind: ViewerTabKind::Live,
+                live: true,
                 state: ViewerTabState::Ready,
             },
             active: true,
@@ -842,7 +796,7 @@ mod tests {
         assert!(html.contains("style=\"transition-duration:75ms;\""));
         assert!(!html.contains("duration-150"));
         assert!(!html.contains("active:bg-"));
-        assert!(html.contains("viewer-tab-close mr-1 group/viewer-tab-close"));
+        assert!(html.contains("viewer-tab-close mr-0.5 group/viewer-tab-close"));
         assert!(html.contains("background-color:#c1121f;transition-duration:100ms"));
         assert!(html.contains("viewer-tab-close-icon"));
         assert!(html.contains("transform:translateX(-0.5px)"));
@@ -869,7 +823,7 @@ mod tests {
                 pinned: false,
                 id: tab_id,
                 label,
-                kind: ViewerTabKind::Live,
+                live: true,
                 state: ViewerTabState::Pending,
             },
             active: false,
@@ -914,7 +868,7 @@ mod tests {
                     pinned: false,
                     id: viewer_tab_id(1)?,
                     label: recipe_label("Working tree")?,
-                    kind: ViewerTabKind::Live,
+                    live: true,
                     state: ViewerTabState::Ready,
                 },
                 rows_loading: false,
@@ -925,6 +879,33 @@ mod tests {
         assert!(html.contains("Working tree"));
         assert!(!html.contains("<button"));
         assert!(!html.contains("draggable"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_ready_tab_starts_its_label_without_an_icon_or_state_slot() -> TestResult {
+        let tab = |state| -> TestResult<ViewerTab> {
+            Ok(ViewerTab {
+                custom_name: None,
+                pinned: false,
+                id: viewer_tab_id(1)?,
+                label: recipe_label("Working tree")?,
+                live: true,
+                state,
+            })
+        };
+        let render = |tab: ViewerTab| {
+            dioxus_ssr::render_element(rsx! {
+                ViewerTabRailMeasurementItem { tab, rows_loading: false }
+            })
+        };
+
+        let ready = render(tab(ViewerTabState::Ready)?);
+        let pending = render(tab(ViewerTabState::Pending)?);
+
+        assert!(!ready.contains("<svg"));
+        assert!(!ready.contains("size-3.5 flex-none"));
+        assert!(pending.contains("size-3.5 flex-none"));
         Ok(())
     }
 
@@ -951,7 +932,7 @@ mod tests {
             pinned: false,
             id: viewer_tab_id(1)?,
             label: recipe_label("Working tree")?,
-            kind: ViewerTabKind::Live,
+            live: true,
             state: ViewerTabState::Ready,
         };
         let pending_tab = ViewerTab {
@@ -959,7 +940,7 @@ mod tests {
             pinned: false,
             id: viewer_tab_id(2)?,
             label: recipe_label("Saved comparison")?,
-            kind: ViewerTabKind::Snapshot,
+            live: false,
             state: ViewerTabState::Pending,
         };
         let event_handler_owner = VirtualDom::new(VNode::empty);

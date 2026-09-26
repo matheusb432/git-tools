@@ -72,14 +72,9 @@ impl ViewerFixture {
         })
     }
 
-    pub fn forward_live_view(&self) -> Result<()> {
-        command_checked_with_data_root(
-            &self.cli,
-            ["diff", "live", "--path", path_as_str(&self.repository)?],
-            None,
-            &self.data_root,
-        )
-        .context("forward live view through release CLI")
+    pub fn forward(&self) -> Result<()> {
+        command_checked_with_data_root(&self.cli, ["diff"], Some(&self.repository), &self.data_root)
+            .context("forward diff through release CLI")
     }
 
     pub fn commit_extra(&self) -> Result<()> {

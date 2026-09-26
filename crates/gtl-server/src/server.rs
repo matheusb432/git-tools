@@ -5,8 +5,7 @@ use gtl_local_transport::LocalListener;
 use gtl_wire::{
     FILE_DESCRIPTOR_SET,
     v1::{
-        diff_service_server::DiffServiceServer, live_view_service_server::LiveViewServiceServer,
-        project_service_server::ProjectServiceServer,
+        diff_service_server::DiffServiceServer, project_service_server::ProjectServiceServer,
         repository_service_server::RepositoryServiceServer,
         settings_service_server::SettingsServiceServer, tag_service_server::TagServiceServer,
         viewer_service_server::ViewerServiceServer,
@@ -25,8 +24,8 @@ use tower_http::{
 
 use crate::{
     services::{
-        DiffGrpcService, LiveViewGrpcService, ProjectGrpcService, RepositoryGrpcService,
-        SettingsGrpcService, TagGrpcService, ViewerGrpcService, ViewerServerInfo,
+        DiffGrpcService, ProjectGrpcService, RepositoryGrpcService, SettingsGrpcService,
+        TagGrpcService, ViewerGrpcService, ViewerServerInfo,
     },
     state::AppState,
 };
@@ -38,9 +37,8 @@ const VIEWER_MAX_RESPONSE_MESSAGE_SIZE: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 6
 
 const HEALTH_SERVICE_NAME: &str = "grpc.health.v1.Health";
 const REFLECTION_SERVICE_NAME: &str = "grpc.reflection.v1.ServerReflection";
-const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 7] = [
+const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 6] = [
     DiffServiceServer::<DiffGrpcService>::NAME,
-    LiveViewServiceServer::<LiveViewGrpcService>::NAME,
     ProjectServiceServer::<ProjectGrpcService>::NAME,
     RepositoryServiceServer::<RepositoryGrpcService>::NAME,
     SettingsServiceServer::<SettingsGrpcService>::NAME,
@@ -79,9 +77,6 @@ pub(crate) async fn serve(
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
     let diff_server = DiffServiceServer::new(DiffGrpcService::new(state.clone()))
-        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let live_view_server = LiveViewServiceServer::new(LiveViewGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
     let project_server = ProjectServiceServer::new(ProjectGrpcService::new(state.clone()))
@@ -123,7 +118,6 @@ pub(crate) async fn serve(
         .add_service(health_server)
         .add_service(reflection_server)
         .add_service(diff_server)
-        .add_service(live_view_server)
         .add_service(project_server)
         .add_service(repository_server)
         .add_service(settings_server)

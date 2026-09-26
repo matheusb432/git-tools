@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use gtl_models::paths::RepositoryRoot;
-use gtl_wire::viewer::projects::ViewerProjectDiffMode;
-use lucide_dioxus::{Activity, FileText};
+use lucide_dioxus::FileText;
 
 use crate::{
     app::application_router::Route,
@@ -17,18 +16,15 @@ pub(super) enum ProjectActionShape {
     Icon,
 }
 
+/// Opens the project's unpushed or branch changes, or shows the tab that already has them.
 #[component]
 pub(super) fn ProjectComparisonAction(
     path: RepositoryRoot,
-    mode: ViewerProjectDiffMode,
     shape: ProjectActionShape,
     disabled: bool,
 ) -> Element {
     let language = use_language();
-    let label = match mode {
-        ViewerProjectDiffMode::Snapshot => t!(language, "projects-create-snapshot"),
-        ViewerProjectDiffMode::Live => t!(language, "projects-open-live"),
-    };
+    let label = t!(language, "projects-open-diff");
     let classes = button_classes(
         ButtonLayout::Inline,
         if shape == ProjectActionShape::Icon {
@@ -43,11 +39,7 @@ pub(super) fn ProjectComparisonAction(
         },
     );
     let content = rsx! {
-        if mode == ViewerProjectDiffMode::Snapshot {
-            FileText { size: 15 }
-        } else {
-            Activity { size: 15 }
-        }
+        FileText { size: 15 }
         if shape == ProjectActionShape::Labeled {
             span { class: "whitespace-nowrap", "{label}" }
         }
@@ -55,7 +47,7 @@ pub(super) fn ProjectComparisonAction(
     rsx! {
         if !disabled {
             Link {
-                to: Route::project_diff(&path, mode),
+                to: Route::project_diff(&path),
                 draggable: "false",
                 class: classes,
                 title: label.clone(),

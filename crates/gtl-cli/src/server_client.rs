@@ -227,24 +227,6 @@ impl ServerClient {
             .block_on(self.client.set_viewer_theme(request))?)
     }
 
-    pub(crate) fn save_and_present_live_view(
-        &self,
-        request: v1::SaveAndPresentLiveViewRequest,
-    ) -> anyhow::Result<v1::SaveAndPresentLiveViewResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.save_and_present_live_view(request))?)
-    }
-
-    pub(crate) fn save_and_present_project_live_views(
-        &self,
-        request: v1::SaveAndPresentProjectLiveViewsRequest,
-    ) -> anyhow::Result<v1::SaveAndPresentProjectLiveViewsResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.save_and_present_project_live_views(request))?)
-    }
-
     pub(crate) fn plan_tag_bump(
         &self,
         request: v1::PlanTagBumpRequest,

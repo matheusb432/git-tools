@@ -268,7 +268,6 @@ pub fn encode_viewer_failure(failure: &ViewerFailure) -> v1::ViewerFailure {
                 characters_max: *characters_max,
             })
         }
-        ViewerFailure::NotSnapshot => Reason::NotSnapshot(v1::ViewerFailureNotSnapshot {}),
         ViewerFailure::SnapshotPending => {
             Reason::SnapshotPending(v1::ViewerFailureSnapshotPending {})
         }
@@ -325,7 +324,6 @@ pub fn decode_viewer_failure(failure: v1::ViewerFailure) -> Option<ViewerFailure
         Reason::SnapshotNameInvalid(value) => ViewerFailure::SnapshotNameInvalid {
             characters_max: value.characters_max,
         },
-        Reason::NotSnapshot(_) => ViewerFailure::NotSnapshot,
         Reason::SnapshotPending(_) => ViewerFailure::SnapshotPending,
         Reason::ModifiedFilesUnavailable(_) => ViewerFailure::ModifiedFilesUnavailable,
         Reason::RangeTooLarge(_) => ViewerFailure::RangeTooLarge,

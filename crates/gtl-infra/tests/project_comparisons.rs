@@ -14,7 +14,7 @@ use gtl_application::{
     },
     recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
     utils::FixedUserSettingsStore,
-    viewer::{ViewerState, refresh_live_view, work},
+    viewer::{ViewerState, refresh_live_view, set_viewer_tab_live, work},
 };
 use gtl_infra::{app_state::SqliteAppState, git_client::HybridGitClient, testing::TestRepository};
 use gtl_models::{
@@ -24,9 +24,9 @@ use gtl_models::{
         comparison::ComparisonBranch,
     },
     recipes::RecipeBatchId,
-    viewer::{ViewerTabId, ViewerTabKind},
+    viewer::ViewerTabId,
 };
-use gtl_wire::viewer::FieldUpdate;
+use gtl_wire::viewer::{FieldUpdate, SetViewerTabLive};
 
 /// A repository whose `feature` branch is one commit ahead of `main`, beside an app-state database.
 struct Fixture {
@@ -96,9 +96,9 @@ impl Fixture {
         }
     }
 
-    fn open(&self, viewer: &ViewerState, kind: ViewerTabKind) -> ViewerTabId {
+    fn open(&self, viewer: &ViewerState) -> ViewerTabId {
         let reserved =
-            work::reserve_open(viewer, self.recipe(), RecipeBatchId::generate(), kind).unwrap();
+            work::reserve_open(viewer, self.recipe(), RecipeBatchId::generate()).unwrap();
         let tab = reserved.ticket().tab_id;
         let computed = work::compute_recipe(
             reserved,
@@ -205,7 +205,7 @@ fn upstream_wins_and_tags_cannot_satisfy_a_local_comparison_branch() {
 }
 
 #[test]
-fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() -> anyhow::Result<()>
+fn live_tabs_follow_setting_and_base_tip_changes_while_other_tabs_stay_pinned() -> anyhow::Result<()>
 {
     let fixture = Fixture::new();
     let repository = &fixture.repository;
@@ -213,9 +213,16 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
     fixture.register("PRJ", "project", &root);
     repository.git(&["branch", "develop", "feature"]);
     let live = ViewerState::new();
-    let tab = fixture.open(&live, ViewerTabKind::Live);
+    let tab = fixture.open(&live);
+    set_viewer_tab_live::execute(
+        SetViewerTabLive {
+            tab_id: tab,
+            live: true,
+        },
+        &live,
+    )?;
     let snapshot = ViewerState::new();
-    let snapshot_tab = fixture.open(&snapshot, ViewerTabKind::Snapshot);
+    let snapshot_tab = fixture.open(&snapshot);
     let pinned = snapshot
         .inspect(|session| session.tab(snapshot_tab).unwrap().recipe.clone())
         .unwrap();
@@ -242,7 +249,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
     ));
     fixture.set_branch("project", "main", "develop");
     let refresh_live_view::LiveViewCheck::Prepared(publication) = prepare() else {
-        anyhow::bail!("setting change must refresh the live comparison")
+        anyhow::bail!("setting change must update the live tab")
     };
     refresh_live_view::publish(*publication, &live).unwrap();
     assert_eq!(
@@ -257,7 +264,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
     );
     repository.git(&["branch", "-f", "develop", "main"]);
     let refresh_live_view::LiveViewCheck::Prepared(publication) = prepare() else {
-        anyhow::bail!("base tip change must refresh the live comparison")
+        anyhow::bail!("base tip change must update the live tab")
     };
     refresh_live_view::publish(*publication, &live).unwrap();
     assert_eq!(
@@ -270,13 +277,7 @@ fn live_diffs_follow_setting_and_base_tip_changes_while_snapshots_stay_pinned() 
             .unwrap(),
         1
     );
-    let reserved = work::reserve_open(
-        &snapshot,
-        pinned,
-        RecipeBatchId::generate(),
-        ViewerTabKind::Snapshot,
-    )
-    .unwrap();
+    let reserved = work::reserve_open(&snapshot, pinned, RecipeBatchId::generate()).unwrap();
     let computed = work::compute_recipe(
         reserved,
         &FixedUserSettingsStore::default(),

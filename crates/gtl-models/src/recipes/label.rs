@@ -13,13 +13,29 @@ use crate::{
 pub enum RecipeLabel {
     /// Shows the name the user gave the recipe.
     Named { name: ProjectName },
-    /// Names a live view by the repository it follows.
+    /// Names a tab by its repository alone.
     Repository { repository: ProjectName },
     /// Describes which changes the recipe shows in its repository.
     Changes {
         repository: ProjectName,
         changes: RecipeLabelChanges,
     },
+    /// Names a tab by the revisions its diff compares.
+    Compared {
+        repository: ProjectName,
+        base: GitRevision,
+        head: RecipeLabelHead,
+    },
+}
+
+/// The newer side of the revisions a tab compares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "head", rename_all = "snake_case")]
+pub enum RecipeLabelHead {
+    /// A branch, `HEAD`, or another revision, shown as written.
+    Revision { revision: GitRevision },
+    /// The working tree, including uncommitted changes.
+    WorkingTree,
 }
 
 /// Describes the changes a recipe compares, with the facts known so far.

@@ -83,7 +83,6 @@ fn run_diff(args: DiffArgs) -> ExitCode {
             base,
             raw,
         })) => diff_exit(commands::merge_diff::run(repo_path, base.as_deref(), raw)),
-        Some(DiffSub::Live(args)) => diff_live_exit(commands::diff_live::run(args.path)),
         None => {
             let raw = args.raw;
             if let Some(theme) = args.target.set_theme {
@@ -533,13 +532,6 @@ fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
 fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
-        Err(error) => CommandFailure::from_error(&error).report(None),
-    }
-}
-
-fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
-    match result {
-        Ok(()) => ExitCode::Ok,
         Err(error) => CommandFailure::from_error(&error).report(None),
     }
 }

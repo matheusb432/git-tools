@@ -5,10 +5,10 @@ use gtl_models::{
     viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
 use gtl_wire::viewer::{
-    CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView,
-    ViewerTabRequest, make_commit_selection_action,
+    CommitSelectionAction, OpenViewerDiffFile, SetViewerTabLive, ViewerActiveState,
+    ViewerActiveView, ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{FileDiff, TriangleAlert};
+use lucide_dioxus::{FileDiff, Radio, RefreshCw, TriangleAlert};
 
 use super::{
     DiffWorkspaceDocument, MobilePanel, WorkspaceMobileNavigation,
@@ -145,7 +145,7 @@ fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
                             PageNotice {
                                 class: "h-full px-5",
                                 role: "alert",
-                                title: t!(language, "workspace-live-paused"),
+                                title: t!(language, "workspace-source-unavailable"),
                                 message: failure_message(failure, language),
                                 div { class: "mx-auto mt-4 flex flex-wrap items-center justify-center gap-2",
                                     ModifiedFilesButton { tab_id, visible: false }
@@ -314,7 +314,7 @@ fn ReadyWorkspace(
             .tabs
             .iter()
             .find(|tab| tab.id == tab_id)
-            .map(|tab| tab.kind.is_live())
+            .map(|tab| tab.live)
     });
     let commits_loading = commit_pages.is_loading();
     let commits_error = commit_pages
@@ -410,10 +410,13 @@ fn ReadyWorkspace(
             gtl_wire::viewer::ViewerCommitSelection::Pending { .. }
         );
     let live_actions = Some(rsx! {
-        crate::views::push::ViewPushButton { identity, disabled: push_disabled }
         if is_live {
             LiveViewWarning { tab_id }
+        } else {
+            UpdateTabButton { tab_id }
         }
+        LiveTabButton { tab_id, live: is_live }
+        crate::views::push::ViewPushButton { identity, disabled: push_disabled }
     });
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
@@ -426,7 +429,7 @@ fn ReadyWorkspace(
                         PageNotice {
                             class: "h-full min-h-48 px-5",
                             title: t!(language, "workspace-no-changes"),
-                            message: t!(language, "workspace-no-changes-message"),
+                            message: if is_live { t!(language, "workspace-no-changes-live-message") } else { t!(language, "workspace-no-changes-message") },
                         }
                     } else {
                         ClientDiffDocument { onopen }
@@ -474,6 +477,67 @@ fn ReadyWorkspace(
     }
 }
 
+/// Recomputes a tab that is not live from its recipe's current revisions.
+#[component]
+fn UpdateTabButton(tab_id: ViewerTabId) -> Element {
+    let language = use_language();
+    let viewer = use_context::<ViewerContext>();
+    let label = t!(language, "workspace-update");
+    rsx! {
+        Button {
+            class: "mobile:size-11 mobile:p-0",
+            size: ButtonSize::Small,
+            variant: ButtonVariant::Outline,
+            state: if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            aria_label: label.clone(),
+            title: t!(language, "workspace-update-hint"),
+            "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_UPDATE.value(),
+            onclick: move |_| viewer.update_tab(tab_id),
+            span { class: "inline-flex flex-none", aria_hidden: "true",
+                RefreshCw { size: 14 }
+            }
+            span { class: "mobile:hidden", "{label}" }
+        }
+    }
+}
+
+/// Makes the tab update whenever its repository changes, or keeps its current snapshot.
+#[component]
+fn LiveTabButton(tab_id: ViewerTabId, live: bool) -> Element {
+    let language = use_language();
+    let viewer = use_context::<ViewerContext>();
+    let toast = use_toast();
+    let mut action = use_action(move |live: bool| async move {
+        match viewer_server::set_tab_live(SetViewerTabLive { tab_id, live }).await {
+            Ok(shell) => viewer.replace_shell(shell),
+            Err(error) => toast.client_error(&error),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let label = t!(language, "workspace-live");
+    rsx! {
+        Button {
+            class: "mobile:size-11 mobile:p-0",
+            size: ButtonSize::Small,
+            variant: if live { ButtonVariant::Accent } else { ButtonVariant::Outline },
+            state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
+            aria_label: label.clone(),
+            aria_pressed: live.to_string(),
+            title: if live { t!(language, "workspace-live-stop-hint") } else { t!(language, "workspace-live-start-hint") },
+            "data-testid": gtl_web_contracts::test_ids::VIEWER_LIVE_TOGGLE.value(),
+            onclick: move |_| {
+                if !action.pending() {
+                    action.call(!live);
+                }
+            },
+            span { class: "inline-flex flex-none", aria_hidden: "true",
+                Radio { size: 14 }
+            }
+            span { class: "mobile:hidden", "{label}" }
+        }
+    }
+}
+
 #[component]
 fn LiveViewWarning(tab_id: ViewerTabId) -> Element {
     let viewer = use_context::<ViewerContext>();
@@ -496,7 +560,7 @@ fn LiveViewWarningPopover(
     errors: Vec<crate::entities::diffs::live_errors::LiveError>,
 ) -> Element {
     let language = use_language();
-    let id = format!("live-view-{tab_id}-errors");
+    let id = format!("live-tab-{tab_id}-errors");
     let anchor = format!("--{id}");
     let hover = use_hover_popover(id.clone());
     rsx! {

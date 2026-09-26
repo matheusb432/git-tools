@@ -83,7 +83,6 @@ fn closed_value_tokens_keep_their_wire_contracts() {
         serde_json::to_value(ViewerTheme::Dark).unwrap(),
         serde_json::to_value(ViewerDiffLayout::Unified).unwrap(),
         serde_json::to_value(ViewerDiffDensity::Compact).unwrap(),
-        serde_json::to_value(ViewerTabKind::Snapshot).unwrap(),
         serde_json::to_value(ViewerFileStatus::Renamed).unwrap(),
         serde_json::to_value(ViewerRecipeKind::MergeDiff).unwrap(),
     ];
@@ -96,7 +95,6 @@ fn closed_value_tokens_keep_their_wire_contracts() {
             json!("dark"),
             json!("unified"),
             json!("compact"),
-            json!("snapshot"),
             json!("renamed"),
             json!("merge_diff"),
         ]
@@ -218,7 +216,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
             label: gtl_models::recipes::RecipeLabel::Repository {
                 repository: project_name("git-tools")?,
             },
-            kind: ViewerTabKind::Live,
+            live: true,
             state: ViewerTabState::Ready,
         }],
         active: ViewerActiveState::Ready {

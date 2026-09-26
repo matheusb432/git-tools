@@ -13,7 +13,7 @@ use gtl_application::{
         select_comparison_repositories,
     },
     recipes::{
-        Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeTarget,
+        Recipe, RecipeBatch, RecipeOp, RecipeTarget,
         build_recipe::{self, BuildRecipe},
     },
     repositories::{
@@ -452,7 +452,6 @@ fn present_snapshot(
         state,
         RecipeBatch {
             batch_id: RecipeBatchId::generate(),
-            kind: RecipeBatchKind::Snapshot,
             recipes,
         },
     )

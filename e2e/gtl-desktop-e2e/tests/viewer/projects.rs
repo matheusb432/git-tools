@@ -14,7 +14,7 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             let driver = session.driver();
             import_projects(driver, &fixture.root).await?;
 
-            support::click(driver, action("projects-alpha", "Open live")).await?;
+            support::click(driver, action("projects-alpha", "Open diff")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await?;
             support::click(driver, By::Css("button[aria-label='Modified files']")).await?;
@@ -24,14 +24,14 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await?;
 
-            support::click(driver, By::Css("a[aria-label='Projects']")).await?;
-            support::click(driver, action("projects-alpha", "Create snapshot")).await?;
-            support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
-                .await?;
             ensure!(
                 !main_text(driver).await?.contains("local-project-marker"),
                 "the snapshot included uncommitted work"
             );
+            support::click(driver, By::Css("a[aria-label='Projects']")).await?;
+            support::click(driver, action("projects-alpha", "Open diff")).await?;
+            support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
+                .await?;
             let snapshot =
                 support::visible(driver, By::Css("[role='tab'][aria-selected='true']")).await?;
             support::context_click_element(driver, &snapshot).await?;
@@ -45,11 +45,7 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             session.restart().await?;
             let driver = session.driver();
             support::visible(driver, By::Css("button[aria-label^='Unpin ']")).await?;
-            support::click(
-                driver,
-                By::Css("[role='tab'][title*='projects-alpha'][title*='Unpushed commits']"),
-            )
-            .await?;
+            support::click(driver, By::Css("[role='tab'][title*='projects-alpha']")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await
         })

@@ -69,7 +69,6 @@ const fn viewer_severity(failure: &ViewerFailure) -> ToastKind {
         // updates by themselves.
         ViewerFailure::RevealTooLarge
         | ViewerFailure::SnapshotNameInvalid { .. }
-        | ViewerFailure::NotSnapshot
         | ViewerFailure::SnapshotPending
         | ViewerFailure::ModifiedFilesUnavailable
         | ViewerFailure::RangeTooLarge

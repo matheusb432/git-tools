@@ -8,7 +8,6 @@
 
 pub mod diffs;
 pub mod history;
-pub mod live_views;
 pub mod ports;
 pub mod projects;
 pub mod recipes;

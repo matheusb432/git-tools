@@ -1,15 +1,29 @@
 use anyhow::Result;
+use gtl_web_contracts::test_ids;
 use thirtyfour::By;
 
 use crate::support::{self, fixture::ViewerFixture};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn live_diff_follows_new_commits_across_server_and_viewer_restarts() -> Result<()> {
+async fn a_tab_made_live_follows_new_commits_across_server_and_viewer_restarts() -> Result<()> {
     support::run_test("live-diff", |session| {
         Box::pin(async move {
             let fixture = ViewerFixture::create(session.data_root())?;
-            fixture.forward_live_view()?;
+            fixture.forward()?;
             support::wait_for_active_diff(session.driver(), "live-view", "alpha-v1").await?;
+            support::click(
+                session.driver(),
+                By::Css(test_ids::VIEWER_LIVE_TOGGLE.selector()),
+            )
+            .await?;
+            support::visible(
+                session.driver(),
+                By::Css(format!(
+                    "{}[aria-pressed='true']",
+                    test_ids::VIEWER_LIVE_TOGGLE.selector()
+                )),
+            )
+            .await?;
 
             fixture.commit_alpha_v2()?;
             support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2").await?;

@@ -10,7 +10,7 @@ use gtl_models::{
 };
 use gtl_wire::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerDiffFileId, ViewerFeedback,
-    ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerViewIdentity,
+    ViewerPreferences, ViewerShell, ViewerTab, ViewerTabState, ViewerViewIdentity,
 };
 
 use super::{
@@ -45,22 +45,7 @@ pub fn project(
             custom_name: entry.recipe.name.as_ref().map(ToString::to_string),
             id: entry.tab.id(),
             label: entry.tab.label().clone(),
-            kind: match session
-                .live_source(entry.tab.id())
-                .map(|(_, comparison)| comparison)
-            {
-                Some(gtl_models::live_views::LiveComparison::LocalChanges) => {
-                    ViewerTabKind::LiveLocalChanges
-                }
-                Some(gtl_models::live_views::LiveComparison::UnpushedCommits) => {
-                    if session.is_branch_comparison(entry.tab.id()) {
-                        ViewerTabKind::LiveBranchChanges
-                    } else {
-                        ViewerTabKind::LiveUnpushedCommits
-                    }
-                }
-                None => to_tab_kind(entry.tab.kind()),
-            },
+            live: entry.tab.live(),
             state: to_tab_state(entry.tab.state()),
         })
         .collect();
@@ -154,10 +139,7 @@ fn ready_active_view(
         commit_selection,
         displayed.content_id(project_render_options(options)),
     );
-    if let Some(tab) = session.tab(tab_id)
-        && tab.tab.kind() == viewer::ViewerTabKind::Snapshot
-        && let Some(name) = &tab.recipe.name
-    {
+    if let Some(name) = session.tab(tab_id).and_then(|tab| tab.recipe.name.as_ref()) {
         view.title = gtl_models::diffs::DiffViewTitle::Named { name: name.clone() };
     }
     view.modified_files = modified_files;
@@ -265,13 +247,6 @@ pub fn tab_identity_is_current(
             .content_identity(identity.tab_id)
             .is_some_and(|current| identity_matches(identity, current, options))
     })
-}
-
-const fn to_tab_kind(kind: viewer::ViewerTabKind) -> ViewerTabKind {
-    match kind {
-        viewer::ViewerTabKind::Snapshot => ViewerTabKind::Snapshot,
-        viewer::ViewerTabKind::Live => ViewerTabKind::Live,
-    }
 }
 
 fn to_tab_state(state: &viewer::ViewerTabState) -> ViewerTabState {

@@ -5,7 +5,7 @@ use crate::viewer::{
     work::{self, ReservedRecipeWork},
 };
 
-/// Recomputes affected live views; immutable snapshots retain their reviewed content.
+/// Updates the repository's live tabs; other tabs keep their reviewed snapshot.
 #[cqrsy::command]
 pub fn execute(
     path: &RepositoryRoot,
@@ -14,10 +14,7 @@ pub fn execute(
     let tabs = viewer.inspect(|session| {
         session
             .tabs()
-            .filter(|tab| {
-                !matches!(tab.tab.kind(), gtl_models::viewer::ViewerTabKind::Snapshot)
-                    && tab.recipe.cwd() == *path
-            })
+            .filter(|tab| tab.tab.live() && tab.recipe.cwd() == *path)
             .map(|tab| tab.tab.id())
             .collect::<Vec<_>>()
     })?;

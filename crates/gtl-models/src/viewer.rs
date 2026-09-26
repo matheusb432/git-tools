@@ -21,7 +21,7 @@ pub use pagination::{
     InvalidHistoryPage,
 };
 pub use push_id::ViewerPushId;
-pub use tabs::{ViewerTab, ViewerTabKind, ViewerTabPlacement, ViewerTabState};
+pub use tabs::{ViewerTab, ViewerTabPlacement, ViewerTabState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ViewerSidebarVisibility {

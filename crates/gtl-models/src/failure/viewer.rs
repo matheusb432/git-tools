@@ -14,8 +14,6 @@ pub enum ViewerFailure {
     RevealTooLarge,
     /// A snapshot name is empty, too long, or spans several lines.
     SnapshotNameInvalid { characters_max: u32 },
-    /// Only saved snapshots, not live views, can be renamed.
-    NotSnapshot,
     /// The snapshot is still being saved.
     SnapshotPending,
     /// The tab cannot show modified files now, for example during a commit selection.
@@ -36,11 +34,11 @@ pub enum ViewerFailure {
     FileOutsideRepository,
     /// The configured editor could not be found or started.
     EditorFailed { diagnostic: ExternalDiagnostic },
-    /// A live view's repository directory no longer exists; updates resume when it returns.
+    /// A tab's repository directory no longer exists; a live tab updates again when it returns.
     SourceDirectoryMissing { path: PathBuf },
-    /// A live view's directory is no longer a Git repository; updates resume when it is.
+    /// A tab's directory is no longer a Git repository; a live tab updates again when it is.
     SourceNotRepository { path: PathBuf },
-    /// A live view's source cannot be read; updates resume when it is restored.
+    /// A tab's repository cannot be read; a live tab updates again when it is restored.
     SourceUnavailable,
     /// The diff could not be computed or rendered.
     RenderFailed,
@@ -75,7 +73,6 @@ impl ViewerFailure {
             Self::SourcePreparing
             | Self::SourceDirectoryMissing { .. }
             | Self::SourceNotRepository { .. }
-            | Self::NotSnapshot
             | Self::SnapshotPending
             | Self::ModifiedFilesUnavailable
             | Self::FileNotInDiff
@@ -113,7 +110,6 @@ impl fmt::Display for ViewerFailure {
                 formatter,
                 "Snapshot names need 1 to {characters_max} characters on a single line."
             ),
-            Self::NotSnapshot => formatter.write_str("Only saved snapshots can be renamed."),
             Self::SnapshotPending => {
                 formatter.write_str("Wait for the snapshot to finish saving, then try again.")
             }
@@ -141,20 +137,23 @@ impl fmt::Display for ViewerFailure {
             }
             Self::SourceDirectoryMissing { path } => write!(
                 formatter,
-                "The repository directory {} was not found. Updates resume automatically when it is restored.",
+                "The repository directory {} was not found. Live tabs update again when it is restored.",
                 path.display()
             ),
             Self::SourceNotRepository { path } => write!(
                 formatter,
-                "{} is not a Git repository. Updates resume automatically when the repository is restored.",
+                "{} is not a Git repository. Live tabs update again when the repository is restored.",
                 path.display()
             ),
             Self::SourceUnavailable => formatter.write_str(
-                "The live view source is unavailable. Updates resume automatically when it is restored.",
+                "The repository is unavailable. Live tabs update again when it is restored.",
             ),
-            Self::RenderFailed => formatter.write_str("The diff could not be rendered. Please retry."),
-            Self::CommitFailed => formatter
-                .write_str("The selected commit could not be rendered. Show all changes and retry."),
+            Self::RenderFailed => {
+                formatter.write_str("The diff could not be rendered. Please retry.")
+            }
+            Self::CommitFailed => formatter.write_str(
+                "The selected commit could not be rendered. Show all changes and retry.",
+            ),
             Self::RowTooLarge => formatter.write_str("A diff row is too large to display."),
         }
     }

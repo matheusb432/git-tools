@@ -3,9 +3,7 @@ use gtl_models::{
     paths::RepositoryRoot,
     viewer::{ViewerTabId, ViewerVersion},
 };
-use gtl_wire::viewer::{
-    ViewerActiveState, ViewerShell, ViewerTabRequest, projects::ViewerProjectDiffMode,
-};
+use gtl_wire::viewer::{ViewerActiveState, ViewerShell, ViewerTabRequest};
 
 use crate::{
     app::application_layout::{ApplicationLayout, ViewerContext, ViewerShellLoad},
@@ -25,10 +23,8 @@ pub(crate) enum Route {
         #[redirect("/", || Route::Projects {})]
         #[route("/projects")]
         Projects {},
-        #[route("/projects/snapshot?:..query")]
-        ProjectSnapshotDiff { query: ProjectDiffQuery },
-        #[route("/projects/live?:..query")]
-        ProjectLiveDiff { query: ProjectDiffQuery },
+        #[route("/projects/diff?:..query")]
+        ProjectDiff { query: ProjectDiffQuery },
         #[route("/diffs")]
         CurrentDiff {},
         #[route("/diffs/:tab_id")]
@@ -66,11 +62,9 @@ impl From<&str> for ProjectDiffQuery {
 }
 
 impl Route {
-    pub(crate) fn project_diff(path: &RepositoryRoot, mode: ViewerProjectDiffMode) -> Self {
-        let query = ProjectDiffQuery(Some(path.clone()));
-        match mode {
-            ViewerProjectDiffMode::Snapshot => Self::ProjectSnapshotDiff { query },
-            ViewerProjectDiffMode::Live => Self::ProjectLiveDiff { query },
+    pub(crate) fn project_diff(path: &RepositoryRoot) -> Self {
+        Self::ProjectDiff {
+            query: ProjectDiffQuery(Some(path.clone())),
         }
     }
 
@@ -84,8 +78,7 @@ impl Route {
             Self::Projects {}
             | Self::CurrentDiff {}
             | Self::Settings {}
-            | Self::ProjectSnapshotDiff { .. }
-            | Self::ProjectLiveDiff { .. } => None,
+            | Self::ProjectDiff { .. } => None,
         }
     }
 }
@@ -137,10 +130,7 @@ impl ViewerRouteObservation {
         };
         let active_route = Route::for_active(&shell.active);
         // The project route resolves its own open response into the canonical tab URL.
-        if matches!(
-            route,
-            Route::ProjectSnapshotDiff { .. } | Route::ProjectLiveDiff { .. }
-        ) {
+        if matches!(route, Route::ProjectDiff { .. }) {
             return (next, ViewerRouteAction::None);
         }
         if focus_requested {
@@ -160,8 +150,7 @@ impl ViewerRouteObservation {
             Route::Projects {}
             | Route::Diff { .. }
             | Route::Settings {}
-            | Route::ProjectSnapshotDiff { .. }
-            | Route::ProjectLiveDiff { .. } => ViewerRouteAction::None,
+            | Route::ProjectDiff { .. } => ViewerRouteAction::None,
         };
         (next, action)
     }
@@ -246,16 +235,9 @@ fn Projects() -> Element {
 }
 
 #[component]
-fn ProjectSnapshotDiff(query: ProjectDiffQuery) -> Element {
+fn ProjectDiff(query: ProjectDiffQuery) -> Element {
     rsx! {
-        crate::views::diffs::ProjectDiffView { path: query.0, mode: ViewerProjectDiffMode::Snapshot }
-    }
-}
-
-#[component]
-fn ProjectLiveDiff(query: ProjectDiffQuery) -> Element {
-    rsx! {
-        crate::views::diffs::ProjectDiffView { path: query.0, mode: ViewerProjectDiffMode::Live }
+        crate::views::diffs::ProjectDiffView { path: query.0 }
     }
 }
 
@@ -282,8 +264,7 @@ fn Settings() -> Element {
 mod tests {
     use gtl_models::failure::ViewerFailure;
     use gtl_wire::viewer::{
-        ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabKind, ViewerTabState,
-        ViewerTheme,
+        ViewerPreferences, ViewerRenderOptions, ViewerTab, ViewerTabState, ViewerTheme,
     };
 
     use super::*;
@@ -304,7 +285,7 @@ mod tests {
                     pinned: false,
                     id,
                     label: label.clone(),
-                    kind: ViewerTabKind::Snapshot,
+                    live: false,
                     state: ViewerTabState::Pending,
                 })
                 .collect(),
@@ -409,16 +390,14 @@ mod tests {
             &Route::Projects {},
             &initial,
         );
-        for mode in [ViewerProjectDiffMode::Snapshot, ViewerProjectDiffMode::Live] {
-            let route = Route::project_diff(&path, mode);
-            assert_eq!(route.to_string().parse::<Route>().ok(), Some(route.clone()));
-            let (_, action) = observed.next(
-                "server".to_owned(),
-                &route,
-                &shell(Some(tab_id), Some(ViewerVersion::new(1)))?,
-            );
-            assert_eq!(action, ViewerRouteAction::None);
-        }
+        let route = Route::project_diff(&path);
+        assert_eq!(route.to_string().parse::<Route>().ok(), Some(route.clone()));
+        let (_, action) = observed.next(
+            "server".to_owned(),
+            &route,
+            &shell(Some(tab_id), Some(ViewerVersion::new(1)))?,
+        );
+        assert_eq!(action, ViewerRouteAction::None);
         Ok(())
     }
 
@@ -451,7 +430,7 @@ mod tests {
             pinned: false,
             id: first,
             label: recipe_label("first")?,
-            kind: ViewerTabKind::Snapshot,
+            live: false,
             state: ViewerTabState::Ready,
         });
         let (observed, action) = ViewerRouteObservation::default().next(

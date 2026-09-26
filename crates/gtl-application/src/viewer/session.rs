@@ -10,17 +10,16 @@ pub use cache::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache
 use gtl_models::{
     diffs::{Commit, CommitId},
     failure::{ErrorMeta, Failure, Resource},
-    live_views::LiveSource,
     recipes::{RecipeBatchId, RecipeLabel},
     viewer::{
-        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTab, ViewerTabId, ViewerTabKind,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTab, ViewerTabId,
         ViewerTabPlacement, ViewerTabState, ViewerVersion,
     },
 };
 
 use crate::{
     diffs::View,
-    recipes::{Recipe, RecipeSource, recipe_label},
+    recipes::{Recipe, recipe_label},
     viewer::ViewerDiffSnapshot,
 };
 
@@ -191,6 +190,24 @@ pub struct SessionTab {
     pub pinned: bool,
 }
 
+impl SessionTab {
+    /// Whether opening `recipe` shows it in this tab: the same content, or the same intent in a
+    /// tab whose content is neither pinned for review nor followed live against a pinned request.
+    fn opens(&self, recipe: &Recipe) -> bool {
+        if self.recipe == *recipe {
+            return true;
+        }
+        if self.recipe.unpinned() != recipe.unpinned() {
+            return false;
+        }
+        if recipe.is_pinned() {
+            !self.pinned && !self.tab.live()
+        } else {
+            self.tab.live() || !self.pinned
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum FullContextPreparation {
     Pending,
@@ -228,42 +245,19 @@ impl ViewerSession {
         }
     }
 
-    pub fn open(
-        &mut self,
-        recipe: Recipe,
-        batch_id: RecipeBatchId,
-        kind: ViewerTabKind,
-    ) -> Option<ViewerTabId> {
-        let label = if kind == ViewerTabKind::Live {
-            recipe_label::live(&recipe).unwrap_or_else(|| recipe_label::pending(&recipe))
-        } else {
-            recipe_label::pending(&recipe)
-        };
-        self.open_labeled(recipe, batch_id, kind, label)
+    /// Opens `recipe` in the tab that already shows it, or in a new snapshot tab.
+    pub fn open(&mut self, recipe: Recipe, batch_id: RecipeBatchId) -> Option<ViewerTabId> {
+        let label = recipe_label::pending_tab(&recipe);
+        self.open_labeled(recipe, batch_id, label)
     }
 
     pub(super) fn open_labeled(
         &mut self,
         recipe: Recipe,
         batch_id: RecipeBatchId,
-        kind: ViewerTabKind,
         label: RecipeLabel,
     ) -> Option<ViewerTabId> {
-        let unpinned = recipe.unpinned();
-        if let Some(existing) = self.tabs.iter_mut().find(|tab| {
-            tab.tab.kind() == kind
-                && if tab.pinned && kind == ViewerTabKind::Snapshot {
-                    tab.recipe == recipe
-                } else {
-                    tab.recipe.unpinned() == unpinned
-                }
-        }) {
-            existing.tab = ViewerTab::new(
-                existing.tab.id(),
-                existing.tab.label().clone(),
-                kind,
-                existing.tab.state().clone(),
-            );
+        if let Some(existing) = self.tabs.iter_mut().find(|tab| tab.opens(&recipe)) {
             existing.recipe = recipe;
             existing.batch_id = batch_id;
             self.active = Some(existing.tab.id());
@@ -279,7 +273,7 @@ impl ViewerSession {
         self.tabs.push(SessionTab {
             history_id: None,
             extension_filter: None,
-            tab: ViewerTab::new(id, label, kind, ViewerTabState::Pending),
+            tab: ViewerTab::new(id, label, false, ViewerTabState::Pending),
             recipe,
             batch_id,
             generation: ViewerRangeGeneration::default(),
@@ -316,7 +310,7 @@ impl ViewerSession {
         tab.tab = ViewerTab::new(
             id,
             tab.tab.label().clone(),
-            tab.tab.kind(),
+            tab.tab.live(),
             ViewerTabState::Pending,
         );
         let generation = tab.generation;
@@ -356,7 +350,7 @@ impl ViewerSession {
             .name
             .clone()
             .map_or(label, |name| RecipeLabel::Named { name });
-        tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
+        tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.live(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_version();
         PublishOutcome::Published
@@ -378,7 +372,7 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
         let label = tab.tab.label().clone();
-        tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), state);
+        tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.live(), state);
         self.bump_version();
         PublishOutcome::Published
     }
@@ -389,7 +383,7 @@ impl ViewerSession {
     ) -> Option<super::refresh_live_view::LiveViewRefresh> {
         let tab = self.tab(id)?;
         if self.active != Some(id)
-            || tab.tab.kind() != ViewerTabKind::Live
+            || !tab.tab.live()
             || matches!(tab.tab.state(), ViewerTabState::Pending)
         {
             return None;
@@ -399,15 +393,9 @@ impl ViewerSession {
                 tab_id: id,
                 generation: tab.generation,
             },
-            recipe: tab.recipe.clone(),
+            recipe: tab.recipe.unpinned(),
             head: tab.live_head.clone(),
         })
-    }
-
-    pub(super) fn is_branch_comparison(&self, tab_id: ViewerTabId) -> bool {
-        self.tab(tab_id)
-            .and_then(|tab| tab.live_head.as_ref())
-            .is_some_and(super::refresh_live_view::LiveViewState::is_branch_comparison)
     }
 
     pub fn bind_snapshot_history(
@@ -415,20 +403,21 @@ impl ViewerSession {
         ticket: ComputeTicket,
         record: &crate::history::RecentRenderRecord,
     ) {
-        if let Some(tab) = self.tabs.iter_mut().find(|tab| {
-            tab.tab.id() == ticket.tab_id
-                && tab.generation == ticket.generation
-                && tab.tab.kind() == ViewerTabKind::Snapshot
-        }) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id && tab.generation == ticket.generation)
+        {
             tab.history_id = Some(record.id);
-            if tab.recipe.name.is_none() {
-                tab.recipe.name.clone_from(&record.recipe.name);
+            if tab.recipe.name.is_some() || record.recipe.name.is_none() {
+                return;
             }
+            tab.recipe.name.clone_from(&record.recipe.name);
             if let Some(name) = &tab.recipe.name {
                 tab.tab = ViewerTab::new(
                     tab.tab.id(),
                     RecipeLabel::Named { name: name.clone() },
-                    tab.tab.kind(),
+                    tab.tab.live(),
                     tab.tab.state().clone(),
                 );
             }
@@ -442,12 +431,12 @@ impl ViewerSession {
         name: &gtl_models::paths::ProjectName,
     ) {
         for tab in &mut self.tabs {
-            if tab.history_id == Some(history_id) && tab.tab.kind() == ViewerTabKind::Snapshot {
+            if tab.history_id == Some(history_id) {
                 tab.recipe.name = Some(name.clone());
                 tab.tab = ViewerTab::new(
                     tab.tab.id(),
                     RecipeLabel::Named { name: name.clone() },
-                    tab.tab.kind(),
+                    tab.tab.live(),
                     tab.tab.state().clone(),
                 );
             }
@@ -460,7 +449,6 @@ impl ViewerSession {
             .tabs
             .iter_mut()
             .find(|tab| tab.tab.id() == ticket.tab_id)
-            && tab.tab.kind() == ViewerTabKind::Snapshot
         {
             let name = tab.recipe.name.clone();
             tab.recipe = recipe.clone();
@@ -488,6 +476,7 @@ impl ViewerSession {
         head: super::refresh_live_view::LiveViewState,
         mut value: CachedView,
         label: RecipeLabel,
+        recipe: &Recipe,
     ) -> PublishOutcome {
         if self.active != Some(ticket.tab_id) || self.current_ticket(ticket.tab_id) != Some(ticket)
         {
@@ -520,6 +509,9 @@ impl ViewerSession {
         tab.generation = tab.generation.next();
         tab.selection_generation = tab.selection_generation.next();
         tab.live_head = Some(head);
+        let name = tab.recipe.name.clone();
+        tab.recipe = recipe.clone();
+        tab.recipe.name = name;
         tab.selection = if let Some((commit, selected)) = preserved {
             value = value.with_selected(selected.clone());
             CommitSelection::Ready {
@@ -529,12 +521,7 @@ impl ViewerSession {
         } else {
             CommitSelection::None
         };
-        tab.tab = ViewerTab::new(
-            ticket.tab_id,
-            label,
-            ViewerTabKind::Live,
-            ViewerTabState::Ready,
-        );
+        tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.live(), ViewerTabState::Ready);
         let modified = value.modified.clone();
         let base = value.with_modified(None);
         if self.cache.insert(ticket.tab_id, value) == CacheDisposition::Oversize {
@@ -824,8 +811,8 @@ impl ViewerSession {
         })
     }
 
-    /// Closes an unpinned snapshot whose computation found nothing to show, remembering it
-    /// under `label` until its batch finishes. Live and pinned tabs keep the empty view.
+    /// Closes an unpinned tab whose computation found nothing to show, remembering it under
+    /// `label` until its batch finishes. Live and pinned tabs keep the empty view.
     pub(super) fn skip_empty_snapshot_if_current(
         &mut self,
         ticket: ComputeTicket,
@@ -837,7 +824,7 @@ impl ViewerSession {
         let Some(tab) = self.tab(ticket.tab_id) else {
             return EmptySnapshotOutcome::Stale;
         };
-        if tab.tab.kind() != ViewerTabKind::Snapshot || tab.pinned {
+        if tab.tab.live() || tab.pinned {
             return EmptySnapshotOutcome::Kept;
         }
         let batch_id = tab.batch_id;
@@ -863,6 +850,18 @@ impl ViewerSession {
                 .partition(|(batch_id, _)| !computing.contains(batch_id));
         self.skipped_snapshots = computing;
         finished.into_iter().map(|(_, label)| label).collect()
+    }
+
+    /// Makes a tab follow its source, or keeps its current snapshot from then on.
+    pub(crate) fn set_live(&mut self, id: ViewerTabId, live: bool) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        if tab.tab.live() != live {
+            tab.tab = ViewerTab::new(id, tab.tab.label().clone(), live, tab.tab.state().clone());
+            self.bump_version();
+        }
+        true
     }
 
     pub(crate) fn set_pinned(&mut self, id: ViewerTabId, pinned: bool) -> bool {
@@ -926,33 +925,6 @@ impl ViewerSession {
         self.tabs.insert(insertion_index, tab);
         self.bump_version();
         Some(MoveOutcome::Moved)
-    }
-
-    #[must_use]
-    pub fn live_source(
-        &self,
-        id: ViewerTabId,
-    ) -> Option<(LiveSource, gtl_models::live_views::LiveComparison)> {
-        let tab = self.tab(id)?;
-        if tab.tab.kind() != ViewerTabKind::Live {
-            return None;
-        }
-        let comparison = match &tab.recipe.op {
-            crate::recipes::RecipeOp::Diff {
-                target: crate::recipes::RecipeTarget::Base { rev },
-            } if *rev == gtl_models::git::GitRevision::head() => {
-                gtl_models::live_views::LiveComparison::LocalChanges
-            }
-            crate::recipes::RecipeOp::Diff {
-                target: crate::recipes::RecipeTarget::Unpushed { .. },
-            } => gtl_models::live_views::LiveComparison::UnpushedCommits,
-            _ => return None,
-        };
-        match &tab.recipe.source {
-            RecipeSource::LocalRepo(path) => {
-                Some((LiveSource::local_repo(path.clone()), comparison))
-            }
-        }
     }
 
     pub fn activate(&mut self, id: ViewerTabId) -> bool {
@@ -1275,7 +1247,7 @@ mod tests {
         diffs::{Cmd, Foot, View},
         recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
         utils::{git_head, git_revision, project_name, repository_root},
-        viewer::{ViewerTabId, ViewerTabKind},
+        viewer::ViewerTabId,
     };
 
     fn cache_weight(bytes: usize) -> ViewCacheWeight {
@@ -1322,9 +1294,7 @@ mod tests {
 
     fn ready_session() -> (ViewerSession, ViewerTabId) {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let id = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let id = session.open(recipe(), batch_id(1)).unwrap();
         let ticket = session.begin_compute(id).unwrap();
         assert_eq!(
             session.publish_labeled_if_current(
@@ -1340,9 +1310,7 @@ mod tests {
 
     fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<CommitId>) {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
-        let id = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let id = session.open(recipe(), batch_id(1)).unwrap();
         let ticket = session.begin_compute(id).unwrap();
         let ids = vec![
             crate::utils::commit_id_fixture("a"),
@@ -1434,23 +1402,14 @@ mod tests {
     fn pinning_protects_snapshots_and_keeps_pins_before_other_tabs() {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let first_recipe = pinned_unpushed_recipe("b");
-        let first = session
-            .open(first_recipe.clone(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let first = session.open(first_recipe.clone(), batch_id(1)).unwrap();
         session.set_pinned(first, true);
         let second = session
-            .open(
-                pinned_unpushed_recipe("c"),
-                batch_id(2),
-                ViewerTabKind::Snapshot,
-            )
+            .open(pinned_unpushed_recipe("c"), batch_id(2))
             .unwrap();
         assert_ne!(first, second);
         assert_eq!(session.tab(first).unwrap().recipe, first_recipe);
-        assert_eq!(
-            session.open(first_recipe, batch_id(3), ViewerTabKind::Snapshot),
-            Some(first)
-        );
+        assert_eq!(session.open(first_recipe, batch_id(3)), Some(first));
         session.close(first);
         assert!(session.tab(first).is_some());
         session.move_tab(second, first, ViewerTabPlacement::Before);
@@ -1469,9 +1428,7 @@ mod tests {
         let identity = session.active_content_identity();
         let mut other_recipe = recipe();
         other_recipe.source = RecipeSource::LocalRepo(crate::utils::repository_root("/other"));
-        let other = session
-            .open(other_recipe, batch_id(2), ViewerTabKind::Snapshot)
-            .unwrap();
+        let other = session.open(other_recipe, batch_id(2)).unwrap();
         assert_ne!(id, other);
         assert_eq!(session.content_identity(id), identity);
         assert!(session.activate(id));
@@ -1500,7 +1457,8 @@ mod tests {
                 ticket,
                 head.clone().into(),
                 CachedView::new(range.view.shared_view()),
-                crate::utils::viewer::label("updated")
+                crate::utils::viewer::label("updated"),
+                &recipe(),
             ),
             PublishOutcome::Published
         );
@@ -1517,6 +1475,7 @@ mod tests {
             head.into(),
             CachedView::new(view("empty range")),
             crate::utils::viewer::label("updated"),
+            &recipe(),
         );
         assert!(matches!(
             session.commit_selection_snapshot(id),
@@ -1538,22 +1497,22 @@ mod tests {
                 stale,
                 head.clone().into(),
                 CachedView::new(view("stale")),
-                crate::utils::viewer::label("stale")
+                crate::utils::viewer::label("stale"),
+                &recipe(),
             ),
             PublishOutcome::Stale
         );
         let ticket = session.current_ticket(id).unwrap();
         let mut other_recipe = recipe();
         other_recipe.name = Some(project_name("another"));
-        session
-            .open(other_recipe, batch_id(2), ViewerTabKind::Snapshot)
-            .unwrap();
+        session.open(other_recipe, batch_id(2)).unwrap();
         assert_eq!(
             session.publish_live_if_current(
                 ticket,
                 head.into(),
                 CachedView::new(view("stale")),
-                crate::utils::viewer::label("stale")
+                crate::utils::viewer::label("stale"),
+                &recipe(),
             ),
             PublishOutcome::Stale
         );
@@ -1562,9 +1521,7 @@ mod tests {
     #[test]
     fn active_content_snapshot_shares_the_cached_view_allocation() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let id = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let id = session.open(recipe(), batch_id(1)).unwrap();
         let ticket = session.begin_compute(id).unwrap();
         let view = view("shared");
         assert_eq!(
@@ -1816,33 +1773,53 @@ mod tests {
     #[test]
     fn reopening_a_recipe_reuses_its_tab_and_updates_the_batch() {
         let mut session = ViewerSession::new(cache_weight(128 * 1024 * 1024));
-        let first = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
-        let second = session
-            .open(recipe(), batch_id(2), ViewerTabKind::Snapshot)
-            .unwrap();
+        let first = session.open(recipe(), batch_id(1)).unwrap();
+        let second = session.open(recipe(), batch_id(2)).unwrap();
 
         assert_eq!(first, second);
         assert_eq!(session.tab(first).unwrap().batch_id, batch_id(2));
     }
 
     #[test]
-    fn snapshot_and_live_comparisons_have_independent_tabs() {
+    fn a_live_tab_shows_its_intent_again_but_not_pinned_history() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let id = session
-            .open(recipe(), batch_id(3), ViewerTabKind::Snapshot)
+        let live = session
+            .open(pinned_unpushed_recipe("b").unpinned(), batch_id(3))
             .unwrap();
+        session.set_live(live, true);
 
         let reopened = session
-            .open(recipe(), batch_id(4), ViewerTabKind::Live)
+            .open(pinned_unpushed_recipe("b").unpinned(), batch_id(4))
+            .unwrap();
+        let history = session
+            .open(pinned_unpushed_recipe("b"), batch_id(5))
             .unwrap();
 
-        assert_ne!(reopened, id);
-        assert_eq!(session.tab(id).unwrap().tab.kind(), ViewerTabKind::Snapshot);
-        let tab = session.tab(reopened).unwrap();
-        assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
+        assert_eq!(reopened, live);
+        let tab = session.tab(live).unwrap();
+        assert!(tab.tab.live());
         assert_eq!(tab.batch_id, batch_id(4));
+        assert_ne!(history, live);
+        assert!(!session.tab(history).unwrap().tab.live());
+    }
+
+    #[test]
+    fn a_pinned_snapshot_keeps_its_content_when_its_intent_opens_again() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let pinned = session
+            .open(pinned_unpushed_recipe("b"), batch_id(1))
+            .unwrap();
+        session.set_pinned(pinned, true);
+
+        let reopened = session
+            .open(pinned_unpushed_recipe("b").unpinned(), batch_id(2))
+            .unwrap();
+
+        assert_ne!(reopened, pinned);
+        assert_eq!(
+            session.tab(pinned).unwrap().recipe,
+            pinned_unpushed_recipe("b")
+        );
     }
 
     #[test]
@@ -1899,9 +1876,8 @@ mod tests {
         let pinned = open_snapshot(&mut session, "/repo/pinned", 1);
         session.set_pinned(pinned.tab_id, true);
         let pinned = session.begin_compute(pinned.tab_id).unwrap();
-        let live_id = session
-            .open(recipe(), batch_id(2), ViewerTabKind::Live)
-            .unwrap();
+        let live_id = session.open(recipe(), batch_id(2)).unwrap();
+        session.set_live(live_id, true);
         let live = session.begin_compute(live_id).unwrap();
 
         for ticket in [pinned, live] {
@@ -1918,9 +1894,7 @@ mod tests {
     fn open_snapshot(session: &mut ViewerSession, repository: &str, batch: u64) -> ComputeTicket {
         let mut recipe = recipe();
         recipe.source = RecipeSource::LocalRepo(repository_root(repository));
-        let id = session
-            .open(recipe, batch_id(batch), ViewerTabKind::Snapshot)
-            .unwrap();
+        let id = session.open(recipe, batch_id(batch)).unwrap();
         session.begin_compute(id).unwrap()
     }
 
@@ -2027,9 +2001,7 @@ mod tests {
     fn shell_visible_mutations_advance_the_session_revision() {
         let mut session = ViewerSession::new(cache_weight(1024));
         let start = session.version();
-        let id = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let id = session.open(recipe(), batch_id(1)).unwrap();
         assert!(session.version() > start);
         let opened = session.version();
         assert!(session.activate(id));
@@ -2068,14 +2040,10 @@ mod tests {
     #[test]
     fn activating_a_tab_updates_the_active_identity() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let first = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let first = session.open(recipe(), batch_id(1)).unwrap();
         let mut other = recipe();
         other.source = RecipeSource::LocalRepo(repository_root("/other"));
-        let second = session
-            .open(other, batch_id(1), ViewerTabKind::Live)
-            .unwrap();
+        let second = session.open(other, batch_id(1)).unwrap();
 
         assert!(session.activate(first));
         assert_eq!(session.active(), Some(first));
@@ -2105,18 +2073,10 @@ mod tests {
     fn open_dedupes_snapshot_tabs_by_unpinned_identity_and_adopts_the_new_pin() {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let first = session
-            .open(
-                pinned_unpushed_recipe("b"),
-                batch_id(1),
-                ViewerTabKind::Snapshot,
-            )
+            .open(pinned_unpushed_recipe("b"), batch_id(1))
             .unwrap();
         let second = session
-            .open(
-                pinned_unpushed_recipe("c"),
-                batch_id(2),
-                ViewerTabKind::Snapshot,
-            )
+            .open(pinned_unpushed_recipe("c"), batch_id(2))
             .unwrap();
 
         assert_eq!(first, second, "same repo+op must reuse the tab across pins");
@@ -2141,12 +2101,8 @@ mod tests {
             },
             name: None,
         };
-        let a = session
-            .open(range_recipe("a..b"), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
-        let b = session
-            .open(range_recipe("c..d"), batch_id(2), ViewerTabKind::Snapshot)
-            .unwrap();
+        let a = session.open(range_recipe("a..b"), batch_id(1)).unwrap();
+        let b = session.open(range_recipe("c..d"), batch_id(2)).unwrap();
         assert_ne!(a, b);
     }
 
@@ -2164,9 +2120,7 @@ mod tests {
                 },
                 name: None,
             };
-            session
-                .open(recipe, batch_id(batch), ViewerTabKind::Snapshot)
-                .unwrap()
+            session.open(recipe, batch_id(batch)).unwrap()
         };
         let first = open(&mut session, "a..b", 1);
         let second = open(&mut session, "c..d", 2);
@@ -2190,14 +2144,10 @@ mod tests {
     #[test]
     fn moving_a_tab_to_its_current_slot_is_idempotent() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let first = session
-            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
-            .unwrap();
+        let first = session.open(recipe(), batch_id(1)).unwrap();
         let mut second_recipe = recipe();
         second_recipe.name = Some(project_name("second"));
-        let second = session
-            .open(second_recipe, batch_id(2), ViewerTabKind::Snapshot)
-            .unwrap();
+        let second = session.open(second_recipe, batch_id(2)).unwrap();
         assert_ne!(first, second);
         let version = session.version();
 

@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 17]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 18]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -255,6 +255,9 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 17]> = LazyLock::new(|| {
             "../../db/migrations/0016_repository_extension_filters.sql"
         )),
         M::up(include_str!("../../db/migrations/0017_viewer_tabs.sql")),
+        M::up(include_str!(
+            "../../db/migrations/0018_retire_live_views.sql"
+        )),
     ]
 });
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -398,7 +401,9 @@ mod tests {
             ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'local_changes'),
             ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
             ('LocalRepo', '/repos/two', 'two', '2026-09-10T00:00:00Z', 'local_changes');").unwrap();
-        MIGRATIONS.to_latest(&mut connection).unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..10])
+            .to_latest(&mut connection)
+            .unwrap();
         let comparisons = connection
             .prepare("SELECT comparison FROM live_views ORDER BY source_value")
             .unwrap()
@@ -858,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_v2_drops_settings_and_preserves_runtime_state() {
+    fn migration_v2_drops_settings_and_preserves_render_history() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("gtl.db");
         let mut connection = Connection::open(&path).unwrap();
@@ -868,12 +873,6 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO settings (key, value) VALUES ('theme', 'glacier')",
-                [],
-            )
-            .unwrap();
-        connection
-            .execute(
-                "INSERT INTO live_views (source_kind, source_value, display_name, created_at) VALUES ('local', '/repo', 'Repo', '2026-01-01T00:00:00Z')",
                 [],
             )
             .unwrap();
@@ -896,16 +895,12 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let live_view_count: i64 = connection
-            .query_row("SELECT COUNT(*) FROM live_views", [], |row| row.get(0))
-            .unwrap();
         let recent_render_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .unwrap();
 
         assert_eq!(user_version, i64::try_from(MIGRATIONS_SLICE.len()).unwrap());
         assert_eq!(settings_table_count, 0);
-        assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
     }
 
