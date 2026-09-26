@@ -5,12 +5,14 @@ use gtl_application::{
         get_recent_render,
         record_render::{self, RenderErrorCode, RenderFailure, StartRender},
     },
-    live_views::list_live_views,
     ports::Clock as _,
     recipes::RecipeBatch,
-    viewer::work::{
-        self, CommitPublication, RecipePublication, ReserveRecipeError, ReservedCommitWork,
-        ReservedRecipeWork,
+    viewer::{
+        saved_tabs::{self, SavedViewerTab},
+        work::{
+            self, CommitPublication, RecipePublication, ReserveRecipeError, ReservedCommitWork,
+            ReservedRecipeWork,
+        },
     },
 };
 use gtl_models::{
@@ -30,23 +32,80 @@ pub(crate) fn open_recipe_batch(
     Ok(())
 }
 
-pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
+/// Restores the saved tab strip, then keeps saving it after every tab change until stopped.
+pub(crate) fn restore_viewer_tabs(state: &AppState) -> anyhow::Result<ViewerTabSaving> {
     state.database.associate_render_projects()?;
-    let records = {
+    let saved = {
         let connection = state.database.connection_lock()?;
-        list_live_views::execute(list_live_views::ListLiveViews, &connection)?
+        saved_tabs::load(&connection)
     };
-    if let Some(work) = work::reserve_restored_live_views(&state.viewer, records)? {
+    let saved = saved.unwrap_or_else(|error| {
+        tracing::error!(error = ?error, "saved viewer tabs are unreadable; starting without them");
+        Vec::new()
+    });
+    if let Some(work) = saved_tabs::restore(&state.viewer, saved.clone())? {
         spawn_recipe(state.clone(), work);
     }
-    let restored = {
-        let connection = state.database.connection_lock()?;
-        gtl_application::viewer::pinned_tabs::restore(&state.viewer, &connection)?
-    };
-    for work in restored {
-        spawn_recipe(state.clone(), work);
+    Ok(ViewerTabSaving::spawn(state.clone(), saved))
+}
+
+/// Saves the tab strip whenever a viewer change alters it; a failed save retries on the next
+/// change.
+pub(crate) struct ViewerTabSaving {
+    stop: tokio::sync::oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ViewerTabSaving {
+    fn spawn(state: AppState, mut saved: Vec<SavedViewerTab>) -> Self {
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
+        let mut versions = state.viewer.subscribe();
+        let task = tokio::spawn(async move {
+            loop {
+                save_changed_tabs(&state, &mut saved).await;
+                tokio::select! {
+                    changed = versions.changed() => if changed.is_err() { break; },
+                    _ = &mut stopped => {
+                        save_changed_tabs(&state, &mut saved).await;
+                        break;
+                    }
+                }
+            }
+        });
+        Self { stop, task }
     }
-    Ok(())
+
+    /// Saves any unsaved tab change, then stops saving.
+    pub(crate) async fn stop(self) {
+        let _ = self.stop.send(());
+        if let Err(error) = self.task.await {
+            tracing::error!(error = ?error, "viewer tab saving stopped abnormally");
+        }
+    }
+}
+
+async fn save_changed_tabs(state: &AppState, saved: &mut Vec<SavedViewerTab>) {
+    let tabs = match state.viewer.inspect(|session| saved_tabs::project(session)) {
+        Ok(tabs) if tabs != *saved => tabs,
+        Ok(_) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, "viewer tabs cannot be read for saving");
+            return;
+        }
+    };
+    let worker = state.clone();
+    let pending = tabs.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let mut connection = worker.database.connection_lock()?;
+        saved_tabs::save(&mut connection, &pending).map_err(anyhow::Error::from)
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|result| result);
+    match result {
+        Ok(()) => *saved = tabs,
+        Err(error) => tracing::error!(error = ?error, "viewer tabs could not be saved"),
+    }
 }
 
 pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {

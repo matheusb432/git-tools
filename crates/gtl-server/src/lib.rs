@@ -26,14 +26,16 @@ pub async fn run() -> anyhow::Result<()> {
         .await
         .context("binding the local gRPC listener")?;
     let state = state::AppState::open(endpoint.data_root())?;
-    viewer_runtime::restore_saved_live_views(&state)
-        .context("restoring saved live views into the server viewer session")?;
+    let tab_saving =
+        viewer_runtime::restore_viewer_tabs(&state).context("restoring saved viewer tabs")?;
     let shutdown = shutdown_signal()?;
 
     tracing::info!(native_path = %endpoint.path().display(), "gtl-server ready");
-    server::serve(listener, shutdown, SHUTDOWN_GRACE_PERIOD, state)
+    let served = server::serve(listener, shutdown, SHUTDOWN_GRACE_PERIOD, state)
         .await
-        .context("serving gtl-server")?;
+        .context("serving gtl-server");
+    tab_saving.stop().await;
+    served?;
     tracing::info!("gtl-server stopped");
     Ok(())
 }

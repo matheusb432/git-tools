@@ -1,16 +1,9 @@
 use std::time::Duration;
 
-use gtl_application::{
-    live_views::save_live_view::{self, SaveLiveView},
-    ports::{ExtensionFilterReader as _, ExtensionFilterWriter as _},
-};
-use gtl_infra::{
-    app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient,
-    testing::TestRepository,
-};
+use gtl_application::ports::{ExtensionFilterReader as _, ExtensionFilterWriter as _};
+use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_models::{
     diffs::{ExtensionFilter, ExtensionFilterMode, FileExtensions},
-    live_views::LiveComparison,
     viewer::ViewerTabId,
 };
 use gtl_wire::{
@@ -147,14 +140,11 @@ async fn file_filters_can_finish_for_an_inactive_tab_without_changing_the_active
     ]);
     std::fs::write(other.join("work.txt"), "other change\n")?;
     std::fs::write(other.join("Cargo.lock"), "other lock\n")?;
-    save_live_view::execute(
-        SaveLiveView {
-            path: other,
-            comparison: LiveComparison::LocalChanges,
-        },
-        &HybridGitClient,
-        &mut *database.connection_lock()?,
-        &SystemClock,
+    super::seed_live_tabs(
+        &database,
+        [super::working_tree_recipe(
+            gtl_models::paths::RepositoryRoot::try_new(other)?,
+        )],
     )?;
     let data = directory.path().join("data");
     let server = ServerHarness::start(&data, Some(data.join("settings.toml"))).await?;
@@ -215,15 +205,7 @@ async fn fixture(saved: Option<ExtensionFilter>) -> TestResult<Fixture> {
     if let Some(saved) = saved {
         database.save_extension_filter(&repository.root(), &saved)?;
     }
-    save_live_view::execute(
-        SaveLiveView {
-            path: repository.path().to_path_buf(),
-            comparison: LiveComparison::LocalChanges,
-        },
-        &HybridGitClient,
-        &mut *database.connection_lock()?,
-        &SystemClock,
-    )?;
+    super::seed_live_tabs(&database, [super::working_tree_recipe(repository.root())])?;
     let server = ServerHarness::start(&data, Some(data.join("settings.toml"))).await?;
     let client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     Ok(Fixture {

@@ -1,6 +1,5 @@
 use std::{path::PathBuf, time::Duration};
 
-use gtl_application::live_views::save_live_view;
 use gtl_infra::testing::TestRepository;
 use gtl_models::failure::{Failure, PushFailure, PushRefRejection};
 use gtl_wire::{
@@ -53,15 +52,7 @@ impl Fixture {
         let settings = directory.path().join("settings.toml");
         std::fs::write(&settings, "[push]\nconfirm = false\n")?;
         let database = gtl_infra::app_state::SqliteAppState::open(directory.path())?;
-        save_live_view::execute(
-            gtl_application::live_views::save_live_view::SaveLiveView {
-                path: repository.path().to_path_buf(),
-                comparison: gtl_models::live_views::LiveComparison::UnpushedCommits,
-            },
-            &gtl_infra::git_client::HybridGitClient,
-            &mut *database.connection_lock()?,
-            &gtl_infra::clock::SystemClock,
-        )?;
+        super::seed_live_tabs(&database, [super::unpushed_recipe(repository.root())])?;
         let server = ServerHarness::start(directory.path(), Some(settings)).await?;
         let client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
         Ok(Self {

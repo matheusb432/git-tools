@@ -23,12 +23,6 @@ CREATE TABLE "live_views" (
   UNIQUE (source_kind, source_value, comparison)
 ) STRICT;
 
-CREATE TABLE pinned_viewer_tabs (
-    position INTEGER PRIMARY KEY,
-    recipe_json TEXT NOT NULL CHECK (json_valid(recipe_json)),
-    live INTEGER NOT NULL CHECK (live IN (0, 1))
-) STRICT;
-
 CREATE TABLE project_groups (
     [project_id] TEXT NOT NULL
         REFERENCES projects ([id]) ON DELETE CASCADE,
@@ -192,3 +186,14 @@ CREATE TABLE repository_extension_filters (
         AND json_array_length(extensions_json) > 0
     )
 ) STRICT;
+
+CREATE TABLE viewer_tabs (
+    position INTEGER PRIMARY KEY CHECK (position >= 0),
+    recipe_json TEXT NOT NULL CHECK (json_valid(recipe_json)),
+    label_json TEXT CHECK (label_json IS NULL OR json_valid(label_json)),
+    pinned INTEGER NOT NULL CHECK (pinned IN (0, 1)),
+    live INTEGER NOT NULL CHECK (live IN (0, 1)),
+    active INTEGER NOT NULL CHECK (active IN (0, 1))
+) STRICT;
+
+CREATE UNIQUE INDEX viewer_tabs_active_idx ON viewer_tabs (active) WHERE active = 1;

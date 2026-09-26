@@ -1,12 +1,7 @@
 use std::{fmt::Write as _, time::Duration};
 
-use gtl_application::live_views::save_live_view::{self, SaveLiveView};
-use gtl_infra::{
-    app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient,
-    testing::TestRepository,
-};
+use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_local_transport::LocalEndpoint;
-use gtl_models::live_views::LiveComparison;
 use gtl_wire::{
     proto, v1,
     viewer::{
@@ -46,15 +41,7 @@ async fn fixture_source(
         repository.write("work.txt", "base\n");
         repository.commit_all("base");
         repository.write("work.txt", source);
-        save_live_view::execute(
-            SaveLiveView {
-                path: repository.path().to_path_buf(),
-                comparison: LiveComparison::LocalChanges,
-            },
-            &HybridGitClient,
-            &mut *database.connection_lock()?,
-            &SystemClock,
-        )?;
+        super::seed_live_tabs(&database, [super::working_tree_recipe(repository.root())])?;
     }
     let settings = directory.path().join("settings.toml");
     std::fs::write(&settings, "")?;

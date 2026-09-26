@@ -4,6 +4,7 @@ mod projects;
 mod repositories;
 mod row_sessions;
 mod viewer_push;
+mod viewer_tabs;
 
 use std::{error::Error, time::Duration};
 
@@ -39,6 +40,64 @@ use crate::{
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
+
+/// Saves `recipes` as live tabs after any saved ones, as a previous server would, leaving the
+/// last one active.
+fn seed_live_tabs(
+    database: &gtl_infra::app_state::SqliteAppState,
+    recipes: impl IntoIterator<Item = gtl_application::recipes::Recipe>,
+) -> TestResult {
+    use gtl_application::viewer::saved_tabs::{self, SavedViewerTab};
+    let mut connection = database.connection_lock()?;
+    let mut tabs = saved_tabs::load(&connection)?;
+    for tab in &mut tabs {
+        tab.active = false;
+    }
+    tabs.extend(recipes.into_iter().map(|recipe| SavedViewerTab {
+        label: gtl_models::recipes::RecipeLabel::Repository {
+            repository: recipe.cwd().project_name(),
+        },
+        recipe,
+        pinned: false,
+        live: true,
+        active: false,
+    }));
+    if let Some(last) = tabs.last_mut() {
+        last.active = true;
+    }
+    saved_tabs::save(&mut connection, &tabs)?;
+    Ok(())
+}
+
+/// Compares the working tree of `repository` with its `HEAD`.
+fn working_tree_recipe(
+    repository: gtl_models::paths::RepositoryRoot,
+) -> gtl_application::recipes::Recipe {
+    use gtl_application::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+    Recipe {
+        source: RecipeSource::LocalRepo(repository),
+        op: RecipeOp::Diff {
+            target: RecipeTarget::Base {
+                rev: gtl_models::git::GitRevision::head(),
+            },
+        },
+        name: None,
+    }
+}
+
+/// Compares `repository` with its upstream or comparison branch.
+fn unpushed_recipe(
+    repository: gtl_models::paths::RepositoryRoot,
+) -> gtl_application::recipes::Recipe {
+    use gtl_application::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+    Recipe {
+        source: RecipeSource::LocalRepo(repository),
+        op: RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { pinned: None },
+        },
+        name: None,
+    }
+}
 
 const PRIVATE_METADATA_VALUE: &str = "gtl-observability-private-metadata";
 const DIFF_RENDER_URI: &str = "/gtl.v1.DiffService/RenderDiff";

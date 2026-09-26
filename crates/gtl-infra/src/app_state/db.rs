@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 16]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 17]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -254,6 +254,7 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 16]> = LazyLock::new(|| {
         M::up(include_str!(
             "../../db/migrations/0016_repository_extension_filters.sql"
         )),
+        M::up(include_str!("../../db/migrations/0017_viewer_tabs.sql")),
     ]
 });
 static MIGRATIONS: LazyLock<Migrations<'static>> =
@@ -406,6 +407,76 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(comparisons, ["unpushed_commits", "unpushed_commits"]);
+    }
+
+    #[test]
+    fn migration_saves_pinned_tabs_and_live_views_as_viewer_tabs() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..16])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch(r#"
+            INSERT INTO pinned_viewer_tabs (position, recipe_json, live) VALUES
+                (0, '{"source":{"kind":"local_repo","value":"/repos/one"},"op":{"op":"diff","target":{"target":"unpushed"}},"name":"one"}', 1),
+                (1, '{"source":{"kind":"local_repo","value":"/repos/two"},"op":{"op":"merge_diff"}}', 0);
+            INSERT INTO live_views (id, source_kind, source_value, display_name, created_at, comparison) VALUES
+                (2, 'LocalRepo', '/repos/three', 'three', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+                (1, 'LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+                (3, 'LocalRepo', '/repos/four', 'four', '2026-09-10T00:00:00Z', 'local_changes');
+        "#).unwrap();
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+
+        let tabs = connection
+            .prepare(
+                "SELECT position, json_extract(recipe_json, '$.source.value'),
+                    json_extract(recipe_json, '$.op.target.target'), pinned, live, active
+                 FROM viewer_tabs ORDER BY position",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, bool>(4)?,
+                    row.get::<_, bool>(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            tabs,
+            [
+                (
+                    0,
+                    "/repos/one".into(),
+                    Some("unpushed".into()),
+                    true,
+                    true,
+                    false
+                ),
+                (1, "/repos/two".into(), None, true, false, false),
+                (
+                    2,
+                    "/repos/three".into(),
+                    Some("unpushed".into()),
+                    false,
+                    true,
+                    false
+                ),
+                (
+                    3,
+                    "/repos/four".into(),
+                    Some("base".into()),
+                    false,
+                    true,
+                    false
+                ),
+            ]
+        );
     }
 
     #[test]

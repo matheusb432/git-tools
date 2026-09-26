@@ -35,8 +35,9 @@ pub use state::{ViewerState, ViewerStateError};
 
 pub mod set_modified_files;
 
-pub mod pinned_tabs;
 pub mod rename_snapshot;
+pub mod saved_tabs;
+pub mod set_viewer_tab_pinned;
 
 pub mod file_filters;
 pub mod get_viewer_file_filters;

@@ -19,7 +19,7 @@ use std::pin::Pin;
 use gtl_application::viewer::{
     self,
     close_viewer_tabs::{self, CloseViewerTabs},
-    move_viewer_tab, pinned_tabs, set_modified_files, work,
+    move_viewer_tab, set_modified_files, set_viewer_tab_pinned, work,
 };
 use gtl_models::{
     diffs::CommitId,
@@ -267,14 +267,6 @@ impl ViewerService for ViewerGrpcService {
         let request = proto::viewer::decode_move_viewer_tab_request(request.into_inner())
             .map_err(|_| invalid_request("move"))?;
         move_viewer_tab::execute(request, &self.state.viewer).into_grpc()?;
-        let state = self.state.clone();
-        run_blocking(move || {
-            let mut connection = state.database.connection_lock()?;
-            viewer::pinned_tabs::save_order(&state.viewer, &mut connection)
-                .map_err(anyhow::Error::from)
-        })
-        .await?
-        .map_err(|error| unexpected(error, "save pinned tab order"))?;
         Ok(Response::new(v1::MoveViewerTabResponse {
             shell: Some(project_shell(&self.state)?),
         }))
@@ -292,11 +284,11 @@ impl ViewerService for ViewerGrpcService {
         };
         let state = self.state.clone();
         run_blocking(move || {
-            let mut connection = state
+            let connection = state
                 .database
                 .connection_lock()
                 .map_err(RenameSnapshotError::Unexpected)?;
-            rename_snapshot::execute(&request, &state.viewer, &mut connection)
+            rename_snapshot::execute(&request, &state.viewer, &connection)
         })
         .await?
         .into_grpc()?;
@@ -312,16 +304,7 @@ impl ViewerService for ViewerGrpcService {
             tab_id: tab_id(request.tab_id)?,
             pinned: request.pinned,
         };
-        let state = self.state.clone();
-        run_blocking(move || {
-            let mut connection = state
-                .database
-                .connection_lock()
-                .map_err(pinned_tabs::PinnedTabsError::Unexpected)?;
-            pinned_tabs::execute(request, &state.viewer, &mut connection)
-        })
-        .await?
-        .into_grpc()?;
+        set_viewer_tab_pinned::execute(request, &self.state.viewer).into_grpc()?;
         Ok(Response::new(v1::SetViewerTabPinnedResponse {}))
     }
 

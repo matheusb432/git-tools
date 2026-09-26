@@ -1,11 +1,6 @@
 use std::time::Duration;
 
-use gtl_application::live_views::save_live_view::{self, SaveLiveView};
-use gtl_infra::{
-    app_state::SqliteAppState, clock::SystemClock, git_client::HybridGitClient,
-    testing::TestRepository,
-};
-use gtl_models::live_views::LiveComparison;
+use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_wire::{
     proto, v1,
     viewer::{ViewerActiveState, ViewerShell},
@@ -60,15 +55,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     repository.git(&["switch", "-qc", "feature"]);
     repository.git(&["branch", "--set-upstream-to", "main"]);
     let database = SqliteAppState::open(directory.path())?;
-    save_live_view::execute(
-        SaveLiveView {
-            path: repository.path().to_path_buf(),
-            comparison: LiveComparison::LocalChanges,
-        },
-        &HybridGitClient,
-        &mut *database.connection_lock()?,
-        &SystemClock,
-    )?;
+    super::seed_live_tabs(&database, [super::working_tree_recipe(repository.root())])?;
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let initial = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
@@ -147,15 +134,7 @@ async fn local_row_content_ids_invalidate_same_stats_edits_through_grpc() -> Tes
     repository.commit_all("base");
     repository.write("work.txt", original.replace("line 15", "alpha"));
     let database = SqliteAppState::open(directory.path())?;
-    save_live_view::execute(
-        SaveLiveView {
-            path: repository.path().to_path_buf(),
-            comparison: LiveComparison::LocalChanges,
-        },
-        &HybridGitClient,
-        &mut *database.connection_lock()?,
-        &SystemClock,
-    )?;
+    super::seed_live_tabs(&database, [super::working_tree_recipe(repository.root())])?;
     let settings = directory.path().join("settings.toml");
     std::fs::write(&settings, "")?;
     let server = ServerHarness::start(directory.path(), Some(settings)).await?;

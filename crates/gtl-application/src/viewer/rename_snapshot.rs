@@ -5,7 +5,7 @@ use gtl_models::{
 use gtl_wire::viewer::RenameViewerSnapshot;
 use rusqlite::{Connection, params};
 
-use super::{ViewerState, ViewerStateError, ViewerTabKind, pinned_tabs};
+use super::{ViewerState, ViewerStateError, ViewerTabKind};
 
 /// Longest accepted snapshot name, in Unicode scalar values.
 pub const SNAPSHOT_NAME_CHARACTERS_MAX: u32 = 200;
@@ -42,7 +42,7 @@ pub enum RenameSnapshotError {
 pub fn execute(
     request: &RenameViewerSnapshot,
     state: &ViewerState,
-    connection: &mut Connection,
+    connection: &Connection,
 ) -> Result<(), RenameSnapshotError> {
     let text = request.name.trim();
     if text.chars().count() > SNAPSHOT_NAME_CHARACTERS_MAX as usize
@@ -58,23 +58,13 @@ pub fn execute(
             return Err(RenameSnapshotError::NotSnapshot);
         }
         let history_id = tab.history_id.ok_or(RenameSnapshotError::NotSaved)?;
-        let records = session.tabs().filter(|tab| tab.pinned).map(|tab| {
-            let mut recipe = tab.recipe.clone();
-            if tab.history_id == Some(history_id) {
-                recipe.name = Some(name.clone());
-            }
-            (recipe, tab.tab.kind() == ViewerTabKind::Live)
-        }).collect::<Vec<_>>();
-        let transaction = connection.transaction().map_err(anyhow::Error::from)?;
-        let changed = transaction.execute(
+        let changed = connection.execute(
             "UPDATE recent_renders SET recipe_name = ?1 WHERE id = ?2 AND render_status = 'success'",
             params![name.as_str(), i64::from(history_id)],
         ).map_err(anyhow::Error::from)?;
         if changed != 1 {
             return Err(RenameSnapshotError::HistoryMissing);
         }
-        pinned_tabs::persist_records(&transaction, &records).map_err(anyhow::Error::from)?;
-        transaction.commit().map_err(anyhow::Error::from)?;
         session.rename_snapshot(history_id, &name);
         Ok(())
     })?
@@ -114,8 +104,7 @@ mod tests {
     fn fixture(kind: ViewerTabKind) -> (ViewerState, Connection, gtl_models::viewer::ViewerTabId) {
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE recent_renders (id INTEGER PRIMARY KEY, recipe_name TEXT, render_status TEXT);
-            INSERT INTO recent_renders VALUES (1, NULL, 'success');
-            CREATE TABLE pinned_viewer_tabs (position INTEGER PRIMARY KEY, recipe_json TEXT, live INTEGER);").unwrap();
+            INSERT INTO recent_renders VALUES (1, NULL, 'success');").unwrap();
         let state = ViewerState::new();
         let recipe = utils::viewer::recipe(RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
@@ -186,24 +175,15 @@ mod tests {
     }
 
     #[test]
-    fn rename_persists_history_and_pins_without_changing_tab_identity() {
-        let (state, mut connection, tab_id) = fixture(ViewerTabKind::Snapshot);
-        pinned_tabs::execute(
-            gtl_wire::viewer::SetViewerTabPinned {
-                tab_id,
-                pinned: true,
-            },
-            &state,
-            &mut connection,
-        )
-        .unwrap();
+    fn rename_persists_history_without_changing_tab_identity() {
+        let (state, connection, tab_id) = fixture(ViewerTabKind::Snapshot);
         rename_snapshot::execute(
             &RenameViewerSnapshot {
                 tab_id,
                 name: "  Review auth  ".into(),
             },
             &state,
-            &mut connection,
+            &connection,
         )
         .unwrap();
         let stored: String = connection
@@ -214,47 +194,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, "Review auth");
-        let restored = ViewerState::new();
-        let restored_work = pinned_tabs::restore(&restored, &connection).unwrap();
-        assert_eq!(
-            restored_work[0].recipe().name.as_ref().unwrap().as_str(),
-            "Review auth"
-        );
         state
             .inspect(|session| {
                 let tab = session.tab(tab_id).unwrap();
                 assert_eq!(tab.tab.label(), &named("Review auth"));
                 assert_eq!(tab.recipe.name.as_ref().unwrap().as_str(), "Review auth");
-                assert!(tab.pinned);
             })
             .unwrap();
     }
 
     #[test]
-    fn failed_pin_write_rolls_back_history_and_keeps_the_label() {
-        let (state, mut connection, tab_id) = fixture(ViewerTabKind::Snapshot);
+    fn a_missing_history_record_keeps_the_label() {
+        let (state, connection, tab_id) = fixture(ViewerTabKind::Snapshot);
         connection
-            .execute_batch("DROP TABLE pinned_viewer_tabs")
+            .execute_batch("DELETE FROM recent_renders")
             .unwrap();
-        assert!(
+        assert!(matches!(
             rename_snapshot::execute(
                 &RenameViewerSnapshot {
                     tab_id,
                     name: "Lost rename".into()
                 },
                 &state,
-                &mut connection
-            )
-            .is_err()
-        );
-        let stored: Option<String> = connection
-            .query_row(
-                "SELECT recipe_name FROM recent_renders WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(stored, None);
+                &connection
+            ),
+            Err(RenameSnapshotError::HistoryMissing)
+        ));
         state
             .inspect(|session| {
                 assert_eq!(session.tab(tab_id).unwrap().tab.label(), &two_commits());
@@ -264,7 +229,7 @@ mod tests {
 
     #[test]
     fn live_tabs_and_invalid_names_cannot_be_renamed() {
-        let (state, mut connection, tab_id) = fixture(ViewerTabKind::Live);
+        let (state, connection, tab_id) = fixture(ViewerTabKind::Live);
         assert!(matches!(
             rename_snapshot::execute(
                 &RenameViewerSnapshot {
@@ -272,7 +237,7 @@ mod tests {
                     name: "Live name".into()
                 },
                 &state,
-                &mut connection
+                &connection
             ),
             Err(RenameSnapshotError::NotSnapshot)
         ));
@@ -281,7 +246,7 @@ mod tests {
                 rename_snapshot::execute(
                     &RenameViewerSnapshot { tab_id, name },
                     &state,
-                    &mut connection
+                    &connection
                 ),
                 Err(RenameSnapshotError::InvalidName)
             ));

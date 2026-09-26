@@ -21,6 +21,7 @@ pub struct ServerHarness {
     state: AppState,
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<anyhow::Result<()>>,
+    tab_saving: crate::viewer_runtime::ViewerTabSaving,
     #[cfg(test)]
     native_channel: Channel,
 }
@@ -30,7 +31,7 @@ impl ServerHarness {
         let endpoint = LocalEndpoint::from_root(data_root)?;
         let listener = LocalListener::bind(&endpoint, Duration::from_secs(1)).await?;
         let state = AppState::open_with_settings(data_root, TomlSettingsStore::new(settings_path))?;
-        crate::viewer_runtime::restore_saved_live_views(&state)?;
+        let tab_saving = crate::viewer_runtime::restore_viewer_tabs(&state)?;
         let (shutdown, shutdown_receiver) = oneshot::channel();
         let server_state = state.clone();
         let task = tokio::spawn(serve(
@@ -50,6 +51,7 @@ impl ServerHarness {
             state,
             shutdown: Some(shutdown),
             task,
+            tab_saving,
             #[cfg(test)]
             native_channel,
         })
@@ -92,7 +94,9 @@ impl ServerHarness {
     }
 
     pub async fn wait(self) -> anyhow::Result<()> {
-        self.task.await??;
+        let served = self.task.await;
+        self.tab_saving.stop().await;
+        served??;
         Ok(())
     }
 

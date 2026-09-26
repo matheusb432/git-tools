@@ -428,7 +428,7 @@ fn project_comparisons_restore_independently_and_repeat_renders_update_recency()
     }
     assert_ne!(ids[0], ids[1]);
     assert_viewer_project_recency(&home, &connection)?;
-    assert_live_restores_independently(&mut connection, &viewer, ids[1]);
+    assert_closing_the_live_tab_forgets_its_view(&mut connection, &viewer, ids[1]);
     Ok(())
 }
 
@@ -479,16 +479,17 @@ fn project_comparison_repository(path: PathBuf) -> TestRepository {
     repository
 }
 
-fn assert_live_restores_independently(
+fn assert_closing_the_live_tab_forgets_its_view(
     connection: &mut rusqlite::Connection,
     viewer: &ViewerState,
     live_tab: gtl_models::viewer::ViewerTabId,
 ) {
-    let saved = list_live_views::execute(ListLiveViews, connection).unwrap();
-    assert_eq!(saved.len(), 1);
-    let restored = ViewerState::new();
-    work::reserve_restored_live_views(&restored, saved).unwrap();
-    assert_eq!(restored.inspect(|session| session.tabs().len()).unwrap(), 1);
+    assert_eq!(
+        list_live_views::execute(ListLiveViews, connection)
+            .unwrap()
+            .len(),
+        1
+    );
     close_viewer_tabs::execute(CloseViewerTabs::One(live_tab), connection, viewer).unwrap();
     assert!(
         list_live_views::execute(ListLiveViews, connection)

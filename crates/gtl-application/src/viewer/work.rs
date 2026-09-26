@@ -20,7 +20,6 @@ use super::{
 use crate::{
     diffs::compute_commit_patch::{self, ComputeCommitPatch, ComputeCommitPatchError},
     history::{RecentRenderRecord, record_render::RecordRender},
-    live_views::{LiveViewRecord, recipe_for_record},
     ports::{ExtensionFilterReader, GitClient, UserSettingsReader},
     recipes::{Recipe, RecipeBatch, RecipeBatchId, RecipeBatchKind, recipe_label},
 };
@@ -31,6 +30,8 @@ pub struct ReservedRecipeWork {
     recipe: Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
+    /// Closes an unpinned snapshot whose opening computation finds nothing to show.
+    skip_empty: bool,
 }
 
 impl ReservedRecipeWork {
@@ -66,6 +67,7 @@ pub struct ComputedRecipeWork {
     ticket: ComputeTicket,
     result: Result<PrepareRecipeOk, PrepareRecipeError>,
     head: Option<super::refresh_live_view::LiveViewState>,
+    skip_empty: bool,
 }
 
 /// Contains completed commit work ready for one publication attempt.
@@ -141,6 +143,7 @@ pub fn reserve_open(
             recipe,
             kind,
             ticket,
+            skip_empty: true,
         })
     })?
 }
@@ -158,43 +161,6 @@ pub fn reserve_recipe_batch(
         .into_iter()
         .map(|recipe| reserve_open(state, recipe, batch.batch_id, kind))
         .collect()
-}
-
-pub(crate) fn reserve_restored_pin(
-    state: &ViewerState,
-    recipe: Recipe,
-    kind: ViewerTabKind,
-) -> Result<ReservedRecipeWork, ReserveRecipeError> {
-    state.update(|session| {
-        let id = session
-            .open(recipe, RecipeBatchId::generate(), kind)
-            .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
-        session.set_pinned(id, true);
-        reserve_refresh_in_session(session, id)
-    })?
-}
-
-pub fn reserve_restored_live_views(
-    state: &ViewerState,
-    records: impl IntoIterator<Item = LiveViewRecord>,
-) -> Result<Option<ReservedRecipeWork>, ReserveRecipeError> {
-    state.update(move |session| {
-        let mut newest = None;
-        for record in records {
-            newest = Some(
-                session
-                    .open(
-                        recipe_for_record(&record),
-                        RecipeBatchId::generate(),
-                        ViewerTabKind::Live,
-                    )
-                    .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?,
-            );
-        }
-        newest
-            .map(|tab_id| reserve_refresh_in_session(session, tab_id))
-            .transpose()
-    })?
 }
 
 pub fn reserve_history_open(
@@ -265,6 +231,7 @@ fn reserve_refresh_in_session(
         recipe,
         kind,
         ticket,
+        skip_empty: false,
     })
 }
 
@@ -280,6 +247,7 @@ pub fn compute_recipe(
         recipe,
         kind,
         ticket,
+        skip_empty,
     } = work;
     let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
     let head_before = (kind == ViewerTabKind::Live)
@@ -305,6 +273,7 @@ pub fn compute_recipe(
         ticket,
         result,
         head,
+        skip_empty,
     }
 }
 
@@ -317,6 +286,7 @@ pub fn publish_recipe(
         ticket,
         result,
         head,
+        skip_empty,
     } = work;
     match result {
         Ok(PrepareRecipeOk::Publish {
@@ -324,8 +294,8 @@ pub fn publish_recipe(
             view,
             history,
         }) => {
-            let skipped_label =
-                (!view.has_diff_content()).then(|| recipe_label::pending(&history.recipe));
+            let skipped_label = (skip_empty && !view.has_diff_content())
+                .then(|| recipe_label::pending(&history.recipe));
             let value = CachedView::from_snapshot(state.prepare_snapshot(view)?);
             state.update(|session| {
                 let outcome = skipped_label.map_or(EmptySnapshotOutcome::Kept, |skipped_label| {
@@ -550,6 +520,7 @@ mod tests {
                 }),
             }),
             head: None,
+            skip_empty: work.skip_empty,
         }
     }
 

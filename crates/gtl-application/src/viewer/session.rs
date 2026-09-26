@@ -242,7 +242,7 @@ impl ViewerSession {
         self.open_labeled(recipe, batch_id, kind, label)
     }
 
-    fn open_labeled(
+    pub(super) fn open_labeled(
         &mut self,
         recipe: Recipe,
         batch_id: RecipeBatchId,
