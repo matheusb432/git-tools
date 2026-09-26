@@ -10,7 +10,6 @@ use crate::shared::i18n::{t, use_language};
 pub(crate) enum PanelDialogVariant {
     #[default]
     Panel,
-    #[cfg(feature = "desktop")]
     Table,
 }
 
@@ -22,18 +21,14 @@ pub(crate) fn PanelDialog(
     title: String,
     #[props(default)] variant: PanelDialogVariant,
     onclose: EventHandler<()>,
-    artifact_view_id: Option<String>,
+
     children: Element,
 ) -> Element {
     let language = use_language();
     use_dialog(&id, &trigger_id, open, Duration::ZERO);
     let title_id = format!("{id}-title");
-    let artifact_dialog = artifact_view_id.as_ref().map(|_| "");
-    let artifact_close_action = artifact_view_id.as_ref().map(|_| "close-dialog");
-    let artifact_trigger_id = artifact_view_id.as_ref().map(|_| trigger_id.clone());
     let class = match variant {
         PanelDialogVariant::Panel => "dialog-surface m-auto p-0",
-        #[cfg(feature = "desktop")]
         PanelDialogVariant::Table => "dialog-surface m-auto w-[min(72rem,calc(100vw-2rem))] p-0",
     };
 
@@ -43,8 +38,7 @@ pub(crate) fn PanelDialog(
             class,
             aria_modal: "true",
             aria_labelledby: title_id.clone(),
-            "data-gtl-dialog": artifact_dialog,
-            "data-gtl-dialog-trigger": artifact_trigger_id,
+
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
                     event.prevent_default();
@@ -60,7 +54,7 @@ pub(crate) fn PanelDialog(
                         aria_label: t!(language, "dialog-close-named", title = title.as_str()),
                         title: t!(language, "dialog-close-short"),
                         "data-dialog-initial-focus": "true",
-                        "data-gtl-action": artifact_close_action,
+
                         onclick: move |_| onclose.call(()),
                         span { aria_hidden: "true",
                             X { size: 15 }
@@ -70,12 +64,11 @@ pub(crate) fn PanelDialog(
                 match variant {
                     PanelDialogVariant::Panel => rsx! {
                         ScrollArea { class: "min-h-0 overflow-auto p-4",
-                            if open || artifact_view_id.is_some() {
+                            if open {
                                 {children}
                             }
                         }
                     },
-                    #[cfg(feature = "desktop")]
                     PanelDialogVariant::Table => rsx! {
                         div { class: "min-h-0 overflow-hidden p-4",
                             if open {

@@ -1,12 +1,11 @@
 use dioxus::prelude::*;
-#[cfg(feature = "desktop")]
-use gtl_models::settings::UserSettingsRevision;
 use gtl_models::settings::{
-    ViewerAccessibility, ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
+    UserSettingsRevision, ViewerAccessibility, ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
 };
-#[cfg(feature = "desktop")]
-use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
-use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerTheme};
+use gtl_wire::viewer::{
+    EditSettingsRequest, FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
+    ViewerTheme,
+};
 use lucide_dioxus::Check;
 
 use crate::shared::{
@@ -443,7 +442,6 @@ pub(crate) fn ViewerSettingsForm(
     }
 }
 
-#[cfg(feature = "desktop")]
 pub(super) fn viewer_settings_patch(
     current: ViewerSettingsSelection,
     selected: ViewerSettingsSelection,
@@ -486,7 +484,6 @@ pub(super) fn viewer_settings_patch(
     }
 }
 
-#[cfg(feature = "desktop")]
 fn changed_field<T: PartialEq>(current: &T, selected: T) -> FieldUpdate<T> {
     if current == &selected {
         FieldUpdate::Unchanged
@@ -495,7 +492,6 @@ fn changed_field<T: PartialEq>(current: &T, selected: T) -> FieldUpdate<T> {
     }
 }
 
-#[cfg(feature = "desktop")]
 fn changed_optional_field<T: PartialEq>(
     current: Option<&T>,
     selected: Option<T>,
@@ -590,7 +586,7 @@ fn density_options(language: ViewerLanguage) -> Vec<SelectOption> {
     ]
 }
 
-#[cfg(all(test, feature = "desktop"))]
+#[cfg(test)]
 mod tests {
     use gtl_wire::viewer::{FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions};
 

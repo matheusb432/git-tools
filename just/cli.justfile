@@ -5,7 +5,7 @@ set working-directory := '..'
 _default:
     @just --list cli
 
-# Build the release CLI engine + gtl-server + the static artifact stylesheet: target/release/{git-tools,gtl-server}[.exe].
+# Build the release CLI engine + gtl-server: target/release/{git-tools,gtl-server}[.exe].
 [group('cli')]
 build:
     cargo run --quiet -p xtask -- build --target cli

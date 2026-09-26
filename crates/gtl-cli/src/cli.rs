@@ -356,7 +356,7 @@ pub struct DiffTargetArgs {
 
 #[derive(Debug, Args)]
 pub struct DiffScopeArgs {
-    /// Render one tabbed HTML diff for every git repo under the current directory.
+    /// Render one HTML document with a section for every git repo under the current directory.
     #[arg(short = 'r', long = "recursive", conflicts_with_all = ["target", "merge", "name"])]
     pub recursive: bool,
     /// Include nested linked worktrees in a recursive diff scan.

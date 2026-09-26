@@ -13,7 +13,6 @@ use crate::shared::{
     },
 };
 
-#[cfg(feature = "desktop")]
 pub(super) mod desktop;
 
 /// Edits the extension filter behind the Files panel's filter button.

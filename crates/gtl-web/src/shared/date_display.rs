@@ -1,38 +1,30 @@
 //! Displays timestamps in the viewer's date format and local time zone.
 //!
 //! The desktop viewer provides its configured format through
-//! [`use_date_display_provider`]. Trees without a provider, such as offline
-//! artifacts, keep ISO in each timestamp's recorded offset.
+//! [`use_date_display_provider`]. Component previews without a provider
+//! keep ISO in each timestamp's recorded offset.
 
 use dioxus::prelude::*;
-#[cfg(feature = "interactive-ui")]
-use gtl_models::settings::{ViewerDateFormat, ViewerLanguage};
-use gtl_models::timestamps::MachineTimestamp;
-#[cfg(feature = "interactive-ui")]
+use gtl_models::{
+    settings::{ViewerDateFormat, ViewerLanguage},
+    timestamps::MachineTimestamp,
+};
 use jiff::civil::DateTime;
 
-#[cfg(feature = "interactive-ui")]
 use crate::shared::i18n::t;
 
-#[cfg(feature = "interactive-ui")]
 const SECONDS_PER_MINUTE: i64 = 60;
-#[cfg(feature = "interactive-ui")]
 const SECONDS_PER_HOUR: i64 = 60 * SECONDS_PER_MINUTE;
-#[cfg(feature = "interactive-ui")]
 const SECONDS_PER_DAY: i64 = 24 * SECONDS_PER_HOUR;
 /// Dates at least this old show ISO in the relative format.
-#[cfg(feature = "interactive-ui")]
 const RELATIVE_AGE_SECONDS_LIMIT: i64 = 7 * SECONDS_PER_DAY;
 /// How often relative dates advance.
-#[cfg(feature = "desktop")]
 const RELATIVE_CLOCK_PERIOD: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The date the settings options format as an example. Its day exceeds 12,
 /// so the day-first and month-first samples cannot be confused.
-#[cfg(feature = "interactive-ui")]
 const SAMPLE_DATE_TIME: DateTime = jiff::civil::date(2026, 6, 28).at(13, 45, 0, 0);
 /// The age the relative settings option formats as an example.
-#[cfg(feature = "interactive-ui")]
 const SAMPLE_AGE_SECONDS: i64 = 3 * SECONDS_PER_HOUR;
 
 /// Shows `timestamp` in a `time` element whose tooltip holds the exact time.
@@ -41,18 +33,14 @@ pub(crate) fn DateDisplayTime(
     timestamp: MachineTimestamp,
     #[props(default)] class: String,
 ) -> Element {
-    #[cfg(feature = "desktop")]
     let DateDisplayText { text, exact, .. } =
         use_date_display().show(&timestamp, crate::shared::i18n::use_language());
-    #[cfg(not(feature = "desktop"))]
-    let (text, exact) = (timestamp.display_minute(), timestamp.to_string());
     rsx! {
         time { class, datetime: timestamp.to_string(), title: exact, "{text}" }
     }
 }
 
 /// A timestamp formatted for display.
-#[cfg(feature = "desktop")]
 pub(crate) struct DateDisplayText {
     /// The date in the configured format.
     pub(crate) text: String,
@@ -63,16 +51,14 @@ pub(crate) struct DateDisplayText {
 }
 
 /// Formats timestamps for the component that called [`use_date_display`].
-#[cfg(feature = "desktop")]
 #[derive(Clone, Copy)]
 pub(crate) enum DateDisplay {
-    /// ISO in each timestamp's recorded offset, as offline artifacts show it.
+    /// ISO in each timestamp's recorded offset.
     Recorded,
     /// The configured format in the local time zone.
     Viewer(ViewerDateDisplay),
 }
 
-#[cfg(feature = "desktop")]
 #[derive(Clone, Copy)]
 pub(crate) struct ViewerDateDisplay {
     format: ReadSignal<ViewerDateFormat>,
@@ -80,7 +66,6 @@ pub(crate) struct ViewerDateDisplay {
 }
 
 /// Makes `format` the date format of every descendant's [`use_date_display`].
-#[cfg(feature = "desktop")]
 pub(crate) fn use_date_display_provider(format: ReadSignal<ViewerDateFormat>) {
     let mut now = use_signal(crate::shared::browser::current_timestamp);
     // Only relative dates read `now`, so other formats never re-render on a tick.
@@ -97,12 +82,10 @@ pub(crate) fn use_date_display_provider(format: ReadSignal<ViewerDateFormat>) {
 }
 
 /// Returns the date display of the calling component's tree.
-#[cfg(feature = "desktop")]
 pub(crate) fn use_date_display() -> DateDisplay {
     try_use_context::<ViewerDateDisplay>().map_or(DateDisplay::Recorded, DateDisplay::Viewer)
 }
 
-#[cfg(feature = "desktop")]
 impl DateDisplay {
     /// Formats `timestamp`, subscribing the calling component to the format
     /// and, for relative dates, to the clock.
@@ -146,7 +129,6 @@ impl DateDisplay {
 }
 
 /// Formats the settings example of `format`.
-#[cfg(feature = "interactive-ui")]
 pub(crate) fn date_format_sample(format: ViewerDateFormat, language: ViewerLanguage) -> String {
     match format {
         ViewerDateFormat::Relative => relative_date_text(SAMPLE_AGE_SECONDS, language)
@@ -158,7 +140,6 @@ pub(crate) fn date_format_sample(format: ViewerDateFormat, language: ViewerLangu
 }
 
 /// Formats `local` to the minute; the relative format uses ISO, its format for older dates.
-#[cfg(feature = "interactive-ui")]
 fn absolute_date_text(local: DateTime, format: ViewerDateFormat) -> String {
     let pattern = match format {
         ViewerDateFormat::Iso | ViewerDateFormat::Relative => "%Y-%m-%d %H:%M",
@@ -169,7 +150,6 @@ fn absolute_date_text(local: DateTime, format: ViewerDateFormat) -> String {
 }
 
 /// States an age of `age_seconds`, or `None` for future dates and dates a week or older.
-#[cfg(feature = "interactive-ui")]
 fn relative_date_text(age_seconds: i64, language: ViewerLanguage) -> Option<String> {
     Some(match age_seconds {
         0..SECONDS_PER_MINUTE => t!(language, "date-just-now"),
@@ -192,7 +172,7 @@ fn relative_date_text(age_seconds: i64, language: ViewerLanguage) -> Option<Stri
     })
 }
 
-#[cfg(all(test, feature = "interactive-ui"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

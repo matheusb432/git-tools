@@ -451,7 +451,9 @@ fn ReadyWorkspace(
             onclose: move |()| mobile_panel.set(None),
             FilesPanel {
                 onnavigate,
-                extension_filter_id: "mobile-diff-extension-filters",
+                filter_control: rsx! {
+                    super::extension_filters::desktop::ExtensionFilters { id: "mobile-diff-extension-filters" }
+                },
             }
         }
         PanelDialog {

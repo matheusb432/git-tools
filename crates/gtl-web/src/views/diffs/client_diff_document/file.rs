@@ -4,7 +4,7 @@ mod navigation_tests;
 pub(super) mod rows;
 
 use dioxus::prelude::*;
-use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath, viewer::ViewerTabId};
+use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
@@ -33,7 +33,6 @@ pub(super) fn DiffFileCard(
     onretry: EventHandler<()>,
     retry_allowed: bool,
     file_index: usize,
-    artifact_tab_id: Option<ViewerTabId>,
     controls: Option<DiffFileControls>,
     body: Option<Element>,
 ) -> Element {
@@ -57,22 +56,13 @@ pub(super) fn DiffFileCard(
             set_open.call(!folded);
         }
     });
-    let (file_id, original_anchor_id, path, absolute_path, comment_leader) =
-        summary.with(|summary| {
-            (
-                summary.id.clone(),
-                summary.anchor_id.clone(),
-                summary.path.to_string_lossy().into_owned(),
-                summary
-                    .absolute_path
-                    .as_path()
-                    .to_string_lossy()
-                    .into_owned(),
-                copy_comment_leader(&summary.path),
-            )
-        });
-    let artifact_file_id = artifact_tab_id.map(|tab_id| static_artifact_file_id(tab_id, &file_id));
-    let anchor_id = artifact_file_id.clone().unwrap_or(original_anchor_id);
+    let (anchor_id, comment_leader) = summary.with(|summary| {
+        (
+            summary.anchor_id.clone(),
+            copy_comment_leader(&summary.path),
+        )
+    });
+    let path = summary.with(|summary| summary.path.to_string_lossy().into_owned());
     let navigation_anchor_id = anchor_id.clone();
     use_effect(move || {
         if flashing_file.read().as_deref() == Some(navigation_anchor_id.as_str()) {
@@ -80,20 +70,12 @@ pub(super) fn DiffFileCard(
         }
     });
     let copy_popover_id = format!("{anchor_id}-copy-menu");
-    let artifact_path = artifact_file_id.as_ref().map(|_| path.clone());
-    let artifact_absolute_path = artifact_file_id.as_ref().map(|_| absolute_path);
-    let artifact_enhancement = artifact_file_id.is_some();
-    let artifact_initial_open =
-        artifact_enhancement.then_some(if initially_expanded { "true" } else { "false" });
     let is_flashing = use_memo(move || {
         let summary = summary.read();
         flashing_file
             .read()
             .as_deref()
-            .is_some_and(|flashing| match artifact_tab_id {
-                Some(tab_id) => flashing == static_artifact_file_id(tab_id, &summary.id),
-                None => flashing == summary.anchor_id,
-            })
+            .is_some_and(|flashing| flashing == summary.anchor_id)
     });
 
     rsx! {
@@ -102,11 +84,7 @@ pub(super) fn DiffFileCard(
             "data-gtl-diff-file": "",
             "data-file-index": file_index.to_string(),
             "data-path": path.clone(),
-            "data-gtl-file": artifact_file_id.clone(),
-            "data-gtl-path": artifact_path,
-            "data-gtl-absolute-path": artifact_absolute_path,
             "data-gtl-comment-leader": comment_leader,
-            "data-gtl-initial-open": artifact_initial_open,
             class: "diff-file-card group/file print:[&[hidden]]:block!",
             class: if is_flashing() { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
@@ -117,7 +95,6 @@ pub(super) fn DiffFileCard(
                 onresize: controls.map(|controls| controls.onresize),
                 copy_popover_id,
                 onopen,
-                artifact_enhancement,
             }
             if let Some(body) = body {
                 {body}
@@ -129,7 +106,6 @@ pub(super) fn DiffFileCard(
                     file_index,
                     onretry,
                     retry_allowed,
-                    artifact_file_id: artifact_file_id.clone(),
                 }
             }
         }
@@ -144,7 +120,6 @@ fn DiffFileHeader(
     onresize: Option<EventHandler<ResizeEvent>>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
-    artifact_enhancement: bool,
 ) -> Element {
     let file_summary = summary.read();
     rsx! {
@@ -169,19 +144,10 @@ fn DiffFileHeader(
                 class: "h-5 w-px flex-none bg-line mobile:hidden",
                 aria_hidden: "true",
             }
-            DiffFileActions {
-                summary,
-                copy_popover_id,
-                onopen,
-                artifact_enhancement,
-            }
+            DiffFileActions { summary, copy_popover_id, onopen }
             DiffFileStatus { status: file_summary.status }
         }
     }
-}
-
-fn static_artifact_file_id(tab_id: ViewerTabId, file_id: &ViewerDiffFileId) -> String {
-    format!("artifact-view-{tab_id}-{}", file_id.as_str())
 }
 
 pub(super) fn copy_comment_leader(path: &RepositoryRelativePath) -> &'static str {
@@ -282,27 +248,9 @@ mod tests {
         })
     }
 
-    fn render_file(
-        file: ClientDiffFile,
-        artifact_tab_id: Option<gtl_models::viewer::ViewerTabId>,
-    ) -> String {
-        let mut file_card = VirtualDom::new_with_props(
-            TestDiffFile,
-            TestDiffFileProps {
-                file,
-                artifact_tab_id,
-            },
-        );
-        file_card.rebuild_in_place();
-        dioxus_ssr::render(&file_card)
-    }
-
     #[component]
-    fn TestDiffFile(
-        file: ClientDiffFile,
-        artifact_tab_id: Option<gtl_models::viewer::ViewerTabId>,
-    ) -> Element {
-        let Some(tab_id) = artifact_tab_id.or_else(|| viewer_tab_id(1).ok()) else {
+    fn TestDiffFile(file: ClientDiffFile) -> Element {
+        let Some(tab_id) = viewer_tab_id(1).ok() else {
             return rsx! {};
         };
         let files = vec![file.clone(), file.clone(), file.clone(), file];
@@ -336,20 +284,14 @@ mod tests {
                 onretry: move |()| {},
                 retry_allowed: false,
                 file_index: 3,
-                artifact_tab_id,
             }
         }
     }
 
     #[test]
     fn streamed_batches_keep_existing_rows_and_replace_them_on_retry() -> TestResult {
-        let mut dom = VirtualDom::new_with_props(
-            TestDiffFile,
-            TestDiffFileProps {
-                file: test_file()?,
-                artifact_tab_id: None,
-            },
-        );
+        let mut dom =
+            VirtualDom::new_with_props(TestDiffFile, TestDiffFileProps { file: test_file()? });
         dom.rebuild_in_place();
         let workspace = dom
             .runtime()
@@ -375,62 +317,5 @@ mod tests {
         assert!(!html.contains("echo static"));
         assert!(!html.contains("appended batch"));
         Ok(())
-    }
-
-    #[test]
-    fn artifact_file_markup_is_qualified_and_has_compact_copy_actions() -> TestResult {
-        let artifact = render_file(test_file()?, Some(viewer_tab_id(7)?));
-
-        assert!(artifact.contains(r#"id="artifact-view-7-file-0""#));
-        assert!(artifact.contains(r#"id="artifact-view-7-file-0-rows""#));
-        assert!(artifact.contains(r#"data-gtl-file="artifact-view-7-file-0""#));
-        assert!(artifact.contains(r#"data-gtl-path="scripts/run.SH""#));
-        assert!(artifact.contains(r#"data-gtl-absolute-path="/repo/scripts/run.SH""#));
-        assert!(artifact.contains("data-gtl-comment-leader=\"#\""));
-        assert!(artifact.contains(r#"data-gtl-initial-open="false""#));
-        assert!(artifact.contains("diff-file-card group/file"));
-        assert!(artifact.contains("diff-file-summary"));
-        assert!(artifact.contains(r#"aria-label="Modified file">M</span></summary>"#));
-        assert!(!artifact.contains("mb-5 rounded-panel"));
-        assert_artifact_copy_menu(&artifact);
-
-        let other_artifact = render_file(test_file()?, Some(viewer_tab_id(8)?));
-        assert!(other_artifact.contains(r#"id="artifact-view-8-file-0""#));
-        assert!(other_artifact.contains(r#"id="artifact-view-8-file-0-rows""#));
-        assert!(other_artifact.contains(r#"id="artifact-view-8-file-0-copy-menu""#));
-        assert!(!other_artifact.contains(r#"id="artifact-view-7-file-0""#));
-
-        let desktop = render_file(test_file()?, None);
-        assert!(desktop.contains(r#"id="f-scripts-run-sh""#));
-        assert!(desktop.contains(r#"id="f-scripts-run-sh-copy-menu""#));
-        assert!(desktop.contains(r#"id="viewer-diff-3""#));
-        assert!(desktop.contains("data-gtl-comment-leader=\"#\""));
-        assert!(desktop.contains(r#"data-gtl-copy-line="""#));
-        assert!(!desktop.contains("data-gtl-file="));
-        assert!(!desktop.contains("data-gtl-copy="));
-        Ok(())
-    }
-
-    fn assert_artifact_copy_menu(artifact: &str) {
-        assert!(artifact.contains(r#"id="artifact-view-7-file-0-copy-menu""#));
-        assert!(artifact.contains(r#"popovertarget="artifact-view-7-file-0-copy-menu""#));
-        assert!(artifact.contains(r#"popover="auto""#));
-        assert!(artifact.contains("popover-surface"));
-        let stylesheet = include_str!("../../../app/assets/styles/overlays.css");
-        let (_, styles) = stylesheet
-            .split_once(".popover-surface[data-placement=\"trigger-end\"] {")
-            .unwrap();
-        let styles = styles.split('}').next().unwrap();
-        assert!(styles.contains("[position-area:bottom_span-left]"));
-        assert!(styles.contains("[position-try-fallbacks:flip-block]"));
-        assert!(artifact.contains(r#"data-gtl-copy="path""#));
-        assert!(artifact.contains(r#"data-gtl-copy="absolute""#));
-        assert!(!artifact.contains(r#"data-gtl-copy="code""#));
-        assert_eq!(artifact.matches("data-gtl-copy-feedback=").count(), 2);
-        assert!(artifact.contains("Relative path"));
-        assert!(artifact.contains("Absolute path"));
-        assert!(!artifact.contains("<small"));
-        assert!(!artifact.contains(r#"title="scripts/run.SH""#));
-        assert!(!artifact.contains(r#"title="/repo/scripts/run.SH""#));
     }
 }

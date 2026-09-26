@@ -91,15 +91,11 @@ impl WorkspaceFilesModel {
 pub(super) fn FilesPanel(
     test_id: Option<String>,
     onnavigate: EventHandler<String>,
-    artifact_view_id: Option<String>,
-    /// Keeps the filter popover ID unique when a layout renders more than one panel.
-    #[props(default = "diff-extension-filters".to_owned())]
-    extension_filter_id: String,
+    filter_control: Option<Element>,
 ) -> Element {
     let workspace = super::use_workspace_context();
     let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Files);
     let model = workspace.files.read();
-    let artifact_enhancement = artifact_view_id.is_some();
 
     rsx! {
         ScrollArea {
@@ -108,39 +104,20 @@ pub(super) fn FilesPanel(
             onmounted: scroll.mount,
             onresize: move |_| scroll.restore.call(()),
             onscroll: scroll.save,
-            FilesPanelHeading {
-                file_count: model.file_count,
-                artifact_view_id,
-                extension_filter_id,
-            }
+            FilesPanelHeading { file_count: model.file_count, filter_control }
             FilesPanelSummary { totals: model.totals }
             if model.file_count == 0 {
                 EmptyNotice { {t!(use_language(), "files-empty")} }
             } else {
-                {render_file_tree(&model.tree, false, onnavigate, artifact_enhancement)}
+                {render_file_tree(&model.tree, false, onnavigate)}
             }
         }
     }
 }
 
 #[component]
-fn FilesPanelHeading(
-    file_count: usize,
-    artifact_view_id: Option<String>,
-    extension_filter_id: String,
-) -> Element {
+fn FilesPanelHeading(file_count: usize, filter_control: Option<Element>) -> Element {
     let language = use_language();
-    #[cfg(feature = "desktop")]
-    let extension_filters = artifact_view_id.is_none().then(|| {
-        rsx! {
-            super::extension_filters::desktop::ExtensionFilters { id: extension_filter_id }
-        }
-    });
-    #[cfg(not(feature = "desktop"))]
-    let extension_filters: Option<Element> = {
-        let _ = extension_filter_id;
-        None
-    };
     rsx! {
         div { class: "mx-1 mb-2 flex items-center justify-between gap-1",
             h2 { class: "flex items-center gap-1.5 font-semibold text-ink",
@@ -151,13 +128,9 @@ fn FilesPanelHeading(
                 }
             }
             div { class: "flex items-center",
-                super::path_filter::PathFilterTrigger { artifact_view_id: artifact_view_id.clone() }
-                if artifact_view_id.is_none() {
-                    super::titlebar::CollapseFilesButton {}
-                }
-                if let Some(extension_filters) = extension_filters {
-                    {extension_filters}
-                }
+                super::path_filter::PathFilterTrigger {}
+                super::titlebar::CollapseFilesButton {}
+                {filter_control}
             }
         }
     }
@@ -180,7 +153,6 @@ fn render_file_tree(
     tree: &WorkspaceFileTree,
     nested: bool,
     onnavigate: EventHandler<String>,
-    artifact_enhancement: bool,
 ) -> Element {
     rsx! {
         ul { class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
@@ -191,16 +163,12 @@ fn render_file_tree(
                             WorkspaceDirectoryCaret {}
                             span { class: "diff-files-directory-name min-w-0", "{directory_name}" }
                         }
-                        {render_file_tree(directory, true, onnavigate, artifact_enhancement)}
+                        {render_file_tree(directory, true, onnavigate)}
                     }
                 }
             }
             for file_index in &tree.files {
-                WorkspaceFileItem {
-                    file_index: *file_index,
-                    onnavigate,
-                    artifact_enhancement,
-                }
+                WorkspaceFileItem { file_index: *file_index, onnavigate }
             }
         }
     }
@@ -218,11 +186,7 @@ fn WorkspaceDirectoryCaret() -> Element {
 }
 
 #[component]
-fn WorkspaceFileItem(
-    file_index: usize,
-    onnavigate: EventHandler<String>,
-    artifact_enhancement: bool,
-) -> Element {
+fn WorkspaceFileItem(file_index: usize, onnavigate: EventHandler<String>) -> Element {
     let workspace = super::use_workspace_context();
     let file = use_memo(use_reactive((&file_index,), move |(file_index,)| {
         workspace.view.read().files.get(file_index).cloned()
@@ -237,7 +201,7 @@ fn WorkspaceFileItem(
     );
     let anchor_id = file.anchor_id.clone();
     let color = file_status_text_class(file.status);
-    let artifact_action = artifact_enhancement.then_some("navigate-file");
+
     let item_attributes = merge_attributes(vec![attributes!(div {
         class: "diff-files-file-button gap-1.5 px-1.5 py-0.5 leading-snug",
     })]);
@@ -250,7 +214,7 @@ fn WorkspaceFileItem(
                 variant: ButtonVariant::Bare,
                 attributes: item_attributes,
                 "data-file-target": anchor_id.clone(),
-                "data-gtl-action": artifact_action,
+
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
                 span { class: "diff-files-file-name min-w-0 {color}", "{file_name}" }

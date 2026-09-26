@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use dioxus::dioxus_core::NoOpMutations;
 
 use super::{tests::test_file, *};
-use crate::test_support::{TestResult, viewer_tab_id};
+use crate::test_support::TestResult;
 
 #[derive(Clone)]
 struct NavigationRenderCounts(Rc<Vec<Cell<usize>>>);
@@ -16,7 +16,7 @@ pub(super) fn record_render(file_index: usize) {
 }
 
 #[component]
-fn NavigationFiles(files: Vec<ClientDiffFile>, artifact_tab_id: Option<ViewerTabId>) -> Element {
+fn NavigationFiles(files: Vec<ClientDiffFile>) -> Element {
     let file_count = files.len();
     let files = use_store(move || files);
     use_context_provider(|| {
@@ -38,7 +38,6 @@ fn NavigationFiles(files: Vec<ClientDiffFile>, artifact_tab_id: Option<ViewerTab
                 onretry: move |()| {},
                 retry_allowed: false,
                 file_index,
-                artifact_tab_id,
             }
         }
     }
@@ -55,7 +54,7 @@ fn file_opening_tag<'a>(html: &'a str, anchor_id: &str) -> &'a str {
 
 #[test]
 fn file_navigation_renders_changed_cards_and_reopens_the_same_target() -> TestResult {
-    for artifact_tab_id in [None, Some(viewer_tab_id(7)?)] {
+    {
         let files = (0..3)
             .map(|index| {
                 let mut file = test_file()?;
@@ -66,20 +65,9 @@ fn file_navigation_renders_changed_cards_and_reopens_the_same_target() -> TestRe
             .collect::<TestResult<Vec<_>>>()?;
         let anchors = files
             .iter()
-            .map(|file| {
-                artifact_tab_id.map_or_else(
-                    || file.summary.anchor_id.clone(),
-                    |tab_id| static_artifact_file_id(tab_id, &file.summary.id),
-                )
-            })
+            .map(|file| file.summary.anchor_id.clone())
             .collect::<Vec<_>>();
-        let mut dom = VirtualDom::new_with_props(
-            NavigationFiles,
-            NavigationFilesProps {
-                files,
-                artifact_tab_id,
-            },
-        );
+        let mut dom = VirtualDom::new_with_props(NavigationFiles, NavigationFilesProps { files });
         dom.rebuild_in_place();
         dom.render_immediate(&mut NoOpMutations);
         let (mut folded, mut flashing_file) = dom

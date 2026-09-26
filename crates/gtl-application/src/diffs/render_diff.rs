@@ -146,7 +146,9 @@ pub fn execute(
     let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
     let settings = app_settings.load()?;
-    let render_options = settings.viewer_render_options();
+    let render_options = settings
+        .viewer_render_options()
+        .with_layout(gtl_models::viewer::DiffLayout::Unified);
     let theme = settings.theme();
     let language = settings.language();
     let top = git.top_level(&cwd)?;
@@ -312,7 +314,9 @@ mod tests {
 
         let response = render_diff::execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
-            &FixedUserSettingsStore::default(),
+            &FixedUserSettingsStore::new(UserSettings::default().with_viewer_render_options(
+                RenderOptions::DEFAULT.with_layout(gtl_models::viewer::DiffLayout::Split),
+            )),
             &source,
             &store,
             &StubRenderer,
@@ -330,6 +334,10 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .unwrap();
+        assert_eq!(
+            artifact.meta.render_options.layout(),
+            gtl_models::viewer::DiffLayout::Unified
+        );
         assert_eq!(
             artifact.meta.repo_root,
             crate::utils::repository_root("/repo")
@@ -435,7 +443,9 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedUserSettingsStore::default(),
+            &FixedUserSettingsStore::new(UserSettings::default().with_viewer_render_options(
+                RenderOptions::DEFAULT.with_layout(gtl_models::viewer::DiffLayout::Split),
+            )),
             &source,
             &store,
             &StubRenderer,

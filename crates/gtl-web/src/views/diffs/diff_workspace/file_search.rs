@@ -1,22 +1,17 @@
-#[cfg(feature = "desktop")]
 use std::collections::HashSet;
 
 use dioxus::prelude::*;
-#[cfg(feature = "desktop")]
 use gtl_wire::viewer::{
-    SearchViewerFiles, ViewerDiffFileId, ViewerFileSearchResult, ViewerViewIdentity,
+    SearchViewerFiles, ViewerActiveView, ViewerDiffFileId, ViewerFileSearchResult,
+    ViewerFileSummary, ViewerViewIdentity,
 };
-use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
 
-#[cfg(feature = "desktop")]
 use crate::{entities::diffs::viewer_server, shared::viewer_client::ViewerClientError};
 
 #[derive(Clone, PartialEq)]
 pub(super) enum WorkspaceFileMatches {
     Ready(Vec<ViewerFileSummary>),
-    #[cfg(feature = "desktop")]
     Loading,
-    #[cfg(feature = "desktop")]
     Error(ViewerClientError),
 }
 
@@ -24,7 +19,6 @@ impl WorkspaceFileMatches {
     pub(super) fn files(&self) -> &[ViewerFileSummary] {
         match self {
             Self::Ready(files) => files,
-            #[cfg(feature = "desktop")]
             Self::Loading | Self::Error(_) => &[],
         }
     }
@@ -35,14 +29,10 @@ pub(super) fn use_workspace_file_matches(
     query: ReadSignal<String>,
     server_owned: bool,
 ) -> Memo<WorkspaceFileMatches> {
-    #[cfg(feature = "desktop")]
     let search = use_workspace_file_search(view, query, server_owned);
-    #[cfg(not(feature = "desktop"))]
-    let _ = server_owned;
     use_memo(move || {
         let query = query.read();
         let view = view.read();
-        #[cfg(feature = "desktop")]
         if server_owned && !query.is_empty() {
             return server_file_matches(&search, &view, &query);
         }
@@ -62,7 +52,6 @@ pub(super) fn use_workspace_file_matches(
     })
 }
 
-#[cfg(feature = "desktop")]
 fn server_file_matches(
     search: &WorkspaceFileSearch,
     view: &ViewerActiveView,
@@ -87,10 +76,8 @@ fn server_file_matches(
     WorkspaceFileMatches::Loading
 }
 
-#[cfg(feature = "desktop")]
 type WorkspaceFileSearch = Resource<Option<WorkspaceFileSearchOutcome>>;
 
-#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorkspaceFileSearchOutcome {
     identity: ViewerViewIdentity,
@@ -98,7 +85,6 @@ struct WorkspaceFileSearchOutcome {
     result: Result<HashSet<ViewerDiffFileId>, ViewerClientError>,
 }
 
-#[cfg(feature = "desktop")]
 impl WorkspaceFileSearchOutcome {
     fn files_for(
         &self,
@@ -119,7 +105,6 @@ impl WorkspaceFileSearchOutcome {
     }
 }
 
-#[cfg(feature = "desktop")]
 fn use_workspace_file_search(
     view: ReadSignal<ViewerActiveView>,
     file_filter: ReadSignal<String>,
@@ -133,7 +118,6 @@ fn use_workspace_file_search(
     })
 }
 
-#[cfg(feature = "desktop")]
 async fn request_workspace_files(
     view: ReadSignal<ViewerActiveView>,
     server_owned: bool,
@@ -157,7 +141,6 @@ async fn request_workspace_files(
     })
 }
 
-#[cfg(feature = "desktop")]
 fn validate_file_search_result(
     view: &ViewerActiveView,
     identity: ViewerViewIdentity,
@@ -178,7 +161,7 @@ fn validate_file_search_result(
     Ok(files)
 }
 
-#[cfg(all(test, feature = "desktop"))]
+#[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 

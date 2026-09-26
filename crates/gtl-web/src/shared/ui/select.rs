@@ -10,7 +10,6 @@ const SELECT_CLASSES: &str = "control-select min-h-10 w-full px-3 py-2 pr-10 pee
 pub(crate) enum SelectVariant {
     #[default]
     Field,
-    #[cfg(feature = "desktop")]
     Toolbar,
 }
 

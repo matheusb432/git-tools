@@ -1,10 +1,8 @@
-#![cfg(any(feature = "component-preview", feature = "desktop", test))]
-
 #[cfg(feature = "component-preview")]
 use dioxus::prelude::*;
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
-use gtl_models::viewer::ViewerKeyboardModifier;
-use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerKeyboardModifiers};
+use gtl_models::viewer::{
+    ViewerKeybindingAction, ViewerKeybindings, ViewerKeyboardModifier, ViewerKeyboardModifiers,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ViewerKeyboardInput<'a> {
@@ -40,7 +38,6 @@ pub(super) fn keyboard_event_matches(
     )
 }
 
-#[cfg(feature = "desktop")]
 pub(super) fn native_keyboard_event_matches(
     event: &web_sys::KeyboardEvent,
     keybindings: ViewerKeybindings,

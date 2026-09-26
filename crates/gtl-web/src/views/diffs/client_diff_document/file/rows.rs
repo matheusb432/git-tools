@@ -2,14 +2,13 @@ use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use super::super::scroll_area::DiffRowsScrollArea;
-#[cfg(feature = "desktop")]
-use crate::shared::{
-    i18n::{t, use_language},
-    ui::{Button, ButtonSize, ButtonVariant},
-};
 use crate::{
     entities::diffs::{
         ClientDiffFile, ClientDiffFileState, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
+    },
+    shared::{
+        i18n::{t, use_language},
+        ui::{Button, ButtonSize, ButtonVariant},
     },
     views::diffs::{SplitDiffRowBatch, UnifiedDiffRowBatch},
 };
@@ -22,10 +21,8 @@ pub(super) fn DiffFileBody(
     file_index: usize,
     onretry: EventHandler<()>,
     retry_allowed: bool,
-    artifact_file_id: Option<String>,
 ) -> Element {
-    let artifact_enhancement = artifact_file_id.is_some();
-    let row_container_id = diff_rows_id(file_index, artifact_file_id.as_deref());
+    let row_container_id = format!("viewer-diff-{file_index}");
     let rows = file.rows();
     let unified_batches = rows.unified();
     let split_batches = rows.split();
@@ -45,7 +42,6 @@ pub(super) fn DiffFileBody(
                         key: "{file_index}:{batch_index}",
                         file,
                         batch_index,
-                        artifact_enhancement,
                     }
                 }
             } else {
@@ -54,19 +50,11 @@ pub(super) fn DiffFileBody(
                         key: "{file_index}:{batch_index}",
                         file,
                         batch_index,
-                        artifact_enhancement,
                     }
                 }
             }
         }
     }
-}
-
-fn diff_rows_id(file_index: usize, artifact_file_id: Option<&str>) -> String {
-    artifact_file_id.map_or_else(
-        || format!("viewer-diff-{file_index}"),
-        |file_id| format!("{file_id}-rows"),
-    )
 }
 
 #[component]
@@ -76,10 +64,8 @@ pub(in crate::views::diffs::client_diff_document) fn DiffFileLoadState(
     onretry: EventHandler<()>,
 ) -> Element {
     match &*state.read() {
-        #[cfg(feature = "desktop")]
         ClientDiffFileState::Loading => rsx! {},
         ClientDiffFileState::Complete => rsx! {},
-        #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
             let message = error.message(use_language());
             let retryable = error.retryable() && retry_allowed;
@@ -90,7 +76,6 @@ pub(in crate::views::diffs::client_diff_document) fn DiffFileLoadState(
     }
 }
 
-#[cfg(feature = "desktop")]
 #[component]
 fn DiffFileLoadError(message: String, retryable: bool, onretry: EventHandler<()>) -> Element {
     rsx! {
@@ -110,19 +95,5 @@ fn DiffFileLoadError(message: String, retryable: bool, onretry: EventHandler<()>
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn artifact_row_container_uses_the_qualified_file_identity() {
-        assert_eq!(diff_rows_id(3, None), "viewer-diff-3");
-        assert_eq!(
-            diff_rows_id(3, Some("artifact-view-7-file-0")),
-            "artifact-view-7-file-0-rows"
-        );
     }
 }

@@ -628,20 +628,6 @@ commits-copy-id = Copy commit ID
 
 ## Diff workspace chrome
 
-titlebar-working-tree = Working tree · HEAD
-titlebar-expand-all = Expand all
-titlebar-collapse-all = Collapse all
-titlebar-hidden-files =
-    { $count ->
-        [one] { $count } file hidden
-       *[other] { $count } files hidden
-    } · { $extensions }
-titlebar-hidden-files-only =
-    { $count ->
-        [one] { $count } file hidden
-       *[other] { $count } files hidden
-    } · only { $extensions }
-titlebar-hidden-tooltip = Hidden by the saved extension filter:
 files-empty = No changed files
 files-count =
     { $count ->
@@ -686,13 +672,6 @@ project-diff-loading = Loading diff...
 
 ## Offline artifacts
 
-artifact-document-title =
-    { $count ->
-        [one] { $repository } - { $title } · { $count } commit
-       *[other] { $repository } - { $title } · { $count } commits
-    }
-artifact-empty = No diffs in this artifact
-artifact-subrepo-diffs = Subrepo diffs
 
 ## Desktop host
 

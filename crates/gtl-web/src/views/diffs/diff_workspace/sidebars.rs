@@ -69,7 +69,6 @@ pub(super) fn SidebarButtons(
     visibility: ViewerSidebarVisibility,
     keybindings: ViewerKeybindings,
     ontoggle: Option<EventHandler<Sidebar>>,
-    artifact: bool,
 ) -> Element {
     let language = use_language();
     rsx! {
@@ -84,7 +83,6 @@ pub(super) fn SidebarButtons(
                     visible,
                     keybindings,
                     ontoggle,
-                    artifact,
                 }
             }
         }
@@ -97,7 +95,6 @@ fn SidebarButton(
     visible: bool,
     keybindings: ViewerKeybindings,
     ontoggle: Option<EventHandler<Sidebar>>,
-    artifact: bool,
 ) -> Element {
     let shortcut = keybindings
         .display_keys(sidebar.action())
@@ -110,12 +107,12 @@ fn SidebarButton(
         Button {
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Accent,
-            id: (!artifact).then(|| format!("{}-sidebar-toggle", sidebar.name())),
+            id: format!("{}-sidebar-toggle", sidebar.name()),
             aria_label: label,
             title,
             aria_pressed: visible.to_string(),
             "data-sidebar-toggle": sidebar.name(),
-            "data-gtl-action": artifact.then(|| format!("toggle-{}-sidebar", sidebar.name())),
+
             onclick: move |_| {
                 if let Some(ontoggle) = ontoggle {
                     ontoggle.call(sidebar);
@@ -135,13 +132,11 @@ fn SidebarButton(
     }
 }
 
-#[cfg(feature = "desktop")]
 pub(crate) fn use_sidebar_controls_provider() {
     let controls = use_sidebar_controls();
     use_context_provider(|| controls);
 }
 
-#[cfg(feature = "desktop")]
 #[component]
 pub(crate) fn WorkspaceSidebarButtons() -> Element {
     use crate::app::application_layout::{ViewerContext, ViewerShellLoad};
@@ -157,19 +152,16 @@ pub(crate) fn WorkspaceSidebarButtons() -> Element {
             visibility: (controls.visibility)(),
             keybindings,
             ontoggle: controls.toggle,
-            artifact: false,
         }
     }
 }
 
-#[cfg(feature = "desktop")]
 #[derive(Clone, Copy)]
 pub(super) struct SidebarControls {
     pub(super) visibility: Memo<ViewerSidebarVisibility>,
     pub(super) toggle: Callback<Sidebar>,
 }
 
-#[cfg(feature = "desktop")]
 fn use_sidebar_controls() -> SidebarControls {
     use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
 

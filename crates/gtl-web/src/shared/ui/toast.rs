@@ -127,19 +127,11 @@ impl ToastPhase {
 #[derive(Clone)]
 pub(crate) enum ToastText {
     Formatted(String),
-    #[cfg_attr(
-        not(feature = "desktop"),
-        expect(dead_code, reason = "component previews show only formatted toasts")
-    )]
     Localized(Rc<dyn Fn(ViewerLanguage) -> String>),
 }
 
 impl ToastText {
     /// Copy formatted in the displayed language each time the toast renders.
-    #[cfg_attr(
-        not(feature = "desktop"),
-        expect(dead_code, reason = "component previews show only formatted toasts")
-    )]
     pub(crate) fn localized(format: impl Fn(ViewerLanguage) -> String + 'static) -> Self {
         Self::Localized(Rc::new(format))
     }

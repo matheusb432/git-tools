@@ -1,5 +1,5 @@
 //! The `render_diff_subrepos` vertical slice: render every discovered repo into
-//! one tabbed artifact, skipping repos whose view is empty (or errors) and
+//! one document, skipping repos whose view is empty (or errors) and
 //! reporting the skip count. The server discovers repositories and dispatches
 //! this application request with the resulting [`RepoRef`] values.
 
@@ -21,7 +21,7 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff artifact across `repos`.
+/// Render one diff document with a section for each entry in `repos`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffSubrepos {
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -105,7 +105,9 @@ pub fn execute(
 
     let generated_at = clock.now().map_err(anyhow::Error::from)?;
     let title = dated_title(&generated_at, "diff-artifact subrepos");
-    let render_options = settings.viewer_render_options();
+    let render_options = settings
+        .viewer_render_options()
+        .with_layout(gtl_models::viewer::DiffLayout::Unified);
     let theme = settings.theme();
     let language = settings.language();
     let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme, language)?;
@@ -164,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_a_tabbed_artifact_and_reports_the_skip_count() {
+    fn renders_a_combined_artifact_and_reports_the_skip_count() {
         let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -180,7 +182,12 @@ mod tests {
 
         let response = render_diff_subrepos::execute(
             req(repos),
-            &FixedUserSettingsStore::default(),
+            &FixedUserSettingsStore::new(
+                gtl_models::settings::UserSettings::default().with_viewer_render_options(
+                    gtl_models::viewer::RenderOptions::DEFAULT
+                        .with_layout(gtl_models::viewer::DiffLayout::Split),
+                ),
+            ),
             &source,
             &store,
             &StubRenderer,
@@ -205,6 +212,10 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .unwrap();
+        assert_eq!(
+            artifact.meta.render_options.layout(),
+            gtl_models::viewer::DiffLayout::Unified
+        );
         assert!(
             artifact
                 .html

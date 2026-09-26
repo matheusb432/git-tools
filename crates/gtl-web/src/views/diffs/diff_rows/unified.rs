@@ -24,30 +24,19 @@ enum UnifiedGutterTone {
 }
 
 #[component]
-pub(crate) fn UnifiedDiffRowBatch(
-    file: ReadStore<ClientDiffFile>,
-    batch_index: usize,
-    artifact_enhancement: bool,
-) -> Element {
+pub(crate) fn UnifiedDiffRowBatch(file: ReadStore<ClientDiffFile>, batch_index: usize) -> Element {
     let rows = file.rows().unified().index(batch_index);
     rsx! {
-        UnifiedRows { rows, artifact_enhancement, first_row: batch_index * 64 }
+        UnifiedRows { rows, first_row: batch_index * 64 }
     }
 }
 
 #[component]
 fn UnifiedRows(
     rows: ReadStore<Vec<ViewerUnifiedRow>>,
-    artifact_enhancement: bool,
+
     #[props(default)] first_row: usize,
 ) -> Element {
-    if artifact_enhancement {
-        return rsx! {
-            for (index, row) in rows.iter().enumerate() {
-                UnifiedDiffRow { key: "{index}", row }
-            }
-        };
-    }
     rsx! {
         for (index, row) in rows.iter().enumerate() {
             div {
@@ -234,10 +223,10 @@ mod tests {
     use crate::test_support::unified_source_row;
 
     #[component]
-    fn UnifiedBatchFixture(rows: Vec<ViewerUnifiedRow>, artifact_enhancement: bool) -> Element {
+    fn UnifiedBatchFixture(rows: Vec<ViewerUnifiedRow>) -> Element {
         let rows = use_store(move || rows);
         rsx! {
-            UnifiedRows { rows, artifact_enhancement }
+            UnifiedRows { rows }
         }
     }
 
@@ -249,7 +238,7 @@ mod tests {
             ViewerUnifiedRow::Added(unified_source_row("abce", None, Some(10000), Some(4))),
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            UnifiedBatchFixture { rows, artifact_enhancement: false }
+            UnifiedBatchFixture { rows }
         });
 
         assert!(html.contains(">9999</span>"));
@@ -258,32 +247,5 @@ mod tests {
         assert_eq!(html.matches("(+4 characters omitted)").count(), 2);
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
         assert!(html.contains(r#"class="diff-truncated-text">abce</span>"#));
-    }
-
-    #[test]
-    fn artifact_rows_designate_copyable_new_source_without_markers() {
-        let rows = vec![
-            ViewerUnifiedRow::Hunk("@@ -1,2 +10,3 @@".to_owned()),
-            ViewerUnifiedRow::Context(unified_source_row("keep", Some(1), Some(10), Some(4))),
-            ViewerUnifiedRow::Removed(unified_source_row("oldx", Some(2), None, Some(4))),
-            ViewerUnifiedRow::Added(unified_source_row("newx", None, Some(11), Some(4))),
-            ViewerUnifiedRow::Added(unified_source_row("abcdefgh", None, Some(12), Some(8))),
-        ];
-        let html = dioxus_ssr::render_element(rsx! {
-            UnifiedBatchFixture { rows, artifact_enhancement: true }
-        });
-
-        assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);
-        for line_number in [10, 11, 12] {
-            assert!(html.contains(&format!(r#"data-gtl-new-line="{line_number}""#)));
-        }
-        for text in ["keep", "newx", "abcdefgh"] {
-            assert!(html.contains(&format!(r#"class="diff-truncated-text">{text}</span>"#)));
-        }
-        assert!(!html.contains(r#"data-gtl-copy-text="">oldx</span>"#));
-        assert!(!html.contains(r#"data-gtl-copy-text="">+newx</span>"#));
-        assert!(html.contains("(+8 characters omitted)"));
-        assert!(!html.contains("toggle-long-line"));
-        assert!(!html.contains("aria-expanded"));
     }
 }

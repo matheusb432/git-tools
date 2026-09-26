@@ -44,16 +44,12 @@ const SOURCE_FILES: &[&str] = &[
 const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-wire/src",
     "crates/gtl-desktop/src",
-    "crates/gtl-artifacts/src",
     "crates/gtl-parser/src",
     "crates/gtl-web/assets",
     "crates/gtl-web/src",
     "crates/gtl-web-contracts/src",
 ];
-const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
-    "crates/gtl-web/assets/tailwind.css",
-    "crates/gtl-web/assets/artifact.css",
-];
+const GENERATED_SOURCE_OUTPUTS: &[&str] = &["crates/gtl-web/assets/tailwind.css"];
 const FILE_COUNT_MAX: usize = 10_000;
 const FILE_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const SOURCE_BYTES_MAX: u64 = 256 * 1024 * 1024;
@@ -75,17 +71,6 @@ const TAILWIND_ARGUMENTS: &[&str] = &[
     "crates/gtl-web/src/app/assets/styles/tailwind.css",
     "--output",
     "crates/gtl-web/assets/tailwind.css",
-    "--minify",
-];
-const ARTIFACT_TAILWIND_ARGUMENTS: &[&str] = &[
-    "run",
-    "--frozen",
-    "--allow-all",
-    "@tailwindcss/cli",
-    "--input",
-    "crates/gtl-web/src/app/assets/styles/artifact.css",
-    "--output",
-    "crates/gtl-web/assets/artifact.css",
     "--minify",
 ];
 const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
@@ -339,7 +324,7 @@ pub(crate) fn build_release() -> Result<()> {
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
-    build_artifact_styles_unlocked(root)?;
+    build_styles_unlocked(root)?;
     let target = cargo_target_directory(root)?;
     clean_desktop_release_outputs(root, &target)?;
     let step = Step::new(
@@ -363,16 +348,6 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     verify_staged_bundle(root)
 }
 
-pub(crate) fn build_artifact_styles_unlocked(root: &Path) -> Result<()> {
-    let inputs_before = release_input_fingerprint(root)?;
-    build_styles_unlocked(root)?;
-    ensure!(
-        release_input_fingerprint(root)? == inputs_before,
-        "static artifact inputs changed during stylesheet generation; retry the build"
-    );
-    Ok(())
-}
-
 pub(crate) fn build_styles() -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
@@ -380,15 +355,14 @@ pub(crate) fn build_styles() -> Result<()> {
 }
 
 pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
-    for (label, arguments) in [
-        ("dioxus-tailwind", TAILWIND_ARGUMENTS),
-        ("artifact-tailwind", ARTIFACT_TAILWIND_ARGUMENTS),
-    ] {
-        process::run_step(
-            &Step::new(label, "deno", arguments.iter().copied()).with_current_directory(root),
-        )?;
-    }
-    Ok(())
+    process::run_step(
+        &Step::new(
+            "dioxus-tailwind",
+            "deno",
+            TAILWIND_ARGUMENTS.iter().copied(),
+        )
+        .with_current_directory(root),
+    )
 }
 
 pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {

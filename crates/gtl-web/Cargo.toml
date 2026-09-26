@@ -5,20 +5,19 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-dioxus = { workspace = true, features = ["lib"] }
-dioxus-ssr = { version = "0.7.10", optional = true }
+dioxus = { workspace = true, features = ["lib", "router"] }
 dioxus-sdk-time = "0.7.0"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 dx-story = { workspace = true, optional = true }
-futures-channel = { workspace = true, optional = true }
-gtl-client = { workspace = true, optional = true, features = ["viewer-ipc"] }
+futures-channel.workspace = true
+gtl-client = { workspace = true, features = ["viewer-ipc"] }
 gtl-models.workspace = true
 gtl-wire.workspace = true
 gtl-web-contracts.workspace = true
 i18n-embed = { version = "0.16.0", features = ["fluent-system"] }
 i18n-embed-fl = "0.10.1"
 jiff.workspace = true
-lru = { workspace = true, optional = true }
+lru.workspace = true
 lucide-dioxus = { version = "3.26.0", features = [
   "account",
   "arrows",
@@ -58,11 +57,7 @@ web-sys = { workspace = true, features = [
   "Storage",
   "Window",
 ] }
-thiserror = { workspace = true, optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
-
-[build-dependencies]
-minifier = { version = "0.4.0", default-features = false, optional = true }
 
 [dev-dependencies]
 dioxus-ssr = "0.7.10"
@@ -72,30 +67,14 @@ fluent-syntax = "0.12.0"
 workspace = true
 
 [features]
-default = ["desktop"]
-artifact = ["dep:dioxus-ssr", "dep:minifier", "dep:thiserror"]
-component-preview = [
-  "artifact",
-  "dep:dx-story",
-  "dx-story/catalog",
-  "interactive-ui",
-  "web",
-]
-desktop = [
-  "interactive-ui",
-  "web",
-  "dioxus/router",
-  "dep:gtl-client",
-  "dep:futures-channel",
-  "dep:lru",
-]
-interactive-ui = []
+default = ["web"]
+component-preview = ["dep:dx-story", "dx-story/catalog", "web"]
 web = ["dioxus/launch", "dioxus/web"]
 
 [[bin]]
 name = "gtl-web"
 path = "src/main.rs"
-required-features = ["desktop"]
+required-features = ["web"]
 
 [[example]]
 name = "component-preview"

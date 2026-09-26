@@ -45,7 +45,7 @@ pub fn CommitsPanel(
 pub(super) fn WorkspaceCommitsPanel(
     details_popover_id_prefix: String,
     actions: Option<Element>,
-    #[props(default)] artifact: bool,
+
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
     #[props(default)] loading: bool,
@@ -100,7 +100,7 @@ pub(super) fn WorkspaceCommitsPanel(
                         CommitCard {
                             key: "{commit_id}",
                             commit_index,
-                            artifact,
+
                             details_popover_id_prefix: details_popover_id_prefix.clone(),
                             selected,
                             selection_pending,
@@ -185,7 +185,7 @@ const COMMIT_CARD_CLASSES: &str = "diff-commit-card w-full px-3 py-3 compact:px-
 #[component]
 fn CommitCard(
     commit_index: usize,
-    artifact: bool,
+
     details_popover_id_prefix: String,
     selected: bool,
     selection_pending: bool,
@@ -249,7 +249,7 @@ fn CommitCard(
                 commit,
                 id: popover_id.clone(),
                 anchor_name,
-                active: artifact || (hover.active)(),
+                active: (hover.active)(),
             }
         }
     }
@@ -362,7 +362,6 @@ fn CommitIdButton(id: CommitId) -> Element {
 
     let language = use_language();
     let abbreviated_id = id.abbreviated(CommitIdAbbreviation::TenCharacters);
-    let copy_value = id.as_ref().to_owned();
 
     rsx! {
         span { class: "pointer-events-auto relative z-20 flex flex-none",
@@ -371,8 +370,6 @@ fn CommitIdButton(id: CommitId) -> Element {
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Bare,
                 title: t!(language, "commits-copy-id"),
-                "data-gtl-action": "copy-commit",
-                "data-gtl-copy-value": copy_value,
                 onclick: move |e: Event<MouseData>| {
                     e.stop_propagation();
                     copy_commit_id(id.clone());

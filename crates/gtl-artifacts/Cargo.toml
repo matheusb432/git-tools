@@ -9,8 +9,7 @@ anyhow.workspace = true
 base64.workspace = true
 gtl-application.workspace = true
 gtl-models.workspace = true
-gtl-web = { workspace = true, features = ["artifact"] }
-gtl-wire.workspace = true
+gtl-parser = { workspace = true, features = ["syntax"] }
 sha2.workspace = true
 
 [dev-dependencies]

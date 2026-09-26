@@ -1,35 +1,24 @@
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 use std::rc::Rc;
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 use std::time::Duration;
 
-#[cfg(all(
-    any(feature = "component-preview", feature = "desktop"),
-    not(target_arch = "wasm32")
-))]
+#[cfg(not(target_arch = "wasm32"))]
 use dioxus::prelude::spawn;
-#[cfg(feature = "interactive-ui")]
 use gtl_models::settings::ViewerLanguage;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen::JsCast;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 use wasm_bindgen_futures::JsFuture;
-#[cfg(any(feature = "desktop", feature = "component-preview"))]
-use web_sys::HtmlDetailsElement;
-#[cfg(any(feature = "artifact", feature = "desktop"))]
-use web_sys::{HtmlDocument, HtmlElement, HtmlTextAreaElement};
+use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlElement, HtmlTextAreaElement};
 
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 const VIEWER_LANGUAGE_STORAGE_KEY: &str = "gtl.viewer.language";
 
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
 struct WindowKeydownListener {
     window: web_sys::Window,
     callback: Rc<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::KeyboardEvent)>>,
 }
 
-#[cfg(feature = "interactive-ui")]
 pub(crate) fn apply_theme(theme: &'static str) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -38,7 +27,6 @@ pub(crate) fn apply_theme(theme: &'static str) {
 }
 
 /// Names the language of the document's copy for assistive technology and spellcheck.
-#[cfg(feature = "interactive-ui")]
 pub(crate) fn apply_document_language(language: ViewerLanguage) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -48,7 +36,7 @@ pub(crate) fn apply_document_language(language: ViewerLanguage) {
 
 /// Returns the language the viewer last displayed, so a restart renders it
 /// before the server's settings arrive.
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn stored_viewer_language() -> Option<ViewerLanguage> {
     web_sys::window()?
         .local_storage()
@@ -59,13 +47,13 @@ pub(crate) fn stored_viewer_language() -> Option<ViewerLanguage> {
         .ok()
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) const fn stored_viewer_language() -> Option<ViewerLanguage> {
     None
 }
 
 /// Remembers the displayed language for [`stored_viewer_language`].
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn store_viewer_language(language: ViewerLanguage) {
     let Some(storage) = web_sys::window().and_then(|window| window.local_storage().ok().flatten())
     else {
@@ -74,10 +62,9 @@ pub(crate) fn store_viewer_language(language: ViewerLanguage) {
     let _ = storage.set_item(VIEWER_LANGUAGE_STORAGE_KEY, language.as_str());
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) const fn store_viewer_language(_language: ViewerLanguage) {}
 
-#[cfg(feature = "desktop")]
 pub(crate) fn apply_reduced_motion(reduce_motion: bool) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -88,7 +75,6 @@ pub(crate) fn apply_reduced_motion(reduce_motion: bool) {
     );
 }
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) fn focus_element(id: String) {
     let focus = async move {
         dioxus_sdk_time::sleep(Duration::ZERO).await;
@@ -106,14 +92,13 @@ pub(crate) fn focus_element(id: String) {
     spawn(focus);
 }
 
-#[cfg(feature = "interactive-ui")]
 pub(crate) fn element_has_visible_focus(id: &str) -> bool {
     document()
         .and_then(|document| document.get_element_by_id(id))
         .is_some_and(|element| element.matches(":focus-visible").unwrap_or(false))
 }
 
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
         || {
@@ -145,17 +130,15 @@ pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + '
     );
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn use_window_keydown(_handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {}
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) fn popover_is_open(id: &str) -> bool {
     document()
         .and_then(|document| document.get_element_by_id(id))
         .is_some_and(|element| element.matches(":popover-open").unwrap_or(false))
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn hide_popover(id: &str) {
     let Some(element) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -166,7 +149,6 @@ pub(crate) fn hide_popover(id: &str) {
     let _ = element.hide_popover();
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn show_hover_popover(id: &str) {
     let Some(document) = document() else {
         return;
@@ -194,7 +176,6 @@ pub(crate) fn show_hover_popover(id: &str) {
     }
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn show_popover(id: &str) {
     let Some(element) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -205,7 +186,6 @@ pub(crate) fn show_popover(id: &str) {
     let _ = element.show_popover();
 }
 
-#[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) fn scroll_to_file(id: &str) {
     let Some(details) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -219,7 +199,6 @@ pub(crate) fn scroll_to_file(id: &str) {
     details.scroll_into_view_with_bool(true);
 }
 
-#[cfg(any(feature = "desktop", feature = "component-preview"))]
 pub(crate) fn scroll_option_into_view(id: &str) {
     let Some(option) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -239,7 +218,6 @@ pub(crate) fn scroll_option_into_view(id: &str) {
     }
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) fn scroll_diff_document_to_start() {
     let Some(diff_document) = document()
         .and_then(|document| document.query_selector("[data-gtl-diff-document]").ok())
@@ -250,7 +228,6 @@ pub(crate) fn scroll_diff_document_to_start() {
     diff_document.set_scroll_top(0);
 }
 
-#[cfg(feature = "desktop")]
 pub(crate) fn highlight_diff_search_match(file_index: usize, row_index: usize) -> bool {
     let Some(element) = document()
         .and_then(|document| document.get_element_by_id(&format!("viewer-diff-{file_index}")))
@@ -287,7 +264,6 @@ pub(crate) fn highlight_diff_search_match(file_index: usize, row_index: usize) -
     true
 }
 
-#[cfg(feature = "desktop")]
 pub(crate) fn clear_diff_search_match() {
     let Some(element) = document()
         .and_then(|document| document.query_selector("[data-gtl-find-active]").ok())
@@ -302,7 +278,6 @@ pub(crate) fn clear_diff_search_match() {
     let _ = element.remove_attribute("data-gtl-find-active");
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 pub(crate) async fn copy_text(text: &str) -> bool {
     if let Some(window) = web_sys::window()
         && JsFuture::from(window.navigator().clipboard().write_text(text))
@@ -314,7 +289,6 @@ pub(crate) async fn copy_text(text: &str) -> bool {
     exec_copy(text)
 }
 
-#[cfg(any(feature = "artifact", feature = "desktop"))]
 fn exec_copy(text: &str) -> bool {
     let Some(document) = document().and_then(|document| document.dyn_into::<HtmlDocument>().ok())
     else {
@@ -342,7 +316,7 @@ fn exec_copy(text: &str) -> bool {
 }
 
 /// Returns the current instant from the `WebView` clock.
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn current_timestamp() -> jiff::Timestamp {
     #[expect(
         clippy::cast_possible_truncation,
@@ -352,13 +326,13 @@ pub(crate) fn current_timestamp() -> jiff::Timestamp {
     jiff::Timestamp::from_millisecond(milliseconds).unwrap_or(jiff::Timestamp::UNIX_EPOCH)
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn current_timestamp() -> jiff::Timestamp {
     jiff::Timestamp::now()
 }
 
 /// Returns the `WebView` local UTC offset at `instant`, which follows daylight saving time.
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn local_offset_at(instant: jiff::Timestamp) -> jiff::tz::Offset {
     #[expect(
         clippy::cast_precision_loss,
@@ -377,7 +351,7 @@ pub(crate) fn local_offset_at(instant: jiff::Timestamp) -> jiff::tz::Offset {
 }
 
 /// Native builds only run tests, which display UTC.
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) const fn local_offset_at(_instant: jiff::Timestamp) -> jiff::tz::Offset {
     jiff::tz::Offset::UTC
 }
@@ -386,7 +360,7 @@ fn document() -> Option<web_sys::Document> {
     web_sys::window()?.document()
 }
 
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
     use dioxus::prelude::*;
     let mut visible = use_signal(|| document().is_some_and(|document| !document.hidden()));
@@ -418,12 +392,11 @@ pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
     visible.into()
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn use_document_visible() -> dioxus::prelude::ReadSignal<bool> {
     dioxus::prelude::use_signal(|| true).into()
 }
 
-#[cfg(feature = "desktop")]
 pub(crate) fn workspace_is_wide() -> bool {
     web_sys::window()
         .and_then(|window| window.inner_width().ok())
@@ -431,7 +404,7 @@ pub(crate) fn workspace_is_wide() -> bool {
         .is_some_and(|width| width >= 1025.0)
 }
 
-#[cfg(all(feature = "desktop", target_arch = "wasm32"))]
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn use_window_resize(handler: impl FnMut() + 'static) {
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
         || {
@@ -456,10 +429,9 @@ pub(crate) fn use_window_resize(handler: impl FnMut() + 'static) {
     );
 }
 
-#[cfg(all(feature = "desktop", not(target_arch = "wasm32")))]
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn use_window_resize(_handler: impl FnMut() + 'static) {}
 
-#[cfg(feature = "desktop")]
 pub(crate) fn scroll_element_to_start(id: &str) {
     if let Some(element) = document().and_then(|document| document.get_element_by_id(id)) {
         element.set_scroll_top(0);

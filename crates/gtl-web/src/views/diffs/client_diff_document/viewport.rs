@@ -433,7 +433,7 @@ fn ViewportFile(
             onretry: move |()| onretry.call(file_id.clone()),
             retry_allowed,
             file_index: index,
-            artifact_tab_id: None,
+
             controls: Some(controls),
             body: Some(body),
         }
@@ -484,17 +484,9 @@ fn ViewportRowWindow(
             }
             if loaded {
                 if layout == ViewerDiffLayout::Unified {
-                    UnifiedDiffRowBatch {
-                        file,
-                        batch_index: batch,
-                        artifact_enhancement: false,
-                    }
+                    UnifiedDiffRowBatch { file, batch_index: batch }
                 } else {
-                    SplitDiffRowBatch {
-                        file,
-                        batch_index: batch,
-                        artifact_enhancement: false,
-                    }
+                    SplitDiffRowBatch { file, batch_index: batch }
                 }
             }
         }

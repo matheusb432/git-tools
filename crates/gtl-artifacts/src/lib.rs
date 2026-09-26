@@ -1,15 +1,15 @@
 //! Native build-time rendering for self-contained static diff artifacts.
 
-mod assets;
 mod document;
-mod payload;
+mod labels;
+mod rows;
 
 pub use document::{build_html, build_tabbed_html};
-use gtl_application::{
-    diffs::View,
+use gtl_application::diffs::View;
+use gtl_models::{
+    settings::ViewerLanguage,
     viewer::{RenderOptions, Theme},
 };
-use gtl_models::settings::ViewerLanguage;
 
 /// The [`HtmlRenderer`](gtl_application::ports::HtmlRenderer) adapter for offline artifacts.
 #[derive(Debug, Clone, Copy, Default)]
@@ -81,11 +81,5 @@ mod tests {
             },
             full_context: gtl_application::diffs::FullContextDiffState::Loaded,
         }
-    }
-
-    pub(crate) fn has_disallowed_external_url(html: &str) -> bool {
-        [" src=", " href=", " srcset=", " action=", "url("]
-            .iter()
-            .any(|reference| html.contains(reference))
     }
 }

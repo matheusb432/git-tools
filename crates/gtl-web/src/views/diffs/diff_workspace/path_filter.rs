@@ -16,18 +16,16 @@ const PATH_FILTER_INPUT_ID: &str = "viewer-path-filter";
 
 pub(super) fn open_path_filter(mut workspace: DiffWorkspaceContext) {
     workspace.path_filter_open.set(true);
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     crate::shared::browser::focus_element(PATH_FILTER_INPUT_ID.to_owned());
 }
 
 fn close_path_filter(mut workspace: DiffWorkspaceContext) {
     workspace.path_filter_open.set(false);
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     crate::shared::browser::focus_element("workspace-heading".to_owned());
 }
 
 #[component]
-pub(super) fn PathFilterTrigger(artifact_view_id: Option<String>) -> Element {
+pub(super) fn PathFilterTrigger() -> Element {
     let language = use_language();
     let workspace = use_workspace_context();
     rsx! {
@@ -38,7 +36,7 @@ pub(super) fn PathFilterTrigger(artifact_view_id: Option<String>) -> Element {
             aria_label: t!(language, "path-filter-label"),
             title: t!(language, "path-filter-label"),
             aria_expanded: (workspace.path_filter_open)().to_string(),
-            "data-gtl-action": artifact_view_id.map(|_| "open-path-filter"),
+
             onclick: move |_| open_path_filter(workspace),
             span { aria_hidden: "true",
                 Search { size: 16 }
@@ -48,25 +46,17 @@ pub(super) fn PathFilterTrigger(artifact_view_id: Option<String>) -> Element {
 }
 
 #[component]
-pub(super) fn PathFilter(
-    onnavigate: EventHandler<String>,
-    artifact_view_id: Option<String>,
-) -> Element {
+pub(super) fn PathFilter(onnavigate: EventHandler<String>) -> Element {
     let language = use_language();
     let mut workspace = use_workspace_context();
     let mut selected = use_signal(|| None::<ViewerDiffFileId>);
-    let artifact = artifact_view_id.is_some();
-    let input_id = artifact_view_id.map_or_else(
-        || PATH_FILTER_INPUT_ID.to_owned(),
-        |id| format!("artifact-view-{id}-path-filter"),
-    );
+    let input_id = PATH_FILTER_INPUT_ID.to_owned();
     let results_id = format!("{input_id}-results");
     let open = (workspace.path_filter_open)();
     let onselect = use_callback(move |file: ViewerFileSummary| {
         close_path_filter(workspace);
         onnavigate.call(file.anchor_id);
     });
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     {
         let focus_input_id = input_id.clone();
         use_effect(move || {
@@ -89,7 +79,7 @@ pub(super) fn PathFilter(
             }
         });
     }
-    if !open && !artifact {
+    if !open {
         return rsx! {};
     }
     let matches = workspace.file_matches.read();
@@ -103,7 +93,7 @@ pub(super) fn PathFilter(
             label: t!(language, "path-filter-label"),
             placement: SearchPanelPlacement::WorkspaceCenter,
             hidden: !open,
-            "data-gtl-path-filter": artifact.then_some(""),
+
             onfocusout: move |_| workspace.path_filter_open.set(false),
             onkeydown: move |event| handle_keydown(&event, &workspace, selected, onselect),
             div { class: "p-2",
@@ -118,7 +108,7 @@ pub(super) fn PathFilter(
                     aria_expanded: open.to_string(),
                     aria_controls: results_id.clone(),
                     aria_activedescendant: active_id,
-                    "data-gtl-action": artifact.then_some("filter-files"),
+
                     oninput: move |event: FormEvent| {
                         selected.set(None);
                         workspace.file_filter.set(event.value());
@@ -136,26 +126,15 @@ pub(super) fn PathFilter(
                         id: format!("{results_id}-{}", file.id.as_str()),
                         file: file.clone(),
                         active: active.as_ref() == Some(&file.id),
-                        artifact,
+
                         onselect,
                     }
                 }
             }
-            if let Some(message) = (!artifact)
-                .then(|| matches_message(&matches, language))
-                .flatten()
-            {
+            if let Some(message) = matches_message(&matches, language) {
                 p { class: "px-3 pb-3 text-xs text-ink-3", role: "status", "{message}" }
             }
-            if artifact {
-                p {
-                    class: "px-3 pb-3 text-xs text-ink-3",
-                    hidden: !files.is_empty(),
-                    role: "status",
-                    "data-gtl-path-filter-empty": "",
-                    {t!(language, "path-filter-empty")}
-                }
-            }
+
         }
     }
 }
@@ -216,9 +195,7 @@ fn matches_message(matches: &WorkspaceFileMatches, language: ViewerLanguage) -> 
         WorkspaceFileMatches::Ready(files) => {
             files.is_empty().then(|| t!(language, "path-filter-empty"))
         }
-        #[cfg(feature = "desktop")]
         WorkspaceFileMatches::Loading => Some(t!(language, "path-filter-searching")),
-        #[cfg(feature = "desktop")]
         WorkspaceFileMatches::Error(error) => Some(
             crate::shared::failure_notice::client_error_message(error, language),
         ),
@@ -230,7 +207,7 @@ fn PathFilterOption(
     id: String,
     file: ViewerFileSummary,
     active: bool,
-    artifact: bool,
+
     onselect: EventHandler<ViewerFileSummary>,
 ) -> Element {
     let path = file.path.to_string_lossy().into_owned();
@@ -244,8 +221,7 @@ fn PathFilterOption(
             aria_selected: active.to_string(),
             title: path.clone(),
             "data-file-target": file.anchor_id.clone(),
-            "data-gtl-filter-key": artifact.then(|| path.to_lowercase()),
-            "data-gtl-action": artifact.then_some("select-path-filter-file"),
+
             onmousedown: move |event| event.prevent_default(),
             onclick: move |_| onselect.call(file.clone()),
             span { class: "flex-none text-ink-3", aria_hidden: "true",

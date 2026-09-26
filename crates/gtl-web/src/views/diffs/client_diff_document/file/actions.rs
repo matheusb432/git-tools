@@ -19,17 +19,12 @@ pub(super) fn DiffFileActions(
     summary: ReadSignal<ViewerFileSummary>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
-    artifact_enhancement: bool,
 ) -> Element {
     let (file_id, can_open_in_editor) =
         summary.with(|summary| (summary.id.clone(), summary.can_open_in_editor));
     rsx! {
         span { class: "diff-file-actions",
-            DiffPathCopyMenu {
-                summary,
-                popover_id: copy_popover_id,
-                artifact_enhancement,
-            }
+            DiffPathCopyMenu { summary, popover_id: copy_popover_id }
             if let Some(onopen) = onopen.filter(|_| can_open_in_editor) {
                 OpenInTextEditorAction { file_id, onopen }
             }
@@ -38,11 +33,7 @@ pub(super) fn DiffFileActions(
 }
 
 #[component]
-fn DiffPathCopyMenu(
-    summary: ReadSignal<ViewerFileSummary>,
-    popover_id: String,
-    artifact_enhancement: bool,
-) -> Element {
+fn DiffPathCopyMenu(summary: ReadSignal<ViewerFileSummary>, popover_id: String) -> Element {
     let (relative_path, absolute_path) = summary.with(|summary| {
         (
             summary.path.to_string_lossy().into_owned(),
@@ -70,13 +61,11 @@ fn DiffPathCopyMenu(
                         kind: DiffPathCopyKind::Relative,
                         payload: relative_path,
                         popover_id: popover_id.clone(),
-                        artifact_enhancement,
                     }
                     DiffPathCopyAction {
                         kind: DiffPathCopyKind::Absolute,
                         payload: absolute_path,
                         popover_id,
-                        artifact_enhancement,
                     }
                 }
             }
@@ -145,13 +134,6 @@ impl DiffPathCopyKind {
             Self::Absolute => t!(language, "copy-absolute-path-action"),
         }
     }
-
-    const fn artifact_value(self) -> &'static str {
-        match self {
-            Self::Relative => "path",
-            Self::Absolute => "absolute",
-        }
-    }
 }
 
 fn use_copy_feedback(payload: String) -> CopyFeedbackController {
@@ -175,15 +157,10 @@ fn use_copy_feedback(payload: String) -> CopyFeedbackController {
 }
 
 #[component]
-fn DiffPathCopyAction(
-    kind: DiffPathCopyKind,
-    payload: String,
-    popover_id: String,
-    artifact_enhancement: bool,
-) -> Element {
+fn DiffPathCopyAction(kind: DiffPathCopyKind, payload: String, popover_id: String) -> Element {
     let language = use_language();
     let feedback = use_copy_feedback(payload);
-    let artifact_copy = artifact_enhancement.then_some(kind.artifact_value());
+
     let icon = match kind {
         DiffPathCopyKind::Relative => rsx! {
             span { class: "text-xs font-bold tracking-tight", "./" }
@@ -198,7 +175,7 @@ fn DiffPathCopyAction(
             class: MENU_ACTION_HOST_CLASSES,
             r#type: "button",
             aria_label: kind.aria_label(language),
-            "data-gtl-copy": artifact_copy,
+
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
@@ -206,16 +183,14 @@ fn DiffPathCopyAction(
                 browser::hide_popover(&popover_id);
             },
             MenuActionContent { icon, label: kind.label(language),
-                CopyActionFeedback { state: (feedback.state)(), artifact_enhancement }
+                CopyActionFeedback { state: (feedback.state)() }
             }
         }
     }
 }
 
 #[component]
-fn CopyActionFeedback(state: CopyState, artifact_enhancement: bool) -> Element {
-    let artifact_feedback = artifact_enhancement.then_some("");
-
+fn CopyActionFeedback(state: CopyState) -> Element {
     rsx! {
         span {
             class: "diff-file-copy-feedback",
@@ -223,7 +198,7 @@ fn CopyActionFeedback(state: CopyState, artifact_enhancement: bool) -> Element {
             aria_live: "polite",
             aria_atomic: "true",
             "data-state": state.value(),
-            "data-gtl-copy-feedback": artifact_feedback,
+
             {state.message(use_language())}
         }
     }

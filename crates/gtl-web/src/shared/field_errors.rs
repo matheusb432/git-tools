@@ -6,13 +6,6 @@ use super::failure_message::failure_message;
 
 /// One input of a form, named after the request field the server validates.
 pub(crate) trait FormField: Copy + Eq + 'static {
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without parsing requests"
-        )
-    )]
     /// Every input of the form.
     const ALL: &'static [Self];
 
@@ -28,13 +21,6 @@ pub(crate) trait FormField: Copy + Eq + 'static {
 enum FieldError {
     /// The input's own correction.
     Correction,
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without server failures"
-        )
-    )]
     /// A server failure that explains this input.
     Failure(Failure),
 }
@@ -54,13 +40,6 @@ impl<F> Default for FieldErrors<F> {
 }
 
 impl<F: FormField> FieldErrors<F> {
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without parsing requests"
-        )
-    )]
     /// Assigns an invalid-request failure to the input it names.
     ///
     /// Returns `None` when the failure concerns the whole form rather than one of its inputs.
@@ -77,13 +56,6 @@ impl<F: FormField> FieldErrors<F> {
         Some(errors)
     }
 
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without parsing requests"
-        )
-    )]
     /// Keeps a parsed value, or records the input's correction when parsing failed.
     pub(crate) fn parse<T, E>(&mut self, input: F, parsed: Result<T, E>) -> Option<T> {
         parsed.inspect_err(|_| self.reject(input)).ok()
@@ -94,13 +66,6 @@ impl<F: FormField> FieldErrors<F> {
         self.record(input, FieldError::Correction);
     }
 
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without server failures"
-        )
-    )]
     /// Records `failure` as the reason `input` was rejected, replacing an earlier one.
     pub(crate) fn reject_with(&mut self, input: F, failure: Failure) {
         self.record(input, FieldError::Failure(failure));
@@ -126,13 +91,6 @@ impl<F: FormField> FieldErrors<F> {
             })
     }
 
-    #[cfg_attr(
-        all(not(feature = "desktop"), not(test)),
-        expect(
-            dead_code,
-            reason = "component previews show errors without parsing requests"
-        )
-    )]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

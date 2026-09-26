@@ -7,7 +7,6 @@ pub(crate) enum PopoverPlacement {
     #[default]
     ViewportEnd,
     TriggerEnd,
-    #[cfg(any(feature = "desktop", feature = "component-preview"))]
     TriggerStart,
 }
 
@@ -16,7 +15,6 @@ impl PopoverPlacement {
         match self {
             Self::ViewportEnd => "viewport-end",
             Self::TriggerEnd => "trigger-end",
-            #[cfg(any(feature = "desktop", feature = "component-preview"))]
             Self::TriggerStart => "trigger-start",
         }
     }

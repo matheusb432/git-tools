@@ -4,9 +4,7 @@ use gtl_models::settings::ViewerLanguage;
 
 use crate::shared::i18n::t;
 
-#[cfg(feature = "desktop")]
 mod selection;
-#[cfg(feature = "desktop")]
 pub(super) use selection::use_diff_copy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,10 +85,6 @@ enum ContextCopyStatus {
 }
 
 impl ContextCopyStatus {
-    #[cfg_attr(
-        not(feature = "desktop"),
-        expect(dead_code, reason = "offline artifacts copy through their enhancer")
-    )]
     fn message(self, language: ViewerLanguage) -> String {
         match self {
             Self::File(None) => t!(language, "copy-context"),

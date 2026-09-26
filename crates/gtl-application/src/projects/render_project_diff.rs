@@ -80,7 +80,9 @@ pub fn execute(
 
     let generated_at = clock.now().map_err(anyhow::Error::from)?;
     let title = dated_title(&generated_at, "diff-artifact all");
-    let render_options = settings.viewer_render_options();
+    let render_options = settings
+        .viewer_render_options()
+        .with_layout(gtl_models::viewer::DiffLayout::Unified);
     let theme = settings.theme();
     let language = settings.language();
     let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme, language)?;
@@ -164,7 +166,12 @@ mod tests {
         let filters = SavedRepositoryPreferences::default();
         let response = render_project_diff::execute(
             req(repos),
-            &FixedUserSettingsStore::default(),
+            &FixedUserSettingsStore::new(
+                UserSettings::default().with_viewer_render_options(
+                    gtl_models::viewer::RenderOptions::DEFAULT
+                        .with_layout(gtl_models::viewer::DiffLayout::Split),
+                ),
+            ),
             &source,
             &store,
             &StubRenderer,
@@ -189,6 +196,10 @@ mod tests {
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .unwrap();
         assert_eq!(artifact.meta.identity, ArtifactDiffIdentity::WorkTree);
+        assert_eq!(
+            artifact.meta.render_options.layout(),
+            gtl_models::viewer::DiffLayout::Unified
+        );
     }
 
     #[test]

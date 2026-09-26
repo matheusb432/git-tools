@@ -29,7 +29,7 @@ up:
 preview-components *args:
     dx-story serve {{ args }}
 
-# Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
+# Build both the CLI engine and the desktop viewer.
 [group('build')]
 build:
     cargo run --quiet -p xtask -- build
@@ -129,7 +129,6 @@ test *args:
 _test-default-matrix:
     @just test-parser
     @just test-web-desktop
-    @just test-web-artifact
     @just test-web-component-preview
 
 # Run the parser test suite with every feature enabled.
@@ -141,11 +140,6 @@ test-parser *args:
 [group('quality')]
 test-web-desktop *args:
     @cargo nextest run --locked -p gtl-web "$@"
-
-# Run the static-artifact configuration of the shared web crate.
-[group('quality')]
-test-web-artifact *args:
-    @cargo nextest run --locked -p gtl-web --no-default-features --features artifact "$@"
 
 # Run the CSR component-preview configuration and its story registry tests.
 [group('quality')]
@@ -182,7 +176,6 @@ test-e2e-browser:
 test-all:
     @cargo nextest run --workspace
     @just test-parser
-    @just test-web-artifact
     @just test-web-component-preview
     @just test-docs
     @just drift-check
@@ -249,7 +242,7 @@ drift-check:
     set -euo pipefail
     just web preview-styles
     just web build
-    status=$(git status --short --untracked-files=all -- crates/gtl-web/assets/{tailwind,component-preview,artifact}.css)
+    status=$(git status --short --untracked-files=all -- crates/gtl-web/assets/{tailwind,component-preview}.css)
     if [[ -n "$status" ]]; then
         printf '%s\n' "$status" 'Stylesheets are stale; run just web styles and just web preview-styles, then commit.' >&2
         exit 1

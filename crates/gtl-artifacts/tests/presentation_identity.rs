@@ -99,7 +99,7 @@ fn presentation_options_have_distinct_artifact_identities() {
     let store_root = tempfile::tempdir().unwrap();
     let view = view(&repo_root);
     let options_default = RenderOptions::DEFAULT;
-    let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
+    let options_full = RenderOptions::new(DiffLayout::Unified, DiffDensity::Full);
     let html_default = ArtifactRenderer
         .build_html(
             &view,
@@ -108,16 +108,16 @@ fn presentation_options_have_distinct_artifact_identities() {
             gtl_models::settings::ViewerLanguage::EnUs,
         )
         .unwrap();
-    let html_split_full = ArtifactRenderer
+    let html_full = ArtifactRenderer
         .build_html(
             &view,
-            options_split_full,
+            options_full,
             None,
             gtl_models::settings::ViewerLanguage::EnUs,
         )
         .unwrap();
 
-    assert_ne!(html_default, html_split_full);
+    assert_ne!(html_default, html_full);
 
     let artifact_default = StoreArtifacts
         .place(
@@ -126,15 +126,15 @@ fn presentation_options_have_distinct_artifact_identities() {
             &html_default,
         )
         .unwrap();
-    let artifact_split_full = StoreArtifacts
+    let artifact_full = StoreArtifacts
         .place(
             store_root.path(),
-            &artifact_meta(&repo_root, options_split_full),
-            &html_split_full,
+            &artifact_meta(&repo_root, options_full),
+            &html_full,
         )
         .unwrap();
 
-    assert_ne!(artifact_default.path(), artifact_split_full.path());
+    assert_ne!(artifact_default.path(), artifact_full.path());
     assert_eq!(
         StoreArtifacts
             .lookup_by_range(
@@ -150,9 +150,9 @@ fn presentation_options_have_distinct_artifact_identities() {
             .lookup_by_range(
                 store_root.path(),
                 &repo_root,
-                &artifact_range_key(options_split_full),
+                &artifact_range_key(options_full),
             )
             .unwrap(),
-        Some(artifact_split_full.path().clone()),
+        Some(artifact_full.path().clone()),
     );
 }

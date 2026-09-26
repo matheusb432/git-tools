@@ -89,9 +89,8 @@ pub(crate) fn ScrollArea(
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "interactive-ui")]
-    use super::SCROLL_AREA_RAIL_CLASSES;
-    use super::{SCROLL_AREA_STANDARD_CLASSES, ScrollAreaVariant};
+
+    use super::{SCROLL_AREA_RAIL_CLASSES, SCROLL_AREA_STANDARD_CLASSES, ScrollAreaVariant};
 
     #[test]
     fn scroll_area_variant_owns_its_scrollbar_treatment() {
@@ -99,7 +98,6 @@ mod tests {
             ScrollAreaVariant::Standard.classes(),
             SCROLL_AREA_STANDARD_CLASSES
         );
-        #[cfg(feature = "interactive-ui")]
         assert_eq!(ScrollAreaVariant::Rail.classes(), SCROLL_AREA_RAIL_CLASSES);
     }
 }

@@ -1,39 +1,30 @@
-#[cfg(feature = "artifact")]
-use crate::shared::ui::ScrollArea;
 use crate::shared::{
     diff_view_title::diff_view_title_text,
     i18n::{t, use_language},
 };
-#[cfg(feature = "desktop")]
 mod copy_context;
 mod file;
-#[cfg(feature = "desktop")]
+#[cfg(feature = "component-preview")]
+use file::DiffFileCard;
 mod find;
 mod scroll_area;
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(super) mod search_bar;
-#[cfg(feature = "desktop")]
 pub(super) mod viewport;
 
-#[cfg(feature = "desktop")]
-use dioxus::core::Task;
-use dioxus::prelude::*;
+use dioxus::{core::Task, prelude::*};
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerViewIdentity};
 
-#[cfg(feature = "artifact")]
-use self::file::DiffFileCard;
-#[cfg(feature = "desktop")]
-use crate::app::application_layout::ViewerContext;
-#[cfg(feature = "desktop")]
-use crate::entities::diffs::use_client_diff_workspace;
-use crate::entities::diffs::{
-    ClientDiffFileStoreExt, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
+#[cfg(feature = "component-preview")]
+use crate::shared::ui::{EmptyNotice, ScrollArea};
+use crate::{
+    app::application_layout::ViewerContext,
+    entities::diffs::{
+        ClientDiffFileStoreExt, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
+        use_client_diff_workspace,
+    },
 };
-#[cfg(feature = "artifact")]
-use crate::shared::ui::EmptyNotice;
 
-#[cfg(feature = "desktop")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DiffSearchTarget {
     identity: ViewerViewIdentity,
@@ -41,7 +32,6 @@ struct DiffSearchTarget {
     row: usize,
 }
 
-#[cfg(feature = "desktop")]
 #[component]
 pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>) -> Element {
     let diff = super::diff_workspace::use_workspace_context();
@@ -75,7 +65,6 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
     }
 }
 
-#[cfg(feature = "desktop")]
 #[component]
 fn DiffSourcePreparation(
     state: gtl_wire::viewer::ViewerRowSourceState,
@@ -109,7 +98,6 @@ fn DiffSourcePreparation(
     }
 }
 
-#[cfg(feature = "desktop")]
 #[component]
 fn LoadedDiffDocument(
     workspace: Store<ClientDiffWorkspace>,
@@ -168,7 +156,6 @@ fn LoadedDiffDocument(
     }
 }
 
-#[cfg(feature = "desktop")]
 fn use_diff_rows_loading_tab(tab_id: ViewerTabId, loading: bool) {
     let viewer = use_context::<ViewerContext>();
     let mut reported_tab_id = use_signal(|| None::<ViewerTabId>);
@@ -202,9 +189,9 @@ fn use_diff_rows_loading_tab(tab_id: ViewerTabId, loading: bool) {
     });
 }
 
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 #[component]
-pub(crate) fn StaticDiffDocument(
+pub(crate) fn PreviewDiffDocument(
     workspace: ClientDiffWorkspace,
     overlay: Option<Element>,
 ) -> Element {
@@ -229,13 +216,12 @@ pub(crate) fn StaticDiffDocument(
                 retry_allowed: false,
                 onopen: None,
                 onretry: move |_file_id| {},
-                artifact_tab_id: Some(identity.tab_id),
             }
         }
     }
 }
 
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 #[component]
 fn DiffDocumentBody(
     title: String,
@@ -247,7 +233,6 @@ fn DiffDocumentBody(
     retry_allowed: bool,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<ViewerDiffFileId>,
-    artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
     let layout = identity.render_options.layout;
     let density = identity.render_options.density;
@@ -281,14 +266,13 @@ fn DiffDocumentBody(
                 retry_allowed,
                 onopen,
                 onretry,
-                artifact_tab_id,
             }
             div { class: "h-15 tablet:h-12 print:hidden", aria_hidden: "true" }
         }
     }
 }
 
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 #[component]
 fn DiffDocumentFiles(
     workspace: ReadStore<ClientDiffWorkspace>,
@@ -299,7 +283,6 @@ fn DiffDocumentFiles(
     retry_allowed: bool,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<ViewerDiffFileId>,
-    artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
     rsx! {
         if workspace.files().is_empty() {
@@ -320,7 +303,6 @@ fn DiffDocumentFiles(
                         onretry: move |()| onretry.call(file_id.clone()),
                         retry_allowed,
                         file_index: index,
-                        artifact_tab_id,
                     }
                 }
             }

@@ -23,30 +23,15 @@ enum SplitCellPresentation {
 }
 
 #[component]
-pub(crate) fn SplitDiffRowBatch(
-    file: ReadStore<ClientDiffFile>,
-    batch_index: usize,
-    artifact_enhancement: bool,
-) -> Element {
+pub(crate) fn SplitDiffRowBatch(file: ReadStore<ClientDiffFile>, batch_index: usize) -> Element {
     let rows = file.rows().split().index(batch_index);
     rsx! {
-        SplitRows { rows, artifact_enhancement, first_row: batch_index * 64 }
+        SplitRows { rows, first_row: batch_index * 64 }
     }
 }
 
 #[component]
-fn SplitRows(
-    rows: ReadStore<Vec<ViewerSplitRow>>,
-    artifact_enhancement: bool,
-    #[props(default)] first_row: usize,
-) -> Element {
-    if artifact_enhancement {
-        return rsx! {
-            for (index, row) in rows.iter().enumerate() {
-                SplitDiffRowView { key: "{index}", row }
-            }
-        };
-    }
+fn SplitRows(rows: ReadStore<Vec<ViewerSplitRow>>, #[props(default)] first_row: usize) -> Element {
     rsx! {
         for (index, row) in rows.iter().enumerate() {
             div {
@@ -310,10 +295,10 @@ mod tests {
     use crate::test_support::code_line;
 
     #[component]
-    fn SplitBatchFixture(rows: Vec<ViewerSplitRow>, artifact_enhancement: bool) -> Element {
+    fn SplitBatchFixture(rows: Vec<ViewerSplitRow>) -> Element {
         let rows = use_store(move || rows);
         rsx! {
-            SplitRows { rows, artifact_enhancement }
+            SplitRows { rows }
         }
     }
 
@@ -340,7 +325,7 @@ mod tests {
             },
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            SplitBatchFixture { rows, artifact_enhancement: false }
+            SplitBatchFixture { rows }
         });
         let absent_gutter = dioxus_ssr::render_element(rsx! {
             SplitGutter { side: SplitSide::New, number: None }
@@ -353,47 +338,5 @@ mod tests {
         assert!(absent_gutter.ends_with("></span>"));
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
         assert!(html.contains(r#"class="diff-truncated-text">abce</span>"#));
-    }
-
-    #[test]
-    fn artifact_rows_copy_only_the_new_side_without_diff_markers() {
-        let rows = vec![
-            ViewerSplitRow::Hunk("@@ -1,2 +10,3 @@".to_owned()),
-            ViewerSplitRow::Context {
-                old_line_number: 1,
-                new_line_number: 10,
-                code: code_line("keep", Some(4)),
-            },
-            ViewerSplitRow::Pair {
-                old: Some(ViewerSplitCell {
-                    line_number: 2,
-                    code: code_line("oldx", Some(4)),
-                }),
-                new: Some(ViewerSplitCell {
-                    line_number: 11,
-                    code: code_line("newx", Some(4)),
-                }),
-            },
-            ViewerSplitRow::Pair {
-                old: None,
-                new: Some(ViewerSplitCell {
-                    line_number: 12,
-                    code: code_line("abcdefgh", Some(8)),
-                }),
-            },
-        ];
-        let html = dioxus_ssr::render_element(rsx! {
-            SplitBatchFixture { rows, artifact_enhancement: true }
-        });
-
-        assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);
-        for line_number in [10, 11, 12] {
-            assert!(html.contains(&format!(r#"data-gtl-new-line="{line_number}""#)));
-        }
-        for text in ["keep", "newx", "abcdefgh"] {
-            assert!(html.contains(&format!(r#"class="diff-truncated-text">{text}</span>"#)));
-        }
-        assert!(!html.contains(r#"data-gtl-copy-text="">oldx</span>"#));
-        assert!(!html.contains(r#"data-gtl-copy-text="">+newx</span>"#));
     }
 }

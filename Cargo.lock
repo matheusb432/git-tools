@@ -3944,8 +3944,7 @@ dependencies = [
  "gtl-application",
  "gtl-infra",
  "gtl-models",
- "gtl-web",
- "gtl-wire",
+ "gtl-parser",
  "sha2 0.11.0",
  "tempfile",
 ]
@@ -4228,10 +4227,8 @@ dependencies = [
  "jiff",
  "lru",
  "lucide-dioxus",
- "minifier",
  "serde",
  "serde_json",
- "thiserror 2.0.19",
  "unic-langid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5460,12 +5457,6 @@ dependencies = [
  "mime",
  "unicase",
 ]
-
-[[package]]
-name = "minifier"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "245c950e30794ed20f72ff60c85ae1cddb0ba54fda4623017a678943f98f636c"
 
 [[package]]
 name = "miniz_oxide"

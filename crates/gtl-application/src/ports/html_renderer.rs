@@ -16,7 +16,7 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         language: ViewerLanguage,
     ) -> anyhow::Result<String>;
 
-    /// Renders several views in one document with a tab per repository.
+    /// Renders several views in one document with a linked section per repository.
     fn build_tabbed_html(
         &self,
         title: &str,

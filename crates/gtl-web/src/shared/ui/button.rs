@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-#[cfg(feature = "interactive-ui")]
 use super::LoadingSpinner;
 
 const BUTTON_CLASSES: &str = "control-button";
@@ -10,7 +9,6 @@ const BUTTON_CLASSES: &str = "control-button";
 pub(crate) enum ButtonType {
     #[default]
     Button,
-    #[cfg(feature = "interactive-ui")]
     Submit,
 }
 
@@ -18,7 +16,6 @@ impl ButtonType {
     const fn as_html_type(self) -> &'static str {
         match self {
             Self::Button => "button",
-            #[cfg(feature = "interactive-ui")]
             Self::Submit => "submit",
         }
     }
@@ -48,11 +45,8 @@ impl ButtonLayout {
 pub(crate) enum ButtonVariant {
     #[default]
     Primary,
-    #[cfg(feature = "interactive-ui")]
     Secondary,
-    #[cfg(feature = "interactive-ui")]
     Destructive,
-    #[cfg(feature = "interactive-ui")]
     #[cfg_attr(
         not(feature = "component-preview"),
         allow(dead_code, reason = "reserved for the viewer push feature")
@@ -62,7 +56,6 @@ pub(crate) enum ButtonVariant {
     Outline,
     Ghost,
     Accent,
-    #[cfg(feature = "interactive-ui")]
     Toggle,
     Bare,
 }
@@ -71,17 +64,13 @@ impl ButtonVariant {
     pub(crate) const fn classes(self) -> &'static str {
         match self {
             Self::Primary => "control-button-variant-primary",
-            #[cfg(feature = "interactive-ui")]
             Self::Secondary => "control-button-variant-secondary",
-            #[cfg(feature = "interactive-ui")]
             Self::Destructive => "control-button-variant-destructive",
-            #[cfg(feature = "interactive-ui")]
             Self::Warning => "control-button-variant-warning",
             Self::Failure => "control-button-variant-failure",
             Self::Outline => "control-button-variant-outline",
             Self::Ghost => "control-button-variant-ghost",
             Self::Accent => "control-button-variant-accent",
-            #[cfg(feature = "interactive-ui")]
             Self::Toggle => "control-button-variant-ghost control-button-variant-toggle",
             Self::Bare => "",
         }
@@ -96,12 +85,10 @@ pub(crate) enum ButtonSize {
     Small,
     #[default]
     Medium,
-    #[cfg(feature = "interactive-ui")]
     IconCompact,
     IconSmall,
     #[cfg(feature = "component-preview")]
     IconMedium,
-    #[cfg(feature = "interactive-ui")]
     IconTouch,
 }
 
@@ -113,12 +100,10 @@ impl ButtonSize {
             Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-xs",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",
-            #[cfg(feature = "interactive-ui")]
             Self::IconCompact => "size-6 p-0",
             Self::IconSmall => "size-8 p-0",
             #[cfg(feature = "component-preview")]
             Self::IconMedium => "size-9 p-0",
-            #[cfg(feature = "interactive-ui")]
             Self::IconTouch => "size-11 p-0",
         }
     }
@@ -129,10 +114,8 @@ pub(crate) enum ButtonState {
     #[default]
     Enabled,
     Disabled,
-    #[cfg(feature = "interactive-ui")]
     Loading,
     /// Busy behind other work; shows a clock instead of the spinner.
-    #[cfg(feature = "interactive-ui")]
     Waiting,
 }
 
@@ -140,17 +123,13 @@ impl ButtonState {
     const fn is_disabled(self) -> bool {
         match self {
             Self::Enabled => false,
-            Self::Disabled => true,
-            #[cfg(feature = "interactive-ui")]
-            Self::Loading | Self::Waiting => true,
+            Self::Disabled | Self::Loading | Self::Waiting => true,
         }
     }
 
     const fn is_busy(self) -> bool {
         match self {
-            Self::Enabled => false,
-            Self::Disabled => false,
-            #[cfg(feature = "interactive-ui")]
+            Self::Enabled | Self::Disabled => false,
             Self::Loading | Self::Waiting => true,
         }
     }
@@ -158,11 +137,9 @@ impl ButtonState {
     fn indicator(self) -> Option<Element> {
         match self {
             Self::Enabled | Self::Disabled => None,
-            #[cfg(feature = "interactive-ui")]
             Self::Loading => Some(rsx! {
                 LoadingSpinner {}
             }),
-            #[cfg(feature = "interactive-ui")]
             Self::Waiting => Some(rsx! {
                 lucide_dioxus::Clock { size: 14 }
             }),
@@ -226,7 +203,7 @@ pub(crate) fn Button(
     }
 }
 
-#[cfg(all(test, feature = "interactive-ui"))]
+#[cfg(test)]
 mod tests {
     use dioxus::prelude::*;
 

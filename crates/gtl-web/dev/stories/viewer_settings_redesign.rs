@@ -655,7 +655,7 @@ mod tests {
         );
         assert!(styles.contains(r#".viewer-tab-selection-indicator[data-active="true"] { @apply opacity-100 transition-opacity"#));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
-        assert!(html.contains(r#"data-gtl-action="copy-commit""#));
+        assert!(html.contains(r#"title="Copy commit ID""#));
         assert!(html.contains(r#"aria-pressed="false""#));
         assert!(html.contains("Collapse all"));
         assert!(!html.contains("Search code in this file"));
@@ -706,7 +706,7 @@ mod tests {
         assert!(html.contains(r#"aria-label="Changed files""#));
         assert!(html.contains(r#"aria-label="Commits""#));
         assert!(html.contains("inline-flex size-5 flex-none items-center justify-center"));
-        assert!(!html.contains(r#"data-gtl-action="copy-commit""#));
+        assert!(!html.contains(r#"title="Copy commit ID""#));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
     }
 }

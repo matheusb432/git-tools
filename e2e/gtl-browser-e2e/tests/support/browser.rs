@@ -11,7 +11,9 @@ use anyhow::{Context as _, Result, bail};
 use playwright_rs::{
     LaunchOptions, Playwright,
     api::IgnoreDefaultArgs,
-    protocol::{Browser, BrowserContext, CDPSession, GotoOptions, Page, Route},
+    protocol::{
+        Browser, BrowserContext, BrowserContextOptions, CDPSession, GotoOptions, Page, Route,
+    },
 };
 use serde_json::Value;
 
@@ -293,6 +295,20 @@ pub async fn open_web() -> Result<Session> {
     open_session(false).await
 }
 
+fn browser_launch_options() -> LaunchOptions {
+    LaunchOptions::new()
+        .ignore_default_args(IgnoreDefaultArgs::Array(vec![
+            "--hide-scrollbars".to_owned(),
+        ]))
+        .args(vec![
+            "--disable-background-networking".to_owned(),
+            "--disable-component-update".to_owned(),
+            "--disable-default-apps".to_owned(),
+            "--disable-sync".to_owned(),
+            "--metrics-recording-only".to_owned(),
+        ])
+}
+
 async fn open_session(install_artifact_audit: bool) -> Result<Session> {
     let playwright = operation("launch Playwright driver", async {
         Playwright::launch()
@@ -303,19 +319,7 @@ async fn open_session(install_artifact_audit: bool) -> Result<Session> {
     let browser = match operation("launch Chromium", async {
         playwright
             .chromium()
-            .launch_with_options(
-                LaunchOptions::new()
-                    .ignore_default_args(IgnoreDefaultArgs::Array(vec![
-                        "--hide-scrollbars".to_owned(),
-                    ]))
-                    .args(vec![
-                        "--disable-background-networking".to_owned(),
-                        "--disable-component-update".to_owned(),
-                        "--disable-default-apps".to_owned(),
-                        "--disable-sync".to_owned(),
-                        "--metrics-recording-only".to_owned(),
-                    ]),
-            )
+            .launch_with_options(browser_launch_options())
             .await
             .context("launch Chromium")
     })
@@ -326,7 +330,11 @@ async fn open_session(install_artifact_audit: bool) -> Result<Session> {
     };
     let context = match operation("create isolated Chromium context", async {
         browser
-            .new_context()
+            .new_context_with_options(
+                BrowserContextOptions::builder()
+                    .javascript_enabled(!install_artifact_audit)
+                    .build(),
+            )
             .await
             .context("create isolated Chromium context")
     })

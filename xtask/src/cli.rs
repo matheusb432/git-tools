@@ -89,7 +89,7 @@ pub enum Command {
     MacosPackage,
     /// Exercise the installed macOS package and save a desktop launch screenshot.
     MacosSmoke,
-    /// Generate the static artifact stylesheet and stage the release Dioxus Web bundle.
+    /// Generate the viewer stylesheet and stage the release Dioxus Web bundle.
     WebBuild,
     /// Serve the Dioxus shell with repository-owned asset watchers.
     WebServe {

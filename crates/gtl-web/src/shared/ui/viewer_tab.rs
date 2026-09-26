@@ -1,16 +1,12 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
 use gtl_models::{settings::ViewerLanguage, viewer::ViewerTabId};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
-use lucide_dioxus::ChevronDown;
-use lucide_dioxus::{Check, ListX, Pencil, Pin, Radio, RefreshCw, TriangleAlert, X};
+use lucide_dioxus::{Check, ChevronDown, ListX, Pencil, Pin, Radio, RefreshCw, TriangleAlert, X};
 
 use super::{
-    Button, ButtonSize, ButtonVariant, HoverPopover, HoverPopoverPlacement, InlineTextEditor,
-    InlineTextSubmission, LoadingSpinner, use_hover_popover,
+    Button, ButtonSize, ButtonVariant, CountBadge, HoverPopover, HoverPopoverPlacement,
+    InlineTextEditor, InlineTextSubmission, LoadingSpinner, ScrollArea, use_hover_popover,
 };
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
-use super::{CountBadge, ScrollArea};
 use crate::shared::{
     browser,
     i18n::{t, use_language},
@@ -357,7 +353,6 @@ fn ViewerTabCloseButton(
     }
 }
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 #[component]
 pub(crate) fn ViewerTabOverflowMenu(
     id: String,
@@ -496,7 +491,6 @@ pub(crate) fn ViewerTabOverflowMenu(
     }
 }
 
-#[cfg(any(feature = "component-preview", feature = "desktop"))]
 #[component]
 fn ViewerTabOverflowMenuItem(
     popover_id: String,
@@ -818,7 +812,6 @@ impl TabPresentationState {
         }
     }
 
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     fn menu_label(self, language: ViewerLanguage) -> Option<String> {
         match self {
             Self::Ready => None,
@@ -871,10 +864,9 @@ mod tests {
 
     use super::{
         MouseButton, TabPresentationState, TabStateMarker, ViewerTabActivationGesture,
-        ViewerTabItem, ViewerTabItemProps, ViewerTabRailMeasurementItem, tab_presentation_state,
+        ViewerTabItem, ViewerTabItemProps, ViewerTabOverflowMenu, ViewerTabOverflowMenuProps,
+        ViewerTabRailMeasurementItem, tab_presentation_state,
     };
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
-    use super::{ViewerTabOverflowMenu, ViewerTabOverflowMenuProps};
     use crate::test_support::{TestResult, recipe_label, viewer_tab_id};
 
     #[test]
@@ -1094,7 +1086,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     #[test]
     fn overflow_panel_stays_below_its_trigger_with_bounded_height() {
         let stylesheet = include_str!("../../app/assets/styles/viewer-tabs.css");
@@ -1109,7 +1100,6 @@ mod tests {
         assert!(!styles.split_whitespace().any(|class| class == "grid"));
     }
 
-    #[cfg(any(feature = "component-preview", feature = "desktop"))]
     #[test]
     fn overflow_menu_exposes_current_pending_and_close_states() -> TestResult {
         let active_tab = ViewerTab {

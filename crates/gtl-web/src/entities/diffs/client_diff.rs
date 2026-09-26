@@ -1,18 +1,14 @@
-#[cfg(feature = "desktop")]
 mod loading;
 use dioxus::prelude::*;
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 use gtl_wire::viewer::{ViewerFileRows, ViewerRows};
 use gtl_wire::viewer::{ViewerFileSummary, ViewerViewIdentity};
-#[cfg(feature = "desktop")]
 pub(super) use loading::{ClientDiffFetch, LoadedRowWindow, window_too_large};
-#[cfg(feature = "desktop")]
 pub(crate) use loading::{
     ClientDiffWindow, ClientDiffWorkspaceController, use_client_diff_workspace,
 };
 
 use super::{ViewerSplitRow, ViewerUnifiedRow};
-#[cfg(feature = "desktop")]
 use crate::shared::viewer_client::ViewerClientError;
 
 pub(crate) const CLIENT_LINE_BATCH_SIZE: usize = 64;
@@ -24,18 +20,18 @@ pub(crate) struct ClientDiffRows {
 }
 
 impl ClientDiffRows {
-    #[cfg(any(feature = "artifact", test))]
+    #[cfg(any(feature = "component-preview", test))]
     fn append_unified(&mut self, rows: Vec<ViewerUnifiedRow>) {
         self.unified.extend(bounded_batches(rows));
     }
 
-    #[cfg(any(feature = "artifact", test))]
+    #[cfg(any(feature = "component-preview", test))]
     fn append_split(&mut self, rows: Vec<ViewerSplitRow>) {
         self.split.extend(bounded_batches(rows));
     }
 }
 
-#[cfg(any(feature = "artifact", test))]
+#[cfg(any(feature = "component-preview", test))]
 fn bounded_batches<Row>(rows: Vec<Row>) -> impl Iterator<Item = Vec<Row>> {
     let mut rows = rows.into_iter();
     std::iter::from_fn(move || {
@@ -47,7 +43,6 @@ fn bounded_batches<Row>(rows: Vec<Row>) -> impl Iterator<Item = Vec<Row>> {
     })
 }
 
-#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileError {
     Transport(ViewerClientError),
@@ -58,7 +53,6 @@ pub(crate) enum ClientDiffFileError {
     },
 }
 
-#[cfg(feature = "desktop")]
 impl ClientDiffFileError {
     pub(crate) const fn retryable(&self) -> bool {
         match self {
@@ -79,7 +73,6 @@ impl ClientDiffFileError {
     }
 }
 
-#[cfg(feature = "desktop")]
 impl ClientDiffFileError {
     /// Explains why rows did not load, in `language`.
     pub(crate) fn message(&self, language: gtl_models::settings::ViewerLanguage) -> String {
@@ -98,22 +91,18 @@ impl ClientDiffFileError {
 }
 
 /// Describes the error in the default language for diagnostics and tests.
-#[cfg(feature = "desktop")]
 impl std::fmt::Display for ClientDiffFileError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message(gtl_models::settings::ViewerLanguage::default()))
     }
 }
 
-#[cfg(feature = "desktop")]
 impl std::error::Error for ClientDiffFileError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileState {
-    #[cfg(feature = "desktop")]
     Loading,
     Complete,
-    #[cfg(feature = "desktop")]
     Error(ClientDiffFileError),
 }
 
@@ -126,7 +115,6 @@ pub(crate) struct ClientDiffFile {
 }
 
 impl ClientDiffFile {
-    #[cfg(feature = "desktop")]
     fn loading(summary: ViewerFileSummary, layout: gtl_wire::viewer::ViewerDiffLayout) -> Self {
         let count = summary.row_count.div_ceil(CLIENT_LINE_BATCH_SIZE);
         let rows = match layout {
@@ -155,7 +143,6 @@ pub(crate) struct ClientDiffWorkspace {
 }
 
 impl ClientDiffWorkspace {
-    #[cfg(feature = "desktop")]
     pub(super) fn loading(identity: ViewerViewIdentity, files: Vec<ViewerFileSummary>) -> Self {
         Self {
             identity,
@@ -167,7 +154,7 @@ impl ClientDiffWorkspace {
     }
 }
 
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 pub(crate) fn static_diff_workspace(
     identity: ViewerViewIdentity,
     files: Vec<(ViewerFileSummary, ViewerFileRows)>,
@@ -179,7 +166,7 @@ pub(crate) fn static_diff_workspace(
     ClientDiffWorkspace { identity, files }
 }
 
-#[cfg(feature = "artifact")]
+#[cfg(feature = "component-preview")]
 fn static_diff_file(summary: ViewerFileSummary, rows: ViewerFileRows) -> ClientDiffFile {
     let line_number_digits = rows.line_number_digits;
     let mut projected = ClientDiffRows::default();
@@ -195,7 +182,7 @@ fn static_diff_file(summary: ViewerFileSummary, rows: ViewerFileRows) -> ClientD
     }
 }
 
-#[cfg(all(test, feature = "desktop"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     #[test]

@@ -6,14 +6,13 @@ pub(in crate::views::diffs) enum Panel {
     Commits,
 }
 
-#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(in crate::views::diffs) struct PanelScrollPosition {
     left: f64,
     top: f64,
 }
 
-#[cfg(all(test, feature = "desktop"))]
+#[cfg(test)]
 impl PanelScrollPosition {
     pub(in crate::views::diffs) const fn new(left: f64, top: f64) -> Self {
         Self { left, top }
@@ -27,7 +26,6 @@ pub(super) struct PanelScroll {
 }
 
 /// provides saving and restoring panel scroll positions for diff tabs.
-#[cfg(feature = "desktop")]
 pub(super) fn use_panel_scroll(panel: Panel) -> PanelScroll {
     use crate::views::diffs::presentation::DiffPresentation;
 
@@ -96,14 +94,5 @@ pub(super) fn use_panel_scroll(panel: Panel) -> PanelScroll {
                 );
             }
         }),
-    }
-}
-
-#[cfg(not(feature = "desktop"))]
-pub(super) fn use_panel_scroll(_panel: Panel) -> PanelScroll {
-    PanelScroll {
-        mount: use_callback(|_| {}),
-        restore: use_callback(|()| {}),
-        save: use_callback(|_| {}),
     }
 }

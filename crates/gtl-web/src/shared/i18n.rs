@@ -111,7 +111,6 @@ macro_rules! t {
 pub(crate) use t;
 
 /// Names `language` in itself, so readers find their own language whatever the display language.
-#[cfg(feature = "interactive-ui")]
 pub(crate) const fn language_endonym(language: ViewerLanguage) -> &'static str {
     match language {
         ViewerLanguage::EnUs => "English (US)",

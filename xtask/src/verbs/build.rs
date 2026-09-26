@@ -1,4 +1,4 @@
-//! Release build orchestration for the CLI, static artifact styles, and desktop viewer.
+//! Release build orchestration for the CLI and desktop viewer.
 
 use std::path::Path;
 
@@ -19,10 +19,11 @@ const VIEWER_BUILD_ARGS: &[&str] = &[
 /// Build the selected release artifact set. Every selected artifact is mandatory.
 pub fn run(target: BuildTarget) -> Result<()> {
     let root = repository_root();
-    let _lock = lock_web_assets(&root)?;
-    match target {
-        BuildTarget::Cli => dioxus_web::build_artifact_styles_unlocked(&root)?,
-        BuildTarget::Viewer | BuildTarget::Both => dioxus_web::build_release_unlocked(&root)?,
+    let _lock = matches!(target, BuildTarget::Viewer | BuildTarget::Both)
+        .then(|| lock_web_assets(&root))
+        .transpose()?;
+    if matches!(target, BuildTarget::Viewer | BuildTarget::Both) {
+        dioxus_web::build_release_unlocked(&root)?;
     }
     if matches!(target, BuildTarget::Cli | BuildTarget::Both) {
         build_cli(&root)?;

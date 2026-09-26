@@ -24,7 +24,6 @@ pub(super) enum DialogPhase {
 }
 
 impl DialogPhase {
-    #[cfg(feature = "interactive-ui")]
     #[cfg_attr(
         not(feature = "component-preview"),
         allow(dead_code, reason = "reserved for the viewer push feature")

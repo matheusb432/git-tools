@@ -12,7 +12,14 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 11] = [
+const EDGE_POLICIES: [EdgePolicy; 12] = [
+    EdgePolicy {
+        from: "gtl-artifacts",
+        label: "gtl-artifacts owns standalone document rendering",
+        forbidden: &["gtl-web", "gtl-client", "gtl-wire", "dioxus", "dioxus-ssr"],
+        forbid_workspace_packages: false,
+        reason: "offline documents share domain data and the parser, not viewer presentation or transport contracts",
+    },
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
