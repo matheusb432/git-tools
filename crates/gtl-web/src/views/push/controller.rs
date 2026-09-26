@@ -374,35 +374,19 @@ pub(crate) fn PushButton(
     #[props(default)] icon_only: bool,
     title: Option<String>,
 ) -> Element {
-    let language = use_language();
-    let controller = use_context::<PushController>();
-    let source_key = PushSourceKey::from(&source);
-    let dialog = controller.dialog.read();
-    let preparing = dialog.as_ref().is_some_and(|dialog| {
-        dialog.source == source_key && matches!(dialog.phase, PushPhase::Preparing)
-    });
-    let operation = controller.operations.read().get(&source_key).cloned();
-    let unavailable = !controller.viewer.actions_enabled()
-        || dialog.is_some()
-        || (disabled && operation.is_none());
+    let (presentation, activate) = use_push_trigger(source, disabled, title);
     let PushButtonPresentation {
         label,
         title,
         state,
         unresolved,
-    } = push_button_presentation(
-        operation.as_ref().map(|operation| &operation.phase),
-        preparing,
-        unavailable,
-        title,
-        language,
-    );
+    } = presentation;
     let trigger = id.clone();
     rsx! {
         Button {
             id,
             size: if icon_only { ButtonSize::IconSmall } else { ButtonSize::Small },
-            variant: if icon_only { ButtonVariant::Accent } else { ButtonVariant::Secondary },
+            variant: ButtonVariant::Accent,
             class: "mobile:size-11 mobile:p-0",
             state,
             aria_label: label.clone(),
@@ -414,10 +398,79 @@ pub(crate) fn PushButton(
                     lucide_dioxus::Upload { size: 14 }
                 }
             },
-            onclick: move |_| controller.activate(source.clone(), trigger.clone()),
+            onclick: move |_| activate.call(trigger.clone()),
             if !icon_only {
                 span { class: "mobile:hidden", "{label}" }
             }
+        }
+    }
+}
+
+fn use_push_trigger(
+    source: CreateViewerPush,
+    disabled: bool,
+    title: Option<String>,
+) -> (PushButtonPresentation, Callback<String>) {
+    let language = use_language();
+    let controller = use_context::<PushController>();
+    let source_key = PushSourceKey::from(&source);
+    let dialog = controller.dialog.read();
+    let preparing = dialog.as_ref().is_some_and(|dialog| {
+        dialog.source == source_key && matches!(dialog.phase, PushPhase::Preparing)
+    });
+    let operation = controller.operations.read().get(&source_key).cloned();
+    let unavailable = !controller.viewer.actions_enabled()
+        || dialog.is_some()
+        || (disabled && operation.is_none());
+    let presentation = push_button_presentation(
+        operation.as_ref().map(|operation| &operation.phase),
+        preparing,
+        unavailable,
+        title,
+        language,
+    );
+    let activate = use_callback(move |trigger| controller.activate(source.clone(), trigger));
+    (presentation, activate)
+}
+
+#[component]
+pub(super) fn PushMenuAction(
+    source: CreateViewerPush,
+    disabled: bool,
+    title: String,
+    menu_id: String,
+    trigger_id: String,
+) -> Element {
+    let (presentation, activate) = use_push_trigger(source, disabled, Some(title));
+    let PushButtonPresentation {
+        label,
+        title,
+        state,
+        unresolved,
+    } = presentation;
+    rsx! {
+        Button {
+            class: "control-menu-action viewer-tab-context-action",
+            size: ButtonSize::Content,
+            variant: ButtonVariant::Bare,
+            role: "menuitem",
+            tabindex: "-1",
+            state,
+            title,
+            icon: rsx! {
+                span { class: "inline-flex text-acc", aria_hidden: "true",
+                    if unresolved {
+                        lucide_dioxus::RefreshCw { size: 14 }
+                    } else {
+                        lucide_dioxus::Upload { size: 14 }
+                    }
+                }
+            },
+            onclick: move |_| {
+                browser::hide_popover(&menu_id);
+                activate.call(trigger_id.clone());
+            },
+            "{label}"
         }
     }
 }

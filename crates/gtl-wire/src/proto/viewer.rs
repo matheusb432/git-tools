@@ -189,6 +189,14 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
 
 fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
     v1::ViewerTab {
+        details: tab.details.map(|details| v1::ViewerTabDetails {
+            repository: details.repository.to_string_lossy().into_owned(),
+            comparison: Some(recipe_label::encode(details.comparison)),
+            range: details.range.map(|range| v1::ViewerTabRange {
+                base: range.base.to_string(),
+                head: range.head.to_string(),
+            }),
+        }),
         pinned: tab.pinned,
         custom_name: tab.custom_name,
         id: u64::from(tab.id),
@@ -1303,6 +1311,7 @@ fn decode_viewer_keybindings(
 
 fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> {
     Ok(ViewerTab {
+        details: tab.details.map(decode_viewer_tab_details).transpose()?,
         pinned: tab.pinned,
         custom_name: tab.custom_name,
         id: ViewerTabId::try_new(tab.id).map_err(|_| ViewerCodecError::InvalidMessage)?,
@@ -1317,6 +1326,27 @@ fn decode_viewer_tab(tab: v1::ViewerTab) -> Result<ViewerTab, ViewerCodecError> 
                 return Err(ViewerCodecError::InvalidMessage);
             }
         },
+    })
+}
+
+fn decode_viewer_tab_details(
+    details: v1::ViewerTabDetails,
+) -> Result<crate::viewer::ViewerTabDetails, ViewerCodecError> {
+    Ok(crate::viewer::ViewerTabDetails {
+        repository: gtl_models::paths::RepositoryRoot::try_new(details.repository.into())
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        comparison: recipe_label::decode(required(details.comparison)?)?,
+        range: details
+            .range
+            .map(|range| {
+                Ok::<_, ViewerCodecError>(gtl_models::diffs::PinnedRange {
+                    base: CommitId::try_from(range.base)
+                        .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                    head: CommitId::try_from(range.head)
+                        .map_err(|_| ViewerCodecError::InvalidMessage)?,
+                })
+            })
+            .transpose()?,
     })
 }
 

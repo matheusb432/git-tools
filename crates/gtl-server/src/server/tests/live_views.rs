@@ -59,6 +59,7 @@ async fn live_watch_tracks_head_identity_recovers_and_catches_up_after_disconnec
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let initial = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    super::wait_for_history(&mut client).await?;
     let tab_id = initial.tabs[0].id;
     let request = v1::WatchViewerRequest {
         live_tab_id: Some(tab_id.into()),

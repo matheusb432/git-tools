@@ -31,7 +31,7 @@ use crate::{
     },
     views::{
         diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
-        viewer_menu::ViewerMenu,
+        viewer_settings_button::ViewerSettingsButton,
         viewer_settings_form::{SettingsField, ViewerSettingsForm, ViewerSettingsSelection},
     },
 };
@@ -113,7 +113,7 @@ fn alternate_preview_keybindings() -> Option<ViewerKeybindings> {
     .ok()
 }
 
-/// Phone viewer with a lean titlebar and dedicated Files and Commits navigation.
+/// Phone viewer with dedicated Files and Commits navigation.
 #[story(name = "Mobile viewer")]
 fn mobile_viewer() -> Element {
     rsx! {
@@ -190,11 +190,6 @@ fn ViewerPreview(
 fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
     let initial_tab_id = tabs.first().map(|tab| tab.id);
     let mut active_tab_id = use_signal(move || initial_tab_id);
-    let menu_id = if mobile {
-        "preview-mobile-viewer-menu"
-    } else {
-        "preview-desktop-viewer-menu"
-    };
 
     rsx! {
         NavigationBar {
@@ -225,7 +220,7 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
                 }
             },
             trailing: rsx! {
-                ViewerMenu { id: menu_id, onsettings: move |()| {} }
+                ViewerSettingsButton { onsettings: move |()| {} }
             },
         }
     }
@@ -278,6 +273,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     };
     let tabs = vec![
         ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: tab_id,
@@ -288,6 +284,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             state: ViewerTabState::Ready,
         },
         ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: ViewerTabId::try_new(2)?,
@@ -650,7 +647,6 @@ mod tests {
             ViewerPreview {}
         });
 
-        assert!(html.contains(r#"class="viewer-tab group/viewer-tab" data-active="true""#));
         assert!(html.contains(r#"class="viewer-tab-selection-indicator" data-active="true""#));
         let styles = include_str!("../../src/app/assets/styles/viewer-tabs.css");
         assert!(styles.contains("min-w-24 max-w-80 shrink-0"));
@@ -662,7 +658,6 @@ mod tests {
         assert!(html.contains(r#"data-gtl-action="copy-commit""#));
         assert!(html.contains(r#"aria-pressed="false""#));
         assert!(html.contains("Collapse all"));
-        assert!(html.contains("Search code in all files"));
         assert!(!html.contains("Search code in this file"));
         assert!(!html.contains("<kbd"));
         assert!(!html.contains(">+ context<"));

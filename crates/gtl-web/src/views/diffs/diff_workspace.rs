@@ -19,13 +19,10 @@ use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSummary};
 ))]
 use lucide_dioxus::{Files, GitCommitHorizontal};
 
-#[cfg(feature = "component-preview")]
-use self::titlebar::PreviewViewTitlebar;
 use self::{
     commits_panel::WorkspaceCommitsPanel,
     file_search::{WorkspaceFileMatches, use_workspace_file_matches},
     files_panel::{FilesPanel, WorkspaceFilesModel},
-    titlebar::ViewTitlebar,
 };
 #[cfg(feature = "component-preview")]
 use super::{
@@ -57,7 +54,7 @@ mod file_search;
 mod files_panel;
 pub(super) mod panel_scroll;
 mod path_filter;
-mod sidebars;
+pub(crate) mod sidebars;
 mod titlebar;
 
 #[cfg(feature = "desktop")]
@@ -65,9 +62,9 @@ pub(crate) use desktop::DiffWorkspaceView;
 
 #[cfg(feature = "desktop")]
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct FileFoldCommand {
-    pub(super) tab_id: ViewerTabId,
-    pub(super) folded: bool,
+pub(crate) struct FileFoldCommand {
+    pub(crate) tab_id: ViewerTabId,
+    pub(crate) folded: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -124,7 +121,12 @@ fn use_diff_workspace_context(
         file_matches,
         files_folded,
         #[cfg(feature = "desktop")]
-        fold_command: use_signal(|| None),
+        fold_command: use_hook(|| {
+            try_consume_context::<super::presentation::DiffPresentation>().map_or_else(
+                || Signal::new(None),
+                |presentation| presentation.fold_command,
+            )
+        }),
         flashing_file,
         #[cfg(feature = "desktop")]
         find_open,
@@ -365,7 +367,6 @@ pub(crate) fn PreviewDiffWorkspace(
                     }
                 },
                 path_filter::PathFilter { onnavigate }
-                PreviewViewTitlebar { mobile: true, onfindall: open_all_files_search }
                 WorkspaceMobileNavigation {
                     files_trigger_id: "preview-mobile-files-trigger",
                     files_panel_id: "preview-mobile-files-panel",
@@ -425,13 +426,14 @@ pub(crate) fn PreviewDiffWorkspace(
                     }
                 },
                 path_filter::PathFilter { onnavigate }
-                PreviewViewTitlebar { onfindall: open_all_files_search }
                 aside {
                     class: "diff-workspace-panel min-h-0 diff-workspace-files-panel",
                     aria_label: t!(language, "workspace-changed-files"),
                     FilesPanel { onnavigate }
                 }
-                StaticDiffDocument { workspace, overlay: search_overlay }
+                div { class: "col-start-2 row-start-1 min-h-0 overflow-hidden",
+                    StaticDiffDocument { workspace, overlay: search_overlay }
+                }
                 aside {
                     class: "diff-workspace-panel min-h-0 diff-workspace-commits-panel",
                     aria_label: t!(language, "workspace-commits"),
@@ -568,12 +570,9 @@ pub(crate) fn ArtifactDiffWorkspace(
 #[component]
 fn DiffWorkspaceDocument(
     #[props(default)] sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    #[props(default)] keybindings: gtl_models::viewer::ViewerKeybindings,
-    ontoggle_sidebar: Option<EventHandler<sidebars::Sidebar>>,
     diff_document: Element,
     onnavigate: EventHandler<String>,
     mobile_navigation: Option<Element>,
-    live_actions: Option<Element>,
     commits_actions: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
     #[props(default)] commits_loading: bool,
@@ -601,12 +600,8 @@ fn DiffWorkspaceDocument(
             "data-gtl-view": artifact_view_id.clone(),
             "data-gtl-files-folded": artifact_files_folded,
             path_filter::PathFilter { onnavigate, artifact_view_id: artifact_view_id.clone() }
-            ViewTitlebar {
-                live_actions,
-                artifact_view_id: artifact_view_id.clone(),
-                sidebars,
-                keybindings,
-                ontoggle_sidebar,
+            if let Some(artifact_view_id) = &artifact_view_id {
+                titlebar::ArtifactTitlebar { artifact_view_id: artifact_view_id.clone(), sidebars }
             }
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}
@@ -618,9 +613,7 @@ fn DiffWorkspaceDocument(
                     artifact_view_id: artifact_view_id.clone(),
                 }
             }
-            div { class: "diff-workspace-mobile-content min-h-0 workspace:col-start-2 workspace:col-span-1 workspace:row-start-2",
-                {diff_document}
-            }
+            div { class: "diff-workspace-content min-h-0", {diff_document} }
             sidebars::SidebarPanel {
                 sidebar: sidebars::Sidebar::Commits,
                 visible: sidebars.commits,

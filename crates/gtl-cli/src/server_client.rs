@@ -169,6 +169,13 @@ impl ServerClient {
             .block_on(self.client.get_project_repository(request))?)
     }
 
+    pub(crate) fn create_project(
+        &self,
+        request: v1::CreateProjectRequest,
+    ) -> anyhow::Result<v1::CreateProjectResponse> {
+        Ok(self.runtime.block_on(self.client.create_project(request))?)
+    }
+
     pub(crate) fn pause_project(
         &self,
         request: v1::PauseProjectRequest,

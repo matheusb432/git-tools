@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 use gtl_models::viewer::{
     ViewerKeybindingAction, ViewerKeybindings, ViewerKeyboardModifier, ViewerTabId,
 };
-use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabRequest};
 use wasm_bindgen::JsCast as _;
 
@@ -23,10 +22,10 @@ use crate::{
             viewer_tab_element_id,
         },
     },
-    views::viewer_menu::ViewerMenu,
 };
 
-const VIEWER_MENU_ID: &str = "viewer-menu";
+mod tab_actions;
+
 const VIEWER_TAB_OVERFLOW_MENU_ID: &str = "viewer-tab-overflow-menu";
 const VIEWER_TAB_OVERFLOW_TOLERANCE_PX: f64 = 1.0;
 
@@ -129,6 +128,26 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let toast = use_toast();
     let shell = viewer.shell();
     let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
+    let menu_actions = use_callback(|target| {
+        rsx! {
+            tab_actions::DiffTabActions { target }
+        }
+    });
+    let live_errors = viewer.live_errors();
+    let warnings = live_errors.with(|errors| {
+        errors
+            .iter()
+            .filter(|(_, errors)| !errors.entries().is_empty())
+            .map(|(tab_id, errors)| {
+                (
+                    *tab_id,
+                    rsx! {
+                        tab_actions::LiveWarningDetails { errors: errors.entries().to_vec() }
+                    },
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>()
+    });
     let tab_rail_overflow = use_viewer_tab_rail_overflow();
     let mut overflow_menu_open = use_signal(|| false);
     let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
@@ -139,6 +158,17 @@ pub(crate) fn ApplicationNavigation() -> Element {
         }
         pending_tab_order.set(None);
         Ok::<(), std::convert::Infallible>(())
+    });
+    let update_tab = use_callback(move |tab_id| viewer.update_tab(tab_id));
+    let live_tab = use_callback(move |(tab_id, live)| {
+        spawn(async move {
+            match viewer_server::set_tab_live(gtl_wire::viewer::SetViewerTabLive { tab_id, live })
+                .await
+            {
+                Ok(shell) => viewer.replace_shell(shell),
+                Err(error) => toast.client_error(&error),
+            }
+        });
     });
     let pin_tab = use_callback(move |(tab_id, pinned)| {
         spawn(async move {
@@ -304,7 +334,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     aria_current: projects_active.then_some("page"),
                     title: t!(language, "navigation-projects"),
                     ApplicationLogo {}
-                    span { class: "hidden sm:inline", {t!(language, "navigation-projects")} }
                     ViewerTabSelectionIndicator { active: projects_active }
                 }
             },
@@ -337,6 +366,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     key: "{tab.id}",
                                     tab: tab.clone(),
                                     rows_loading: diff_rows_loading_tab_id == Some(tab.id),
+                                    warning: tab.live && warnings.contains_key(&tab.id),
                                 }
                             }
                         } else {
@@ -352,7 +382,11 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             key: "{tab.id}",
                                             tab: tab.clone(),
                                             active,
+                                            menu_actions,
+                                            warning_details: tab.live.then(|| warnings.get(&tab_id).cloned()).flatten(),
                                             onrename: move |submission| rename_snapshot.call((tab_id, submission)),
+                                            onupdate: move |()| update_tab.call(tab_id),
+                                            onlive: move |live| live_tab.call((tab_id, live)),
                                             onpin: move |pinned| pin_tab.call((tab_id, pinned)),
                                             oncloseothers: move |()| close_others.call(tab_id),
                                             rows_loading: diff_rows_loading_tab_id == Some(tab_id),
@@ -406,7 +440,11 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             ViewerTabOverflowMenu {
                                 id: VIEWER_TAB_OVERFLOW_MENU_ID,
                                 tabs: overflow_tabs,
+                                menu_actions,
+                                warnings: warnings.clone(),
                                 onrename: rename_snapshot,
+                                onupdate: update_tab,
+                                onlive: live_tab,
                                 onpin: pin_tab,
                                 oncloseothers: close_others,
                                 active_tab: overflow_active_tab,
@@ -438,17 +476,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     }
                 }
             },
-            trailing: rsx! {
-                WindowDragExcluded {
-                    ViewerMenu {
-                        id: VIEWER_MENU_ID,
-                        trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value().to_owned(),
-                        onsettings: move |()| {
-                            navigator.push(Route::Settings {});
-                        },
-                    }
-                }
-            },
         }
     }
 }
@@ -457,12 +484,12 @@ pub(crate) fn ApplicationNavigation() -> Element {
 #[component]
 fn ApplicationLogo() -> Element {
     rsx! {
-        span { class: "viewer-navigation-icon size-5", aria_hidden: "true",
+        span { class: "viewer-navigation-icon size-6", aria_hidden: "true",
             svg {
                 class: "size-full",
                 view_box: "0 0 32 32",
-                width: "20",
-                height: "20",
+                width: "24",
+                height: "24",
                 "focusable": "false",
                 rect {
                     class: "fill-surface stroke-line-2",

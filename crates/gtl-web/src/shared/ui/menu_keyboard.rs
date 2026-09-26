@@ -40,7 +40,7 @@ pub(crate) fn keydown(id: &str, trigger_id: &str, event: &KeyboardEvent) {
     else {
         return;
     };
-    let Ok(nodes) = menu.query_selector_all("[role='menuitem']") else {
+    let Ok(nodes) = menu.query_selector_all("[role='menuitem'], [role='menuitemcheckbox']") else {
         return;
     };
     let elements = (0..nodes.length())

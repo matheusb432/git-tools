@@ -94,7 +94,8 @@ CREATE TABLE "recent_renders" (
   rendered_at    TEXT NOT NULL,
   project_id     TEXT REFERENCES projects (id),
   render_status  TEXT NOT NULL DEFAULT 'success'
-    CHECK (render_status IN ('pending', 'success', 'error')),
+    CHECK (render_status IN ('pending', 'success', 'error')), comparison_name TEXT
+    CHECK (comparison_name IS NULL OR length(trim(comparison_name)) > 0),
   CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
   -- Only the diff operation (seeded id 1) takes a target.
   CHECK ((operation_id = 1) = (target_id IS NOT NULL)),
@@ -183,6 +184,8 @@ CREATE TABLE viewer_tabs (
     pinned INTEGER NOT NULL CHECK (pinned IN (0, 1)),
     live INTEGER NOT NULL CHECK (live IN (0, 1)),
     active INTEGER NOT NULL CHECK (active IN (0, 1))
-) STRICT;
+, comparison_name TEXT
+    CHECK (comparison_name IS NULL OR length(trim(comparison_name)) > 0), history_id INTEGER
+    REFERENCES recent_renders (id) ON DELETE SET NULL) STRICT;
 
 CREATE UNIQUE INDEX viewer_tabs_active_idx ON viewer_tabs (active) WHERE active = 1;

@@ -166,8 +166,12 @@ const wait = async predicate => {
             action = () => { view.scrollTop = (view.scrollHeight - view.clientHeight) * fraction; };
             complete = ready;
         } else if (kind === 'menu') {
-            action = () => document.querySelector('[data-testid=viewer-menu-trigger]').click();
-            complete = () => !!document.querySelector('[popover][aria-label="Viewer menu"]:popover-open');
+            const tab = document.querySelector('[role="tab"][aria-selected="true"]');
+            tab.focus();
+            action = () => tab.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'F10', shiftKey: true, bubbles: true, cancelable: true,
+            }));
+            complete = () => !!document.querySelector('[role="menu"][aria-label="Tab actions"]:popover-open');
         } else {
             root().scrollTop = 0;
             await wait(ready);
@@ -202,7 +206,13 @@ const wait = async predicate => {
             });
             if (neededFetch) uncached.push(elapsed);
         }
-        if (kind === 'menu') document.querySelector('[data-testid=viewer-menu-trigger]').click();
+        if (kind === 'menu') {
+            const menu = document.querySelector('[role="menu"][aria-label="Tab actions"]:popover-open');
+            menu.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', bubbles: true, cancelable: true,
+            }));
+            await wait(() => !menu.matches(':popover-open'));
+        }
         if (kind === 'path') root().querySelector('button[aria-label="Copy file path"]').click();
     }
     done({ milliseconds: results, uncached_viewport_ms: uncached });

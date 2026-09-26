@@ -1,5 +1,4 @@
 use anyhow::Result;
-use gtl_web_contracts::test_ids;
 use thirtyfour::{By, WebDriver, components::SelectElement};
 
 use crate::support::{self, fixture::OneShotFixture};
@@ -40,11 +39,7 @@ async fn saved_viewer_settings_apply_and_survive_restart() -> Result<()> {
 }
 
 pub(super) async fn open_settings(driver: &WebDriver) -> Result<()> {
-    support::selectors::by_test_id(driver, test_ids::VIEWER_MENU_TRIGGER)
-        .await?
-        .click()
-        .await?;
-    support::click(driver, By::Css("button[aria-label='User settings']")).await?;
+    support::click(driver, By::Css("button[aria-label='Settings']")).await?;
     support::visible(driver, By::Css("#settings-theme")).await?;
     Ok(())
 }

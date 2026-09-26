@@ -6,8 +6,6 @@ use gtl_models::{
 };
 use gtl_wire::viewer::ViewerAppliedExtensionFilter;
 use lucide_dioxus::ChevronsDownUp;
-#[cfg(feature = "component-preview")]
-use lucide_dioxus::Search;
 
 use crate::shared::{
     browser,
@@ -16,18 +14,15 @@ use crate::shared::{
 };
 
 #[component]
-pub(super) fn ViewTitlebar(
+pub(super) fn ArtifactTitlebar(
     sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    keybindings: gtl_models::viewer::ViewerKeybindings,
-    ontoggle_sidebar: Option<EventHandler<super::sidebars::Sidebar>>,
-    live_actions: Option<Element>,
     artifact_view_id: Option<String>,
 ) -> Element {
     let language = use_language();
     let workspace = super::use_workspace_context();
     let view = workspace.view.read();
     rsx! {
-        header { class: "diff-workspace-titlebar min-w-0 gap-4 px-5 py-3 tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1 mobile:px-2 mobile:py-1.5",
+        header { class: "diff-workspace-titlebar min-w-0 gap-3 px-3 py-2 mobile:gap-1 mobile:px-2 mobile:py-1.5",
             div { class: "min-w-0 mobile:hidden",
                 RepositoryIdentity { repository_name: view.repository_name.clone() }
             }
@@ -45,85 +40,23 @@ pub(super) fn ViewTitlebar(
                 }
             }
             div { class: "flex-1 mobile:hidden" }
-            if let Some(live_actions) = live_actions {
-                {live_actions}
-            }
             div { class: "workspace:hidden",
                 super::path_filter::PathFilterTrigger { artifact_view_id: artifact_view_id.clone() }
             }
-            super::sidebars::SidebarButtons {
-                visibility: sidebars,
-                keybindings,
-                ontoggle: ontoggle_sidebar,
-                artifact: artifact_view_id.is_some(),
+            if artifact_view_id.is_some() {
+                super::sidebars::SidebarButtons {
+                    visibility: sidebars,
+                    keybindings: gtl_models::viewer::ViewerKeybindings::default(),
+                    artifact: true,
+                }
             }
             CollapseFilesButton { artifact_view_id }
         }
     }
 }
 
-#[cfg(feature = "component-preview")]
 #[component]
-pub(super) fn PreviewViewTitlebar(
-    #[props(default)] mobile: bool,
-    onfindall: EventHandler<()>,
-) -> Element {
-    let workspace = super::use_workspace_context();
-    let view = workspace.view.read();
-    let header_classes = if mobile {
-        "col-span-3 row-start-1 flex min-w-0 items-center gap-1 border-b border-line bg-surface px-2 py-1.5"
-    } else {
-        "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3"
-    };
-
-    rsx! {
-        header { class: "diff-workspace-titlebar min-w-0 {header_classes}",
-            if !mobile {
-                RepositoryIdentity { repository_name: view.repository_name.clone() }
-            }
-            BranchRange {
-                branch: view.branch.clone(),
-                upstream: view.upstream.clone(),
-                compact: mobile,
-            }
-            if !mobile {
-                if let Some(applied) = &view.extension_filter {
-                    HiddenFilesBadge { applied: applied.clone() }
-                }
-            }
-            if !mobile {
-                div { class: "flex-1" }
-                FindAllFilesButton { onfindall }
-            }
-            if mobile {
-                super::path_filter::PathFilterTrigger {}
-            }
-            CollapseFilesButton { preview_mobile: mobile }
-        }
-    }
-}
-
-#[cfg(feature = "component-preview")]
-#[component]
-fn FindAllFilesButton(onfindall: EventHandler<()>) -> Element {
-    let language = use_language();
-    rsx! {
-        Button {
-            size: ButtonSize::Small,
-            variant: ButtonVariant::Outline,
-            aria_label: t!(language, "titlebar-find-all"),
-            title: t!(language, "titlebar-find-all"),
-            onclick: move |_| onfindall.call(()),
-            span { class: "inline-flex flex-none", aria_hidden: "true",
-                Search { size: 15 }
-            }
-            span { {t!(language, "titlebar-all-files")} }
-        }
-    }
-}
-
-#[component]
-pub(super) fn RepositoryIdentity(repository_name: String) -> Element {
+fn RepositoryIdentity(repository_name: String) -> Element {
     rsx! {
         div { class: "flex min-w-0 items-baseline gap-2 text-lg font-semibold tracking-tight mobile:text-base",
             span { class: "truncate",
@@ -135,18 +68,9 @@ pub(super) fn RepositoryIdentity(repository_name: String) -> Element {
 }
 
 #[component]
-pub(super) fn BranchRange(
-    branch: GitHead,
-    upstream: GitRevision,
-    #[props(default)] compact: bool,
-) -> Element {
-    let classes = if compact {
-        "flex min-w-0 flex-1 items-center gap-1.5 text-ink-2"
-    } else {
-        "flex min-w-0 items-center gap-1.5 text-ink-2 mobile:flex-1"
-    };
+fn BranchRange(branch: GitHead, upstream: GitRevision) -> Element {
     rsx! {
-        div { class: "{classes}",
+        div { class: "flex min-w-0 items-center gap-1.5 text-ink-2 mobile:flex-1",
             span { class: "truncate text-acc", "{branch}" }
             span { class: "text-ink-3", "\u{2192}" }
             span { class: "truncate text-ink-3", "{upstream}" }
@@ -169,45 +93,42 @@ fn HiddenFilesBadge(applied: ViewerAppliedExtensionFilter) -> Element {
 }
 
 #[component]
-fn CollapseFilesButton(
-    artifact_view_id: Option<String>,
-    #[props(default)] preview_mobile: bool,
-) -> Element {
+pub(super) fn CollapseFilesButton(artifact_view_id: Option<String>) -> Element {
     let language = use_language();
-    let mut workspace = super::use_workspace_context();
+    let workspace = super::use_workspace_context();
+    #[cfg(feature = "desktop")]
+    let presentation = try_use_context::<crate::views::diffs::presentation::DiffPresentation>();
     let files_folded = (workspace.files_folded)().unwrap_or(false);
-    let button_size = if preview_mobile {
-        ButtonSize::IconTouch
-    } else {
-        ButtonSize::Small
-    };
-    let icon_size = if preview_mobile { 18 } else { 14 };
+    let artifact = artifact_view_id.is_some();
     let fold_label = if files_folded {
-        t!(language, "titlebar-expand-all")
-    } else {
+        if artifact {
+            t!(language, "titlebar-expand-all")
+        } else {
+            t!(language, "files-expand-diffs")
+        }
+    } else if artifact {
         t!(language, "titlebar-collapse-all")
+    } else {
+        t!(language, "files-collapse-diffs")
     };
 
     rsx! {
         Button {
             class: "mobile:size-11 mobile:p-0",
-            size: button_size,
-            variant: ButtonVariant::Outline,
+            size: if artifact { ButtonSize::Small } else { ButtonSize::IconSmall },
+            variant: if artifact { ButtonVariant::Outline } else { ButtonVariant::Ghost },
             aria_label: fold_label.clone(),
             title: fold_label.clone(),
             "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
             onclick: move |_| {
-                let folded = !files_folded;
-                workspace.files_folded.set(Some(folded));
                 #[cfg(feature = "desktop")]
-                workspace
-                    .fold_command
-                    .set(
-                        Some(super::FileFoldCommand {
-                            tab_id: workspace.view.peek().identity.tab_id,
-                            folded,
-                        }),
-                    );
+                if let Some(presentation) = presentation {
+                    presentation.toggle_files(workspace.view.peek().identity.tab_id);
+                    return;
+                }
+                let folded = !files_folded;
+                let mut folded_state = workspace.files_folded;
+                folded_state.set(Some(folded));
                 if folded {
                     browser::scroll_diff_document_to_start();
                 }
@@ -215,10 +136,14 @@ fn CollapseFilesButton(
             span {
                 class: "inline-flex flex-none mobile:[&_svg]:size-5",
                 aria_hidden: "true",
-                ChevronsDownUp { size: icon_size }
+                if files_folded {
+                    lucide_dioxus::ChevronsUpDown { size: 14 }
+                } else {
+                    ChevronsDownUp { size: 14 }
+                }
             }
             span {
-                class: if preview_mobile { "hidden" } else { "mobile:hidden" },
+                class: if artifact { "mobile:hidden" } else { "sr-only" },
                 "data-gtl-files-label": artifact_view_id.as_ref().map(|_| ""),
                 {fold_label}
             }

@@ -141,6 +141,14 @@ fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
 
 fn tab(id: u64, label: RecipeLabel) -> TestResult<ViewerTab> {
     Ok(ViewerTab {
+        details: Some(gtl_wire::viewer::ViewerTabDetails {
+            repository: gtl_models::paths::RepositoryRoot::try_new("/repos/git-tools".into())?,
+            comparison: label.clone(),
+            range: Some(gtl_models::diffs::PinnedRange {
+                base: gtl_models::diffs::CommitId::try_from("a".repeat(40))?,
+                head: gtl_models::diffs::CommitId::try_from("b".repeat(40))?,
+            }),
+        }),
         custom_name: None,
         pinned: false,
         id: ViewerTabId::try_new(id)?,
@@ -199,8 +207,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn shell_decoding_rejects_missing_or_invalid_recipe_label_parts() -> TestResult {
+fn encoded_pending_shell() -> TestResult<v1::ViewerShell> {
     let shell = ViewerShell {
         version: ViewerVersion::new(1),
         focus_request_version: None,
@@ -226,7 +233,48 @@ fn shell_decoding_rejects_missing_or_invalid_recipe_label_parts() -> TestResult 
         },
         feedback: None,
     };
-    let encoded = encode_viewer_shell(shell)?;
+    Ok(encode_viewer_shell(shell)?)
+}
+
+#[test]
+fn tab_details_decoding_rejects_invalid_sources_and_ranges() -> TestResult {
+    let encoded = encoded_pending_shell()?;
+    let decode_with_details = |details: v1::ViewerTabDetails| {
+        let mut shell = encoded.clone();
+        shell.tabs[0].details = Some(details);
+        decode_get_viewer_shell_response(v1::GetViewerShellResponse { shell: Some(shell) })
+    };
+    let details = encoded.tabs[0]
+        .details
+        .clone()
+        .ok_or("missing fixture details")?;
+    let mut invalid = details.clone();
+    invalid.repository = "relative/repo".to_owned();
+    assert_eq!(
+        decode_with_details(invalid),
+        Err(ViewerCodecError::InvalidMessage)
+    );
+    let mut invalid = details.clone();
+    invalid.comparison = None;
+    assert_eq!(
+        decode_with_details(invalid),
+        Err(ViewerCodecError::InvalidMessage)
+    );
+    let mut invalid = details;
+    invalid.range = Some(v1::ViewerTabRange {
+        base: "invalid".to_owned(),
+        head: "b".repeat(40),
+    });
+    assert_eq!(
+        decode_with_details(invalid),
+        Err(ViewerCodecError::InvalidMessage)
+    );
+    Ok(())
+}
+
+#[test]
+fn shell_decoding_rejects_missing_or_invalid_recipe_label_parts() -> TestResult {
+    let encoded = encoded_pending_shell()?;
     let mut empty_feedback = encoded.clone();
     empty_feedback.feedback = Some(v1::ViewerFeedback {
         kind: v1::ViewerFeedbackKind::SnapshotRecipesSkipped as i32,

@@ -119,7 +119,7 @@ const diffDocument = [...document.querySelectorAll('[data-gtl-diff-document]')].
 });
 const files = [...(diffDocument?.querySelectorAll('[data-gtl-diff-file]') ?? [])];
 if (diffDocument?.hasAttribute('data-total-files')) {
-    const collapse = document.querySelector("button[aria-label='Collapse all']");
+    const collapse = document.querySelector("button[aria-label='Collapse all diffs']");
     if (collapse) collapse.click();
     return Number(diffDocument.getAttribute('data-total-files'));
 }
@@ -899,7 +899,7 @@ async fn expand_diff_files_for_scroll(
         expectation.file_count
     );
     let expand = driver
-        .find_all(thirtyfour::By::Css("button[aria-label='Expand all']"))
+        .find_all(thirtyfour::By::Css("button[aria-label='Expand all diffs']"))
         .await?;
     if let Some(expand) = expand.first() {
         expand.click().await?;

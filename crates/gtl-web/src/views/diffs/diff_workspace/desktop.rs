@@ -5,10 +5,10 @@ use gtl_models::{
     viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
 use gtl_wire::viewer::{
-    CommitSelectionAction, OpenViewerDiffFile, SetViewerTabLive, ViewerActiveState,
-    ViewerActiveView, ViewerTabRequest, make_commit_selection_action,
+    CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView,
+    ViewerTabRequest, make_commit_selection_action,
 };
-use lucide_dioxus::{FileDiff, Radio, RefreshCw, TriangleAlert};
+use lucide_dioxus::FileDiff;
 
 use super::{
     DiffWorkspaceDocument, MobilePanel, WorkspaceMobileNavigation,
@@ -26,8 +26,8 @@ use crate::{
         failure_notice::client_error_message,
         i18n::{t, use_language},
         ui::{
-            Button, ButtonSize, ButtonState, ButtonVariant, HoverPopover, HoverPopoverPlacement,
-            PageNotice, PanelDialog, Skeleton, use_hover_popover, use_toast,
+            Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, PanelDialog, Skeleton,
+            use_toast,
         },
     },
     views::{
@@ -90,14 +90,6 @@ fn WorkspaceLoading() -> Element {
             class: "diff-workspace-loading h-full min-h-0",
             role: "status",
             aria_label: t!(language, "workspace-loading"),
-            div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
-                Skeleton { class: "h-7 w-32" }
-                Skeleton { class: "h-7 w-40" }
-            }
-            div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
-                Skeleton { class: "h-7 w-52" }
-                Skeleton { class: "ml-auto h-7 w-28" }
-            }
             div { class: "diff-workspace-loading-columns min-h-0 gap-px xl:grid-cols-[15rem_minmax(0,1fr)_16rem]",
                 Skeleton { class: "hidden h-full rounded-none xl:block" }
                 Skeleton { class: "h-full rounded-none" }
@@ -232,11 +224,18 @@ fn ReadyWorkspace(
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
-    let sidebars = super::sidebars::use_sidebar_controls();
+    let sidebars = use_context::<super::sidebars::SidebarControls>();
     let mut file_filter = use_signal(String::new);
     let mut path_filter_open = use_signal(|| false);
     let presentation = use_context::<crate::views::diffs::presentation::DiffPresentation>();
     let mut files_folded = use_signal(move || presentation.all_folded(view.peek().identity.tab_id));
+    use_effect(move || {
+        if let Some(command) = (presentation.fold_command)()
+            && command.tab_id == view.peek().identity.tab_id
+        {
+            files_folded.set(Some(command.folded));
+        }
+    });
     let mut flashing_file = use_signal(|| None::<String>);
     let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
@@ -385,8 +384,21 @@ fn ReadyWorkspace(
     let (file_count, commit_count) = workspace
         .files
         .with(|files| (files.file_count(), files.commit_count()));
+    let push_disabled = view.read().modified_files
+        || view.read().commit_count == 0
+        || matches!(
+            view.read().commit_selection,
+            gtl_wire::viewer::ViewerCommitSelection::Pending { .. }
+        );
     let commits_actions = rsx! {
-        ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+        div { class: "flex flex-none items-center",
+            crate::views::push::ViewPushButton {
+                id: "viewer-push-trigger",
+                identity,
+                disabled: push_disabled,
+            }
+            ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+        }
     };
     let mobile_navigation = rsx! {
         WorkspaceMobileNavigation {
@@ -396,34 +408,19 @@ fn ReadyWorkspace(
             commits_panel_id: "mobile-commits-panel",
             file_count,
             commit_count,
-            commits_actions: commits_actions.clone(),
+            commits_actions: rsx! {
+                ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+            },
             files_open: mobile_panel() == Some(MobilePanel::Files),
             commits_open: mobile_panel() == Some(MobilePanel::Commits),
             onfiles: move |_| mobile_panel.set(Some(MobilePanel::Files)),
             oncommits: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
         }
     };
-    let push_disabled = view.read().modified_files
-        || view.read().commit_count == 0
-        || matches!(
-            view.read().commit_selection,
-            gtl_wire::viewer::ViewerCommitSelection::Pending { .. }
-        );
-    let live_actions = Some(rsx! {
-        if is_live {
-            LiveViewWarning { tab_id }
-        } else {
-            UpdateTabButton { tab_id }
-        }
-        LiveTabButton { tab_id, live: is_live }
-        crate::views::push::ViewPushButton { identity, disabled: push_disabled }
-    });
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
                 sidebars: (sidebars.visibility)(),
-                keybindings,
-                ontoggle_sidebar: sidebars.toggle,
                 diff_document: rsx! {
                     if file_count == 0 {
                         PageNotice {
@@ -437,8 +434,7 @@ fn ReadyWorkspace(
                 },
                 onnavigate,
                 mobile_navigation,
-                live_actions,
-                commits_actions,
+                commits_actions: commits_actions.clone(),
                 onselect_commit,
                 commits_loading,
                 commits_error: commits_error.clone(),
@@ -467,143 +463,14 @@ fn ReadyWorkspace(
             onclose: move |()| mobile_panel.set(None),
             WorkspaceCommitsPanel {
                 details_popover_id_prefix: "mobile-commits-panel",
+                actions: rsx! {
+                    crate::views::push::ViewPushButton { id: "mobile-viewer-push-trigger", identity, disabled: push_disabled }
+                },
                 onselect: onselect_commit,
                 loading: commits_loading,
                 load_error: commits_error,
                 has_more: commits_has_more,
                 onloadmore: onload_commits,
-            }
-        }
-    }
-}
-
-/// Recomputes a tab that is not live from its recipe's current revisions.
-#[component]
-fn UpdateTabButton(tab_id: ViewerTabId) -> Element {
-    let language = use_language();
-    let viewer = use_context::<ViewerContext>();
-    let label = t!(language, "workspace-update");
-    rsx! {
-        Button {
-            class: "mobile:size-11 mobile:p-0",
-            size: ButtonSize::Small,
-            variant: ButtonVariant::Outline,
-            state: if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
-            aria_label: label.clone(),
-            title: t!(language, "workspace-update-hint"),
-            "data-testid": gtl_web_contracts::test_ids::VIEWER_TAB_UPDATE.value(),
-            onclick: move |_| viewer.update_tab(tab_id),
-            span { class: "inline-flex flex-none", aria_hidden: "true",
-                RefreshCw { size: 14 }
-            }
-            span { class: "mobile:hidden", "{label}" }
-        }
-    }
-}
-
-/// Makes the tab update whenever its repository changes, or keeps its current snapshot.
-#[component]
-fn LiveTabButton(tab_id: ViewerTabId, live: bool) -> Element {
-    let language = use_language();
-    let viewer = use_context::<ViewerContext>();
-    let toast = use_toast();
-    let mut action = use_action(move |live: bool| async move {
-        match viewer_server::set_tab_live(SetViewerTabLive { tab_id, live }).await {
-            Ok(shell) => viewer.replace_shell(shell),
-            Err(error) => toast.client_error(&error),
-        }
-        Ok::<(), std::convert::Infallible>(())
-    });
-    let label = t!(language, "workspace-live");
-    rsx! {
-        Button {
-            class: "mobile:size-11 mobile:p-0",
-            size: ButtonSize::Small,
-            variant: if live { ButtonVariant::Accent } else { ButtonVariant::Outline },
-            state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
-            aria_label: label.clone(),
-            aria_pressed: live.to_string(),
-            title: if live { t!(language, "workspace-live-stop-hint") } else { t!(language, "workspace-live-start-hint") },
-            "data-testid": gtl_web_contracts::test_ids::VIEWER_LIVE_TOGGLE.value(),
-            onclick: move |_| {
-                if !action.pending() {
-                    action.call(!live);
-                }
-            },
-            span { class: "inline-flex flex-none", aria_hidden: "true",
-                Radio { size: 14 }
-            }
-            span { class: "mobile:hidden", "{label}" }
-        }
-    }
-}
-
-#[component]
-fn LiveViewWarning(tab_id: ViewerTabId) -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let errors = viewer.live_errors();
-    let errors = errors.read();
-    let Some(errors) = errors
-        .get(&tab_id)
-        .filter(|errors| !errors.entries().is_empty())
-    else {
-        return rsx! {};
-    };
-    rsx! {
-        LiveViewWarningPopover { tab_id, errors: errors.entries().to_vec() }
-    }
-}
-
-#[component]
-fn LiveViewWarningPopover(
-    tab_id: ViewerTabId,
-    errors: Vec<crate::entities::diffs::live_errors::LiveError>,
-) -> Element {
-    let language = use_language();
-    let id = format!("live-tab-{tab_id}-errors");
-    let anchor = format!("--{id}");
-    let hover = use_hover_popover(id.clone());
-    rsx! {
-        div {
-            class: "relative flex flex-none",
-            style: "anchor-name: {anchor};",
-            onmouseenter: move |_| hover.pointer_enter.call(()),
-            onmouseleave: move |_| hover.pointer_leave.call(()),
-            onfocusin: move |_| hover.focus_enter.call(()),
-            onfocusout: move |_| hover.focus_leave.call(()),
-            Button {
-                class: "mobile:size-11",
-                size: ButtonSize::IconSmall,
-                variant: ButtonVariant::Ghost,
-                aria_label: t!(language, "workspace-live-warnings"),
-                aria_describedby: id.clone(),
-                span { class: "text-warn", aria_hidden: "true",
-                    TriangleAlert { size: 16 }
-                }
-            }
-            HoverPopover {
-                id,
-                anchor_name: anchor.clone(),
-                aria_label: t!(language, "workspace-live-warnings"),
-                placement: HoverPopoverPlacement::Below,
-                p { class: "text-xs font-semibold text-ink",
-                    {t!(language, "workspace-live-recent-errors")}
-                }
-                ul { class: "mt-2 grid gap-2 text-xs",
-                    for (index, entry) in errors.iter().enumerate() {
-                        li { key: "{index}", class: "break-words",
-                            p { {client_error_message(&entry.error, language)} }
-                            if let Some(diagnostic) = entry.error.diagnostic() {
-                                p { class: "mt-0.5 font-mono text-ink-3", "{diagnostic}" }
-                            }
-                            if entry.occurrences > 1 {
-                                p { class: "mt-0.5 text-ink-3",
-                                    {t!(language, "workspace-live-occurrences", count = entry.occurrences)}
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -677,7 +544,7 @@ fn ModifiedFilesButton(tab_id: ViewerTabId, visible: bool) -> Element {
     rsx! {
         Button {
             size: ButtonSize::IconSmall,
-            variant: ButtonVariant::Accent,
+            variant: ButtonVariant::Toggle,
             class: "mobile:size-11",
             state: if action.pending() { ButtonState::Loading } else if viewer.actions_enabled() { ButtonState::Enabled } else { ButtonState::Disabled },
             icon: rsx! {

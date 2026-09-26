@@ -165,6 +165,7 @@ mod tests {
 
     fn tab(id: u64) -> TestResult<ViewerTab> {
         Ok(ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(id)?,

@@ -137,7 +137,7 @@ fn LoadedDiffDocument(
 
     rsx! {
         section {
-            class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
+            class: "relative h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: t!(use_language(), "diff-rendered"),
             // Dioxus reconciles keys in lists; each tab owns these hook lifetimes.
             for identity in [identity] {
@@ -214,7 +214,7 @@ pub(crate) fn StaticDiffDocument(
     let identity = workspace.identity().cloned();
     rsx! {
         section {
-            class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
+            class: "relative h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: t!(use_language(), "diff-rendered"),
             if let Some(overlay) = overlay {
                 {overlay}

@@ -2,11 +2,12 @@ use dioxus::{html::input_data::MouseButton, prelude::*};
 use gtl_models::{settings::ViewerLanguage, viewer::ViewerTabId};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
-use lucide_dioxus::{Check, ChevronDown};
-use lucide_dioxus::{Pin, TriangleAlert, X};
+use lucide_dioxus::ChevronDown;
+use lucide_dioxus::{Check, ListX, Pencil, Pin, Radio, RefreshCw, TriangleAlert, X};
 
 use super::{
-    Button, ButtonSize, ButtonVariant, InlineTextEditor, InlineTextSubmission, LoadingSpinner,
+    Button, ButtonSize, ButtonVariant, HoverPopover, HoverPopoverPlacement, InlineTextEditor,
+    InlineTextSubmission, LoadingSpinner, use_hover_popover,
 };
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 use super::{CountBadge, ScrollArea};
@@ -41,6 +42,13 @@ impl ViewerTabActivationGesture {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub(crate) struct ViewerTabMenuTarget {
+    pub tab_id: ViewerTabId,
+    pub menu_id: String,
+    pub trigger_id: String,
+}
+
 #[component]
 pub(crate) fn ViewerTabItem(
     tab: ViewerTab,
@@ -51,9 +59,13 @@ pub(crate) fn ViewerTabItem(
     onkeydown: EventHandler<KeyboardEvent>,
     onclose: EventHandler<MouseEvent>,
     #[props(default)] onmove: Option<EventHandler<MoveViewerTab>>,
+    #[props(default)] onupdate: Option<EventHandler<()>>,
+    #[props(default)] onlive: Option<EventHandler<bool>>,
     #[props(default)] onpin: Option<EventHandler<bool>>,
     #[props(default)] oncloseothers: Option<EventHandler<()>>,
     #[props(default)] onrename: Option<EventHandler<InlineTextSubmission>>,
+    menu_actions: Option<Callback<ViewerTabMenuTarget, Element>>,
+    warning_details: Option<Element>,
 ) -> Element {
     let language = use_language();
     let label = recipe_label_text(&tab.label, language);
@@ -63,12 +75,41 @@ pub(crate) fn ViewerTabItem(
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(onmove);
     let menu_id = format!("viewer-tab-{tab_id}-menu");
+    let details_id = format!("viewer-tab-{tab_id}-details");
+    let details_anchor = format!("--{details_id}");
+    let hover = use_hover_popover(details_id.clone());
+    let warning = warning_details.is_some();
+    let details = rsx! {
+        ViewerTabDetails { tab: tab.clone(), warning_details }
+    };
+    let actions = menu_actions.map(|render| {
+        render.call(ViewerTabMenuTarget {
+            tab_id,
+            menu_id: menu_id.clone(),
+            trigger_id: viewer_tab_element_id(tab_id),
+        })
+    });
     let mouse_menu_id = menu_id.clone();
     let keyboard_menu_id = menu_id.clone();
     let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
         div {
             class: "viewer-tab group/viewer-tab",
+            style: "anchor-name: {details_anchor};",
+            onmouseenter: move |_| {
+                if !editing() {
+                    hover.pointer_enter.call(());
+                }
+            },
+            onmouseleave: move |_| hover.pointer_leave.call(()),
+            onfocusin: move |_| {
+                if !editing()
+                    && browser::element_has_visible_focus(&viewer_tab_element_id(tab_id))
+                {
+                    hover.focus_enter.call(());
+                }
+            },
+            onfocusout: move |_| hover.focus_leave.call(()),
             "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "horizontal",
@@ -87,6 +128,10 @@ pub(crate) fn ViewerTabItem(
                 }
             },
             onkeydown: move |event: KeyboardEvent| {
+                if event.key() == Key::Escape {
+                    hover.pointer_leave.call(());
+                    hover.focus_leave.call(());
+                }
                 if onpin.is_some()
                     && (event.key() == Key::ContextMenu
                         || (event.key() == Key::F10
@@ -97,7 +142,7 @@ pub(crate) fn ViewerTabItem(
                 }
             },
             if editing() {
-                div { class: "viewer-tab-trigger",
+                div { class: "viewer-tab-trigger viewer-tab-editing",
                     InlineTextEditor {
                         initial_value: tab.custom_name.clone().unwrap_or_default(),
                         label: t!(language, "tab-snapshot-name"),
@@ -129,6 +174,7 @@ pub(crate) fn ViewerTabItem(
                     aria_busy: presentation_state.is_loading().to_string(),
                     "data-viewer-state": presentation_state.dom_state(),
                     aria_controls: "viewer-active-view",
+                    aria_describedby: details_id.clone(),
                     tabindex: if active { "0" } else { "-1" },
                     title: tab_description(&label, tab.live, language),
                     onpointerdown: move |event: PointerEvent| {
@@ -166,14 +212,14 @@ pub(crate) fn ViewerTabItem(
                         activation_gesture.write().cancel();
                         drag.cancel.call(());
                     },
-                    {viewer_tab_rail_content(&tab, &label, presentation_state)}
+                    {viewer_tab_rail_content(&tab, &label, presentation_state, warning)}
                 }
             }
             if tab.pinned {
                 Button {
                     size: ButtonSize::IconCompact,
                     variant: ButtonVariant::Bare,
-                    class: "mr-0.5 text-acc",
+                    class: "viewer-tab-pin text-acc",
                     aria_label: t!(language, "tab-unpin-named", tab = label.as_str()),
                     title: t!(language, "tab-unpin"),
                     onclick: move |_| {
@@ -194,13 +240,32 @@ pub(crate) fn ViewerTabItem(
                 ViewerTabContextMenu {
                     id: menu_id,
                     trigger_id: viewer_tab_element_id(tab_id),
+                    actions,
+                    details: details.clone(),
                     pinned: tab.pinned,
+                    live: tab.live,
+                    pending: matches!(tab.state, ViewerTabState::Pending),
                     position: menu_position(),
-                    onrename: onrename.is_some().then(|| EventHandler::new(move |()| editing.set(true))),
+                    onrename: onrename
+                        .is_some()
+                        .then(|| EventHandler::new(move |()| {
+                            hover.pointer_leave.call(());
+                            hover.focus_leave.call(());
+                            editing.set(true);
+                        })),
+                    onupdate,
+                    onlive,
                     onpin,
                     onclose,
                     oncloseothers,
                 }
+            }
+            HoverPopover {
+                id: details_id,
+                anchor_name: details_anchor.clone(),
+                aria_label: t!(language, "tab-details"),
+                placement: HoverPopoverPlacement::Below,
+                {details}
             }
             ViewerTabSelectionIndicator { active }
         }
@@ -224,19 +289,19 @@ pub(crate) fn ViewerTabSelectionIndicator(active: bool) -> Element {
 pub(crate) fn ViewerTabRailMeasurementItem(
     tab: ViewerTab,
     #[props(default)] rows_loading: bool,
+    #[props(default)] warning: bool,
 ) -> Element {
     let label = recipe_label_text(&tab.label, use_language());
     let presentation_state = tab_presentation_state(&tab.state, rows_loading);
 
     rsx! {
         div {
-            class: "flex h-9 min-w-24 max-w-80 shrink-0 select-none items-center",
+            class: "viewer-tab",
             "data-viewer-tab-measurement": "true",
             aria_hidden: "true",
-            span { class: "flex h-full min-w-0 flex-1 items-center gap-1 pr-0.5 pl-1.5",
-                {viewer_tab_rail_content(&tab, &label, presentation_state)}
+            span { class: "viewer-tab-trigger",
+                {viewer_tab_rail_content(&tab, &label, presentation_state, warning)}
             }
-            span { class: "mr-0.5 size-6 flex-none", aria_hidden: "true" }
         }
     }
 }
@@ -254,12 +319,16 @@ fn viewer_tab_rail_content(
     tab: &ViewerTab,
     label: &str,
     presentation_state: TabPresentationState,
+    warning: bool,
 ) -> Element {
     rsx! {
         if presentation_state != TabPresentationState::Ready {
             TabStateMarker { state: presentation_state }
         }
-        span { class: "min-w-0 truncate", "{label}" }
+        if warning {
+            TabWarningMarker {}
+        }
+        span { class: "viewer-tab-label", "{label}" }
         if tab.live {
             span { class: "sr-only", {format!(", {}", t!(use_language(), "tab-live"))} }
         }
@@ -277,20 +346,12 @@ fn ViewerTabCloseButton(
         Button {
             size: ButtonSize::IconCompact,
             variant: ButtonVariant::Bare,
-            class: "viewer-tab-close mr-0.5 group/viewer-tab-close",
+            class: "viewer-tab-close",
             aria_label: t!(language, "tab-close-named", tab = label),
             "data-testid": test_id,
             onclick,
-            span {
-                class: "viewer-tab-close-surface m-auto size-5",
-                style: "background-color:#c1121f;transition-duration:100ms;",
-                aria_hidden: "true",
-            }
-            span {
-                class: "viewer-tab-close-icon",
-                style: "transform:translateX(-0.5px);",
-                aria_hidden: "true",
-                X { size: 14, stroke_width: 4 }
+            span { class: "inline-flex", aria_hidden: "true",
+                X { size: 12, stroke_width: 3 }
             }
         }
     }
@@ -307,10 +368,14 @@ pub(crate) fn ViewerTabOverflowMenu(
     onactivate: EventHandler<ViewerTabId>,
     onclose: EventHandler<ViewerTabId>,
     onmove: EventHandler<MoveViewerTab>,
+    #[props(default)] onupdate: Option<EventHandler<ViewerTabId>>,
+    #[props(default)] onlive: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
     #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
     #[props(default)] onopenchange: Option<EventHandler<bool>>,
+    menu_actions: Option<Callback<ViewerTabMenuTarget, Element>>,
+    #[props(default)] warnings: std::collections::HashMap<ViewerTabId, Element>,
 ) -> Element {
     let language = use_language();
     let active_tab_state = active_tab
@@ -347,6 +412,9 @@ pub(crate) fn ViewerTabOverflowMenu(
                 span { class: "min-w-0 flex-1 truncate font-medium", "{active_tab_label}" }
                 if let Some(state) = active_tab_state {
                     TabStateMarker { state }
+                }
+                if active_tab.as_ref().is_some_and(|tab| tab.live && warnings.contains_key(&tab.id)) {
+                    TabWarningMarker {}
                 }
                 CountBadge { count: tabs.len(), aria_hidden: "true" }
                 span {
@@ -410,9 +478,13 @@ pub(crate) fn ViewerTabOverflowMenu(
                                         onactivate,
                                         onclose,
                                         onmove,
+                                        onupdate,
+                                        onlive,
                                         onpin,
                                         oncloseothers,
                                         onrename,
+                                        menu_actions,
+                                        warning_details: tab.live.then(|| warnings.get(&tab_id).cloned()).flatten(),
                                     }
                                 }
                             }
@@ -435,9 +507,13 @@ fn ViewerTabOverflowMenuItem(
     onactivate: EventHandler<ViewerTabId>,
     onclose: EventHandler<ViewerTabId>,
     onmove: EventHandler<MoveViewerTab>,
+    #[props(default)] onupdate: Option<EventHandler<ViewerTabId>>,
+    #[props(default)] onlive: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] onpin: Option<EventHandler<(ViewerTabId, bool)>>,
     #[props(default)] oncloseothers: Option<EventHandler<ViewerTabId>>,
     #[props(default)] onrename: Option<EventHandler<(ViewerTabId, InlineTextSubmission)>>,
+    menu_actions: Option<Callback<ViewerTabMenuTarget, Element>>,
+    warning_details: Option<Element>,
 ) -> Element {
     let language = use_language();
     let label = recipe_label_text(&tab.label, language);
@@ -446,12 +522,43 @@ fn ViewerTabOverflowMenuItem(
     let mut activation_gesture = use_signal(ViewerTabActivationGesture::default);
     let drag = pointer_drag::use_pointer_drag(Some(onmove));
     let menu_id = format!("viewer-overflow-tab-{tab_id}-menu");
+    let details_id = format!("viewer-overflow-tab-{tab_id}-details");
+    let details_anchor = format!("--{details_id}");
+    let hover = use_hover_popover(details_id.clone());
+    let warning = warning_details.is_some();
+    let details = rsx! {
+        ViewerTabDetails { tab: tab.clone(), warning_details }
+    };
+    let actions = menu_actions.map(|render| {
+        render.call(ViewerTabMenuTarget {
+            tab_id,
+            menu_id: menu_id.clone(),
+            trigger_id: format!("viewer-overflow-tab-{tab_id}-trigger"),
+        })
+    });
     let mouse_menu_id = menu_id.clone();
     let keyboard_menu_id = menu_id.clone();
     let mut menu_position = use_signal(|| (16.0, 48.0));
     rsx! {
         li {
             class: "viewer-tab-menu-item group/viewer-tab-menu",
+            style: "anchor-name: {details_anchor};",
+            onmouseenter: move |_| {
+                if !editing() {
+                    hover.pointer_enter.call(());
+                }
+            },
+            onmouseleave: move |_| hover.pointer_leave.call(()),
+            onfocusin: move |_| {
+                if !editing()
+                    && browser::element_has_visible_focus(
+                        &format!("viewer-overflow-tab-{tab_id}-trigger"),
+                    )
+                {
+                    hover.focus_enter.call(());
+                }
+            },
+            onfocusout: move |_| hover.focus_leave.call(()),
             "data-active": active.to_string(),
             "data-viewer-tab-id": "{tab_id}",
             "data-viewer-tab-axis": "vertical",
@@ -470,6 +577,10 @@ fn ViewerTabOverflowMenuItem(
                 }
             },
             onkeydown: move |event: KeyboardEvent| {
+                if event.key() == Key::Escape {
+                    hover.pointer_leave.call(());
+                    hover.focus_leave.call(());
+                }
                 if onpin.is_some()
                     && (event.key() == Key::ContextMenu
                         || (event.key() == Key::F10
@@ -511,6 +622,7 @@ fn ViewerTabOverflowMenuItem(
                     aria_roledescription: reorderable.then(|| t!(language, "tab-sortable")),
                     aria_current: active.then_some("page"),
                     aria_controls: "viewer-active-view",
+                    aria_describedby: details_id.clone(),
                     onpointerdown: move |event: PointerEvent| {
                         if reorderable {
                             drag.start.call(event.clone());
@@ -551,6 +663,9 @@ fn ViewerTabOverflowMenuItem(
                     }
                     span { class: "flex flex-none items-center gap-1.5",
                         TabStateMarker { state: presentation_state }
+                        if warning {
+                            TabWarningMarker {}
+                        }
                         if let Some(label) = presentation_state.menu_label(language) {
                             small {
                                 class: "text-xs text-ink-3",
@@ -590,9 +705,21 @@ fn ViewerTabOverflowMenuItem(
                 ViewerTabContextMenu {
                     id: menu_id,
                     trigger_id: format!("viewer-overflow-tab-{tab_id}-trigger"),
+                    actions,
+                    details: details.clone(),
                     pinned: tab.pinned,
+                    live: tab.live,
+                    pending: matches!(tab.state, ViewerTabState::Pending),
                     position: menu_position(),
-                    onrename: onrename.is_some().then(|| EventHandler::new(move |()| editing.set(true))),
+                    onrename: onrename
+                        .is_some()
+                        .then(|| EventHandler::new(move |()| {
+                            hover.pointer_leave.call(());
+                            hover.focus_leave.call(());
+                            editing.set(true);
+                        })),
+                    onupdate: onupdate.map(|handler| EventHandler::new(move |()| handler.call(tab_id))),
+                    onlive: onlive.map(|handler| EventHandler::new(move |live| handler.call((tab_id, live)))),
                     onpin: move |pinned| onpin.call((tab_id, pinned)),
                     onclose: move |_| onclose.call(tab_id),
                     oncloseothers: move |()| {
@@ -602,12 +729,63 @@ fn ViewerTabOverflowMenuItem(
                     },
                 }
             }
+            HoverPopover {
+                id: details_id,
+                anchor_name: details_anchor.clone(),
+                aria_label: t!(language, "tab-details"),
+                placement: HoverPopoverPlacement::Below,
+                {details}
+            }
         }
     }
 }
 
 pub(crate) fn viewer_tab_element_id(tab_id: ViewerTabId) -> String {
     format!("viewer-tab-{tab_id}")
+}
+
+#[component]
+fn ViewerTabDetails(tab: ViewerTab, warning_details: Option<Element>) -> Element {
+    let language = use_language();
+    rsx! {
+        div { class: "grid min-w-0 gap-1 text-xs",
+            p { class: "font-semibold text-ink break-words",
+                {recipe_label_text(&tab.label, language)}
+            }
+            if let Some(details) = &tab.details {
+                if details.comparison != tab.label {
+                    p { class: "text-ink-2 break-words",
+                        {recipe_label_text(&details.comparison, language)}
+                    }
+                }
+                p { class: "text-ink-3 break-all", "{details.repository.to_string_lossy()}" }
+                if let Some(range) = &details.range {
+                    dl { class: "mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-ink-3",
+                        dt { {t!(language, "tab-details-base")} }
+                        dd { class: "font-mono break-all", "{range.base}" }
+                        dt { {t!(language, "tab-details-head")} }
+                        dd { class: "font-mono break-all", "{range.head}" }
+                    }
+                }
+            }
+            if tab.live {
+                p { class: "text-acc", {t!(language, "tab-live")} }
+            }
+            if let Some(warning_details) = warning_details {
+                {warning_details}
+            }
+        }
+    }
+}
+
+#[component]
+fn TabWarningMarker() -> Element {
+    rsx! {
+        span { class: "inline-flex flex-none text-warn", aria_hidden: "true",
+            TriangleAlert { size: 13 }
+        }
+        span { class: "sr-only", {t!(use_language(), "workspace-live-warnings")} }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -768,9 +946,14 @@ mod tests {
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
             onrename: None,
+            menu_actions: None,
+            warning_details: None,
+            onupdate: None,
+            onlive: None,
             onpin: None,
             oncloseothers: None,
             tab: ViewerTab {
+                details: None,
                 custom_name: None,
                 pinned: false,
                 id: tab_id,
@@ -796,11 +979,6 @@ mod tests {
         assert!(html.contains("style=\"transition-duration:75ms;\""));
         assert!(!html.contains("duration-150"));
         assert!(!html.contains("active:bg-"));
-        assert!(html.contains("viewer-tab-close mr-0.5 group/viewer-tab-close"));
-        assert!(html.contains("background-color:#c1121f;transition-duration:100ms"));
-        assert!(html.contains("viewer-tab-close-icon"));
-        assert!(html.contains("transform:translateX(-0.5px)"));
-        assert!(html.contains("stroke-width=\"4\""));
         assert!(html.contains("aria-label=\"Close Working tree\""));
         assert!(html.contains("data-viewer-state=\"ready\""));
         assert!(!html.contains("title=\"Close tab\""));
@@ -816,9 +994,14 @@ mod tests {
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
             onrename: None,
+            menu_actions: None,
+            warning_details: None,
+            onupdate: None,
+            onlive: None,
             onpin: None,
             oncloseothers: None,
             tab: ViewerTab {
+                details: None,
                 custom_name: None,
                 pinned: false,
                 id: tab_id,
@@ -864,6 +1047,7 @@ mod tests {
         let html = dioxus_ssr::render_element(rsx! {
             ViewerTabRailMeasurementItem {
                 tab: ViewerTab {
+                    details: None,
                     custom_name: None,
                     pinned: false,
                     id: viewer_tab_id(1)?,
@@ -886,6 +1070,7 @@ mod tests {
     fn a_ready_tab_starts_its_label_without_an_icon_or_state_slot() -> TestResult {
         let tab = |state| -> TestResult<ViewerTab> {
             Ok(ViewerTab {
+                details: None,
                 custom_name: None,
                 pinned: false,
                 id: viewer_tab_id(1)?,
@@ -928,6 +1113,7 @@ mod tests {
     #[test]
     fn overflow_menu_exposes_current_pending_and_close_states() -> TestResult {
         let active_tab = ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(1)?,
@@ -936,6 +1122,7 @@ mod tests {
             state: ViewerTabState::Ready,
         };
         let pending_tab = ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: viewer_tab_id(2)?,
@@ -947,6 +1134,10 @@ mod tests {
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabOverflowMenuProps {
             onopenchange: None,
             onrename: None,
+            menu_actions: None,
+            warnings: std::collections::HashMap::new(),
+            onupdate: None,
+            onlive: None,
             onpin: None,
             oncloseothers: None,
             id: "viewer-tab-overflow-test".to_owned(),
@@ -982,16 +1173,26 @@ mod tests {
 #[component]
 fn ViewerTabContextMenu(
     id: String,
+    actions: Option<Element>,
+    details: Element,
     trigger_id: String,
     pinned: bool,
+    live: bool,
+    pending: bool,
     position: (f64, f64),
+    onupdate: Option<EventHandler<()>>,
+    onlive: Option<EventHandler<bool>>,
     onpin: EventHandler<bool>,
     onclose: EventHandler<MouseEvent>,
     oncloseothers: Option<EventHandler<()>>,
     onrename: Option<EventHandler<()>>,
 ) -> Element {
     let language = use_language();
+    let mut open = use_signal(|| false);
+    let toggle_id = id.clone();
     let keyboard_id = id.clone();
+    let update_id = id.clone();
+    let live_id = id.clone();
     let pin_id = id.clone();
     let others_id = id.clone();
     let rename_id = id.clone();
@@ -1000,11 +1201,59 @@ fn ViewerTabContextMenu(
         div {
             id: id.clone(),
             class: "viewer-tab-context-menu",
-            style: "left:clamp(0px, {x}px, calc(100vw - 13rem));top:clamp(0px, {y}px, calc(100vh - 8rem));",
+            style: "left:clamp(0px, {x}px, calc(100vw - 16rem));top:clamp(0px, {y}px, calc(100vh - min(30rem, 100vh)));max-height:calc(100vh - clamp(0px, {y}px, calc(100vh - min(30rem, 100vh))) - 0.5rem);",
             popover: "auto",
             role: "menu",
             aria_label: t!(language, "tab-actions"),
+            ontoggle: move |_| open.set(browser::popover_is_open(&toggle_id)),
             onkeydown: move |event| super::menu_keyboard::keydown(&keyboard_id, &trigger_id, &event),
+            div { class: "viewer-tab-context-details", {details} }
+            if open() {
+                if let Some(actions) = actions {
+                    {actions}
+                }
+            }
+            if let Some(update) = onupdate {
+                button {
+                    class: "control-menu-action viewer-tab-context-action",
+                    r#type: "button",
+                    role: "menuitem",
+                    tabindex: "-1",
+                    disabled: pending,
+                    title: t!(language, "workspace-refresh-hint"),
+                    onclick: move |_| {
+                        browser::hide_popover(&update_id);
+                        update.call(());
+                    },
+                    span { class: "inline-flex text-acc", aria_hidden: "true",
+                        RefreshCw { size: 14 }
+                    }
+                    {t!(language, "workspace-refresh")}
+                }
+            }
+            if let Some(set_live) = onlive {
+                button {
+                    class: "control-menu-action viewer-tab-context-action",
+                    r#type: "button",
+                    role: "menuitemcheckbox",
+                    aria_checked: live.to_string(),
+                    title: if live { t!(language, "workspace-live-stop-hint") } else { t!(language, "workspace-live-start-hint") },
+                    tabindex: "-1",
+                    onclick: move |_| {
+                        browser::hide_popover(&live_id);
+                        set_live.call(!live);
+                    },
+                    span { class: "inline-flex text-acc", aria_hidden: "true",
+                        Radio { size: 14 }
+                    }
+                    {t!(language, "workspace-live")}
+                    if live {
+                        span { class: "ml-auto", aria_hidden: "true",
+                            Check { size: 14 }
+                        }
+                    }
+                }
+            }
             if let Some(rename) = onrename {
                 button {
                     class: "control-menu-action viewer-tab-context-action",
@@ -1015,6 +1264,9 @@ fn ViewerTabContextMenu(
                         browser::hide_popover(&rename_id);
                         rename.call(());
                     },
+                    span { class: "inline-flex text-acc", aria_hidden: "true",
+                        Pencil { size: 14 }
+                    }
                     {t!(language, "tab-rename-snapshot")}
                 }
             }
@@ -1029,6 +1281,9 @@ fn ViewerTabContextMenu(
                     browser::hide_popover(&pin_id);
                     onpin.call(!pinned);
                 },
+                span { class: "inline-flex text-acc", aria_hidden: "true",
+                    Pin { size: 14 }
+                }
                 span {
                     if pinned {
                         {t!(language, "tab-unpin")}
@@ -1049,6 +1304,9 @@ fn ViewerTabContextMenu(
                     browser::hide_popover(&id);
                     onclose.call(event);
                 },
+                span { class: "inline-flex text-acc", aria_hidden: "true",
+                    X { size: 14 }
+                }
                 span { {t!(language, "tab-close")} }
                 span { class: "ml-auto text-ink-3", aria_hidden: "true", "Ctrl+W" }
             }
@@ -1065,6 +1323,9 @@ fn ViewerTabContextMenu(
                         close.call(());
                     }
                 },
+                span { class: "inline-flex text-acc", aria_hidden: "true",
+                    ListX { size: 14 }
+                }
                 span { {t!(language, "tab-close-others")} }
                 span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+O" }
             }

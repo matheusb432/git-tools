@@ -43,8 +43,9 @@
 }
 
 @layer components {
-  .viewer-tab-context-action { @apply min-h-7 w-full gap-6 px-2 py-1 text-xs; }
+  .viewer-tab-context-action { @apply min-h-7 w-full gap-2 px-2 py-1 text-xs; }
   .viewer-tab-context-menu {
-    @apply fixed inset-auto m-0 w-52 rounded-sm border border-line-2 bg-surface p-1 text-ink shadow-lg;
+    @apply fixed inset-auto m-0 w-64 max-w-[calc(100vw-1rem)] max-h-[calc(100vh-1rem)] overflow-y-auto rounded-sm border border-line-2 bg-surface p-1 text-ink shadow-lg;
   }
+  .viewer-tab-context-details { @apply mb-1 border-b border-line px-2 py-2; }
 }

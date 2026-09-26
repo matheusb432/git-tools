@@ -16,6 +16,8 @@ use crate::recipes::{Recipe, recipe_label};
 /// One open tab with the order, flags, and label the viewer restores.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedViewerTab {
+    pub history_id: Option<super::RenderHistoryId>,
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     pub recipe: Recipe,
     pub label: RecipeLabel,
     pub pinned: bool,
@@ -56,6 +58,8 @@ pub fn project(session: &ViewerSession) -> Vec<SavedViewerTab> {
     session
         .tabs()
         .map(|tab| SavedViewerTab {
+            history_id: tab.history_id,
+            comparison_name: tab.comparison_name.clone(),
             recipe: tab.recipe.clone(),
             label: tab.tab.label().clone(),
             pinned: tab.pinned,
@@ -74,8 +78,8 @@ pub fn save(
     transaction.execute("DELETE FROM viewer_tabs", [])?;
     {
         let mut statement = transaction.prepare_cached(
-            "INSERT INTO viewer_tabs (position, recipe_json, label_json, pinned, live, active)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO viewer_tabs (position, recipe_json, label_json, pinned, live, active, history_id, comparison_name)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for (position, tab) in tabs.iter().enumerate() {
             statement.execute(params![
@@ -86,6 +90,8 @@ pub fn save(
                 tab.pinned,
                 tab.live,
                 tab.active,
+                tab.history_id.map(i64::from),
+                tab.comparison_name.as_ref().map(AsRef::<str>::as_ref),
             ])?;
         }
     }
@@ -96,7 +102,7 @@ pub fn save(
 /// Reads the saved tab strip in order.
 pub fn load(connection: &Connection) -> Result<Vec<SavedViewerTab>, LoadViewerTabsError> {
     let mut statement = connection.prepare(
-        "SELECT position, recipe_json, label_json, pinned, live, active
+        "SELECT position, recipe_json, label_json, pinned, live, active, history_id, comparison_name
          FROM viewer_tabs ORDER BY position",
     )?;
     let rows = statement.query_map([], |row| {
@@ -107,10 +113,28 @@ pub fn load(connection: &Connection) -> Result<Vec<SavedViewerTab>, LoadViewerTa
             row.get::<_, bool>(3)?,
             row.get::<_, bool>(4)?,
             row.get::<_, bool>(5)?,
+            row.get::<_, Option<i64>>(6)?,
+            row.get::<_, Option<String>>(7)?,
         ))
     })?;
     rows.map(|row| {
-        let (position, recipe, label, pinned, live, active) = row?;
+        let (position, recipe, label, pinned, live, active, history_id, comparison_name) = row?;
+        let comparison_name = comparison_name
+            .map(gtl_models::git::GitRevision::try_new)
+            .transpose()
+            .map_err(|error| LoadViewerTabsError::InvalidRow {
+                position,
+                field: "comparison_name",
+                reason: error.to_string(),
+            })?;
+        let history_id = history_id
+            .map(super::RenderHistoryId::try_new)
+            .transpose()
+            .map_err(|error| LoadViewerTabsError::InvalidRow {
+                position,
+                field: "history_id",
+                reason: error.to_string(),
+            })?;
         let invalid = |field, error: serde_json::Error| LoadViewerTabsError::InvalidRow {
             position,
             field,
@@ -123,6 +147,8 @@ pub fn load(connection: &Connection) -> Result<Vec<SavedViewerTab>, LoadViewerTa
             None => recipe_label::pending_tab(&recipe),
         };
         Ok(SavedViewerTab {
+            history_id,
+            comparison_name,
             recipe,
             label,
             pinned,
@@ -145,6 +171,8 @@ pub fn restore(
             let id = session
                 .open_labeled(tab.recipe, RecipeBatchId::generate(), tab.label)
                 .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
+            session.restore_history_id(id, tab.history_id);
+            session.set_comparison_name(id, tab.comparison_name);
             session.set_live(id, tab.live);
             if tab.pinned {
                 session.set_pinned(id, true);
@@ -162,7 +190,7 @@ pub fn restore(
             ids.insert(0, id);
         }
         ids.into_iter()
-            .map(|id| work::reserve_refresh_in_session(session, id))
+            .map(|id| work::reserve_restore_in_session(session, id))
             .collect()
     })?
 }
@@ -187,6 +215,8 @@ mod tests {
                     label_json TEXT,
                     pinned INTEGER NOT NULL,
                     live INTEGER NOT NULL,
+                    history_id INTEGER,
+                    comparison_name TEXT,
                     active INTEGER NOT NULL
                 ) STRICT",
             )
@@ -202,6 +232,8 @@ mod tests {
             })
         };
         SavedViewerTab {
+            history_id: None,
+            comparison_name: None,
             label: utils::viewer::label(path),
             recipe,
             pinned,
@@ -231,7 +263,7 @@ mod tests {
         let tab = saved("/repos/project", false, false, false);
         connection
             .execute(
-                "INSERT INTO viewer_tabs VALUES (0, ?1, NULL, 0, 0, 0)",
+                "INSERT INTO viewer_tabs (position, recipe_json, label_json, pinned, live, active) VALUES (0, ?1, NULL, 0, 0, 0)",
                 [serde_json::to_string(&tab.recipe).unwrap()],
             )
             .unwrap();
@@ -246,7 +278,7 @@ mod tests {
     fn an_undecodable_recipe_is_reported_with_its_position() {
         let connection = store();
         connection
-            .execute_batch(r#"INSERT INTO viewer_tabs VALUES (3, '{"source":{}}', NULL, 0, 0, 0)"#)
+            .execute_batch(r#"INSERT INTO viewer_tabs (position, recipe_json, label_json, pinned, live, active) VALUES (3, '{"source":{}}', NULL, 0, 0, 0)"#)
             .unwrap();
 
         assert!(matches!(

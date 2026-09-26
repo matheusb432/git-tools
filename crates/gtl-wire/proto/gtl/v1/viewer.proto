@@ -194,6 +194,18 @@ message ViewerTab {
   bool pinned = 5;
   optional string custom_name = 6;
   ViewerRecipeLabel recipe_label = 7;
+  ViewerTabDetails details = 9;
+}
+
+message ViewerTabDetails {
+  string repository = 1;
+  ViewerRecipeLabel comparison = 2;
+  ViewerTabRange range = 3;
+}
+
+message ViewerTabRange {
+  string base = 1;
+  string head = 2;
 }
 
 // Names a recipe's diff in parts the viewer localizes.

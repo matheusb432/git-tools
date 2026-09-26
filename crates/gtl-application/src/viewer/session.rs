@@ -178,6 +178,7 @@ pub(crate) enum MoveOutcome {
 #[derive(Debug, Clone)]
 pub struct SessionTab {
     pub history_id: Option<super::RenderHistoryId>,
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     extension_filter: Option<gtl_models::diffs::ExtensionFilter>,
     pub tab: ViewerTab,
     pub recipe: Recipe,
@@ -272,6 +273,7 @@ impl ViewerSession {
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.push(SessionTab {
             history_id: None,
+            comparison_name: None,
             extension_filter: None,
             tab: ViewerTab::new(id, label, false, ViewerTabState::Pending),
             recipe,
@@ -398,6 +400,26 @@ impl ViewerSession {
         })
     }
 
+    pub(crate) fn set_comparison_name(
+        &mut self,
+        id: ViewerTabId,
+        name: Option<gtl_models::git::GitRevision>,
+    ) {
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) {
+            tab.comparison_name = name;
+        }
+    }
+
+    pub(crate) fn restore_history_id(
+        &mut self,
+        id: ViewerTabId,
+        history_id: Option<super::RenderHistoryId>,
+    ) {
+        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) {
+            tab.history_id = history_id;
+        }
+    }
+
     pub fn bind_snapshot_history(
         &mut self,
         ticket: ComputeTicket,
@@ -410,6 +432,7 @@ impl ViewerSession {
         {
             tab.history_id = Some(record.id);
             if tab.recipe.name.is_some() || record.recipe.name.is_none() {
+                self.bump_version();
                 return;
             }
             tab.recipe.name.clone_from(&record.recipe.name);
@@ -1226,6 +1249,36 @@ impl ViewerSession {
         self.cache.get(id).cloned()
     }
 
+    pub(super) fn tab_details(&self, entry: &SessionTab) -> gtl_wire::viewer::ViewerTabDetails {
+        let mut recipe = entry.recipe.clone();
+        recipe.name = None;
+        let comparison = self.cache.peek(entry.tab.id()).map_or_else(
+            || crate::recipes::recipe_label::pending(&recipe),
+            |cached| {
+                crate::recipes::recipe_label::compared(
+                    &recipe,
+                    &cached.view,
+                    entry.comparison_name.as_ref(),
+                )
+            },
+        );
+        let range = match &recipe.op {
+            crate::recipes::RecipeOp::Diff { target } => match target {
+                crate::recipes::RecipeTarget::Unpushed { pinned }
+                | crate::recipes::RecipeTarget::Range { pinned, .. }
+                | crate::recipes::RecipeTarget::Merge { pinned, .. }
+                | crate::recipes::RecipeTarget::Last { pinned, .. } => pinned.clone(),
+                crate::recipes::RecipeTarget::Base { .. } => None,
+            },
+            crate::recipes::RecipeOp::MergeDiff { pinned, .. } => pinned.clone(),
+        };
+        gtl_wire::viewer::ViewerTabDetails {
+            repository: recipe.cwd(),
+            comparison,
+            range,
+        }
+    }
+
     #[must_use]
     pub fn current_ticket(&self, id: ViewerTabId) -> Option<ComputeTicket> {
         self.tabs
@@ -1328,6 +1381,30 @@ mod tests {
             crate::utils::viewer::label("ready"),
         );
         (session, id, ids)
+    }
+
+    #[test]
+    fn tab_details_keep_the_source_when_a_snapshot_is_renamed_or_evicted() {
+        let (mut session, id) = ready_session();
+        let history_id = gtl_models::viewer::RenderHistoryId::try_new(1).unwrap();
+        session.restore_history_id(id, Some(history_id));
+        session.rename_snapshot(history_id, &project_name("Release review"));
+        let details = session.tab_details(session.tab(id).unwrap());
+        assert_eq!(details.repository, repository_root("/repo"));
+        assert_eq!(
+            details.comparison,
+            RecipeLabel::Compared {
+                repository: project_name("repo"),
+                base: git_revision("main"),
+                head: gtl_models::recipes::RecipeLabelHead::Revision {
+                    revision: git_revision("feature")
+                },
+            }
+        );
+        session.cache.remove(id);
+        let details = session.tab_details(session.tab(id).unwrap());
+        assert_eq!(details.repository, repository_root("/repo"));
+        assert!(matches!(details.comparison, RecipeLabel::Changes { .. }));
     }
 
     #[test]

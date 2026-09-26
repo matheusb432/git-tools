@@ -18,6 +18,20 @@ async fn user_pushes_exactly_the_reviewed_commit() -> Result<()> {
             support::click(driver, By::Id("viewer-push-trigger")).await?;
             wait_for_review(driver, &fixture.latest).await?;
 
+            support::click(
+                driver,
+                By::XPath("//dialog[@id='viewer-push-confirmation']//button[normalize-space()='Cancel']"),
+            ).await?;
+            support::click(driver, By::Id("commits-sidebar-toggle")).await?;
+            support::visible(driver, By::Css("#commits-sidebar-toggle[aria-pressed='false']")).await?;
+            let tab = support::visible(driver, By::Css("[role='tab'][aria-selected='true']")).await?;
+            support::context_click_element(driver, &tab).await?;
+            support::click(
+                driver,
+                By::XPath("//*[@role='menu' and @aria-label='Tab actions']//button[normalize-space()='Push']"),
+            ).await?;
+            wait_for_review(driver, &fixture.latest).await?;
+
             fixture.add_newer()?;
             support::click(
                 driver,
@@ -35,6 +49,7 @@ async fn user_pushes_exactly_the_reviewed_commit() -> Result<()> {
                 fixture.repository.join("untracked.txt").exists(),
                 "the push changed untracked work"
             );
+            support::click(driver, By::Id("commits-sidebar-toggle")).await?;
             support::visible(driver, By::Css("#viewer-push-trigger:disabled")).await?;
             Ok(())
         })

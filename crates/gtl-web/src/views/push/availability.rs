@@ -16,9 +16,28 @@ use crate::{
 
 #[component]
 pub(crate) fn ViewPushButton(
+    id: String,
     identity: ReadSignal<ViewerViewIdentity>,
     disabled: ReadSignal<bool>,
 ) -> Element {
+    let (available, title) = use_view_push_availability(identity, disabled);
+    rsx! {
+        PushButton {
+            id,
+            icon_only: true,
+            source: CreateViewerPush::View {
+                identity: identity(),
+            },
+            disabled: !available,
+            title: Some(title),
+        }
+    }
+}
+
+fn use_view_push_availability(
+    identity: ReadSignal<ViewerViewIdentity>,
+    disabled: ReadSignal<bool>,
+) -> (bool, String) {
     let language = use_language();
     let controller = use_context::<PushController>();
     let key = use_memo(move || {
@@ -57,14 +76,29 @@ pub(crate) fn ViewPushButton(
         Some(Err(error)) => client_error_message(&error, language),
         None => t!(language, "push-availability-checking"),
     };
+    (
+        matches!(current(), Some(Ok(ViewerPushAvailability::Available))),
+        title,
+    )
+}
+
+#[component]
+pub(crate) fn ViewPushMenuAction(
+    identity: ReadSignal<ViewerViewIdentity>,
+    disabled: ReadSignal<bool>,
+    menu_id: String,
+    trigger_id: String,
+) -> Element {
+    let (available, title) = use_view_push_availability(identity, disabled);
     rsx! {
-        PushButton {
-            id: "viewer-push-trigger",
+        super::controller::PushMenuAction {
             source: CreateViewerPush::View {
                 identity: identity(),
             },
-            disabled: !matches!(current(), Some(Ok(ViewerPushAvailability::Available))),
-            title: Some(title),
+            disabled: !available,
+            title,
+            menu_id,
+            trigger_id,
         }
     }
 }

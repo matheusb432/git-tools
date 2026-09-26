@@ -20,6 +20,7 @@ use crate::{
 /// Requests one complete viewer recipe preparation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrepareRecipe {
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     pub recipe: Recipe,
 }
 
@@ -57,7 +58,10 @@ pub fn execute(
     filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
-    let PrepareRecipe { mut recipe } = query;
+    let PrepareRecipe {
+        mut recipe,
+        mut comparison_name,
+    } = query;
     let probe = probe_recipe::execute(
         ProbeRecipe {
             recipe: recipe.clone(),
@@ -68,28 +72,21 @@ pub fn execute(
         return Ok(PrepareRecipeOk::Broken { state });
     }
 
-    let mut comparison_name = None;
     if let crate::recipes::RecipeOp::Diff {
-        target: crate::recipes::RecipeTarget::Unpushed { pinned },
+        target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
     } = &recipe.op
     {
-        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons);
-        if pinned.is_some() {
-            // The pin fixes the content; the comparison only names it when it still resolves.
-            comparison_name = comparison.ok().map(|comparison| comparison.name());
-        } else {
-            let comparison = comparison
-                .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
-                .map_err(compute_recipe::ComputeRecipeError::from)?;
-            let pin = comparison
-                .pin(&recipe.cwd(), git)
-                .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
-                .map_err(compute_recipe::ComputeRecipeError::from)?;
-            comparison_name = Some(comparison.name());
-            recipe.op = crate::recipes::RecipeOp::Diff {
-                target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
-            };
-        }
+        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons)
+            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+            .map_err(compute_recipe::ComputeRecipeError::from)?;
+        let pin = comparison
+            .pin(&recipe.cwd(), git)
+            .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
+            .map_err(compute_recipe::ComputeRecipeError::from)?;
+        comparison_name = Some(comparison.name());
+        recipe.op = crate::recipes::RecipeOp::Diff {
+            target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
+        };
     }
     let mut view =
         compute_recipe::execute(recipe.clone(), user_settings, git, filters, comparisons)?;
@@ -100,10 +97,11 @@ pub fn execute(
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
         view,
-        comparison_name,
+        comparison_name: comparison_name.clone(),
     });
     let CompleteRecipeComputationOk { label, view } = completed;
     let history = Box::new(RecordRender {
+        comparison_name,
         label_parts: RecipeLabelParts::from_view(&recipe, &view),
         recipe,
         repo_name: view.repo_name.clone(),
@@ -139,6 +137,7 @@ mod tests {
     fn missing_source_stops_before_computation() {
         let response = prepare_recipe::execute(
             PrepareRecipe {
+                comparison_name: None,
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),
@@ -160,6 +159,7 @@ mod tests {
     fn ready_recipe_returns_a_publish_decision_for_its_pinned_commits() {
         let response = prepare_recipe::execute(
             PrepareRecipe {
+                comparison_name: None,
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),

@@ -118,9 +118,21 @@ pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
 }
 
 /// Computes reserved work on the calling thread, publishes it, and records its history.
-fn run_recipe(state: &AppState, work: ReservedRecipeWork) {
+fn run_recipe(state: &AppState, mut work: ReservedRecipeWork) {
     let ticket = work.ticket();
-    let render_id = start_history(state, &work);
+    let previous = previous_history(state, &work);
+    if work.recipe().is_pinned()
+        && work.comparison_name.is_none()
+        && let Some(record) = &previous
+        && record.recipe == *work.recipe()
+    {
+        work.comparison_name.clone_from(&record.comparison_name);
+    }
+    let render_id = if previous.is_some() {
+        None
+    } else {
+        start_history(state, work.recipe())
+    };
     let work = work::compute_recipe(
         work,
         &state.user_settings,
@@ -130,9 +142,7 @@ fn run_recipe(state: &AppState, work: ReservedRecipeWork) {
     );
     match work::publish_recipe(&state.viewer, work) {
         Ok(RecipePublication::Published { history }) => {
-            if let Some(render_id) = render_id {
-                succeed_history(state, ticket, render_id, &history);
-            }
+            finish_history(state, ticket, render_id, previous, &history);
         }
         Ok(RecipePublication::Skipped { path }) => {
             if let Some(render_id) = render_id {
@@ -203,10 +213,56 @@ pub(crate) fn spawn_commit(state: AppState, work: ReservedCommitWork) {
     });
 }
 
-fn start_history(state: &AppState, work: &ReservedRecipeWork) -> Option<RenderHistoryId> {
+fn finish_history(
+    state: &AppState,
+    ticket: gtl_application::viewer::session::ComputeTicket,
+    pending: Option<RenderHistoryId>,
+    previous: Option<gtl_application::history::RecentRenderRecord>,
+    history: &record_render::RecordRender,
+) {
+    let render_id = match previous {
+        Some(record) if record.recipe == history.recipe => {
+            if let Err(error) = state
+                .viewer
+                .update(|session| session.bind_snapshot_history(ticket, &record))
+            {
+                tracing::error!(error = ?error, "viewer history reuse failed");
+            }
+            record_project_renders(state, &[history.recipe.cwd()]);
+            return;
+        }
+        Some(_) => start_history(state, &history.recipe),
+        None => pending,
+    };
+    if let Some(render_id) = render_id {
+        succeed_history(state, ticket, render_id, history);
+    }
+}
+
+fn previous_history(
+    state: &AppState,
+    work: &ReservedRecipeWork,
+) -> Option<gtl_application::history::RecentRenderRecord> {
+    let id = work.history_id?;
+    match state.database.connection_lock().and_then(|connection| {
+        get_recent_render::execute(&get_recent_render::GetRecentRender { id }, &connection)
+            .map_err(Into::into)
+    }) {
+        Ok(record) => record.filter(|record| record.recipe.unpinned() == work.recipe().unpinned()),
+        Err(error) => {
+            tracing::error!(error = ?error, "viewer previous history loading failed");
+            None
+        }
+    }
+}
+
+fn start_history(
+    state: &AppState,
+    recipe: &gtl_application::recipes::Recipe,
+) -> Option<RenderHistoryId> {
     let result = state.database.connection_lock().and_then(|mut connection| {
         record_render::start(
-            &StartRender::new(work.recipe().clone()),
+            &StartRender::new(recipe.clone()),
             &mut connection,
             &state.clock,
         )

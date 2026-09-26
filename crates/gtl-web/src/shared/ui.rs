@@ -48,7 +48,7 @@ mod text_input;
 #[cfg(feature = "interactive-ui")]
 mod toast;
 #[cfg(feature = "interactive-ui")]
-mod viewer_tab;
+pub(crate) mod viewer_tab;
 #[cfg(feature = "component-preview")]
 mod viewer_theme_picker;
 
@@ -75,8 +75,6 @@ pub(crate) use field_label::FieldLabel;
 #[cfg(feature = "artifact")]
 pub(crate) use floating_notice::FloatingNotice;
 pub(crate) use icon_popover::IconPopover;
-#[cfg(feature = "interactive-ui")]
-pub(crate) use icon_popover::IconPopoverIconMotion;
 pub(crate) use loading_spinner::LoadingSpinner;
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
 #[cfg(feature = "interactive-ui")]

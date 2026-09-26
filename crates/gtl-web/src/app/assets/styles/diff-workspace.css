@@ -1,4 +1,6 @@
 @layer components {
+  .sidebar-icon { @apply inline-flex; }
+  [data-sidebar-toggle][aria-pressed="false"] .sidebar-icon path { @apply hidden; }
   .diff-workspace-sidebar {
     @apply hidden workspace:block;
     transition: opacity 150ms ease-out, visibility 0s linear;
@@ -16,23 +18,30 @@
   .diff-workspace-grid[data-commits-sidebar-visible="false"] { --commits-sidebar-width: 0px; }
 
   .diff-workspace-main { @apply grid grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg; }
-  .diff-workspace-loading { @apply grid grid-rows-[2.75rem_3rem_minmax(0,1fr)]; }
+  .diff-workspace-loading { @apply grid grid-rows-[minmax(0,1fr)]; }
   .diff-workspace-loading-columns { @apply grid grid-cols-1 bg-line; }
   .diff-workspace-shell { @apply flex flex-col overflow-hidden; }
   .diff-workspace-shell-content { @apply flex-1 overflow-hidden; }
-  .diff-workspace-mobile-grid { @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden; }
-  .diff-workspace-desktop-grid { @apply relative grid grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden; }
+  .diff-workspace-mobile-grid { @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)] overflow-hidden; }
+  .diff-workspace-desktop-grid { @apply relative grid grid-cols-[220px_minmax(0,1fr)_210px] grid-rows-[minmax(0,1fr)] overflow-hidden; }
   .diff-workspace-grid {
     --files-sidebar-size: 220px;
     --commits-sidebar-size: 210px;
-    @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[var(--files-sidebar-width,var(--files-sidebar-size))_minmax(0,1fr)_var(--commits-sidebar-width,var(--commits-sidebar-size))] workspace:grid-rows-[auto_minmax(0,1fr)] expanded:[--files-sidebar-size:262px] expanded:[--commits-sidebar-size:252px] wide-screen:[--files-sidebar-size:320px] wide-screen:[--commits-sidebar-size:304px] transition-[grid-template-columns] duration-150 ease-out motion-reduce:transition-none;
+    @apply relative grid grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)] overflow-hidden workspace:grid-cols-[var(--files-sidebar-width,var(--files-sidebar-size))_minmax(0,1fr)_var(--commits-sidebar-width,var(--commits-sidebar-size))] workspace:grid-rows-[minmax(0,1fr)] expanded:[--files-sidebar-size:262px] expanded:[--commits-sidebar-size:252px] wide-screen:[--files-sidebar-size:320px] wide-screen:[--commits-sidebar-size:304px] transition-[grid-template-columns] duration-150 ease-out motion-reduce:transition-none;
   }
-  .diff-workspace-mobile-navigation { @apply col-span-3 row-start-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] border-b border-line bg-surface; }
-  .diff-workspace-mobile-content { @apply col-span-3 row-start-3 overflow-hidden; }
+  .diff-workspace-mobile-navigation { @apply col-span-3 row-start-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] border-b border-line bg-surface; }
+  .diff-workspace-mobile-content { @apply col-span-3 row-start-2 overflow-hidden; }
+  .diff-workspace-content { @apply col-span-3 row-start-2 overflow-hidden workspace:col-start-2 workspace:col-span-1 workspace:row-start-1; }
+  .diff-workspace-grid[data-gtl-workspace] {
+    @apply grid-rows-[auto_auto_minmax(0,1fr)] workspace:grid-rows-[auto_minmax(0,1fr)];
+    .diff-workspace-mobile-navigation { @apply row-start-2; }
+    .diff-workspace-content { @apply row-start-3 workspace:row-start-2; }
+    .diff-workspace-files-panel, .diff-workspace-commits-panel { @apply row-start-2; }
+  }
   .diff-workspace-titlebar { @apply col-span-3 row-start-1 flex items-center border-b border-line bg-surface; }
   .diff-workspace-panel { @apply overflow-hidden bg-surface; }
-  .diff-workspace-files-panel { --sidebar-size: var(--files-sidebar-size); @apply col-start-1 row-start-2 border-r border-line; }
-  .diff-workspace-commits-panel { --sidebar-size: var(--commits-sidebar-size); @apply col-start-3 row-start-2 border-l border-line; }
+  .diff-workspace-files-panel { --sidebar-size: var(--files-sidebar-size); @apply col-start-1 row-start-1 border-r border-line; }
+  .diff-workspace-commits-panel { --sidebar-size: var(--commits-sidebar-size); @apply col-start-3 row-start-1 border-l border-line; }
   .diff-document-scroll { @apply overflow-auto bg-bg text-ink; }
   .diff-file-card { @apply border-b border-line-2 bg-bg; }
   .diff-file-summary { @apply relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }

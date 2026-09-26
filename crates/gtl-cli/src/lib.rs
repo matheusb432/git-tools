@@ -114,6 +114,13 @@ fn run_recursive_diff(target: &DiffTargetArgs, raw: bool, id: Option<&ProjectId>
 
 fn run_project(command: ProjectCommand) -> ExitCode {
     match command {
+        ProjectCommand::Add(args) => match commands::project_add::run(args.payload, args.json) {
+            Ok(output) => {
+                println!("{output}");
+                ExitCode::Ok
+            }
+            Err(error) => fail("project add", &error),
+        },
         ProjectCommand::Ls(args) => managed_exit(&commands::managed::run_status(
             &managed_read_options(args.read),
         )),

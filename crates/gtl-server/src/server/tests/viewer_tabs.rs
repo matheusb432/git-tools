@@ -101,3 +101,108 @@ async fn open_tabs_survive_a_restart_with_their_order_pins_and_active_tab() -> T
     server.stop().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn restored_and_reopened_tabs_reuse_history_and_its_comparison_branch() -> TestResult {
+    use gtl_application::{
+        history::list_recent_render_page::{self, ListRecentRenderPage},
+        viewer::saved_tabs,
+    };
+    let directory = tempfile::tempdir()?;
+    let repository = changed_repository(directory.path().join("repo"));
+    repository.git(&["branch", "other"]);
+    repository.git(&["switch", "-qc", "feature"]);
+    repository.git(&["branch", "--set-upstream-to", "main"]);
+    repository.commit_all("feature changes");
+    let database = SqliteAppState::open(directory.path())?;
+    super::seed_live_tabs(&database, [super::unpushed_recipe(repository.root())])?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client = Client::new(server.native_channel());
+    let initial = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    client
+        .set_viewer_tab_live(v1::SetViewerTabLiveRequest {
+            tab_id: initial.tabs[0].id.into(),
+            live: false,
+        })
+        .await?;
+    super::wait_for_history(&mut client).await?;
+    server.stop().await?;
+    let original = {
+        let connection = database.connection_lock()?;
+        let entries =
+            list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)?
+                .entries;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0]
+                .comparison_name
+                .as_ref()
+                .map(AsRef::<str>::as_ref),
+            Some("main")
+        );
+        assert_eq!(
+            saved_tabs::load(&connection)?[0].history_id,
+            Some(entries[0].id)
+        );
+        connection.execute_batch("CREATE TABLE history_insertions (id INTEGER); CREATE TRIGGER count_history_insertions AFTER INSERT ON recent_renders BEGIN INSERT INTO history_insertions VALUES (new.id); END;")?;
+        entries[0].clone()
+    };
+    repository.git(&["branch", "--set-upstream-to", "other"]);
+    for _ in 0..2 {
+        let server = ServerHarness::start(directory.path(), None).await?;
+        let mut client = Client::new(server.native_channel());
+        let restored =
+            tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+        assert_eq!(restored.tabs[0].label, initial.tabs[0].label);
+        client
+            .close_viewer_tab(v1::CloseViewerTabRequest {
+                tab_id: restored.tabs[0].id.into(),
+            })
+            .await?;
+        client
+            .open_viewer_history(v1::OpenViewerHistoryRequest {
+                render_id: u64::try_from(i64::from(original.id))?,
+            })
+            .await?;
+        let reopened =
+            tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+        assert_eq!(reopened.tabs[0].label, initial.tabs[0].label);
+        server.stop().await?;
+        let connection = database.connection_lock()?;
+        let entries =
+            list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)?
+                .entries;
+        assert_eq!(entries.as_slice(), std::slice::from_ref(&original));
+        assert_eq!(
+            saved_tabs::load(&connection)?[0].history_id,
+            Some(original.id)
+        );
+        let insertions: i64 =
+            connection.query_row("SELECT count(*) FROM history_insertions", [], |row| {
+                row.get(0)
+            })?;
+        assert_eq!(
+            insertions, 0,
+            "restoring and reopening must not start another history entry"
+        );
+    }
+    // Pruning history severs the saved reference; the next restore records its missing entry.
+    database
+        .connection_lock()?
+        .execute("DELETE FROM recent_renders", [])?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client = Client::new(server.native_channel());
+    tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+    super::wait_for_history(&mut client).await?;
+    server.stop().await?;
+    let connection = database.connection_lock()?;
+    let entries =
+        list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)?.entries;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].comparison_name, original.comparison_name);
+    assert_eq!(
+        saved_tabs::load(&connection)?[0].history_id,
+        Some(entries[0].id)
+    );
+    Ok(())
+}

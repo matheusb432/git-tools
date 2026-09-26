@@ -529,6 +529,7 @@ fn ApplicationLayoutContent() -> Element {
     };
     let displayed_language = use_context::<DisplayedLanguage>();
     use_context_provider(|| context);
+    crate::views::diffs::diff_workspace::sidebars::use_sidebar_controls_provider();
     let date_format = use_memo(move || match &*shell.read() {
         ViewerShellLoad::Ready(shell) => shell.preferences.date_format,
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
@@ -833,6 +834,7 @@ mod tests {
                 .into_iter()
                 .map(|id| {
                     Ok(gtl_wire::viewer::ViewerTab {
+                        details: None,
                         custom_name: None,
                         pinned: false,
                         id: viewer_tab_id(id)?,

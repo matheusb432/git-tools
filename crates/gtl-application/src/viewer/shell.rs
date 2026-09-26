@@ -41,6 +41,7 @@ pub fn project(
     let tabs = session
         .tabs()
         .map(|entry| ViewerTab {
+            details: Some(session.tab_details(entry)),
             pinned: entry.pinned,
             custom_name: entry.recipe.name.as_ref().map(ToString::to_string),
             id: entry.tab.id(),

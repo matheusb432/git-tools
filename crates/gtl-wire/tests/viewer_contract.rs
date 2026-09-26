@@ -210,6 +210,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
         version: ViewerVersion::new(23),
         focus_request_version: Some(ViewerVersion::new(20)),
         tabs: vec![ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: tab_id(7)?,

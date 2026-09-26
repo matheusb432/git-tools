@@ -72,7 +72,7 @@ pub enum Command {
     Push(PushArgs),
     /// Fast-forward a repository from origin.
     Pull(PullArgs),
-    /// Run workflows across managed projects.
+    /// Add managed projects and run Git workflows across them.
     Project(ProjectArgs),
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
@@ -169,6 +169,8 @@ pub struct ProjectArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ProjectCommand {
+    /// Add one managed project from a JSON object.
+    Add(Box<ProjectAddArgs>),
     /// List active projects and their repository status.
     Ls(LsArgs),
     /// Pause a managed project.
@@ -181,6 +183,24 @@ pub enum ProjectCommand {
     Pull(ProjectPullArgs),
     /// View diffs for active projects with unpushed changes.
     Diff(ProjectDiffArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(after_long_help = r#"Example:
+  gtl project add '{"project_id":"APP","title":"My app","source":{"kind":"directory","path":"/srv/app"}}'
+
+Required fields: project_id (2–4 ASCII letters), title (nonblank, without
+surrounding whitespace), source (kind: directory, path: absolute).
+
+Optional fields: git_remote, color (lowercase #rrggbb), groups (up to 64 unique
+names), include_in_full_export (defaults to true). Unknown fields are rejected."#)]
+pub struct ProjectAddArgs {
+    /// One JSON object describing the project.
+    #[arg(value_name = "JSON_PAYLOAD")]
+    pub payload: crate::commands::project_add::ProjectAddPayload,
+    /// Print the project ID and active state as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

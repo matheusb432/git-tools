@@ -83,7 +83,6 @@
   }
 
   .viewer-tab-floating { @apply pointer-events-none fixed inset-auto flex select-none items-center rounded-sm border-0 bg-surface-2 text-ink shadow-floating outline outline-1 outline-acc-line; }
-  .icon-popover-quarter-turn { @apply transition-transform duration-150 ease-out group-has-[:popover-open]/icon-popover:rotate-90 motion-reduce:transition-none; }
 }
 
 @keyframes alert-dialog-enter {

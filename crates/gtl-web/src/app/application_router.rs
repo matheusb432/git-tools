@@ -281,6 +281,7 @@ mod tests {
             tabs: active
                 .into_iter()
                 .map(|id| ViewerTab {
+                    details: None,
                     custom_name: None,
                     pinned: false,
                     id,
@@ -426,6 +427,7 @@ mod tests {
         let second = viewer_tab_id(8)?;
         let mut shell = shell(Some(second), Some(ViewerVersion::new(1)))?;
         shell.tabs.push(ViewerTab {
+            details: None,
             custom_name: None,
             pinned: false,
             id: first,

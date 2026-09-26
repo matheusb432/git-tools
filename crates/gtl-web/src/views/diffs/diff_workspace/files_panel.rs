@@ -7,7 +7,9 @@ use lucide_dioxus::ChevronRight;
 use crate::{
     shared::{
         i18n::{t, use_language},
-        ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea},
+        ui::{
+            Button, ButtonLayout, ButtonSize, ButtonVariant, CountBadge, EmptyNotice, ScrollArea,
+        },
     },
     views::diffs::{
         DiffFileStatus, DiffLineChangeBadge, DiffLineChangeKind, file_status_text_class,
@@ -140,11 +142,19 @@ fn FilesPanelHeading(
         None
     };
     rsx! {
-        div { class: "mx-1 mb-2 flex items-baseline justify-between gap-2",
-            h2 { class: "font-semibold text-ink", {t!(language, "workspace-files")} }
-            div { class: "flex items-center gap-1",
-                span { class: "text-xs text-ink-3", {t!(language, "files-count", count = file_count)} }
-                super::path_filter::PathFilterTrigger { artifact_view_id }
+        div { class: "mx-1 mb-2 flex items-center justify-between gap-1",
+            h2 { class: "flex items-center gap-1.5 font-semibold text-ink",
+                {t!(language, "workspace-files")}
+                CountBadge {
+                    count: file_count,
+                    aria_label: t!(language, "files-count", count = file_count),
+                }
+            }
+            div { class: "flex items-center",
+                super::path_filter::PathFilterTrigger { artifact_view_id: artifact_view_id.clone() }
+                if artifact_view_id.is_none() {
+                    super::titlebar::CollapseFilesButton {}
+                }
                 if let Some(extension_filters) = extension_filters {
                     {extension_filters}
                 }

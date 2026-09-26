@@ -197,10 +197,12 @@ pub(super) fn DiffViewport(
         }
         if let Some(command) = command.filter(|command| command.tab_id == identity.tab_id) {
             let folded = command.folded;
-            presentation.set_all_expanded(identity.tab_id, !folded);
             let mut geometry = geometry.write();
             for file in 0..workspace.peek().files.len() {
                 geometry.set_expanded(file, !folded);
+            }
+            if folded {
+                context.browser.scroll_to(0.0);
             }
         }
     });

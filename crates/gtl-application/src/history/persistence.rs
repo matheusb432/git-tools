@@ -25,6 +25,7 @@ pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
 /// One persisted render recipe with its stable row identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentRenderRecord {
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     pub project_id: Option<gtl_models::projects::catalogue::ProjectId>,
     pub id: RenderHistoryId,
     pub recipe: Recipe,
@@ -160,6 +161,7 @@ pub(super) struct RecentRenderRow {
     range_label: String,
     label_parts: LabelPartColumns,
     rendered_at: String,
+    comparison_name: Option<String>,
 }
 
 /// The column list every recent-render query selects, in
@@ -168,7 +170,7 @@ pub(super) const RECENT_RENDER_SELECT: &str = "
 SELECT r.id, s.kind, s.value, o.name, t.name, r.argument,
        r.pinned_base, r.pinned_head, r.recipe_name,
        r.repo_name, r.range_label, r.commit_count, r.merge_branch, r.merge_upstream,
-       r.rendered_at, r.project_id
+       r.rendered_at, r.project_id, r.comparison_name
 FROM recent_renders r
 JOIN render_sources s ON s.id = r.source_id
 JOIN render_operations o ON o.id = r.operation_id
@@ -195,6 +197,7 @@ impl RecentRenderRow {
             },
             rendered_at: row.get(14)?,
             project_id: row.get(15)?,
+            comparison_name: row.get(16)?,
         })
     }
 
@@ -222,6 +225,14 @@ impl RecentRenderRow {
             }
         })?;
         Ok(RecentRenderRecord {
+            comparison_name: self
+                .comparison_name
+                .map(GitRevision::try_new)
+                .transpose()
+                .map_err(|error| RecentRenderRowError::Recipe {
+                    id: self.id,
+                    reason: error.to_string(),
+                })?,
             project_id,
             id,
             recipe,
@@ -386,6 +397,7 @@ pub(super) fn store_test() -> Connection {
           operation_id INTEGER NOT NULL REFERENCES render_operations (id),
           target_id    INTEGER REFERENCES render_targets (id),
           argument     TEXT,
+          comparison_name TEXT,
           pinned_base  TEXT,
           pinned_head  TEXT,
           recipe_name  TEXT,
@@ -482,6 +494,7 @@ mod tests {
         let label_parts = RecipeLabelParts::from_view(recipe, &view);
         record_render::execute(
             &record_render::RecordRender {
+                comparison_name: None,
                 recipe: recipe.clone(),
                 repo_name: crate::utils::project_name("gt"),
                 range_label: "main..HEAD".into(),

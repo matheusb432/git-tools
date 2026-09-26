@@ -138,6 +138,7 @@ impl StartRender {
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordRender {
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     pub recipe: Recipe,
     pub repo_name: ProjectName,
     /// The Git range the render compared, as Git spells it.
@@ -314,7 +315,8 @@ pub fn succeed(
                  commit_count = ?11,
                  merge_branch = ?12,
                  merge_upstream = ?13,
-                 render_status = ?14
+                 render_status = ?14,
+                 comparison_name = ?15
              WHERE id = ?1 AND render_status = 'pending'",
             params![
                 i64::from(render_id),
@@ -331,6 +333,7 @@ pub fn succeed(
                 label_parts.merge_branch,
                 label_parts.merge_upstream,
                 RenderStatus::Success.as_str(),
+                request.comparison_name.as_ref().map(AsRef::<str>::as_ref),
             ],
         )?;
         if updated != 1 {
@@ -493,6 +496,7 @@ mod tests {
 
     fn command_for_recipe(commit_count: u64, repo_name: &str, recipe: Recipe) -> RecordRender {
         RecordRender {
+            comparison_name: None,
             recipe,
             repo_name: crate::utils::project_name(repo_name),
             range_label: "origin/main..HEAD".into(),
@@ -645,6 +649,7 @@ mod tests {
         assert_eq!(
             renders[0],
             RecentRenderRecord {
+                comparison_name: None,
                 project_id: None,
                 id: gtl_models::viewer::RenderHistoryId::try_new(1).unwrap(),
                 recipe: recipe("/repos/gt"),

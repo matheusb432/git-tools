@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 18]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 19]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -257,6 +257,9 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 18]> = LazyLock::new(|| {
         M::up(include_str!("../../db/migrations/0017_viewer_tabs.sql")),
         M::up(include_str!(
             "../../db/migrations/0018_retire_live_views.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0019_viewer_tab_history.sql"
         )),
     ]
 });
@@ -389,6 +392,55 @@ mod tests {
             barrier.wait();
             open_app_db(&root).map(|_| ())
         })
+    }
+
+    #[test]
+    fn migration_links_saved_tabs_to_history_without_inventing_branch_names() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..18])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch(r#"
+            INSERT INTO render_sources (id, kind, value, created_at)
+            VALUES (1, 'directory', '/repos/project', '2026-09-25T00:00:00Z');
+            INSERT INTO recent_renders (id, source_id, operation_id, target_id, pinned_base, pinned_head, repo_name, range_label, rendered_at)
+            VALUES (1, 1, 1, 1, 'base', 'head', 'project', 'base..head', '2026-09-25T00:00:00Z');
+            INSERT INTO viewer_tabs (position, recipe_json, pinned, live, active) VALUES
+            (0, '{"source":{"kind":"local_repo","value":"/repos/project"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"base","head":"head"}}}}', 1, 0, 1),
+            (1, '{"source":{"kind":"local_repo","value":"/repos/missing"},"op":{"op":"diff","target":{"target":"unpushed"}}}', 0, 0, 0);
+        "#).unwrap();
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        let history: (i64, Option<String>) = connection
+            .query_row(
+                "SELECT id, comparison_name FROM recent_renders",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(history, (1, None));
+        let ids = connection
+            .prepare("SELECT history_id FROM viewer_tabs ORDER BY position")
+            .unwrap()
+            .query_map([], |row| row.get::<_, Option<i64>>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, [Some(1), None]);
+        connection
+            .execute("DELETE FROM recent_renders", [])
+            .unwrap();
+        let linked: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM viewer_tabs WHERE history_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(linked, 0);
     }
 
     #[test]

@@ -235,12 +235,9 @@ settings-recovery-reset = Back up and reset settings
 settings-recovery-valid = The settings file is valid now. Retry to continue.
 settings-recovery-reset-done = Settings reset. Backup: { $path }
 
-## Viewer menu
+## Viewer navigation
 
-viewer-menu-label = Viewer menu
-viewer-menu-settings-label = User settings
-viewer-menu-settings = Settings
-viewer-menu-settings-description = Viewer defaults
+viewer-settings = Settings
 
 ## Push
 
@@ -600,14 +597,14 @@ workspace-empty = No diff is open
 workspace-empty-message = Run a git-tools diff command or open a project to see a diff.
 workspace-source-unavailable = Repository unavailable
 workspace-no-changes = No changes
-workspace-no-changes-message = No changes in this comparison. Update the tab to check again.
+workspace-no-changes-message = No changes in this comparison. Refresh the tab to check again.
 workspace-no-changes-live-message = No changes in this comparison. Updates appear automatically when HEAD changes.
 workspace-live-warnings = Live diff update warnings
 workspace-live = Live
 workspace-live-start-hint = Update this tab whenever the repository changes
 workspace-live-stop-hint = Stop updating this tab and keep its current snapshot
-workspace-update = Update
-workspace-update-hint = Show the latest changes for this tab's range
+workspace-refresh = Refresh
+workspace-refresh-hint = Show the latest changes for this tab's range
 workspace-live-recent-errors = Recent update errors
 workspace-live-occurrences =
     { $count ->
@@ -632,8 +629,6 @@ commits-copy-id = Copy commit ID
 ## Diff workspace chrome
 
 titlebar-working-tree = Working tree · HEAD
-titlebar-find-all = Search code in all files
-titlebar-all-files = All files
 titlebar-expand-all = Expand all
 titlebar-collapse-all = Collapse all
 titlebar-hidden-files =
@@ -704,3 +699,10 @@ artifact-subrepo-diffs = Subrepo diffs
 tray-show = Show
 tray-quit = Quit
 projects-import-picker-title = Choose a folder to scan
+
+files-expand-diffs = Expand all diffs
+files-collapse-diffs = Collapse all diffs
+tab-details = Comparison details
+tab-details-base = Base
+tab-details-head = Head
+tab-push-activate = Open this tab to review a push.

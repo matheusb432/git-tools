@@ -1,6 +1,7 @@
 @layer components {
-  .viewer-window-header { @apply z-70 flex h-9 shrink-0 items-center border-b border-line bg-surface; }
-  .viewer-window-drag-region { @apply h-9 w-12 shrink-0 select-none; }
+  .viewer-window-header { @apply z-70 flex h-9 shrink-0 items-center bg-surface; }
+  .viewer-window-drag-region { @apply h-9 w-6 shrink-0 select-none; }
+  .viewer-window-actions { @apply flex h-9 shrink-0 items-center; }
   .viewer-window-controls { @apply flex h-9 shrink-0 items-center; }
   .viewer-window-button { @apply flex size-9 shrink-0 cursor-default items-center justify-center border-0 bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
   .viewer-window-button[data-close="true"] { @apply hover:bg-del hover:text-white active:bg-del active:text-white; }

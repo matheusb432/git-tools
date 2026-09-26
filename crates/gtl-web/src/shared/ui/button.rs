@@ -61,8 +61,8 @@ pub(crate) enum ButtonVariant {
     Failure,
     Outline,
     Ghost,
-    #[cfg(feature = "interactive-ui")]
     Accent,
+    #[cfg(feature = "interactive-ui")]
     Toggle,
     Bare,
 }
@@ -80,8 +80,8 @@ impl ButtonVariant {
             Self::Failure => "control-button-variant-failure",
             Self::Outline => "control-button-variant-outline",
             Self::Ghost => "control-button-variant-ghost",
-            #[cfg(feature = "interactive-ui")]
             Self::Accent => "control-button-variant-accent",
+            #[cfg(feature = "interactive-ui")]
             Self::Toggle => "control-button-variant-ghost control-button-variant-toggle",
             Self::Bare => "",
         }
@@ -101,6 +101,7 @@ pub(crate) enum ButtonSize {
     IconSmall,
     #[cfg(feature = "component-preview")]
     IconMedium,
+    #[cfg(feature = "interactive-ui")]
     IconTouch,
 }
 
@@ -117,6 +118,7 @@ impl ButtonSize {
             Self::IconSmall => "size-8 p-0",
             #[cfg(feature = "component-preview")]
             Self::IconMedium => "size-9 p-0",
+            #[cfg(feature = "interactive-ui")]
             Self::IconTouch => "size-11 p-0",
         }
     }

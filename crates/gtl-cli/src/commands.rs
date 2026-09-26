@@ -8,6 +8,7 @@ pub mod diff;
 pub mod diff_subrepos;
 pub mod managed;
 pub mod merge_diff;
+pub mod project_add;
 pub mod project_status;
 pub mod pull;
 pub mod push_subrepos;

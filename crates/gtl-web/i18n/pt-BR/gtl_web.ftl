@@ -236,12 +236,9 @@ settings-recovery-reset = Fazer backup e redefinir configurações
 settings-recovery-valid = O arquivo de configurações agora é válido. Tente de novo para continuar.
 settings-recovery-reset-done = Configurações redefinidas. Backup: { $path }
 
-## Viewer menu
+## Viewer navigation
 
-viewer-menu-label = Menu do visualizador
-viewer-menu-settings-label = Configurações do usuário
-viewer-menu-settings = Configurações
-viewer-menu-settings-description = Padrões do visualizador
+viewer-settings = Configurações
 
 ## Push
 
@@ -621,8 +618,8 @@ workspace-live-warnings = Avisos de atualização do diff live
 workspace-live = Live
 workspace-live-start-hint = Atualizar esta aba sempre que o repositório mudar
 workspace-live-stop-hint = Parar de atualizar esta aba e manter o snapshot atual
-workspace-update = Atualizar
-workspace-update-hint = Mostrar as alterações mais recentes do intervalo desta aba
+workspace-refresh = Atualizar
+workspace-refresh-hint = Mostrar as alterações mais recentes do intervalo desta aba
 workspace-live-recent-errors = Erros recentes de atualização
 workspace-live-occurrences =
     { $count ->
@@ -647,8 +644,6 @@ commits-copy-id = Copiar o ID do commit
 ## Diff workspace chrome
 
 titlebar-working-tree = Working tree · HEAD
-titlebar-find-all = Buscar código em todos os arquivos
-titlebar-all-files = Todos os arquivos
 titlebar-expand-all = Expandir tudo
 titlebar-collapse-all = Recolher tudo
 titlebar-hidden-files =
@@ -724,3 +719,10 @@ artifact-subrepo-diffs = Diffs dos sub-repositórios
 tray-show = Mostrar
 tray-quit = Sair
 projects-import-picker-title = Escolha uma pasta para escanear
+
+files-expand-diffs = Expandir todos os diffs
+files-collapse-diffs = Recolher todos os diffs
+tab-details = Detalhes da comparação
+tab-details-base = Base
+tab-details-head = Head
+tab-push-activate = Abra esta aba para revisar um push.

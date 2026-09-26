@@ -3,8 +3,7 @@ use dx_story::{stories, story};
 use lucide_dioxus::EllipsisVertical;
 
 use crate::shared::ui::{
-    IconPopover, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
-    popover::PopoverPlacement,
+    IconPopover, MENU_ACTION_HOST_CLASSES, MenuActionContent, popover::PopoverPlacement,
 };
 
 #[story(name = "Catalog thumbnail")]
@@ -36,7 +35,6 @@ fn trigger_end() -> Element {
                 id: "preview-trigger-popover",
                 aria_label: "Example actions",
                 placement: PopoverPlacement::TriggerEnd,
-                icon_motion: IconPopoverIconMotion::QuarterTurn,
                 icon: rsx! {
                     EllipsisVertical { size: 18 }
                 },

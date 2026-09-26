@@ -4,7 +4,7 @@ pub(crate) mod settings_recovery;
 #[cfg(feature = "desktop")]
 mod user_settings;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
-pub(crate) mod viewer_menu;
+pub(crate) mod viewer_settings_button;
 #[cfg(any(feature = "component-preview", feature = "desktop"))]
 pub(crate) mod viewer_settings_form;
 

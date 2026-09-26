@@ -3,13 +3,21 @@ use gtl_wire::window::WindowAction;
 
 use super::{
     application_layout::ViewerContext, application_navigation::ApplicationNavigation,
-    window_chrome::WindowTitleBar,
+    application_router::Route, window_chrome::WindowTitleBar,
 };
-use crate::shared::{browser, ui::use_toast};
+use crate::{
+    shared::{browser, ui::use_toast},
+    views::{
+        diffs::diff_workspace::sidebars::WorkspaceSidebarButtons,
+        viewer_settings_button::ViewerSettingsButton,
+    },
+};
 
 #[component]
 pub(super) fn WindowHeader() -> Element {
     let viewer = use_context::<ViewerContext>();
+    let navigator = use_navigator();
+    let route = use_route::<Route>();
     let mut revision = use_signal(|| 0_u64);
     browser::use_window_resize(move || revision += 1);
     let window = use_resource(move || async move {
@@ -34,6 +42,20 @@ pub(super) fn WindowHeader() -> Element {
             state,
             onaction: move |request| {
                 action.call(request);
+            },
+            actions: rsx! {
+                div {
+                    class: "viewer-window-actions",
+                    "inert": (!viewer.actions_enabled()).then_some(""),
+                    ViewerSettingsButton {
+                        onsettings: move |()| {
+                            navigator.push(Route::Settings {});
+                        },
+                    }
+                    if matches!(route, Route::Diff { .. } | Route::CurrentDiff {}) {
+                        WorkspaceSidebarButtons {}
+                    }
+                }
             },
             div {
                 class: "min-w-0 flex-1",

@@ -6,6 +6,6 @@ mod controller;
 pub(crate) use controller::{PushButton, PushController, PushDialogHost, use_push_provider};
 
 #[cfg(feature = "desktop")]
-mod availability;
+pub(crate) mod availability;
 #[cfg(feature = "desktop")]
 pub(crate) use availability::ViewPushButton;

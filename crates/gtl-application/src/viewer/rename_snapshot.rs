@@ -118,6 +118,7 @@ mod tests {
                 session.bind_snapshot_history(
                     ticket,
                     &RecentRenderRecord {
+                        comparison_name: None,
                         id: RenderHistoryId::try_new(1).unwrap(),
                         project_id: None,
                         recipe,
@@ -146,6 +147,7 @@ mod tests {
                 work::reserve_open(&state, recipe.clone(), RecipeBatchId::generate()).unwrap();
             recipe.name = Some(utils::project_name("Saved review"));
             let record = RecentRenderRecord {
+                comparison_name: None,
                 id: RenderHistoryId::try_new(1).unwrap(),
                 project_id: None,
                 recipe,

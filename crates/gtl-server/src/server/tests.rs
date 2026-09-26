@@ -41,6 +41,30 @@ use crate::{
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
+async fn wait_for_history(client: &mut ViewerServiceClient<Channel>) -> TestResult {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let history = client
+                .list_viewer_history(gtl_wire::v1::ListViewerHistoryRequest {
+                    filter: Some(
+                        gtl_wire::v1::list_viewer_history_request::Filter::AllProjects(Empty {}),
+                    ),
+                    cursor: Some(gtl_wire::v1::list_viewer_history_request::Cursor::Newest(
+                        Empty {},
+                    )),
+                })
+                .await?
+                .into_inner();
+            if !history.entries.is_empty() {
+                return Ok::<(), tonic::Status>(());
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await??;
+    Ok(())
+}
+
 /// Saves `recipes` as live tabs after any saved ones, as a previous server would, leaving the
 /// last one active.
 fn seed_live_tabs(
@@ -54,6 +78,8 @@ fn seed_live_tabs(
         tab.active = false;
     }
     tabs.extend(recipes.into_iter().map(|recipe| SavedViewerTab {
+        history_id: None,
+        comparison_name: None,
         label: gtl_models::recipes::RecipeLabel::Repository {
             repository: recipe.cwd().project_name(),
         },

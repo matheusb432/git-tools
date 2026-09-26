@@ -178,6 +178,10 @@ impl WeightedViewCache {
         self.entries.get(&id)
     }
 
+    pub(super) fn peek(&self, id: ViewerTabId) -> Option<&CachedView> {
+        self.entries.peek(&id)
+    }
+
     pub fn remove(&mut self, id: ViewerTabId) -> Option<()> {
         let removed = self.entries.pop(&id)?;
         self.weight = self.weight.saturating_sub(removed.weight());

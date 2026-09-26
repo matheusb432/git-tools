@@ -48,6 +48,8 @@ fn unpushed_diff_recipe() -> Recipe {
 
 fn saved_tab(recipe: Recipe) -> SavedViewerTab {
     SavedViewerTab {
+        history_id: None,
+        comparison_name: None,
         label: gtl_models::recipes::RecipeLabel::Repository {
             repository: recipe.cwd().project_name(),
         },
@@ -79,6 +81,7 @@ fn public_operations_use_the_migrated_schema() {
         let mut connection = state.connection_lock().unwrap();
         record_render::execute(
             &RecordRender {
+                comparison_name: None,
                 recipe: unpushed_diff_recipe(),
                 repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),
@@ -154,6 +157,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
         let mut connection = state.connection_lock().unwrap();
         record_render::execute(
             &RecordRender {
+                comparison_name: None,
                 recipe: unpushed_diff_recipe(),
                 repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),

@@ -8,7 +8,7 @@ pub(crate) mod file_filter_changes;
 mod file_status;
 mod line_changes;
 #[cfg(feature = "desktop")]
-mod presentation;
+pub(crate) mod presentation;
 #[cfg(feature = "desktop")]
 pub(crate) use presentation::use_diff_presentation_provider;
 #[cfg(feature = "desktop")]

@@ -1,10 +1,10 @@
 //! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
 
 use gtl_models::{
-    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExtensionFilter},
+    diffs::{CommitId, DiffLineCount, DiffViewTitle, ExtensionFilter, PinnedRange},
     failure::Failure,
     git::{GitHead, GitRevision},
-    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
+    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
     recipes::RecipeLabel,
     settings::UserSettingsRevision,
     timestamps::MachineTimestamp,
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 50;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 51;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -140,6 +140,8 @@ pub enum ViewerTabState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTab {
     #[serde(default)]
+    pub details: Option<ViewerTabDetails>,
+    #[serde(default)]
     pub custom_name: Option<String>,
     #[serde(default)]
     pub pinned: bool,
@@ -148,6 +150,14 @@ pub struct ViewerTab {
     /// Whether the tab updates its snapshot whenever its source changes.
     pub live: bool,
     pub state: ViewerTabState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerTabDetails {
+    pub repository: RepositoryRoot,
+    /// The source comparison, independent of a custom tab name.
+    pub comparison: RecipeLabel,
+    pub range: Option<PinnedRange>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

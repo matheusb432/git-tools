@@ -32,6 +32,25 @@ async fn user_reviews_a_cli_snapshot_and_reopens_it_from_history() -> Result<()>
             copy_truncated_line(driver).await?;
 
             rename_snapshot(driver, "Auth review").await?;
+            let tab =
+                support::visible(driver, By::Css("[role='tab'][aria-selected='true']")).await?;
+            support::context_click_element(driver, &tab).await?;
+            let details = support::visible(
+                driver,
+                By::Css("[role='menu'][aria-label='Tab actions']:popover-open"),
+            )
+            .await?
+            .text()
+            .await?;
+            ensure!(
+                details.contains("long-lines") && details.contains("feature"),
+                "renaming hid the snapshot's source: {details}"
+            );
+            driver
+                .action_chain()
+                .send_keys(Key::Escape)
+                .perform()
+                .await?;
             support::selectors::by_test_id(driver, test_ids::VIEWER_TAB_CLOSE)
                 .await?
                 .click()

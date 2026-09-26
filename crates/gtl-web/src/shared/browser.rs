@@ -106,6 +106,13 @@ pub(crate) fn focus_element(id: String) {
     spawn(focus);
 }
 
+#[cfg(feature = "interactive-ui")]
+pub(crate) fn element_has_visible_focus(id: &str) -> bool {
+    document()
+        .and_then(|document| document.get_element_by_id(id))
+        .is_some_and(|element| element.matches(":focus-visible").unwrap_or(false))
+}
+
 #[cfg(all(feature = "desktop", target_arch = "wasm32"))]
 pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
@@ -164,11 +171,14 @@ pub(crate) fn show_hover_popover(id: &str) {
     let Some(document) = document() else {
         return;
     };
+    let tooltip = document.get_element_by_id(id);
     let menu_open = document
-        .query_selector("[popover]:popover-open:not([role='tooltip'])")
-        .ok()
-        .flatten()
-        .is_some();
+        .query_selector_all("[popover]:popover-open:not([role='tooltip'])")
+        .is_ok_and(|popovers| {
+            (0..popovers.length())
+                .filter_map(|index| popovers.item(index))
+                .any(|popover| !popover.contains(tooltip.as_ref().map(AsRef::as_ref)))
+        });
     let dialog_open = document
         .query_selector("dialog[open]")
         .ok()

@@ -6,7 +6,10 @@ use gtl_wire::viewer::ViewerRowContentId;
 
 use super::{
     client_diff_document::viewport::geometry::DiffGeometry,
-    diff_workspace::panel_scroll::{Panel, PanelScrollPosition},
+    diff_workspace::{
+        FileFoldCommand,
+        panel_scroll::{Panel, PanelScrollPosition},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,13 +37,15 @@ struct RetainedGeometry {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) struct DiffPresentation {
+pub(crate) struct DiffPresentation {
     tabs: Signal<HashMap<ViewerTabId, TabPresentation>>,
+    pub(crate) fold_command: Signal<Option<FileFoldCommand>>,
 }
 
 pub(crate) fn use_diff_presentation_provider() {
     let mut tabs = use_signal(HashMap::<ViewerTabId, TabPresentation>::new);
-    use_context_provider(|| DiffPresentation { tabs });
+    let fold_command = use_signal(|| None);
+    use_context_provider(|| DiffPresentation { tabs, fold_command });
     let viewer = use_context::<crate::app::application_layout::ViewerContext>();
     use_effect(move || {
         let shell = viewer.shell();
@@ -84,7 +89,7 @@ impl DiffPresentation {
         }
     }
 
-    pub(super) fn all_folded(self, tab: ViewerTabId) -> Option<bool> {
+    pub(crate) fn all_folded(self, tab: ViewerTabId) -> Option<bool> {
         self.tabs
             .peek()
             .get(&tab)?
@@ -112,11 +117,17 @@ impl DiffPresentation {
         }
     }
 
-    pub(super) fn set_all_expanded(mut self, tab: ViewerTabId, expanded: bool) {
-        if let Some(tab) = self.tabs.write().get_mut(&tab) {
-            tab.default_expanded = Some(expanded);
+    pub(crate) fn toggle_files(mut self, tab_id: ViewerTabId) {
+        let folded = !self.all_folded(tab_id).unwrap_or(false);
+        {
+            let mut tabs = self.tabs.write();
+            let tab = tabs.entry(tab_id).or_default();
+            tab.default_expanded = Some(!folded);
             tab.files.clear();
+            tab.geometry = None;
         }
+        self.fold_command
+            .set(Some(FileFoldCommand { tab_id, folded }));
     }
 
     pub(super) fn anchor(self, tab: ViewerTabId) -> Option<ScrollAnchor> {
@@ -181,7 +192,30 @@ mod tests {
         owner.in_scope(ScopeId::ROOT, || {
             test(DiffPresentation {
                 tabs: Signal::new(HashMap::new()),
+                fold_command: Signal::new(None),
             })
+        })
+    }
+
+    #[test]
+    fn folding_targets_one_tab_and_applies_before_its_viewport_mounts() -> TestResult {
+        in_presentation(|presentation| {
+            let first = viewer_tab_id(1)?;
+            let second = viewer_tab_id(2)?;
+            presentation.ensure_tab(first);
+            presentation.set_file_expanded(first, "src/main.rs".to_owned(), true);
+            presentation.toggle_files(second);
+            assert_eq!(presentation.all_folded(first), None);
+            assert!(presentation.file_expanded(first, "src/main.rs", false));
+            assert!(!presentation.file_expanded(second, "src/lib.rs", true));
+            assert_eq!(
+                (presentation.fold_command)().map(|command| command.tab_id),
+                Some(second)
+            );
+            presentation.toggle_files(second);
+            assert!(presentation.file_expanded(second, "src/lib.rs", false));
+            assert_eq!(presentation.all_folded(first), None);
+            Ok(())
         })
     }
 

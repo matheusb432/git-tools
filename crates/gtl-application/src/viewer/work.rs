@@ -26,6 +26,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct ReservedRecipeWork {
+    pub history_id: Option<super::RenderHistoryId>,
+    pub comparison_name: Option<gtl_models::git::GitRevision>,
     tab_filter: Option<gtl_models::diffs::ExtensionFilter>,
     /// The recipe to compute: pinned to reload the displayed commits, or unpinned to resolve
     /// the tab's revisions again.
@@ -161,6 +163,8 @@ fn reserve_opened(
             .ok_or(ReserveRecipeError::UnknownTab)?;
         session.request_focus();
         Ok(ReservedRecipeWork {
+            history_id: None,
+            comparison_name: None,
             tab_filter: session.tab_extension_filter(ticket.tab_id),
             recipe,
             ticket,
@@ -173,7 +177,14 @@ pub fn reserve_history_open(
     state: &ViewerState,
     record: RecentRenderRecord,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
-    reserve_open(state, record.recipe, RecipeBatchId::generate())
+    let mut work = reserve_open(state, record.recipe.clone(), RecipeBatchId::generate())?;
+    work.history_id = Some(record.id);
+    work.comparison_name = record.comparison_name;
+    state.update(|session| {
+        session.restore_history_id(work.ticket.tab_id, work.history_id);
+        session.set_comparison_name(work.ticket.tab_id, work.comparison_name.clone());
+    })?;
+    Ok(work)
 }
 
 pub fn activate_tab(
@@ -226,11 +237,26 @@ fn active_needs_refresh(session: &mut ViewerSession) -> bool {
     pending || (ready && session.cached_view_snapshot(active).is_none())
 }
 
-pub(crate) fn reserve_refresh_in_session(
+fn reserve_refresh_in_session(
     session: &mut ViewerSession,
     tab_id: ViewerTabId,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
-    reserve_compute_in_session(session, tab_id, false)
+    let live = session.tab(tab_id).is_some_and(|tab| tab.tab.live());
+    reserve_compute_in_session(session, tab_id, live)
+}
+
+pub(crate) fn reserve_restore_in_session(
+    session: &mut ViewerSession,
+    tab_id: ViewerTabId,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    let history_id = session
+        .tab(tab_id)
+        .ok_or(ReserveRecipeError::UnknownTab)?
+        .history_id;
+    let mut work = reserve_refresh_in_session(session, tab_id)?;
+    work.history_id = history_id;
+    session.restore_history_id(tab_id, history_id);
+    Ok(work)
 }
 
 fn reserve_compute_in_session(
@@ -239,7 +265,13 @@ fn reserve_compute_in_session(
     update: bool,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     let tab = session.tab(tab_id).ok_or(ReserveRecipeError::UnknownTab)?;
-    let recipe = if update || tab.tab.live() {
+    let history_id = (!update).then_some(tab.history_id).flatten();
+    let comparison_name = if update {
+        None
+    } else {
+        tab.comparison_name.clone()
+    };
+    let recipe = if update {
         tab.recipe.unpinned()
     } else {
         tab.recipe.clone()
@@ -247,7 +279,10 @@ fn reserve_compute_in_session(
     let ticket = session
         .refresh(tab_id)
         .ok_or(ReserveRecipeError::UnknownTab)?;
+    session.restore_history_id(tab_id, history_id);
     Ok(ReservedRecipeWork {
+        history_id,
+        comparison_name,
         tab_filter: session.tab_extension_filter(ticket.tab_id),
         recipe,
         ticket,
@@ -263,6 +298,8 @@ pub fn compute_recipe(
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
+        history_id: _,
+        comparison_name,
         tab_filter,
         recipe,
         ticket,
@@ -275,6 +312,7 @@ pub fn compute_recipe(
         .flatten();
     let result = prepare_recipe::execute(
         PrepareRecipe {
+            comparison_name,
             recipe: recipe.clone(),
         },
         settings,
@@ -373,6 +411,7 @@ fn publish_view(
     match session.publish_labeled_if_current(ticket, value, label) {
         PublishOutcome::Published => {
             session.retain_snapshot_recipe(ticket, &history.recipe);
+            session.set_comparison_name(ticket.tab_id, history.comparison_name.clone());
             session.set_live_head(ticket, head);
             RecipePublication::Published { history }
         }
@@ -540,6 +579,7 @@ mod tests {
                 label: crate::utils::viewer::label("empty"),
                 view: Arc::new(crate::utils::viewer::empty_view()),
                 history: Box::new(RecordRender {
+                    comparison_name: None,
                     recipe: work.recipe().clone(),
                     repo_name: crate::utils::project_name("empty"),
                     range_label: "main..HEAD".into(),

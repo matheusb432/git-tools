@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 
-const NAVIGATION_BAR_CLASSES: &str = "control-navigation-bar h-9 pr-2";
+const NAVIGATION_BAR_CLASSES: &str = "control-navigation-bar h-9";
 const NAVIGATION_BAR_LEADING_CLASSES: &str = "control-navigation-bar-leading h-9";
 const NAVIGATION_BAR_RAIL_CLASSES: &str = "control-navigation-bar-rail h-9 min-w-0";
-const NAVIGATION_BAR_TRAILING_CLASSES: &str = "control-navigation-bar-trailing h-9 pl-2";
+const NAVIGATION_BAR_TRAILING_CLASSES: &str = "control-navigation-bar-trailing h-9";
 
 #[component]
 pub(crate) fn NavigationBar(

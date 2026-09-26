@@ -74,7 +74,7 @@ pub(super) fn SidebarButtons(
     let language = use_language();
     rsx! {
         div {
-            class: "hidden items-center gap-1 workspace:flex",
+            class: "hidden items-center workspace:flex",
             role: "group",
             aria_label: t!(language, "sidebar-visibility"),
             for (sidebar, visible) in [(Sidebar::Files, visibility.files), (Sidebar::Commits, visibility.commits)] {
@@ -109,7 +109,7 @@ fn SidebarButton(
     rsx! {
         Button {
             size: ButtonSize::IconSmall,
-            variant: ButtonVariant::Toggle,
+            variant: ButtonVariant::Accent,
             id: (!artifact).then(|| format!("{}-sidebar-toggle", sidebar.name())),
             aria_label: label,
             title,
@@ -121,14 +121,43 @@ fn SidebarButton(
                     ontoggle.call(sidebar);
                 }
             },
-            match sidebar {
-                Sidebar::Files => rsx! {
-                    PanelLeft { size: 16 }
-                },
-                Sidebar::Commits => rsx! {
-                    PanelRight { size: 16 }
-                },
+            span { class: "sidebar-icon", aria_hidden: "true",
+                match sidebar {
+                    Sidebar::Files => rsx! {
+                        PanelLeft { size: 16 }
+                    },
+                    Sidebar::Commits => rsx! {
+                        PanelRight { size: 16 }
+                    },
+                }
             }
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+pub(crate) fn use_sidebar_controls_provider() {
+    let controls = use_sidebar_controls();
+    use_context_provider(|| controls);
+}
+
+#[cfg(feature = "desktop")]
+#[component]
+pub(crate) fn WorkspaceSidebarButtons() -> Element {
+    use crate::app::application_layout::{ViewerContext, ViewerShellLoad};
+
+    let controls = use_context::<SidebarControls>();
+    let viewer = use_context::<ViewerContext>();
+    let keybindings = viewer.shell().with(|shell| match shell {
+        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerKeybindings::default(),
+    });
+    rsx! {
+        SidebarButtons {
+            visibility: (controls.visibility)(),
+            keybindings,
+            ontoggle: controls.toggle,
+            artifact: false,
         }
     }
 }
@@ -141,7 +170,7 @@ pub(super) struct SidebarControls {
 }
 
 #[cfg(feature = "desktop")]
-pub(super) fn use_sidebar_controls() -> SidebarControls {
+fn use_sidebar_controls() -> SidebarControls {
     use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
 
     use crate::{

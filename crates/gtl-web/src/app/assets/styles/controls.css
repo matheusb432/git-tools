@@ -9,8 +9,7 @@
   .control-button-variant-failure { @apply border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg; }
   .control-button-variant-outline { @apply border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
   .control-button-variant-ghost { @apply border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
-  .control-button-variant-accent { @apply border border-transparent bg-transparent text-acc enabled:hover:border-acc-line enabled:hover:bg-acc-soft enabled:hover:text-acc-2 disabled:text-ink-3; }
-  .control-button-variant-accent[aria-pressed="true"] { @apply border-acc-line bg-acc/25 enabled:hover:bg-acc/25; }
+  .control-button-variant-accent { @apply border border-transparent bg-transparent text-acc enabled:hover:bg-surface-2 enabled:active:bg-line disabled:text-ink-3; }
   .control-button-variant-toggle[aria-pressed="true"] { @apply bg-acc-soft text-acc; }
 
 

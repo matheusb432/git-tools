@@ -9,6 +9,7 @@ use crate::shared::i18n::{t, use_language};
 pub(super) fn WindowTitleBar(
     state: Option<WindowState>,
     onaction: EventHandler<WindowAction>,
+    actions: Element,
     children: Element,
 ) -> Element {
     let custom_titlebar = state.is_some_and(|state| state.custom_titlebar);
@@ -19,6 +20,9 @@ pub(super) fn WindowTitleBar(
             {children}
             if custom_titlebar {
                 WindowDragRegion {}
+            }
+            WindowDragExcluded { {actions} }
+            if custom_titlebar {
                 WindowControls {
                     maximized: state.is_some_and(|state| state.maximized),
                     onaction,

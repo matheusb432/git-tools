@@ -90,6 +90,7 @@ pub enum LiveViewCheck {
 }
 
 pub struct LiveViewPublication {
+    comparison_name: Option<gtl_models::git::GitRevision>,
     ticket: ComputeTicket,
     head: LiveViewState,
     value: CachedView,
@@ -116,6 +117,7 @@ pub fn prepare(
     }
     let result = prepare_recipe::execute(
         PrepareRecipe {
+            comparison_name: None,
             recipe: request.recipe.clone(),
         },
         settings,
@@ -137,6 +139,7 @@ pub fn prepare(
             value: CachedView::from_snapshot(state.prepare_snapshot(view)?),
             label,
             recipe: history.recipe,
+            comparison_name: history.comparison_name,
         }))),
         PrepareRecipeOk::Broken { state } => Err(match state {
             ViewerTabState::Error { failure } => RefreshLiveViewError::Refused(failure),
@@ -156,12 +159,16 @@ pub fn publish(
     state: &ViewerState,
 ) -> Result<PublishOutcome, super::ViewerStateError> {
     state.update(|session| {
-        session.publish_live_if_current(
+        let outcome = session.publish_live_if_current(
             work.ticket,
             work.head,
             work.value,
             work.label,
             &work.recipe,
-        )
+        );
+        if outcome == PublishOutcome::Published {
+            session.set_comparison_name(work.ticket.tab_id, work.comparison_name);
+        }
+        outcome
     })
 }
