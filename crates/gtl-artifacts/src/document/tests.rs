@@ -23,43 +23,58 @@ struct ArtifactSizeEvidence {
 
 #[test]
 fn document_is_complete_without_scripts_or_external_assets() {
-    let html = build_html(
-        &sample_view(),
-        RenderOptions::DEFAULT,
+    for theme in [
         None,
-        ViewerLanguage::EnUs,
-    )
-    .unwrap();
-    assert!(html.starts_with("<!doctype html><html lang=\"en-US\" data-theme=\"dark\">"));
-    assert!(html.contains("<title>api - diff · 0 commits</title>"));
-    assert!(html.contains("static_rendered"));
-    assert_eq!(html.matches("<style>").count(), 1);
-    assert!(!STYLESHEET.to_ascii_lowercase().contains("</style"));
-    assert!(html.contains(&format!("content=\"{}\"", content_security_policy())));
-    for forbidden in [
-        "<script",
-        " onclick=",
-        " onerror=",
-        " style=",
-        " src=",
-        " srcset=",
-        "url(",
-        "@import",
-        "data-dioxus",
-        ".wasm",
-        "unsafe-inline",
-        "unsafe-eval",
+        Some(Theme::Dark),
+        Some(Theme::Mirage),
+        Some(Theme::Glacier),
+        Some(Theme::Graphite),
+        Some(Theme::Carbon),
     ] {
+        let html = build_html(
+            &sample_view(),
+            RenderOptions::DEFAULT,
+            theme,
+            ViewerLanguage::EnUs,
+        )
+        .unwrap();
+        assert!(html.starts_with(&format!(
+            "<!doctype html><html lang=\"en-US\" data-theme=\"{}\">",
+            theme.unwrap_or_default()
+        )));
+        assert!(html.contains("<title>api - diff · 0 commits</title>"));
+        assert!(html.contains("static_rendered"));
+        assert_eq!(html.matches("<style>").count(), 1);
+        assert!(!stylesheet(&html).to_ascii_lowercase().contains("</style"));
+        assert!(html.contains(&format!(
+            "content=\"{}\"",
+            content_security_policy(stylesheet(&html))
+        )));
+        for forbidden in [
+            "<script",
+            " onclick=",
+            " onerror=",
+            " style=",
+            " src=",
+            " srcset=",
+            "url(",
+            "@import",
+            "data-dioxus",
+            ".wasm",
+            "unsafe-inline",
+            "unsafe-eval",
+        ] {
+            assert!(
+                !html.contains(forbidden),
+                "unexpected active content: {forbidden}"
+            );
+        }
         assert!(
-            !html.contains(forbidden),
-            "unexpected active content: {forbidden}"
+            attribute_values(&html, " href=\"")
+                .iter()
+                .all(|link| link.starts_with('#'))
         );
     }
-    assert!(
-        attribute_values(&html, " href=\"")
-            .iter()
-            .all(|link| link.starts_with('#'))
-    );
 }
 
 #[test]
@@ -277,7 +292,7 @@ fn size_evidence(html: &str) -> ArtifactSizeEvidence {
     ArtifactSizeEvidence {
         html: html.len(),
         gzip,
-        stylesheet: STYLESHEET.len(),
+        stylesheet: stylesheet(html).len(),
 
         files: html.matches("<details class=\"file\"").count(),
         rows: html.matches("<tr class=").count(),
@@ -289,4 +304,13 @@ fn attribute_values<'html>(html: &'html str, prefix: &str) -> Vec<&'html str> {
         .skip(1)
         .filter_map(|tail| tail.split_once('"').map(|(value, _)| value))
         .collect()
+}
+
+fn stylesheet(html: &str) -> &str {
+    html.split_once("<style>")
+        .unwrap()
+        .1
+        .split_once("</style>")
+        .unwrap()
+        .0
 }

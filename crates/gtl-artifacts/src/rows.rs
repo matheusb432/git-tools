@@ -25,10 +25,9 @@ pub(super) fn render(
         .parse(lines.iter());
     write!(
         output,
-        "<div class=\"diff-scroll\" tabindex=\"0\" role=\"region\" aria-label=\"{}\"><table class=\"diff\"><thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>",
+        "<div class=\"diff-scroll\" tabindex=\"0\" role=\"region\" aria-label=\"{}\"><table class=\"diff\"><colgroup><col class=\"number\"><col class=\"marker\"><col></colgroup><thead><tr><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>",
         Escaped(&file.path.to_string_lossy()),
-        labels.old_line,
-        labels.new_line,
+        labels.line,
         labels.change,
         labels.source
     )?;
@@ -47,18 +46,32 @@ fn render_row(output: &mut String, row: &DiffRow, labels: &Labels) -> fmt::Resul
         DiffRowKind::Added => ("added", "+"),
         DiffRowKind::Removed => ("removed", "−"),
     };
-    write!(output, "<tr class=\"{class}\"><td class=\"number\">")?;
-    if let Some(line) = row.old_line_number() {
-        write!(output, "{}", line.into_inner())?;
+    if matches!(row.kind(), DiffRowKind::Meta | DiffRowKind::Hunk) {
+        write!(
+            output,
+            "<tr class=\"{class}\"><td class=\"source\" colspan=\"3\">"
+        )?;
+    } else {
+        let (number, label) = if row.kind() == DiffRowKind::Removed {
+            (row.old_line_number(), labels.old_line)
+        } else {
+            (row.new_line_number(), labels.new_line)
+        };
+        write!(output, "<tr class=\"{class}\">")?;
+        if let Some(line) = number {
+            let line = line.into_inner();
+            write!(
+                output,
+                "<td class=\"number\" aria-label=\"{label} {line}\">{line}"
+            )?;
+        } else {
+            output.push_str("<td class=\"number\">");
+        }
+        write!(
+            output,
+            "</td><td class=\"marker\">{marker}</td><td class=\"source\">"
+        )?;
     }
-    output.push_str("</td><td class=\"number\">");
-    if let Some(line) = row.new_line_number() {
-        write!(output, "{}", line.into_inner())?;
-    }
-    write!(
-        output,
-        "</td><td class=\"marker\">{marker}</td><td class=\"source\">"
-    )?;
     render_source(output, row, labels)?;
     output.push_str("</td></tr>");
     Ok(())
