@@ -4,8 +4,8 @@ use gtl_application::settings::{UserSettingsFieldUpdate, UserSettingsPatch};
 use gtl_models::{
     paths::{ProjectName, ProjectNameError},
     settings::{
-        ProjectsPageSize, ProjectsPreferences, ProjectsSort, ProjectsViewMode, PushAllExclusions,
-        UserSettings, ViewerDateFormat, ViewerLanguage,
+        ProjectsPageSize, ProjectsPreferences, ProjectsSort, PushAllExclusions, UserSettings,
+        ViewerDateFormat, ViewerLanguage,
     },
     tags::{
         TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
@@ -35,8 +35,8 @@ pub(super) enum UserSettingsDocumentKey {
     FocusWindowOnDiff,
     #[strum(to_string = "wrap_lines")]
     WrapLines,
-    #[strum(to_string = "projects_view")]
-    ProjectsView,
+    #[strum(to_string = "copy_with_line_context")]
+    CopyWithLineContext,
     #[strum(to_string = "projects_sort")]
     ProjectsSort,
     #[strum(to_string = "projects_page_size")]
@@ -51,6 +51,8 @@ pub(super) enum UserSettingsDocumentKey {
     Layout,
     #[strum(to_string = "density")]
     Density,
+    #[strum(to_string = "viewer_push_no_confirmation_projects")]
+    ViewerPushNoConfirmationProjects,
     #[strum(to_string = "push.confirm")]
     PushConfirmation,
     #[strum(to_string = "keybindings.search_files")]
@@ -61,6 +63,8 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsToggleFilesSidebar,
     #[strum(to_string = "keybindings.toggle_commits_sidebar")]
     KeybindingsToggleCommitsSidebar,
+    #[strum(to_string = "keybindings.push_diff")]
+    KeybindingsPushDiff,
     #[strum(to_string = "tags")]
     DefaultTagPatterns,
     #[strum(to_string = "tags.default")]
@@ -90,19 +94,21 @@ impl UserSettingsDocumentKey {
             Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
+            Self::CopyWithLineContext => "copy_with_line_context",
             Self::Theme => "theme",
-            Self::ProjectsView => "projects_view",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
+            Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
             Self::PushConfirmation => "push",
             Self::KeybindingsSearchFiles
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
-            | Self::KeybindingsToggleCommitsSidebar => "keybindings",
+            | Self::KeybindingsToggleCommitsSidebar
+            | Self::KeybindingsPushDiff => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable => "tags",
@@ -123,19 +129,21 @@ impl UserSettingsDocumentKey {
             Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
+            Self::CopyWithLineContext => "copy_with_line_context",
             Self::Theme => "theme",
-            Self::ProjectsView => "projects_view",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
+            Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
             Self::PushConfirmation => "confirm",
             Self::KeybindingsSearchFiles => "search_files",
             Self::KeybindingsSearchTextInAllFiles => "search_text_in_all_files",
             Self::KeybindingsToggleFilesSidebar => "toggle_files_sidebar",
             Self::KeybindingsToggleCommitsSidebar => "toggle_commits_sidebar",
+            Self::KeybindingsPushDiff => "push_diff",
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
             Self::ProjectExcludedFromPushAll { .. } => "excluded_from_push_all",
@@ -153,19 +161,21 @@ impl UserSettingsDocumentKey {
             Self::DateFormat => "date_format",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
+            Self::CopyWithLineContext => "copy_with_line_context",
             Self::Theme => "theme",
-            Self::ProjectsView => "projects_view",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
             Self::FilesSidebarVisible => "files_sidebar_visible",
             Self::CommitsSidebarVisible => "commits_sidebar_visible",
             Self::Layout => "layout",
             Self::Density => "density",
+            Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
             Self::PushConfirmation => "push",
             Self::KeybindingsSearchFiles
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
-            | Self::KeybindingsToggleCommitsSidebar => "keybindings",
+            | Self::KeybindingsToggleCommitsSidebar
+            | Self::KeybindingsPushDiff => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable
@@ -272,10 +282,12 @@ pub(super) struct UserSettingsDocument {
 impl UserSettingsDocument {
     pub(super) fn parse(bytes: Vec<u8>) -> Result<Self, UserSettingsDocumentError> {
         let raw = String::from_utf8(bytes)?;
-        let editable = raw
+        let mut editable = raw
             .parse::<DocumentMut>()
             .map_err(UserSettingsDocumentError::TomlSyntax)?;
-        let (settings, projects_preferences) = parse_settings(&raw)?;
+        // Retired preferences must not invalidate otherwise supported settings.
+        editable.remove("projects_view");
+        let (settings, projects_preferences) = parse_settings(&editable.to_string())?;
         Ok(Self {
             raw,
             editable,
@@ -321,8 +333,7 @@ struct RawUserSettingsDocument {
     commits_sidebar_visible: Option<RawSettingValue>,
     #[serde(default)]
     wrap_lines: Option<RawSettingValue>,
-    #[serde(default)]
-    projects_view: ProjectsViewMode,
+    copy_with_line_context: Option<RawSettingValue>,
     #[serde(default)]
     projects_sort: ProjectsSort,
     projects_page_size: Option<RawSettingValue>,
@@ -334,6 +345,8 @@ struct RawUserSettingsDocument {
     density: Option<RawSettingValue>,
     #[serde(default)]
     push: Option<RawPushSettingsDocument>,
+    #[serde(default)]
+    viewer_push_no_confirmation_projects: std::collections::BTreeSet<ProjectName>,
     #[serde(default)]
     keybindings: Option<RawKeybindingsDocument>,
     #[serde(default)]
@@ -361,6 +374,7 @@ struct RawPushSettingsDocument {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawKeybindingsDocument {
+    push_diff: Option<RawSettingValue>,
     toggle_files_sidebar: Option<RawSettingValue>,
     toggle_commits_sidebar: Option<RawSettingValue>,
     #[serde(default)]
@@ -477,6 +491,11 @@ fn parse_settings(
         .unwrap_or(DiffDensity::Compact);
     let wrap_lines =
         optional_bool(UserSettingsDocumentKey::WrapLines, document.wrap_lines)?.unwrap_or(false);
+    let copy_with_line_context = optional_bool(
+        UserSettingsDocumentKey::CopyWithLineContext,
+        document.copy_with_line_context,
+    )?
+    .unwrap_or(UserSettings::COPY_WITH_LINE_CONTEXT_DEFAULT);
     let focus_window_on_diff = optional_bool(
         UserSettingsDocumentKey::FocusWindowOnDiff,
         document.focus_window_on_diff,
@@ -522,17 +541,18 @@ fn parse_settings(
             push_confirmation_required,
             projects.push_all_exclusions,
         )
+        .with_viewer_push_no_confirmation_projects(document.viewer_push_no_confirmation_projects)
         .with_accessibility(accessibility)
         .with_language(document.language)
         .with_date_format(document.date_format)
         .with_focus_window_on_diff(focus_window_on_diff)
+        .with_copy_with_line_context(copy_with_line_context)
         .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
             tag_patterns_default,
             projects.tag_patterns,
         )),
         ProjectsPreferences {
-            view: document.projects_view,
             sort: document.projects_sort,
             page_size: document
                 .projects_page_size
@@ -570,13 +590,25 @@ fn parse_keybindings(
         document.toggle_commits_sidebar,
     )?
     .unwrap_or(defaults[ViewerKeybindingAction::ToggleCommitsSidebar]);
+    let push_diff = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsPushDiff,
+        document.push_diff,
+    )?
+    .unwrap_or(defaults[ViewerKeybindingAction::PushDiff]);
     ViewerKeybindings::try_from_fn(platform, |action| match action {
         ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
         ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
+        ViewerKeybindingAction::PushDiff => push_diff,
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
     })
     .map_err(|source| match source {
+        InvalidViewerKeybindings::ReservedTabShortcut { .. } => {
+            UserSettingsDocumentError::InvalidKeybindingSet {
+                key: UserSettingsDocumentKey::KeybindingsPushDiff,
+                source,
+            }
+        }
         InvalidViewerKeybindings::AmbiguousMacOsModifiers { action } => {
             UserSettingsDocumentError::InvalidKeybindingSet {
                 key: keybinding_document_key(action),
@@ -595,6 +627,7 @@ fn parse_keybindings(
 
 const fn keybinding_document_key(action: ViewerKeybindingAction) -> UserSettingsDocumentKey {
     match action {
+        ViewerKeybindingAction::PushDiff => UserSettingsDocumentKey::KeybindingsPushDiff,
         ViewerKeybindingAction::ToggleFilesSidebar => {
             UserSettingsDocumentKey::KeybindingsToggleFilesSidebar
         }
@@ -726,6 +759,10 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
             UserSettingsDocumentKey::CommitsSidebarVisible,
             patch.commits_sidebar_visible,
         ),
+        (
+            UserSettingsDocumentKey::CopyWithLineContext,
+            patch.copy_with_line_context,
+        ),
     ] {
         match update {
             UserSettingsFieldUpdate::Update(value) => {
@@ -769,11 +806,6 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     }
     apply_root_string(
         document,
-        UserSettingsDocumentKey::ProjectsView,
-        patch.projects_view,
-    );
-    apply_root_string(
-        document,
         UserSettingsDocumentKey::ProjectsSort,
         patch.projects_sort,
     );
@@ -786,6 +818,20 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     apply_root_string(document, UserSettingsDocumentKey::Theme, patch.theme);
     apply_root_string(document, UserSettingsDocumentKey::Layout, patch.layout);
     apply_root_string(document, UserSettingsDocumentKey::Density, patch.density);
+    match patch.viewer_push_no_confirmation_projects {
+        UserSettingsFieldUpdate::Update(projects) => {
+            let mut values = toml_edit::Array::new();
+            for project in projects {
+                values.push(project.as_str());
+            }
+            document[UserSettingsDocumentKey::ViewerPushNoConfirmationProjects.root()] =
+                toml_edit::value(values);
+        }
+        UserSettingsFieldUpdate::Clear => {
+            document.remove(UserSettingsDocumentKey::ViewerPushNoConfirmationProjects.root());
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
     apply_nested_bool(
         document,
         UserSettingsDocumentKey::PushConfirmation,

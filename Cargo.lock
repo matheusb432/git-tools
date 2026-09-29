@@ -4218,6 +4218,7 @@ dependencies = [
  "dx-story",
  "fluent-syntax",
  "futures-channel",
+ "futures-util",
  "gtl-client",
  "gtl-models",
  "gtl-web-contracts",

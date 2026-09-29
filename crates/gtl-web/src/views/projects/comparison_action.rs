@@ -10,39 +10,18 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ProjectActionShape {
-    Labeled,
-    Icon,
-}
-
 /// Opens the project's unpushed or branch changes, or shows the tab that already has them.
 #[component]
-pub(super) fn ProjectComparisonAction(
-    path: RepositoryRoot,
-    shape: ProjectActionShape,
-    disabled: bool,
-) -> Element {
+pub(super) fn ProjectComparisonAction(path: RepositoryRoot, disabled: bool) -> Element {
     let language = use_language();
     let label = t!(language, "projects-open-diff");
     let classes = button_classes(
         ButtonLayout::Inline,
-        if shape == ProjectActionShape::Icon {
-            ButtonVariant::Ghost
-        } else {
-            ButtonVariant::Outline
-        },
-        if shape == ProjectActionShape::Icon {
-            ButtonSize::IconSmall
-        } else {
-            ButtonSize::Small
-        },
+        ButtonVariant::Ghost,
+        ButtonSize::IconSmall,
     );
     let content = rsx! {
         FileText { size: 15 }
-        if shape == ProjectActionShape::Labeled {
-            span { class: "whitespace-nowrap", "{label}" }
-        }
     };
     rsx! {
         if !disabled {

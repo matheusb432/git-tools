@@ -7,11 +7,12 @@ mod extension_filter;
 mod icon_popover;
 mod loading_spinner;
 mod page_notice;
+mod review_actions;
 mod skeleton;
 mod text_input;
 mod toast;
 mod viewer_settings_redesign;
-mod viewer_tab_overflow_menu;
+mod viewer_tab_rail;
 
 #[cfg(test)]
 mod tests {
@@ -75,16 +76,8 @@ mod tests {
             );
         }
         assert!(find("button", "interactive").unwrap().is_some());
-        assert!(
-            find("viewer-tab-overflow-menu", "interactive")
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            find("viewer-tab-overflow-menu", "narrow-rail")
-                .unwrap()
-                .is_some()
-        );
+        assert!(find("viewer-tab-rail", "interactive").unwrap().is_some());
+        assert!(find("viewer-tab-rail", "narrow-rail").unwrap().is_some());
         assert!(
             find("viewer-settings-redesign", "desktop-viewer")
                 .unwrap()

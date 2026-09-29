@@ -8,7 +8,7 @@ fn thumbnail() -> Element {
     rsx! {
         div { class: "grid grid-cols-2 gap-3",
             Button { variant: ButtonVariant::Primary, "Primary" }
-            Button { variant: ButtonVariant::Secondary, "Secondary" }
+            Button { variant: ButtonVariant::Outline, "Outline" }
             Button { variant: ButtonVariant::Ghost, "Ghost" }
             Button { state: ButtonState::Disabled, "Disabled" }
         }
@@ -21,7 +21,6 @@ fn variants() -> Element {
     rsx! {
         div { class: "flex flex-wrap items-center gap-3",
             Button { variant: ButtonVariant::Primary, "Primary" }
-            Button { variant: ButtonVariant::Secondary, "Secondary" }
             Button { variant: ButtonVariant::Accent, "Accent" }
             Button { variant: ButtonVariant::Destructive, "Destructive" }
             Button { variant: ButtonVariant::Warning, "Warning" }

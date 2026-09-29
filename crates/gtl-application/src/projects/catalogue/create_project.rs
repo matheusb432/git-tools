@@ -21,13 +21,14 @@ pub fn execute(
     if count >= i64::from(PROJECTS_MAX) {
         return Err(ProjectCatalogueError::LimitExceeded);
     }
-    transaction
-        .execute(
-            "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)",
+    let source_id: i64 = transaction
+        .query_one(
+            "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', ?1)
+             RETURNING source_id",
             [request.metadata.source.as_ref()],
+            |row| row.get(0),
         )
         .map_err(create_error)?;
-    let source_id = transaction.last_insert_rowid();
     transaction
         .execute(
             "INSERT INTO projects (id, source_id, title, git_remote, color, export_include_in_all)

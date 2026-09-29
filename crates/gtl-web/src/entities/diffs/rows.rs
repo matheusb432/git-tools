@@ -1,3 +1,4 @@
 pub(crate) use gtl_wire::viewer::{
-    ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow,
+    ViewerCodeLine, ViewerCodeSpan, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow,
+    ViewerUnifiedSourceRow,
 };

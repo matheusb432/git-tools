@@ -25,13 +25,14 @@ use crate::{
         failure_message::failure_message,
         failure_notice::client_error_message,
         i18n::{t, use_language},
+        keyboard::native_keyboard_event_matches,
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, PageNotice, PanelDialog, Skeleton,
             use_toast,
         },
     },
     views::{
-        diffs::{ClientDiffDocument, search_keybindings::native_keyboard_event_matches},
+        diffs::ClientDiffDocument,
         projects::{ComparisonBranchEditor, ComparisonEditorTrigger},
     },
 };
@@ -384,12 +385,7 @@ fn ReadyWorkspace(
     let (file_count, commit_count) = workspace
         .files
         .with(|files| (files.file_count(), files.commit_count()));
-    let push_disabled = view.read().modified_files
-        || view.read().commit_count == 0
-        || matches!(
-            view.read().commit_selection,
-            gtl_wire::viewer::ViewerCommitSelection::Pending { .. }
-        );
+    let push_disabled = view.read().modified_files || view.read().commit_count == 0;
     let commits_actions = rsx! {
         div { class: "flex flex-none items-center",
             crate::views::push::ViewPushButton {
@@ -421,15 +417,19 @@ fn ReadyWorkspace(
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
                 sidebars: (sidebars.visibility)(),
+                ontoggle_sidebar: sidebars.toggle,
                 diff_document: rsx! {
-                    if file_count == 0 {
-                        PageNotice {
-                            class: "h-full min-h-48 px-5",
-                            title: t!(language, "workspace-no-changes"),
-                            message: if is_live { t!(language, "workspace-no-changes-live-message") } else { t!(language, "workspace-no-changes-message") },
+                    div { class: "relative h-full min-h-0 min-w-0",
+                        if file_count == 0 {
+                            PageNotice {
+                                class: "h-full min-h-48 px-5",
+                                title: t!(language, "workspace-no-changes"),
+                                message: if is_live { t!(language, "workspace-no-changes-live-message") } else { t!(language, "workspace-no-changes-message") },
+                            }
+                        } else {
+                            ClientDiffDocument { onopen }
                         }
-                    } else {
-                        ClientDiffDocument { onopen }
+                        super::review_actions::ReviewActions { identity, disabled: push_disabled }
                     }
                 },
                 onnavigate,

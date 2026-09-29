@@ -255,17 +255,16 @@ fn matching_file(root: &web_sys::Element, path: &str) -> Option<web_sys::Element
 fn read_anchor(root: &web_sys::Element) -> Option<ScrollAnchor> {
     let top = root.get_bounding_client_rect().top();
     let rows = root.query_selector_all("[data-row-index]").ok()?;
-    for index in 0..rows.length() {
-        let row = rows.item(index)?.dyn_into::<web_sys::Element>().ok()?;
-        let rect = row.get_bounding_client_rect();
-        if rect.bottom() <= top {
-            continue;
-        }
+    let row_at = |index| rows.item(index)?.dyn_into::<web_sys::Element>().ok();
+    let first = first_ending_below(rows.length(), top, |index| {
+        Some(row_at(index)?.get_bounding_client_rect().bottom())
+    })?;
+    if let Some(row) = row_at(first) {
         let file = row.closest("[data-gtl-diff-file]").ok()??;
         return Some(ScrollAnchor {
             file: file.get_attribute("data-path")?,
             row: Some(row.get_attribute("data-row-index")?.parse().ok()?),
-            offset: top - rect.top(),
+            offset: top - row.get_bounding_client_rect().top(),
         });
     }
     let files = root.query_selector_all("[data-gtl-diff-file]").ok()?;
@@ -281,4 +280,51 @@ fn read_anchor(root: &web_sys::Element) -> Option<ScrollAnchor> {
         }
     }
     None
+}
+
+/// `bottom_at` must not decrease with the index.
+fn first_ending_below(
+    length: u32,
+    top: f64,
+    mut bottom_at: impl FnMut(u32) -> Option<f64>,
+) -> Option<u32> {
+    let (mut low, mut high) = (0, length);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if bottom_at(middle)? <= top {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    Some(low)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_ending_below;
+
+    #[test]
+    fn anchor_search_finds_the_first_row_ending_below_the_viewport_top() {
+        let bottoms = [20.0, 40.0, 40.0, 60.0, 80.0];
+        let bottom_at = |index: u32| bottoms.get(index as usize).copied();
+
+        assert_eq!(first_ending_below(5, 0.0, bottom_at), Some(0));
+        assert_eq!(first_ending_below(5, 40.0, bottom_at), Some(3));
+        assert_eq!(first_ending_below(5, 41.0, bottom_at), Some(3));
+        assert_eq!(first_ending_below(5, 80.0, bottom_at), Some(5));
+        assert_eq!(first_ending_below(0, 10.0, bottom_at), Some(0));
+    }
+
+    #[test]
+    fn anchor_search_measures_logarithmically_many_rows() {
+        let mut measured = 0;
+        let first = first_ending_below(1_024, 10_000.5, |index| {
+            measured += 1;
+            Some(f64::from(index + 1) * 20.0)
+        });
+
+        assert_eq!(first, Some(500));
+        assert!(measured <= 11);
+    }
 }

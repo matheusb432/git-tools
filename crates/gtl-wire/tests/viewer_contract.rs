@@ -272,6 +272,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
             }),
         },
         preferences: ViewerPreferences {
+            copy_with_line_context: true,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::default(),
             date_format: gtl_models::settings::ViewerDateFormat::default(),
@@ -344,11 +345,11 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         date_format: gtl_models::settings::ViewerDateFormat::default(),
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x11; 32]),
         focus_window_on_diff: true,
+        copy_with_line_context: true,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,
         },
-        projects_view: gtl_models::settings::ProjectsViewMode::Table,
         projects_sort: gtl_models::settings::ProjectsSort::Branch,
         projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/user/.config/git-tools/config.toml".into()),
@@ -359,6 +360,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
             layout: ViewerDiffLayout::Unified,
             density: ViewerDiffDensity::Compact,
         },
+        viewer_push_no_confirmation_projects: Vec::new(),
         push_confirmation_required: true,
     };
 

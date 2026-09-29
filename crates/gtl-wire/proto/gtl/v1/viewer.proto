@@ -383,6 +383,7 @@ message ViewerSidebarVisibility {
 }
 
 message ViewerPreferences {
+  optional bool copy_with_line_context = 8;
   ViewerDateFormat date_format = 7;
   ViewerLanguage language = 6;
   ViewerAccessibility accessibility = 5;
@@ -420,6 +421,7 @@ enum ViewerKeybindingPlatform {
 }
 
 message ViewerKeybindings {
+  optional string push_diff = 6;
   string toggle_files_sidebar = 4;
   string toggle_commits_sidebar = 5;
   ViewerKeybindingPlatform platform = 1;
@@ -815,18 +817,6 @@ message GetViewerHistoryCopyResponse {
 
 message GetViewerSettingsRequest {}
 
-enum ProjectsViewMode {
-  PROJECTS_VIEW_MODE_UNSPECIFIED = 0;
-  PROJECTS_VIEW_MODE_GRID = 1;
-  PROJECTS_VIEW_MODE_TABLE = 2;
-}
-message ProjectsViewFieldUpdate {
-  oneof operation {
-    ProjectsViewMode update = 1;
-    ClearSetting clear = 2;
-  }
-}
-
 enum ProjectsSort {
   PROJECTS_SORT_UNSPECIFIED = 0;
   PROJECTS_SORT_CHANGES = 1;
@@ -844,6 +834,8 @@ message ProjectsSortFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  optional bool copy_with_line_context = 18;
+  repeated string viewer_push_no_confirmation_projects = 17;
   ViewerDateFormat date_format = 16;
   ViewerLanguage language = 15;
   ViewerAccessibility accessibility = 14;
@@ -852,14 +844,13 @@ message GetViewerSettingsResponse {
   optional bool focus_window_on_diff = 11;
   uint32 projects_page_size = 10;
   ViewerSidebarVisibility sidebars = 9;
-  ProjectsViewMode projects_view = 7;
   optional string configuration_path = 1;
   optional ViewerTheme configured_theme = 2;
   ViewerTheme effective_theme = 3;
   ViewerRenderOptions render_options = 4;
   bool push_confirmation_required = 5;
-  reserved 6;
-  reserved "diff_exclusions";
+  reserved 6, 7;
+  reserved "diff_exclusions", "projects_view";
 }
 
 message ClearSetting {}
@@ -901,7 +892,17 @@ message BoolFieldUpdate {
   }
 }
 
+message ViewerProjectNames { repeated string values = 1; }
+message ViewerProjectNamesFieldUpdate {
+  oneof operation {
+    ViewerProjectNames update = 1;
+    ClearSetting clear = 2;
+  }
+}
+
 message EditSettingsRequest {
+  BoolFieldUpdate copy_with_line_context = 20;
+  ViewerProjectNamesFieldUpdate viewer_push_no_confirmation_projects = 19;
   ViewerDateFormatFieldUpdate date_format = 18;
   ViewerLanguageFieldUpdate language = 17;
   ViewerScaleFieldUpdate ui_scale_percent = 15;
@@ -913,13 +914,12 @@ message EditSettingsRequest {
   BoolFieldUpdate files_sidebar_visible = 9;
   BoolFieldUpdate commits_sidebar_visible = 10;
   BoolFieldUpdate wrap_lines = 8;
-  ProjectsViewFieldUpdate projects_view = 7;
   ThemeFieldUpdate theme = 1;
   LayoutFieldUpdate layout = 2;
   DensityFieldUpdate density = 3;
   BoolFieldUpdate push_confirmation_required = 4;
-  reserved 5, 6;
-  reserved "default_diff_exclusions", "projects";
+  reserved 5, 6, 7;
+  reserved "default_diff_exclusions", "projects", "projects_view";
 }
 
 message ViewerScaleFieldUpdate {
@@ -962,9 +962,8 @@ message ListViewerProjectsResponse {
 }
 message ViewerProject {
   string path = 1;
-  reserved 2, 5;
-  reserved "status", "branch_comparison";
-  optional string last_rendered_at = 3;
+  reserved 2, 3, 5;
+  reserved "status", "last_rendered_at", "branch_comparison";
   string comparison_branch = 4;
   string id = 6;
   string name = 7;
@@ -1080,6 +1079,7 @@ message GetViewerPushRequest { string id = 1; }
 message StartViewerPushRequest { string id = 1; }
 message StartViewerPushResponse {}
 message ViewerPushPreview {
+  bool no_confirmation = 12;
   string repository = 1;
   reserved 2;
   reserved "destination";
@@ -1127,6 +1127,7 @@ message GetViewerPushAvailabilityRequest { ViewerViewIdentity identity = 1; }
 message ViewerPushAvailable {}
 message ViewerPushNothingToPush {}
 message GetViewerPushAvailabilityResponse {
+  optional bool snapshot_has_unpushed_commits = 5;
   reserved 3;
   reserved "unavailable";
 

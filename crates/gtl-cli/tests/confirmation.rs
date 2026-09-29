@@ -12,6 +12,10 @@ use cli_fixture::{CancelKey, CliFixture, assert_contains, assert_omits};
 fn confirmations_and_results_follow_the_cli_contract() -> Result<()> {
     let fixture = CliFixture::new()?;
     let _server = common::ServerHarness::start(Some(&fixture.config_path()), None)?;
+    fixture.succeeds(
+        &["status", "-r", "--color", "never"],
+        "[✓]   example-project main\n",
+    );
     verify_noops_and_cancellation(&fixture)?;
     verify_push_review(&fixture)?;
     verify_tag_preview_and_publication(&fixture)?;
@@ -197,6 +201,15 @@ fn verify_project_batches(
     assert_eq!(
         caller.output(&["ls", "--json"])?,
         caller.output(&["project", "ls", "--json"])?
+    );
+    let listing = caller.output(&["ls", "--color", "never"])?;
+    assert_contains(
+        &listing,
+        &["[?]   Selected project main", "[?]   Excluded project main"],
+    );
+    assert_eq!(
+        listing,
+        caller.output(&["project", "ls", "--color", "never"])?,
     );
 
     let remote_head = selected.advance_origin("batch-remote.txt", "Batch remote work\n")?;

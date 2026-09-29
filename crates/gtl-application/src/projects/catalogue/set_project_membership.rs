@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use gtl_models::projects::catalogue::{
-    ProjectIds, ProjectMutation, ProjectMutationOutcome, ProjectOperationMode,
+    ProjectId, ProjectIds, ProjectMutation, ProjectMutationOutcome, ProjectOperationMode,
 };
-use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension as _, TransactionBehavior, params_from_iter};
 
 use super::ProjectCatalogueError;
 use crate::history::associate_render_projects;
@@ -23,28 +25,42 @@ pub fn execute(
     connection: &mut Connection,
 ) -> Result<Vec<ProjectMutation>, ProjectCatalogueError> {
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let changed_ids: BTreeSet<ProjectId> = if request.mode == ProjectOperationMode::Apply {
+        let update = match request.membership {
+            ProjectMembership::Managed => "SET unmanaged_at = NULL WHERE unmanaged_at IS NOT NULL",
+            ProjectMembership::Unmanaged => {
+                "SET unmanaged_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE unmanaged_at IS NULL"
+            }
+        };
+        let placeholders = vec!["?"; request.ids.as_slice().len()].join(", ");
+        let mut statement = transaction.prepare_cached(&format!(
+            "UPDATE projects {update} AND id IN ({placeholders}) RETURNING id"
+        ))?;
+        let mut rows = statement.query(params_from_iter(
+            request.ids.as_slice().iter().map(AsRef::as_ref),
+        ))?;
+        let mut ids = BTreeSet::new();
+        while let Some(row) = rows.next()? {
+            let id = row
+                .get::<_, String>(0)?
+                .try_into()
+                .map_err(|error| ProjectCatalogueError::InvalidData(anyhow::Error::new(error)))?;
+            ids.insert(id);
+        }
+        ids
+    } else {
+        BTreeSet::new()
+    };
     let mut mutations = Vec::new();
     for id in request.ids.as_slice() {
-        let managed: bool = transaction
-            .query_row(
-                "SELECT unmanaged_at IS NULL FROM projects WHERE id = ?1",
-                [id.as_ref()],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(ProjectCatalogueError::NotFound)?;
-        let changed = managed != matches!(request.membership, ProjectMembership::Managed);
-        if changed && request.mode == ProjectOperationMode::Apply {
-            let sql = match request.membership {
-                ProjectMembership::Managed => {
-                    "UPDATE projects SET unmanaged_at = NULL WHERE id = ?1"
-                }
-                ProjectMembership::Unmanaged => {
-                    "UPDATE projects SET unmanaged_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1"
-                }
-            };
-            transaction.execute(sql, [id.as_ref()])?;
-        }
+        let changed = changed_ids.contains(id) || {
+            let managed: bool = transaction
+                .prepare_cached("SELECT unmanaged_at IS NULL FROM projects WHERE id = ?1")?
+                .query_one([id.as_ref()], |row| row.get(0))
+                .optional()?
+                .ok_or(ProjectCatalogueError::NotFound)?;
+            managed != matches!(request.membership, ProjectMembership::Managed)
+        };
         mutations.push(ProjectMutation {
             id: id.clone(),
             outcome: if changed {

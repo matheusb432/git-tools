@@ -2,14 +2,10 @@ use std::borrow::Cow;
 
 use dioxus::prelude::*;
 use gtl_models::{
-    failure::Failure,
-    paths::RepositoryRoot,
-    repository::status::{RepositoryStatus, StatusChanges, StatusHead},
+    repository::status::{RepositoryStatus, StatusHead},
     settings::ViewerLanguage,
 };
-use gtl_wire::viewer::projects::{
-    ViewerProject, ViewerProjectBranchComparison, ViewerProjectStatus,
-};
+use gtl_wire::viewer::projects::ViewerProjectStatus;
 
 use super::status::{ProjectIssue, ProjectReview, ProjectSignal, ProjectStatus};
 use crate::shared::{
@@ -20,15 +16,6 @@ use crate::shared::{
 };
 
 impl ProjectIssue {
-    /// Whether a different comparison branch in `project`'s own setting can resolve the issue.
-    pub(super) fn comparison_branch_resolves(&self, project: &RepositoryRoot) -> bool {
-        matches!(
-            self,
-            Self::ComparisonUnavailable(Failure::Project(failure))
-                if failure.comparison_setting().is_some_and(|(owner, _)| owner == project)
-        )
-    }
-
     pub(super) fn description(&self, language: ViewerLanguage) -> String {
         match self {
             Self::RequestFailed => t!(language, "projects-issue-request-failed"),
@@ -44,29 +31,6 @@ impl ProjectIssue {
 }
 
 impl ProjectSignal {
-    pub(super) fn glyph(&self) -> String {
-        match self {
-            Self::Local { tracked, untracked } => format!(
-                "[{}]",
-                StatusChanges::from_counts(*tracked, *untracked).symbols()
-            ),
-            Self::Ahead { count, .. } => format!("↑{}", count.into_inner()),
-            Self::Loading => String::new(),
-            Self::Unavailable(_) => "-".to_owned(),
-        }
-    }
-
-    pub(super) fn text_classes(&self) -> &'static str {
-        match self {
-            Self::Local { tracked, untracked } if !tracked.is_zero() || !untracked.is_zero() => {
-                "text-acc"
-            }
-            Self::Ahead { count, .. } if count.into_inner() > 0 => "text-acc",
-            Self::Loading | Self::Local { .. } | Self::Ahead { .. } => "text-ink-3",
-            Self::Unavailable(_) => "text-warn",
-        }
-    }
-
     pub(super) fn description(&self, language: ViewerLanguage) -> String {
         match self {
             Self::Local { tracked, untracked } => {
@@ -101,21 +65,15 @@ impl ProjectSignal {
 
 pub(super) struct ProjectPresentation<'a> {
     pub(super) branch: Option<Cow<'a, str>>,
-    pub(super) comparison_base: Option<&'a str>,
     pub(super) review: ProjectReview,
     pub(super) local: ProjectSignal,
     pub(super) ahead: ProjectSignal,
-    pub(super) ahead_label: String,
-    pub(super) issue: Option<String>,
-    /// The issue names a comparison branch that this project's setting controls.
-    pub(super) comparison_branch_fix: bool,
 }
 
-pub(super) fn project_presentation<'a>(
-    project: &ViewerProject,
-    result: Option<Result<&'a ViewerProjectStatus, ViewerClientError>>,
+pub(super) fn project_presentation(
+    result: Option<Result<&ViewerProjectStatus, ViewerClientError>>,
     language: ViewerLanguage,
-) -> ProjectPresentation<'a> {
+) -> ProjectPresentation<'_> {
     let project_status = match result {
         Some(Ok(status)) => status,
         pending_or_error => {
@@ -127,7 +85,6 @@ pub(super) fn project_presentation<'a>(
             };
             return ProjectPresentation {
                 branch: None,
-                comparison_base: None,
                 review: if failed {
                     ProjectReview::StatusUnavailable
                 } else {
@@ -135,9 +92,6 @@ pub(super) fn project_presentation<'a>(
                 },
                 local: signal.clone(),
                 ahead: signal,
-                ahead_label: t!(language, "comparison-branch-changes"),
-                issue: failed.then(|| t!(language, "projects-issue-request-failed")),
-                comparison_branch_fix: false,
             };
         }
     };
@@ -157,32 +111,11 @@ pub(super) fn project_presentation<'a>(
         }
         | RepositoryStatus::Absent => None,
     };
-    let comparison_base = match &status.ahead {
-        ProjectSignal::Ahead { base: Some(_), .. } => {
-            Some(project_status.comparison_branch.as_ref())
-        }
-        _ => None,
-    };
-    let ahead_label = match project_status.branch_comparison {
-        ViewerProjectBranchComparison::Upstream => t!(language, "comparison-unpushed-commits"),
-        ViewerProjectBranchComparison::Branch { .. }
-        | ViewerProjectBranchComparison::Unavailable { .. } => {
-            t!(language, "comparison-branch-changes")
-        }
-    };
-    let issue = status.issue().map(|issue| issue.description(language));
-    let comparison_branch_fix = status
-        .issue()
-        .is_some_and(|issue| issue.comparison_branch_resolves(&project.path));
     ProjectPresentation {
         branch,
-        comparison_base,
         review: status.review,
         local: status.local,
         ahead: status.ahead,
-        ahead_label,
-        issue,
-        comparison_branch_fix,
     }
 }
 
@@ -228,57 +161,30 @@ pub(super) fn ReviewStatusDot(review: ProjectReview, #[props(default)] stale: bo
     }
 }
 
-#[component]
-pub(super) fn ProjectSignalGlyph(signal: ProjectSignal) -> Element {
-    let description = signal.description(use_language());
-    rsx! {
-        span {
-            class: "inline-flex min-w-6 items-center font-medium tabular-nums {signal.text_classes()}",
-            role: "img",
-            title: description.clone(),
-            aria_label: description,
-            if signal == ProjectSignal::Loading {
-                ProjectStatusSpinner {}
-            } else {
-                "{signal.glyph()}"
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn pending_and_failed_statuses_never_offer_diffs_or_imply_a_clean_repository() {
-        let project = ViewerProject {
-            id: "GTL".try_into().unwrap(),
-            name: "Git Tools".try_into().unwrap(),
-            path: gtl_models::paths::RepositoryRoot::try_new("/repos/git-tools".into()).unwrap(),
-            comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
-            last_rendered_at: Some("2026-09-06T13:00:00Z".try_into().unwrap()),
-        };
-        let loading = project_presentation(&project, None, ViewerLanguage::EnUs);
+        let loading = project_presentation(None, ViewerLanguage::EnUs);
         assert_eq!(loading.review, ProjectReview::Loading);
         assert_eq!(loading.local, ProjectSignal::Loading);
         assert!(!loading.local.is_available());
         assert!(!loading.ahead.has_changes());
-        assert!(loading.issue.is_none());
         let failed = project_presentation(
-            &project,
             Some(Err(ViewerClientError::InvalidMessage)),
             ViewerLanguage::EnUs,
         );
         assert_eq!(failed.review, ProjectReview::StatusUnavailable);
         assert!(!failed.local.is_available());
         assert!(!failed.ahead.has_changes());
-        assert_eq!(failed.issue.as_deref(), Some("Git status unavailable"));
+        assert_eq!(failed.ahead.issue(), Some(&ProjectIssue::RequestFailed));
     }
 }
 
 #[component]
-fn ProjectStatusSpinner() -> Element {
+pub(super) fn ProjectStatusSpinner() -> Element {
     let ready = use_resource(|| async {
         dioxus_sdk_time::sleep(std::time::Duration::from_millis(150)).await;
         true

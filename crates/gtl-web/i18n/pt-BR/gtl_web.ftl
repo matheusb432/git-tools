@@ -27,12 +27,6 @@ date-days-ago =
        *[other] há { $count } dias
     }
 
-## Comparisons
-
-comparison-branch-changes = Alterações da branch
-comparison-local-changes = Alterações locais
-comparison-unpushed-commits = Commits sem push
-
 ## Document titles
 
 document-title-projects = Projetos - git-tools
@@ -65,66 +59,45 @@ feedback-snapshots-skipped-named =
 
 ## User settings page
 
-settings-eyebrow = Preferências do aplicativo
 settings-title = Configurações do usuário
-settings-description = Escolha os padrões do visualizador e as proteções dos comandos e envie para salvá-los.
 settings-loading = Carregando configurações
 settings-unavailable = As configurações estão indisponíveis
-settings-built-in-defaults = Padrões embutidos
-settings-resolved-label = Configurações resolvidas do visualizador
-settings-resolved-title = Configuração resolvida
-settings-resolved-subtitle = Fontes atuais e valores efetivos.
 settings-configuration-file = Arquivo de configuração
-settings-effective-theme = Tema efetivo
 settings-edit-stale = As configurações mudaram desde que esta página foi carregada. Recarregue-as antes de salvar de novo.
-settings-edit-field-rejected = Corrija a configuração destacada e salve de novo.
+settings-edit-field-rejected = Corrija a configuração destacada e tente de novo.
 settings-edit-rejected = Uma ou mais configurações foram rejeitadas. Recarregue os valores salvos e tente de novo.
 settings-edit-invalid-file = O arquivo de configurações ficou inválido. Recarregue-o para corrigi-lo ou redefini-lo.
 
 ## Viewer settings form
 
-settings-form-label = Configurações editáveis do aplicativo
-settings-form-title = Preferências do visualizador e dos comandos
-settings-form-description = Escolha como os diffs aparecem, quando a janela do desktop vem para a frente e se pushes exigem confirmação.
 settings-language = Idioma
-settings-language-hint = Escolha o idioma do visualizador e dos diffs HTML salvos.
 settings-date-format = Formato de data
-settings-date-format-hint = Escolha como o visualizador mostra datas. Todos os formatos usam o seu fuso horário; diffs HTML salvos mantêm datas ISO.
+settings-date-format-hint = As datas usam seu fuso horário. Diffs HTML salvos mantêm datas ISO.
 settings-date-format-iso = ISO ({ $sample })
 settings-date-format-day-first = Dia primeiro ({ $sample })
 settings-date-format-month-first = Mês primeiro ({ $sample })
 settings-date-format-relative = Relativo ({ $sample })
 settings-ui-scale = Tamanho da interface
-settings-ui-scale-hint = Aumente texto, ícones e controles juntos. Experimente 200% em uma tela 4K.
 settings-reduce-motion = Movimento reduzido
-settings-reduce-motion-hint = Desativa animações e transições. A opção Sistema segue a preferência de acessibilidade do seu dispositivo.
-settings-reduce-motion-system = Sistema
-settings-reduce-motion-always = Sempre reduzir
+settings-reduce-motion-hint = Sempre reduzir animações. Desmarque para seguir a preferência do sistema.
 settings-theme = Tema
-settings-theme-hint = Escolha a paleta usada na interface dos diffs e no código.
 settings-theme-default = Padrão embutido (Dark)
 settings-layout = Layout
-settings-layout-hint = Escolha como as linhas antigas e novas dividem o espaço.
 settings-layout-unified = Unificado
 settings-layout-split = Lado a lado
 settings-wrap-lines = Quebrar linhas
-settings-wrap-lines-hint = Ajuste as linhas de código à largura disponível ou role horizontalmente.
-settings-off = Desativado
-settings-on = Ativado
+settings-wrap-lines-hint = Ajusta as linhas de código à largura disponível.
+settings-copy-with-line-context = Copiar com contexto de linha
+settings-copy-with-line-context-hint = Inclui o caminho do arquivo e os números das linhas ao copiar código de um diff.
 settings-density = Exibição
-settings-density-hint = Mostre só as regiões alteradas ou o arquivo completo.
 settings-density-compact = Só as alterações
 settings-density-full = Arquivo completo
 settings-focus-window = Focar a janela ao abrir um diff
 settings-focus-window-hint = Traz a janela do desktop para a frente quando um comando abre um diff.
-settings-push-confirmation = Confirmar antes de push pela CLI
-settings-push-confirmation-hint = Controla a confirmação de push na CLI. Pushes pelo visualizador sempre pedem confirmação.
-settings-push-confirmation-required = Obrigatória
-settings-push-confirmation-not-required = Dispensada
+settings-push-confirmation = Sem confirmação de push na CLI
+settings-push-confirmation-hint = Faça push imediatamente pela CLI. Desativado por padrão para evitar pushes acidentais.
 settings-field-correction = Valor não suportado. Escolha outra opção.
-settings-saved = Configurações salvas
 settings-reload = Recarregar configurações
-settings-save = Salvar configurações
 
 ## Projects
 
@@ -252,7 +225,6 @@ push-not-started = O push não começou. Revise-o novamente.
 push-status-unreadable = { $error } O push pode ainda estar em andamento. Use o botão de push para verificar o resultado.
 push-status-pending = O resultado do push ainda não está disponível. Use o botão de push para verificar o resultado.
 push-availability-nothing = Não há commits sem push até este SHA
-push-availability-checking = Verificando commits sem push
 push-dialog-title =
     { $count ->
         [one] Fazer push de { $count } commit?
@@ -321,12 +293,6 @@ projects-retry-status-for = Buscar de novo o status do Git de { $project }
 projects-retry-status = Buscar de novo o status do Git
 projects-comparison-branch = Branch de comparação
 projects-change-comparison-branch = Alterar a branch de comparação
-projects-rendered =
-    { $style ->
-        [relative] Renderizado { $time }
-       *[absolute] Renderizado em { $time }
-    }
-projects-never-rendered = Nunca renderizado
 
 ## Projects table
 
@@ -363,11 +329,9 @@ projects-per-page = Por página
 projects-per-page-label = Projetos por página
 projects-all-snapshots = Todos os snapshots
 projects-snapshots-for = Snapshots de { $project }
-projects-view-label = Visualização dos projetos
-projects-view-grid = Visualização em grade
-projects-view-list = Visualização em lista
 projects-open-diff = Abrir diff
 projects-comparison-branch-value = Branch de comparação: { $branch }
+projects-settings-label = Configurações do projeto, branch de comparação: { $branch }
 projects-comparison-branch-hint = Usada quando a branch atual não tem upstream.
 projects-comparison-save = Salvar comparação
 projects-import-folder = Pasta a escanear
@@ -444,13 +408,6 @@ tab-state-ready = Pronto
 tab-state-rendering = Renderizando
 tab-state-stopped = Renderização interrompida
 tab-state-failed = Falha na renderização
-tabs-overflow-trigger =
-    { $count ->
-        [0] Escolha um diff aberto. Atual: { $current }. Nenhum diff aberto.
-        [one] Escolha um diff aberto. Atual: { $current }. { $count } diff aberto.
-       *[other] Escolha um diff aberto. Atual: { $current }. { $count } diffs abertos.
-    }
-tabs-overflow-hint = Selecione um diff ou feche um
 tabs-open-count =
     { $count ->
         [0] Nenhum diff aberto
@@ -631,9 +588,7 @@ workspace-modified-files-hint = Inspecionar as alterações atuais em stage, for
 commits-empty = Nenhum commit
 commits-loading = Carregando commits...
 commits-load-more = Carregar mais
-commits-hint = clique no ID para copiar
 commits-select = Selecionar o commit { $commit }: { $subject }
-commits-loading-commit = Carregando o commit
 commits-merge = merge
 commits-details-for = Detalhes do commit { $commit }
 commits-details = Detalhes do commit
@@ -702,3 +657,19 @@ tab-details = Detalhes da comparação
 tab-details-base = Base
 tab-details-head = Head
 tab-push-activate = Abra esta aba para revisar um push.
+settings-back = Voltar
+settings-appearance = Aparência
+settings-locale = Idioma e datas
+settings-snapshots = Aba de diff
+settings-git = Git
+settings-autosave = As alterações são salvas automaticamente
+
+projects-viewer-push-no-confirmation = Sem confirmação de push no viewer
+projects-viewer-push-no-confirmation-hint = Salvo automaticamente para este projeto. Quando ativado, o push é imediato. Desativado por padrão para evitar pushes acidentais.
+review-actions-label = Ações de revisão do diff
+review-push = Push
+review-push-check = Verificar
+review-close-label = Fechar
+review-unpushed-hint = Este snapshot contém commits que ainda não receberam push.
+review-close = Fechar diff
+review-close-pinned = Desafixe este diff antes de fechá-lo.

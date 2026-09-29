@@ -26,12 +26,6 @@ date-days-ago =
        *[other] { $count } days ago
     }
 
-## Comparisons
-
-comparison-branch-changes = Branch changes
-comparison-local-changes = Local changes
-comparison-unpushed-commits = Unpushed commits
-
 ## Document titles
 
 document-title-projects = Projects - git-tools
@@ -64,66 +58,45 @@ feedback-snapshots-skipped-named =
 
 ## User settings page
 
-settings-eyebrow = Application preferences
 settings-title = User settings
-settings-description = Choose viewer defaults and command safeguards, then submit to save them.
 settings-loading = Loading settings
 settings-unavailable = Settings are unavailable
-settings-built-in-defaults = Built-in defaults
-settings-resolved-label = Resolved viewer settings
-settings-resolved-title = Resolved configuration
-settings-resolved-subtitle = Current sources and effective values.
 settings-configuration-file = Configuration file
-settings-effective-theme = Effective theme
 settings-edit-stale = Settings changed since this page loaded. Reload them before saving again.
-settings-edit-field-rejected = Correct the highlighted setting and save again.
+settings-edit-field-rejected = Correct the highlighted setting and retry.
 settings-edit-rejected = One or more settings were rejected. Reload the saved values and try again.
 settings-edit-invalid-file = The settings file became invalid. Reload it to repair or reset it.
 
 ## Viewer settings form
 
-settings-form-label = Editable application settings
-settings-form-title = Viewer and command preferences
-settings-form-description = Choose how diffs appear, when the desktop window comes forward, and whether pushes need confirmation.
 settings-language = Language
-settings-language-hint = Choose the language of the viewer and of saved HTML diffs.
 settings-date-format = Date format
-settings-date-format-hint = Choose how the viewer shows dates. Every format uses your time zone; saved HTML diffs keep ISO dates.
+settings-date-format-hint = Dates use your time zone. Saved HTML diffs keep ISO dates.
 settings-date-format-iso = ISO ({ $sample })
 settings-date-format-day-first = Day first ({ $sample })
 settings-date-format-month-first = Month first ({ $sample })
 settings-date-format-relative = Relative ({ $sample })
 settings-ui-scale = Interface size
-settings-ui-scale-hint = Enlarge text, icons, and controls together. Try 200% on a 4K display.
 settings-reduce-motion = Reduced motion
-settings-reduce-motion-hint = Disable animations and transitions. System follows your device's accessibility preference.
-settings-reduce-motion-system = System
-settings-reduce-motion-always = Always reduce
+settings-reduce-motion-hint = Always reduce animations. When unchecked, follow your system preference.
 settings-theme = Theme
-settings-theme-hint = Choose the palette used for diff chrome and code.
 settings-theme-default = Built-in default (Dark)
 settings-layout = Layout
-settings-layout-hint = Choose how old and new lines share the canvas.
 settings-layout-unified = Unified
 settings-layout-split = Side by side
 settings-wrap-lines = Wrap lines
-settings-wrap-lines-hint = Fit source lines to the available width or scroll horizontally.
-settings-off = Off
-settings-on = On
+settings-wrap-lines-hint = Fit source lines to the available width.
+settings-copy-with-line-context = Copy with line context
+settings-copy-with-line-context-hint = Include the file path and line numbers when copying source from a diff.
 settings-density = View
-settings-density-hint = Show changed regions or the complete file.
 settings-density-compact = Changes only
 settings-density-full = Full file
 settings-focus-window = Focus window when opening a diff
 settings-focus-window-hint = Bring the desktop window forward when a command opens a diff.
-settings-push-confirmation = Confirm before CLI push
-settings-push-confirmation-hint = Control CLI push confirmation. Viewer pushes always require confirmation.
-settings-push-confirmation-required = Required
-settings-push-confirmation-not-required = Not required
+settings-push-confirmation = No confirmation on push in the CLI
+settings-push-confirmation-hint = Push immediately from the CLI. Off by default to prevent accidental pushes.
 settings-field-correction = Unsupported value. Choose another option.
-settings-saved = Settings saved
 settings-reload = Reload settings
-settings-save = Save settings
 
 ## Projects
 
@@ -251,7 +224,6 @@ push-not-started = The push did not start. Review it again.
 push-status-unreadable = { $error } The push may still be running. Use the push button to check its result.
 push-status-pending = The push result is not available yet. Use the push button to check its result.
 push-availability-nothing = No unpushed commits through this SHA
-push-availability-checking = Checking for unpushed commits
 push-dialog-title =
     { $count ->
         [one] Push { $count } commit?
@@ -320,13 +292,6 @@ projects-retry-status-for = Retry Git status for { $project }
 projects-retry-status = Retry Git status
 projects-comparison-branch = Comparison branch
 projects-change-comparison-branch = Change comparison branch
-# $style is relative when $time states an age, such as "3 hours ago", and absolute for a date.
-projects-rendered =
-    { $style ->
-        [relative] Rendered { $time }
-       *[absolute] Rendered { $time }
-    }
-projects-never-rendered = Never rendered
 
 ## Projects table
 
@@ -361,11 +326,9 @@ projects-per-page = Per page
 projects-per-page-label = Projects per page
 projects-all-snapshots = All snapshots
 projects-snapshots-for = Snapshots for { $project }
-projects-view-label = Projects view
-projects-view-grid = Grid view
-projects-view-list = List view
 projects-open-diff = Open diff
 projects-comparison-branch-value = Comparison branch: { $branch }
+projects-settings-label = Project settings, comparison branch: { $branch }
 projects-comparison-branch-hint = Used when the current branch has no upstream.
 projects-comparison-save = Save comparison
 projects-import-folder = Folder to scan
@@ -432,12 +395,6 @@ tab-state-ready = Ready
 tab-state-rendering = Rendering
 tab-state-stopped = Render stopped
 tab-state-failed = Render failed
-tabs-overflow-trigger =
-    { $count ->
-        [one] Choose open diff. Current: { $current }. { $count } open diff.
-       *[other] Choose open diff. Current: { $current }. { $count } open diffs.
-    }
-tabs-overflow-hint = Select a diff or close one
 tabs-open-count =
     { $count ->
         [one] { $count } open diff
@@ -616,9 +573,7 @@ workspace-modified-files-hint = Inspect current staged, unstaged, and untracked 
 commits-empty = No commits
 commits-loading = Loading commits...
 commits-load-more = Load more
-commits-hint = click ID to copy
 commits-select = Select commit { $commit }: { $subject }
-commits-loading-commit = Loading commit
 commits-merge = merge
 commits-details-for = Commit details for { $commit }
 commits-details = Commit details
@@ -685,3 +640,19 @@ tab-details = Comparison details
 tab-details-base = Base
 tab-details-head = Head
 tab-push-activate = Open this tab to review a push.
+settings-back = Back
+settings-appearance = Appearance
+settings-locale = Language & dates
+settings-snapshots = Diff tab
+settings-git = Git
+settings-autosave = Changes save automatically
+
+projects-viewer-push-no-confirmation = No confirmation on push in the viewer
+projects-viewer-push-no-confirmation-hint = Saved automatically for this project. Push runs immediately when enabled. Off by default to prevent accidental pushes.
+review-actions-label = Diff review actions
+review-push = Push
+review-push-check = Check
+review-close-label = Close
+review-unpushed-hint = This snapshot contains commits that have not been pushed.
+review-close = Close diff
+review-close-pinned = Unpin this diff before closing it.

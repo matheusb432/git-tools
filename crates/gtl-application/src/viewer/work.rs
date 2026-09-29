@@ -82,18 +82,10 @@ pub struct ComputedCommitWork {
 
 #[derive(Debug)]
 pub enum RecipePublication {
-    Published {
-        history: RecordRender,
-    },
-    Broken {
-        state: ViewerTabState,
-    },
-    Skipped {
-        path: gtl_models::paths::RepositoryRoot,
-    },
-    Failed {
-        error: PrepareRecipeError,
-    },
+    Published { history: RecordRender },
+    Broken { state: ViewerTabState },
+    Skipped,
+    Failed { error: PrepareRecipeError },
     Stale,
 }
 
@@ -359,9 +351,7 @@ pub fn publish_recipe(
                     session.skip_empty_snapshot_if_current(ticket, skipped_label)
                 });
                 match outcome {
-                    EmptySnapshotOutcome::Skipped => RecipePublication::Skipped {
-                        path: history.recipe.cwd(),
-                    },
+                    EmptySnapshotOutcome::Skipped => RecipePublication::Skipped,
                     EmptySnapshotOutcome::Stale => RecipePublication::Stale,
                     EmptySnapshotOutcome::Kept => {
                         publish_view(session, ticket, value, label, *history, head)
@@ -662,7 +652,7 @@ mod tests {
 
         let publication = publish_recipe(&state, work).unwrap();
 
-        assert!(matches!(publication, RecipePublication::Skipped { .. }));
+        assert!(matches!(publication, RecipePublication::Skipped));
         assert_eq!(
             shell_feedback(),
             Some(gtl_wire::viewer::ViewerFeedback::SnapshotRecipesSkipped {

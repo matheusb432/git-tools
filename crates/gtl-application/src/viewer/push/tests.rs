@@ -7,6 +7,7 @@ fn plan_at(name: &str) -> PushPlan {
     PushPlan {
         path: std::env::temp_dir().join(name).try_into().unwrap(),
         project: None,
+        no_confirmation: false,
         repository: PushRepository {
             branch: BranchName::try_new("feature").unwrap(),
             remote: RemoteName::try_new("origin").unwrap(),

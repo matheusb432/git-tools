@@ -40,7 +40,7 @@ fn ToastControls() -> Element {
         div { class: "flex flex-wrap gap-3",
             Button { onclick: move |_| toast.ok("Tab updated."), "Success" }
             Button {
-                variant: ButtonVariant::Secondary,
+                variant: ButtonVariant::Outline,
                 onclick: move |_| toast.info("Rendering continues in the background."),
                 "Information"
             }

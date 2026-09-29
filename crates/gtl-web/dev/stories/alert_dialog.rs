@@ -13,7 +13,7 @@ fn thumbnail() -> Element {
         div { class: "grid justify-items-start gap-3",
             Button {
                 id: "preview-alert-preview-trigger",
-                variant: ButtonVariant::Secondary,
+                variant: ButtonVariant::Outline,
                 "Review warning"
             }
             AlertDialog {
@@ -38,7 +38,7 @@ fn interactive() -> Element {
         AlertDialogStory {
             id: "preview-alert",
             trigger_label: "Overwrite snapshot",
-            trigger_variant: ButtonVariant::Secondary,
+            trigger_variant: ButtonVariant::Outline,
             variant: AlertDialogVariant::Alert,
             title: "Overwrite snapshot?",
             description: "The existing snapshot will be replaced with the current comparison.",
@@ -86,6 +86,7 @@ fn error() -> Element {
 #[story(name = "Push confirmation")]
 fn push_confirmation() -> Element {
     let preview = gtl_wire::viewer::push::ViewerPushPreview {
+        no_confirmation: false,
         repository: std::path::PathBuf::from("/repos/git-tools").try_into()?,
         project: Some("git-tools".to_owned().try_into()?),
         branch: "main".to_owned().try_into()?,

@@ -176,7 +176,7 @@ mod tests {
     };
     use gtl_models::{
         paths::ProjectName,
-        settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode},
+        settings::{ProjectsPageSize, ProjectsSort},
         viewer::{
             DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybinding,
             ViewerKeybindingAction, ViewerKeybindings,
@@ -226,6 +226,7 @@ mod tests {
         let settings = TomlSettingsStore::new(None).load().unwrap();
 
         assert_eq!(settings.theme(), None);
+        assert!(settings.copy_with_line_context());
         assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
     }
 
@@ -291,6 +292,28 @@ search_files = " shift + alt + k "
             settings.viewer_keybindings()[ViewerKeybindingAction::SearchTextInAllFiles].to_string(),
             "ctrl+f"
         );
+        assert_eq!(
+            settings.viewer_keybindings()[ViewerKeybindingAction::PushDiff].to_string(),
+            "ctrl+enter"
+        );
+    }
+
+    #[test]
+    fn push_keybinding_overrides_are_validated_with_the_other_actions() {
+        let path = Path::new("config.toml");
+        let settings =
+            parse_settings(path, "[keybindings]\npush_diff = \"Alt + Enter\"\n").unwrap();
+        assert_eq!(
+            settings.viewer_keybindings()[ViewerKeybindingAction::PushDiff].to_string(),
+            "alt+enter"
+        );
+        for raw in [
+            "[keybindings]\npush_diff = \"cmd+enter\"\n",
+            "[keybindings]\npush_diff = \"ctrl+p\"\n",
+        ] {
+            let message = parse_settings(path, raw).unwrap_err().to_string();
+            assert!(message.contains("`keybindings.push_diff`"));
+        }
     }
 
     #[test]
@@ -463,13 +486,14 @@ excluded_from_push_all = true
             files_sidebar_visible: UserSettingsFieldUpdate::Update(false),
             commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
             wrap_lines: UserSettingsFieldUpdate::Update(false),
-            projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
+            copy_with_line_context: UserSettingsFieldUpdate::Update(false),
             projects_sort: UserSettingsFieldUpdate::Update(ProjectsSort::Name),
             projects_page_size: UserSettingsFieldUpdate::Update(ProjectsPageSize::default()),
             theme: UserSettingsFieldUpdate::Clear,
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
             density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
             push_confirmation_required: UserSettingsFieldUpdate::Update(false),
+            viewer_push_no_confirmation_projects: UserSettingsFieldUpdate::Unchanged,
         };
 
         assert_eq!(
@@ -496,6 +520,7 @@ excluded_from_push_all = true
             settings.viewer_render_options(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)
         );
+        assert!(!settings.copy_with_line_context());
         assert!(!settings.push_confirmation_required());
     }
 
@@ -779,6 +804,38 @@ excluded_from_push_all = true
     }
 
     #[test]
+    fn copy_with_line_context_defaults_on_and_round_trips_explicit_values_and_clear() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "theme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert!(store.load().unwrap().copy_with_line_context());
+        for (update, expected) in [
+            (UserSettingsFieldUpdate::Update(false), false),
+            (UserSettingsFieldUpdate::Update(true), true),
+            (UserSettingsFieldUpdate::Update(false), false),
+            (UserSettingsFieldUpdate::Clear, true),
+        ] {
+            store
+                .edit(UserSettingsPatch {
+                    copy_with_line_context: update,
+                    ..Default::default()
+                })
+                .unwrap();
+            let settings = store.load().unwrap();
+            assert_eq!(settings.copy_with_line_context(), expected);
+            assert_eq!(settings.theme(), Some(Theme::Dark));
+        }
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("copy_with_line_context")
+        );
+        std::fs::write(&path, "copy_with_line_context = \"false\"\n").unwrap();
+        assert!(store.load().is_err());
+    }
+
+    #[test]
     fn projects_page_size_defaults_and_persists_without_changing_other_settings() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
@@ -873,47 +930,35 @@ excluded_from_push_all = true
     }
 
     #[test]
-    fn projects_view_round_trips_and_clear_restores_grid_without_losing_other_settings() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
-        std::fs::write(&path, "# retained\ntheme = \"mirage\"\n").unwrap();
-        let mut store = TomlSettingsStore::new(Some(path.clone()));
-        assert_eq!(
-            store.load_viewer_settings().unwrap().1.view,
-            ProjectsViewMode::Grid
-        );
-        let application_settings = store.load().unwrap();
-        store
-            .edit(UserSettingsPatch {
-                projects_view: UserSettingsFieldUpdate::Update(ProjectsViewMode::Table),
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(
-            store.load_viewer_settings().unwrap().1.view,
-            ProjectsViewMode::Table
-        );
-        assert_eq!(store.load().unwrap(), application_settings);
-        assert!(
-            std::fs::read_to_string(&path)
-                .unwrap()
-                .contains("# retained")
-        );
-        store
-            .edit(UserSettingsPatch {
-                projects_view: UserSettingsFieldUpdate::Clear,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(
-            store.load_viewer_settings().unwrap().1.view,
-            ProjectsViewMode::Grid
-        );
-        std::fs::write(&path, "projects_view = \"unknown\"\n").unwrap();
-        assert!(matches!(
-            store.load(),
-            Err(UserSettingsLoadError::InvalidConfiguration(_))
-        ));
+    fn retired_projects_view_is_ignored_and_removed_on_the_next_settings_edit() {
+        for view in ["grid", "table"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("config.toml");
+            let raw = format!(
+                "# retained\ntheme = \"mirage\"\nprojects_view = \"{view}\"\nprojects_sort = \"name\"\nprojects_page_size = 30\n"
+            );
+            std::fs::write(&path, &raw).unwrap();
+            let mut store = TomlSettingsStore::new(Some(path.clone()));
+            let (settings, projects) = store.load_viewer_settings().unwrap();
+            assert_eq!(settings.theme(), Some(Theme::Mirage));
+            assert_eq!(projects.sort, ProjectsSort::Name);
+            assert_eq!(projects.page_size.into_inner(), 30);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+
+            store
+                .edit(UserSettingsPatch {
+                    projects_page_size: UserSettingsFieldUpdate::Update(ProjectsPageSize::default()),
+                    ..Default::default()
+                })
+                .unwrap();
+            let saved = std::fs::read_to_string(&path).unwrap();
+            assert!(!saved.contains("projects_view"));
+            assert!(saved.contains("# retained"));
+            assert_eq!(store.load().unwrap(), settings);
+            let projects = store.load_viewer_settings().unwrap().1;
+            assert_eq!(projects.sort, ProjectsSort::Name);
+            assert_eq!(projects.page_size, ProjectsPageSize::default());
+        }
     }
 
     #[test]

@@ -8,14 +8,16 @@ pub enum ViewerKeybindingAction {
     SearchTextInAllFiles,
     ToggleFilesSidebar,
     ToggleCommitsSidebar,
+    PushDiff,
 }
 
 impl ViewerKeybindingAction {
-    const ALL: [Self; 4] = [
+    const ALL: [Self; 5] = [
         Self::SearchFiles,
         Self::SearchTextInAllFiles,
         Self::ToggleFilesSidebar,
         Self::ToggleCommitsSidebar,
+        Self::PushDiff,
     ];
     const COUNT: usize = Self::ALL.len();
 
@@ -25,6 +27,7 @@ impl ViewerKeybindingAction {
             Self::SearchTextInAllFiles => 1,
             Self::ToggleFilesSidebar => 2,
             Self::ToggleCommitsSidebar => 3,
+            Self::PushDiff => 4,
         }
     }
 
@@ -39,6 +42,10 @@ impl ViewerKeybindingAction {
                     ViewerModifier::Primary as u8 | ViewerModifier::Alt as u8,
                 ),
             },
+            Self::PushDiff => ViewerKeybinding {
+                key: ViewerKey::Named(0),
+                modifiers: ViewerModifiers::only(ViewerModifier::Primary),
+            },
         }
     }
 }
@@ -50,6 +57,7 @@ impl fmt::Display for ViewerKeybindingAction {
             Self::SearchTextInAllFiles => "search_text_in_all_files",
             Self::ToggleFilesSidebar => "toggle_files_sidebar",
             Self::ToggleCommitsSidebar => "toggle_commits_sidebar",
+            Self::PushDiff => "push_diff",
         })
     }
 }
@@ -426,6 +434,8 @@ impl fmt::Display for ViewerKeybindingDisplayKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidViewerKeybindings {
+    #[error("`push_diff` uses reserved tab shortcut (`{binding}`)")]
+    ReservedTabShortcut { binding: ViewerKeybinding },
     #[error("`{action}` uses both ctrl and meta, which are both Command on macOS")]
     AmbiguousMacOsModifiers { action: ViewerKeybindingAction },
     #[error("`{first}` conflicts with `{second}` on the selected platform (`{binding}`)")]
@@ -494,7 +504,49 @@ impl ViewerKeybindings {
             )))
     }
 
+    #[must_use]
+    pub fn aria_keyshortcuts(self, action: ViewerKeybindingAction) -> String {
+        let binding = self[action];
+        let modifiers = binding.keyboard_modifiers(self.platform);
+        [
+            (ViewerKeyboardModifier::Control, "Control"),
+            (ViewerKeyboardModifier::Alt, "Alt"),
+            (ViewerKeyboardModifier::Shift, "Shift"),
+            (ViewerKeyboardModifier::Meta, "Meta"),
+        ]
+        .into_iter()
+        .filter(|(modifier, _)| modifiers.0 & *modifier as u8 != 0)
+        .map(|(_, name)| name.to_owned())
+        .chain(iter::once(
+            ViewerKeybindingDisplayKey::from_key(binding.key).to_string(),
+        ))
+        .collect::<Vec<_>>()
+        .join("+")
+    }
+
     fn validate(self) -> Result<(), InvalidViewerKeybindings> {
+        if [
+            ("Tab", ViewerKeyboardModifier::Control, false),
+            ("Tab", ViewerKeyboardModifier::Control, true),
+            ("w", ViewerKeyboardModifier::Control, false),
+            ("p", ViewerKeyboardModifier::Alt, false),
+            ("o", ViewerKeyboardModifier::Alt, false),
+        ]
+        .into_iter()
+        .any(|(key, modifier, shift)| {
+            let modifiers = [
+                Some(modifier),
+                shift.then_some(ViewerKeyboardModifier::Shift),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            self.matches_keypress(ViewerKeybindingAction::PushDiff, key, modifiers)
+        }) {
+            return Err(InvalidViewerKeybindings::ReservedTabShortcut {
+                binding: self[ViewerKeybindingAction::PushDiff],
+            });
+        }
         if let Some(action) = ViewerKeybindingAction::ALL
             .into_iter()
             .find(|action| self[*action].has_ambiguous_macos_modifiers(self.platform))
@@ -535,6 +587,8 @@ struct SerializedViewerKeybindings {
     search_text_in_all_files: ViewerKeybinding,
     toggle_files_sidebar: ViewerKeybinding,
     toggle_commits_sidebar: ViewerKeybinding,
+    #[serde(default)]
+    push_diff: Option<ViewerKeybinding>,
 }
 
 impl Serialize for ViewerKeybindings {
@@ -548,6 +602,7 @@ impl Serialize for ViewerKeybindings {
             search_text_in_all_files: self[ViewerKeybindingAction::SearchTextInAllFiles],
             toggle_files_sidebar: self[ViewerKeybindingAction::ToggleFilesSidebar],
             toggle_commits_sidebar: self[ViewerKeybindingAction::ToggleCommitsSidebar],
+            push_diff: Some(self[ViewerKeybindingAction::PushDiff]),
         }
         .serialize(serializer)
     }
@@ -564,6 +619,9 @@ impl<'de> Deserialize<'de> for ViewerKeybindings {
             ViewerKeybindingAction::SearchTextInAllFiles => value.search_text_in_all_files,
             ViewerKeybindingAction::ToggleFilesSidebar => value.toggle_files_sidebar,
             ViewerKeybindingAction::ToggleCommitsSidebar => value.toggle_commits_sidebar,
+            ViewerKeybindingAction::PushDiff => value
+                .push_diff
+                .unwrap_or(ViewerKeybindingAction::PushDiff.default_keybinding()),
         })
         .map_err(D::Error::custom)
     }
@@ -592,9 +650,8 @@ mod tests {
             ViewerKeybindingAction::SearchFiles => search_files,
             ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
             ViewerKeybindingAction::ToggleFilesSidebar
-            | ViewerKeybindingAction::ToggleCommitsSidebar => {
-                ViewerKeybindings::for_platform(platform)[action]
-            }
+            | ViewerKeybindingAction::ToggleCommitsSidebar
+            | ViewerKeybindingAction::PushDiff => ViewerKeybindings::for_platform(platform)[action],
         })
     }
 
@@ -622,6 +679,101 @@ mod tests {
                 _ => bindings[action],
             });
             assert!(conflict.is_err());
+        }
+    }
+
+    #[test]
+    fn push_shortcut_resolves_platform_modifiers_and_accessible_hints() {
+        for (platform, modifier, aria, display) in [
+            (
+                ViewerKeybindingPlatform::Linux,
+                ViewerKeyboardModifier::Control,
+                "Control+Enter",
+                "Ctrl",
+            ),
+            (
+                ViewerKeybindingPlatform::Windows,
+                ViewerKeyboardModifier::Control,
+                "Control+Enter",
+                "Ctrl",
+            ),
+            (
+                ViewerKeybindingPlatform::MacOs,
+                ViewerKeyboardModifier::Meta,
+                "Meta+Enter",
+                "⌘",
+            ),
+        ] {
+            let bindings = ViewerKeybindings::for_platform(platform);
+            assert!(bindings.matches_keypress(
+                ViewerKeybindingAction::PushDiff,
+                "Enter",
+                [modifier].into_iter().collect()
+            ));
+            assert!(
+                !bindings.matches_keypress(
+                    ViewerKeybindingAction::PushDiff,
+                    "Enter",
+                    [modifier, ViewerKeyboardModifier::Shift]
+                        .into_iter()
+                        .collect()
+                )
+            );
+            assert_eq!(
+                bindings.aria_keyshortcuts(ViewerKeybindingAction::PushDiff),
+                aria
+            );
+            assert_display_keys(
+                bindings,
+                ViewerKeybindingAction::PushDiff,
+                [display, "Enter"],
+            );
+        }
+    }
+
+    #[test]
+    fn push_overrides_cannot_shadow_another_configured_action() {
+        let bindings = ViewerKeybindings::for_platform(ViewerKeybindingPlatform::Linux);
+        let result = ViewerKeybindings::try_from_fn(bindings.platform(), |action| {
+            if action == ViewerKeybindingAction::PushDiff {
+                bindings[ViewerKeybindingAction::SearchFiles]
+            } else {
+                bindings[action]
+            }
+        });
+        assert!(matches!(
+            result,
+            Err(InvalidViewerKeybindings::Conflict {
+                first: ViewerKeybindingAction::SearchFiles,
+                second: ViewerKeybindingAction::PushDiff,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn push_overrides_cannot_replace_fixed_tab_shortcuts() {
+        let cases = [
+            ViewerKeybindingPlatform::Linux,
+            ViewerKeybindingPlatform::Windows,
+        ]
+        .into_iter()
+        .flat_map(|platform| {
+            ["ctrl+tab", "ctrl+shift+tab", "ctrl+w", "alt+p", "alt+o"]
+                .into_iter()
+                .map(move |chord| (platform, chord))
+        });
+        for (platform, chord) in cases {
+            let defaults = ViewerKeybindings::for_platform(platform);
+            let binding = chord.parse().unwrap();
+            let result = ViewerKeybindings::try_from_fn(platform, |action| match action {
+                ViewerKeybindingAction::PushDiff => binding,
+                _ => defaults[action],
+            });
+            assert!(matches!(
+                result,
+                Err(InvalidViewerKeybindings::ReservedTabShortcut { .. })
+            ));
         }
     }
 
@@ -791,5 +943,16 @@ mod tests {
         });
 
         assert!(serde_json::from_value::<ViewerKeybindings>(value).is_err());
+    }
+
+    #[test]
+    fn older_serialized_keybindings_keep_the_default_push_chord() {
+        let bindings = ViewerKeybindings::for_platform(ViewerKeybindingPlatform::Linux);
+        let mut value = serde_json::to_value(bindings).unwrap();
+        value.as_object_mut().unwrap().remove("push_diff");
+        assert_eq!(
+            serde_json::from_value::<ViewerKeybindings>(value).unwrap(),
+            bindings
+        );
     }
 }

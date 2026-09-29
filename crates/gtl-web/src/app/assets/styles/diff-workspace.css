@@ -1,4 +1,12 @@
 @layer components {
+  .sidebar-edge { @apply absolute top-0 bottom-0 z-20 hidden w-2 -translate-x-1/2 cursor-col-resize touch-none border-0 bg-transparent p-0 workspace:block focus-visible:focus-outline focus-visible:-outline-offset-2; }
+  .sidebar-edge::after { content: ""; @apply absolute inset-y-0 left-1/2 w-0.5 bg-transparent transition-colors; }
+  .sidebar-edge:hover::after, .sidebar-edge[data-ready="true"]::after { @apply bg-acc; }
+  .sidebar-edge:focus-visible::after { @apply bg-ink-3; }
+  .sidebar-edge[data-sidebar-edge="files"] { left: var(--files-sidebar-width,var(--files-sidebar-size)); }
+  .sidebar-edge[data-sidebar-edge="commits"] { right: var(--commits-sidebar-width,var(--commits-sidebar-size)); @apply translate-x-1/2; }
+  .sidebar-edge[data-sidebar-edge="files"][data-visible="false"] { @apply translate-x-0; }
+  .sidebar-edge[data-sidebar-edge="commits"][data-visible="false"] { @apply translate-x-0; }
   .sidebar-icon { @apply inline-flex; }
   [data-sidebar-toggle][aria-pressed="false"] .sidebar-icon path { @apply hidden; }
   .diff-workspace-sidebar {
@@ -44,7 +52,7 @@
   .diff-workspace-commits-panel { --sidebar-size: var(--commits-sidebar-size); @apply col-start-3 row-start-1 border-l border-line; }
   .diff-document-scroll { @apply overflow-auto bg-bg text-ink; }
   .diff-file-card { @apply border-b border-line-2 bg-bg; }
-  .diff-file-summary { @apply relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
+  .diff-file-summary { @apply relative sticky top-0 z-10 flex min-h-10 cursor-pointer list-none items-center gap-2 border-b-0 border-line-2 bg-surface py-1 pr-3 pl-5 hover:bg-surface-2 focus-visible:focus-outline focus-visible:-outline-offset-2; }
   .diff-file-card[open] > .diff-file-summary { @apply border-b; }
   .diff-file-summary::-webkit-details-marker { display: none; }
   @media (max-width: 760px) {
@@ -61,7 +69,7 @@
   .diff-search-layout { @apply grid grid-cols-[minmax(0,1fr)_auto]; }
   .diff-path-filter-option { @apply flex cursor-pointer items-center rounded-sm text-ink-2 hover:bg-surface-2 aria-selected:bg-acc-soft aria-selected:text-ink; }
   .diff-commit-card { @apply relative border-0 border-b border-line text-left; }
-  .diff-files-directory-summary { @apply flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc; }
+  .diff-files-directory-summary { @apply flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:focus-outline; }
   .diff-files-directory-summary::-webkit-details-marker { display: none; }
   .diff-files-directory-name { @apply flex-1 overflow-hidden text-ellipsis whitespace-nowrap; }
   .diff-files-directory-caret { @apply flex-none transition-transform; }
@@ -86,5 +94,19 @@
   }
   @media (max-width: 760px) {
     .diff-file-actions { display: none; }
+  }
+}
+
+@layer components {
+  .review-action-dock { @apply pointer-events-none absolute right-5 bottom-5 z-30 print:hidden; }
+  .review-action-buttons { @apply pointer-events-auto relative flex items-center gap-1 rounded-lg border border-line-2 bg-surface p-1 shadow-floating; }
+  .review-action-buttons::before { @apply pointer-events-none absolute -inset-px rounded-[inherit] border-[2px] border-acc opacity-0 transition-opacity duration-200 ease-in-out; content: ""; }
+  .review-action-buttons[data-unpushed="true"]::before { @apply opacity-100; }
+  .review-push-action, .review-close-action { @apply w-28 gap-1.5 px-2 text-xs; }
+  .diff-document-clearance { @apply h-20 print:hidden; }
+  .project-push-setting { @apply border-t border-line pt-3 text-xs; }
+  [id^="project-comparison"].popover-surface[data-placement] { @apply w-[min(22rem,calc(100vw-1rem))] max-h-[calc(100dvh-2rem)]; }
+  @media (max-width: 479px) {
+    .review-action-dock { @apply right-3 bottom-3; }
   }
 }

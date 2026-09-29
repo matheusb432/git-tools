@@ -5,6 +5,7 @@ pub(crate) mod application_navigation;
 pub(crate) mod application_router;
 pub(crate) mod displayed_language;
 mod projects_host;
+pub(crate) mod user_settings;
 mod window_chrome;
 mod window_header;
 

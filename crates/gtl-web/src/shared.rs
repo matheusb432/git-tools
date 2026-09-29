@@ -6,6 +6,7 @@ pub(crate) mod failure_notice;
 pub(crate) mod field_errors;
 pub(crate) mod file_extension;
 pub(crate) mod i18n;
+pub(crate) mod keyboard;
 pub(crate) mod recipe_label;
 pub(crate) mod retry_delay;
 pub(crate) mod ui;

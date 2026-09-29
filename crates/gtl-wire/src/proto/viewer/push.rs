@@ -57,6 +57,7 @@ pub fn encode_status(value: ViewerPushStatus) -> v1::GetViewerPushResponse {
                 remote_url: value.remote_url.to_string(),
                 commit: value.commit.to_string(),
                 count: value.count,
+                no_confirmation: value.no_confirmation,
                 command: value.command,
                 command_arguments: value
                     .command_arguments
@@ -107,6 +108,7 @@ pub fn decode_status(
                 .parse()
                 .map_err(|_| ViewerCodecError::InvalidMessage)?,
             count: value.count,
+            no_confirmation: value.no_confirmation,
             command: value.command,
             command_arguments: value
                 .command_arguments
@@ -195,13 +197,14 @@ pub fn decode_availability_request(
 
 #[must_use]
 pub fn encode_availability(
-    value: crate::viewer::push::ViewerPushAvailability,
+    value: crate::viewer::push::ViewerPushState,
 ) -> v1::GetViewerPushAvailabilityResponse {
     use v1::get_viewer_push_availability_response::Availability;
 
     use crate::viewer::push::ViewerPushAvailability;
     v1::GetViewerPushAvailabilityResponse {
-        availability: Some(match value {
+        snapshot_has_unpushed_commits: value.snapshot_has_unpushed_commits,
+        availability: Some(match value.availability {
             ViewerPushAvailability::Available => {
                 Availability::Available(v1::ViewerPushAvailable {})
             }
@@ -217,15 +220,18 @@ pub fn encode_availability(
 
 pub fn decode_availability(
     value: v1::GetViewerPushAvailabilityResponse,
-) -> Result<crate::viewer::push::ViewerPushAvailability, ViewerCodecError> {
+) -> Result<crate::viewer::push::ViewerPushState, ViewerCodecError> {
     use v1::get_viewer_push_availability_response::Availability;
 
     use crate::viewer::push::ViewerPushAvailability;
-    Ok(match required(value.availability)? {
-        Availability::Available(_) => ViewerPushAvailability::Available,
-        Availability::NothingToPush(_) => ViewerPushAvailability::NothingToPush,
-        Availability::Blocked(failure) => ViewerPushAvailability::Blocked {
-            failure: decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+    Ok(crate::viewer::push::ViewerPushState {
+        snapshot_has_unpushed_commits: value.snapshot_has_unpushed_commits,
+        availability: match required(value.availability)? {
+            Availability::Available(_) => ViewerPushAvailability::Available,
+            Availability::NothingToPush(_) => ViewerPushAvailability::NothingToPush,
+            Availability::Blocked(failure) => ViewerPushAvailability::Blocked {
+                failure: decode_failure(failure).ok_or(ViewerCodecError::InvalidMessage)?,
+            },
         },
     })
 }
@@ -250,6 +256,7 @@ mod tests {
                 .unwrap(),
             commit: "a".repeat(40).parse().unwrap(),
             count: 2,
+            no_confirmation: false,
             command: "git push --atomic".into(),
             command_arguments: vec![
                 ViewerPushCommandArgument::Git,

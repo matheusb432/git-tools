@@ -883,19 +883,18 @@ mod tests {
             .env("SYNTHETIC_CHILD_PID_PATH", &child_pid_path)
             .args([
                 "-c",
-                "sleep 2147483647 & printf '%s' \"$!\" > \"$SYNTHETIC_CHILD_PID_PATH\"; wait",
+                "sleep 2147483647 & printf '%s' \"$!\" > \"$SYNTHETIC_CHILD_PID_PATH.pending\"; mv \"$SYNTHETIC_CHILD_PID_PATH.pending\" \"$SYNTHETIC_CHILD_PID_PATH\"; wait",
             ]);
         configure_process_group(&mut command);
         let mut child = command.spawn().unwrap();
-        while !child_pid_path.exists() {
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !child_pid_path.exists() && Instant::now() < ready_deadline {
             thread::sleep(Duration::from_millis(1));
         }
-        let child_process_id = fs::read_to_string(&child_pid_path)
-            .unwrap()
-            .parse::<u32>()
-            .unwrap();
+        let child_pid = fs::read_to_string(&child_pid_path);
 
         assert!(wait_for_ghz(&mut child, std::process::id(), Instant::now()).is_err());
+        let child_process_id = child_pid.unwrap().parse::<u32>().unwrap();
         assert!(wait_for_process_exit(
             child_process_id,
             Duration::from_secs(1)

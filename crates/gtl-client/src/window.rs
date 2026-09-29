@@ -65,3 +65,15 @@ pub fn perform(
 ) -> impl std::future::Future<Output = Result<(), ViewerClientError>> {
     std::future::ready(Err(ViewerClientError::Disconnected))
 }
+
+/// Reads the configured settings document for the desktop source viewer.
+#[cfg(all(target_arch = "wasm32", feature = "viewer-ipc"))]
+pub async fn read_settings_file() -> Result<String, ViewerClientError> {
+    crate::viewer::tauri::invoke_without_arguments("viewer_read_settings_file").await
+}
+
+#[cfg(not(all(target_arch = "wasm32", feature = "viewer-ipc")))]
+pub fn read_settings_file() -> impl std::future::Future<Output = Result<String, ViewerClientError>>
+{
+    std::future::ready(Err(ViewerClientError::Disconnected))
+}

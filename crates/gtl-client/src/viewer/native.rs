@@ -76,7 +76,7 @@ impl ViewerClient {
     pub async fn get_push_availability(
         &mut self,
         identity: gtl_wire::viewer::ViewerViewIdentity,
-    ) -> Result<gtl_wire::viewer::push::ViewerPushAvailability, ViewerClientError> {
+    ) -> Result<gtl_wire::viewer::push::ViewerPushState, ViewerClientError> {
         let response = self
             .client
             .get_viewer_push_availability(proto::viewer::push::encode_availability_request(

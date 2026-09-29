@@ -370,8 +370,7 @@ pub(super) fn store_test() -> Connection {
         .unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE project_render_recency (source_value TEXT PRIMARY KEY, rendered_at TEXT NOT NULL) STRICT;
-        CREATE TABLE render_sources (
+            "CREATE TABLE render_sources (
           id         INTEGER PRIMARY KEY AUTOINCREMENT,
           kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote')),
           value      TEXT NOT NULL,

@@ -69,7 +69,7 @@ const viewportReady = box !== undefined &&
 
 return {
     active_tab_count: activeTabs.length,
-    active_tab_title: activeTab?.getAttribute('title') ?? null,
+    active_tab_title: activeTab?.textContent?.trim() ?? null,
     visible_active_tab_count: activeTabs.filter(isVisible).length,
     document_count: documents.length,
     visible_document_count: documents.filter(isVisible).length,
@@ -81,7 +81,7 @@ return {
     diff_file_count: Number(diffDocument?.getAttribute('data-total-files') ??
         diffDocument?.querySelectorAll('[data-gtl-diff-file]').length ?? 0),
     viewport_ready: viewportReady,
-    changed_files_text: changedFiles?.innerText ?? null,
+    changed_file_count: changedFiles?.querySelectorAll('[data-file-target]').length ?? 0,
     visible_changed_files_count: Number(isVisible(changedFiles)),
     commit_panel_count: commitPanels.length,
     visible_commit_panel_count: commitPanels.filter(isVisible).length,
@@ -318,7 +318,7 @@ struct ReadinessSnapshot {
     document_density: Option<String>,
     diff_file_count: usize,
     viewport_ready: bool,
-    changed_files_text: Option<String>,
+    changed_file_count: usize,
     visible_changed_files_count: usize,
     commit_panel_count: usize,
     visible_commit_panel_count: usize,
@@ -345,10 +345,7 @@ impl ReadinessSnapshot {
             && self.document_density.as_deref() == Some("compact")
             && self.diff_file_count == expectation.file_count
             && self.visible_changed_files_count == 1
-            && self
-                .changed_files_text
-                .as_deref()
-                .is_some_and(|text| changed_files_summary_is_ready(text, expectation))
+            && self.changed_file_count == expectation.file_count
             && self.commit_panel_count >= 1
             && self.visible_commit_panel_count == 1
             && self.commit_count == expectation.commit_count
@@ -966,29 +963,6 @@ async fn visible_element(
         .with_context(|| format!("decode visible {label}"))
 }
 
-fn changed_files_summary_is_ready(text: &str, expectation: ReadyViewExpectation) -> bool {
-    let normalized = text.to_ascii_lowercase();
-    let words = normalized.split_whitespace().collect::<Vec<_>>();
-    let file_label = if expectation.file_count == 1 {
-        "file"
-    } else {
-        "files"
-    };
-    let commit_label = if expectation.commit_count == 1 {
-        "commit"
-    } else {
-        "commits"
-    };
-    let file_count = expectation.file_count.to_string();
-    let commit_count = expectation.commit_count.to_string();
-    words
-        .windows(2)
-        .any(|pair| pair == [file_count.as_str(), file_label])
-        && words
-            .windows(2)
-            .any(|pair| pair == [commit_count.as_str(), commit_label])
-}
-
 async fn scroll_element(
     driver: &WebDriver,
     element: &WebElement,
@@ -1056,35 +1030,9 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
     format!("{}{suffix}", String::from_utf8_lossy(&bytes[..end]))
 }
 
-#[test]
-fn readiness_normalizes_rendered_changed_files_summary() {
-    assert!(changed_files_summary_is_ready(
-        "Files\n50 files\n\n10\ncommits",
-        ReadyViewExpectation {
-            name: VIEW_NAME,
-            file_count: 50,
-            commit_count: 10,
-            diff_row_count: 4_247,
-        }
-    ));
-}
-
-#[test]
-fn readiness_accepts_singular_file_and_commit_labels() {
-    assert!(changed_files_summary_is_ready(
-        "Files\n1 file\n1\ncommit",
-        ReadyViewExpectation {
-            name: SINGLE_FILE_VIEW_NAME,
-            file_count: 1,
-            commit_count: 1,
-            diff_row_count: desktop_scroll::SINGLE_FILE_DIFF_ROW_COUNT,
-        }
-    ));
-}
-
-#[test]
-fn readiness_accepts_complete_production_dom_snapshot() {
-    let snapshot = ReadinessSnapshot {
+#[cfg(test)]
+fn complete_many_file_snapshot() -> ReadinessSnapshot {
+    ReadinessSnapshot {
         active_tab_count: 1,
         active_tab_title: Some(VIEW_NAME.to_owned()),
         visible_active_tab_count: 1,
@@ -1097,17 +1045,33 @@ fn readiness_accepts_complete_production_dom_snapshot() {
         document_density: Some("compact".to_owned()),
         diff_file_count: desktop_scroll::DISTINCT_FILE_COUNT,
         viewport_ready: true,
-        changed_files_text: Some("Files\n50 files\n\n10\ncommits".to_owned()),
+        changed_file_count: desktop_scroll::DISTINCT_FILE_COUNT,
         visible_changed_files_count: 1,
         commit_panel_count: 1,
         visible_commit_panel_count: 1,
         commit_count: desktop_scroll::COMMIT_COUNT,
+    }
+}
+
+#[cfg(test)]
+const MANY_FILE_EXPECTATION: ReadyViewExpectation = ReadyViewExpectation {
+    name: VIEW_NAME,
+    file_count: desktop_scroll::DISTINCT_FILE_COUNT,
+    commit_count: desktop_scroll::COMMIT_COUNT,
+    diff_row_count: MANY_FILE_DIFF_ROW_COUNT,
+};
+
+#[test]
+fn readiness_accepts_complete_production_dom_snapshot() {
+    assert!(complete_many_file_snapshot().is_ready(MANY_FILE_EXPECTATION));
+}
+
+#[test]
+fn readiness_waits_for_every_changed_file_entry() {
+    let snapshot = ReadinessSnapshot {
+        changed_file_count: desktop_scroll::DISTINCT_FILE_COUNT - 1,
+        ..complete_many_file_snapshot()
     };
 
-    assert!(snapshot.is_ready(ReadyViewExpectation {
-        name: VIEW_NAME,
-        file_count: desktop_scroll::DISTINCT_FILE_COUNT,
-        commit_count: desktop_scroll::COMMIT_COUNT,
-        diff_row_count: MANY_FILE_DIFF_ROW_COUNT,
-    }));
+    assert!(!snapshot.is_ready(MANY_FILE_EXPECTATION));
 }

@@ -13,6 +13,7 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             let fixture = ProjectsFixture::create(fixture_root.path())?;
             let driver = session.driver();
             import_projects(driver, &fixture.root).await?;
+            support::evidence::capture(driver, "projects-dashboard", true).await?;
 
             support::click(driver, action("projects-alpha", "Open diff")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
@@ -45,7 +46,11 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             session.restart().await?;
             let driver = session.driver();
             support::visible(driver, By::Css("button[aria-label^='Unpin ']")).await?;
-            support::click(driver, By::Css("[role='tab'][title*='projects-alpha']")).await?;
+            support::click(
+                driver,
+                By::XPath("//*[@role='tab' and contains(., 'projects-alpha')]"),
+            )
+            .await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await
         })
@@ -95,7 +100,7 @@ async fn import_projects(driver: &WebDriver, root: &std::path::Path) -> Result<(
     .await?;
     support::click(driver, By::Css("button[aria-label='Close Add projects']")).await?;
     for name in ["projects-alpha", "projects-beta"] {
-        support::visible(driver, By::Css(format!("article[aria-label='{name}']"))).await?;
+        support::visible(driver, By::Css(format!("tr[aria-label='{name}']"))).await?;
     }
     Ok(())
 }
@@ -108,7 +113,7 @@ fn dialog_button(label: &str) -> By {
 
 fn action(project: &str, label: &str) -> By {
     By::Css(format!(
-        "article[aria-label='{project}'][aria-busy='false'] :is(a, button)[aria-label='{label}']"
+        "tr[aria-label='{project}'][aria-busy='false'] :is(a, button)[aria-label='{label}']"
     ))
 }
 

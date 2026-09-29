@@ -92,6 +92,21 @@ pub(crate) fn focus_element(id: String) {
     spawn(focus);
 }
 
+/// Lets the current UI paint before starting optional background work.
+pub(crate) async fn yield_to_paint() {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(window) = web_sys::window() {
+        let frame = web_sys::js_sys::Promise::new(&mut |resolve, reject| {
+            if let Err(error) = window.request_animation_frame(&resolve) {
+                let _ = reject.call1(&wasm_bindgen::JsValue::UNDEFINED, &error);
+            }
+        });
+        let _ = JsFuture::from(frame).await;
+    }
+    // A frame callback precedes paint; resume in the following browser task.
+    dioxus_sdk_time::sleep(Duration::ZERO).await;
+}
+
 pub(crate) fn element_has_visible_focus(id: &str) -> bool {
     document()
         .and_then(|document| document.get_element_by_id(id))

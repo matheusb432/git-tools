@@ -12,7 +12,7 @@ struct ViewerKeyboardInput<'a> {
 }
 
 #[cfg(feature = "component-preview")]
-pub(super) fn keyboard_event_matches(
+pub(crate) fn keyboard_event_matches(
     event: &KeyboardEvent,
     keybindings: ViewerKeybindings,
     action: ViewerKeybindingAction,
@@ -38,12 +38,12 @@ pub(super) fn keyboard_event_matches(
     )
 }
 
-pub(super) fn native_keyboard_event_matches(
+pub(crate) fn native_keyboard_event_matches(
     event: &web_sys::KeyboardEvent,
     keybindings: ViewerKeybindings,
     action: ViewerKeybindingAction,
 ) -> bool {
-    let key = event.key();
+    let key = native_keyboard_event_key(event);
     keybinding_matches(
         keybindings,
         action,
@@ -61,6 +61,16 @@ pub(super) fn native_keyboard_event_matches(
             composing: event.is_composing(),
         },
     )
+}
+
+pub(crate) fn native_keyboard_event_key(event: &web_sys::KeyboardEvent) -> String {
+    let key = event.key();
+    // WebKit reports Shift+Tab as Unidentified even when its physical code is Tab.
+    if key == "Unidentified" && event.code() == "Tab" {
+        "Tab".to_owned()
+    } else {
+        key
+    }
 }
 
 fn keybinding_matches(

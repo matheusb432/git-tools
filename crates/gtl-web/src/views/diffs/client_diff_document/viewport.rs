@@ -4,6 +4,8 @@ use crate::shared::{
 };
 mod browser;
 pub(in crate::views::diffs) mod geometry;
+#[cfg(test)]
+mod tests;
 
 use dioxus::prelude::*;
 use gtl_wire::viewer::{
@@ -333,7 +335,7 @@ pub(super) fn DiffViewport(
                 }
             }
             div { style: "height: {after}px;", aria_hidden: "true" }
-            div { class: "h-15 tablet:h-12 print:hidden", aria_hidden: "true" }
+            div { class: "diff-document-clearance", aria_hidden: "true" }
         }
     }
 }
@@ -391,7 +393,7 @@ fn ViewportFile(
         onchange: use_callback(move |expanded| context.set_expanded(index, expanded)),
         onresize: use_callback(move |event| context.measure_header(index, &event)),
     };
-    let file_id = file.summary().peek().id.clone();
+    let onretry_file = use_callback(move |()| onretry.call(file.summary().peek().id.clone()));
     let layout = context.identity.render_options.layout;
     let digits = file.line_number_digits().cloned();
     let before_file = window.before_file;
@@ -409,11 +411,10 @@ fn ViewportFile(
                         aria_hidden: "true",
                     }
                     ViewportRowWindow {
-                        file,
                         file_index: index,
                         batch: placement.index,
                         layout,
-                        onretry: move |()| onretry.call(file.summary().peek().id.clone()),
+                        onretry: onretry_file,
                         retry_allowed,
                     }
                 }
@@ -430,7 +431,7 @@ fn ViewportFile(
             folded,
             flashing_file,
             onopen,
-            onretry: move |()| onretry.call(file_id.clone()),
+            onretry: onretry_file,
             retry_allowed,
             file_index: index,
 
@@ -442,14 +443,19 @@ fn ViewportFile(
 
 #[component]
 fn ViewportRowWindow(
-    file: ReadStore<ClientDiffFile>,
     file_index: usize,
     batch: usize,
     layout: ViewerDiffLayout,
     onretry: EventHandler<()>,
     retry_allowed: bool,
 ) -> Element {
+    #[cfg(test)]
+    tests::record_row_window_render(batch);
     let context = use_context::<ViewportContext>();
+    let Some(file) = context.workspace.files().get(file_index) else {
+        return rsx! {};
+    };
+    let file: ReadStore<ClientDiffFile> = file.into();
     let loaded = match layout {
         ViewerDiffLayout::Unified => file
             .rows()

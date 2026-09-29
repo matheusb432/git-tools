@@ -231,10 +231,10 @@ mod tests {
 
     #[test]
     fn each_language_formats_messages_from_its_own_catalog() {
-        assert_eq!(t!(ViewerLanguage::EnUs, "settings-save"), "Save settings");
+        assert_eq!(t!(ViewerLanguage::EnUs, "settings-title"), "User settings");
         assert_eq!(
-            t!(ViewerLanguage::PtBr, "settings-save"),
-            "Salvar configurações"
+            t!(ViewerLanguage::PtBr, "settings-title"),
+            "Configurações do usuário"
         );
         assert_eq!(
             t!(

@@ -12,6 +12,10 @@ name = "app_state_record_render"
 harness = false
 
 [[bench]]
+name = "app_state_mutations"
+harness = false
+
+[[bench]]
 name = "view_cache"
 harness = false
 

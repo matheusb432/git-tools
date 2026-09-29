@@ -45,7 +45,6 @@ impl ButtonLayout {
 pub(crate) enum ButtonVariant {
     #[default]
     Primary,
-    Secondary,
     Destructive,
     #[cfg_attr(
         not(feature = "component-preview"),
@@ -64,7 +63,6 @@ impl ButtonVariant {
     pub(crate) const fn classes(self) -> &'static str {
         match self {
             Self::Primary => "control-button-variant-primary",
-            Self::Secondary => "control-button-variant-secondary",
             Self::Destructive => "control-button-variant-destructive",
             Self::Warning => "control-button-variant-warning",
             Self::Failure => "control-button-variant-failure",

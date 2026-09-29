@@ -28,6 +28,14 @@ async fn desktop_layout_window_and_scale_survive_restart() -> Result<()> {
                 .perform()
                 .await?;
             assert_sidebars(driver, false, false).await?;
+            drag_sidebar(driver, "commits", -65).await?;
+            assert_sidebars(driver, false, true).await?;
+            drag_sidebar(driver, "commits", 65).await?;
+            assert_sidebars(driver, false, false).await?;
+            drag_sidebar(driver, "files", 65).await?;
+            assert_sidebars(driver, true, false).await?;
+            drag_sidebar(driver, "files", -65).await?;
+            assert_sidebars(driver, false, false).await?;
             second.forward()?;
             support::wait_for_active_diff(driver, "shell-beta", "alpha-one-shot-marker").await?;
             assert_sidebars(driver, false, false).await?;
@@ -40,8 +48,8 @@ async fn desktop_layout_window_and_scale_survive_restart() -> Result<()> {
             driver.set_window_rect(0, 0, 1280, 900).await?;
             open_settings(driver).await?;
             select_value(driver, "settings-ui-scale", "200").await?;
-            support::click(driver, By::Css("button[type='submit']")).await?;
             wait_for_viewport_width(driver, 640.0).await?;
+            support::evidence::capture(driver, "settings-scale-200", true).await?;
 
             session.restart().await?;
             let driver = session.driver();
@@ -165,5 +173,19 @@ fn native_drag(x: f64, y: f64) -> Result<()> {
         "native pointer input failed: {}",
         String::from_utf8_lossy(&result.stderr)
     );
+    Ok(())
+}
+
+async fn drag_sidebar(driver: &WebDriver, sidebar: &str, distance: i64) -> Result<()> {
+    let edge =
+        support::visible(driver, By::Css(format!("[data-sidebar-edge='{sidebar}']"))).await?;
+    driver
+        .action_chain()
+        .move_to_element_center(&edge)
+        .click_and_hold()
+        .move_by_offset(distance, 0)
+        .release()
+        .perform()
+        .await?;
     Ok(())
 }

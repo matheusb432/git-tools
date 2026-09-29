@@ -33,7 +33,7 @@ pub(crate) fn DateDisplayTime(
     timestamp: MachineTimestamp,
     #[props(default)] class: String,
 ) -> Element {
-    let DateDisplayText { text, exact, .. } =
+    let DateDisplayText { text, exact } =
         use_date_display().show(&timestamp, crate::shared::i18n::use_language());
     rsx! {
         time { class, datetime: timestamp.to_string(), title: exact, "{text}" }
@@ -41,18 +41,16 @@ pub(crate) fn DateDisplayTime(
 }
 
 /// A timestamp formatted for display.
-pub(crate) struct DateDisplayText {
+struct DateDisplayText {
     /// The date in the configured format.
-    pub(crate) text: String,
+    text: String,
     /// The exact time and its offset, for a tooltip.
-    pub(crate) exact: String,
-    /// Whether `text` states an age, such as `3 hours ago`, instead of a date.
-    pub(crate) relative: bool,
+    exact: String,
 }
 
 /// Formats timestamps for the component that called [`use_date_display`].
 #[derive(Clone, Copy)]
-pub(crate) enum DateDisplay {
+enum DateDisplay {
     /// ISO in each timestamp's recorded offset.
     Recorded,
     /// The configured format in the local time zone.
@@ -60,7 +58,7 @@ pub(crate) enum DateDisplay {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ViewerDateDisplay {
+struct ViewerDateDisplay {
     format: ReadSignal<ViewerDateFormat>,
     now: ReadSignal<jiff::Timestamp>,
 }
@@ -82,23 +80,18 @@ pub(crate) fn use_date_display_provider(format: ReadSignal<ViewerDateFormat>) {
 }
 
 /// Returns the date display of the calling component's tree.
-pub(crate) fn use_date_display() -> DateDisplay {
+fn use_date_display() -> DateDisplay {
     try_use_context::<ViewerDateDisplay>().map_or(DateDisplay::Recorded, DateDisplay::Viewer)
 }
 
 impl DateDisplay {
     /// Formats `timestamp`, subscribing the calling component to the format
     /// and, for relative dates, to the clock.
-    pub(crate) fn show(
-        self,
-        timestamp: &MachineTimestamp,
-        language: ViewerLanguage,
-    ) -> DateDisplayText {
+    fn show(self, timestamp: &MachineTimestamp, language: ViewerLanguage) -> DateDisplayText {
         let Self::Viewer(viewer) = self else {
             return DateDisplayText {
                 text: timestamp.display_minute(),
                 exact: timestamp.to_string(),
-                relative: false,
             };
         };
         let instant = timestamp.instant();
@@ -114,15 +107,10 @@ impl DateDisplay {
             })
             .flatten();
         match relative {
-            Some(text) => DateDisplayText {
-                text,
-                exact,
-                relative: true,
-            },
+            Some(text) => DateDisplayText { text, exact },
             None => DateDisplayText {
                 text: absolute_date_text(local.datetime(), format),
                 exact,
-                relative: false,
             },
         }
     }

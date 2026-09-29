@@ -1,26 +1,24 @@
 pub(crate) mod cache;
-mod card;
 mod comparison_action;
 mod comparison_editor;
 mod import_dialog;
 mod loading;
+mod preferences;
 mod presentation;
 mod status;
 mod table;
-mod view_mode;
 
 pub(crate) use comparison_editor::{ComparisonBranchEditor, ComparisonEditorTrigger};
 use dioxus::prelude::*;
-use gtl_models::settings::{ProjectsPageSize, ProjectsSort, ProjectsViewMode};
+use gtl_models::settings::{ProjectsPageSize, ProjectsSort};
 use gtl_wire::viewer::{ViewerHistoryFilter, projects::ViewerProjectsCursor};
 use lucide_dioxus::History;
 
 use self::{
-    card::ProjectCard,
     import_dialog::ImportProjectsDialog,
     loading::{ProjectsActivity, use_projects, use_projects_active},
+    preferences::use_projects_presentation,
     table::ProjectTable,
-    view_mode::{ProjectsViewToggle, use_projects_presentation},
 };
 use crate::{
     app::application_layout::ViewerContext,
@@ -29,15 +27,13 @@ use crate::{
         failure_notice::client_error_message,
         i18n::{t, use_language},
         ui::{
-            Button, ButtonSize, ButtonVariant, PageNotice, PanelDialog, ScrollArea, Select,
-            SelectOption, Skeleton,
+            Button, ButtonSize, ButtonVariant, LoadingSpinner, PageNotice, PanelDialog, ScrollArea,
+            Select, SelectOption,
             pagination::{PageNavigation, PagePosition, Pagination},
             select::SelectVariant,
         },
     },
 };
-
-const PROJECT_GRID_CLASSES: &str = "projects-grid gap-4";
 
 #[component]
 pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
@@ -91,7 +87,6 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
     let items = result.and_then(|result| result.as_ref().ok());
     let error = result.and_then(|result| result.as_ref().err()).cloned();
     let loading_page = (projects.loading_page)();
-    let mode = (presentation.mode)();
     let disabled = !viewer.actions_enabled();
     let page_size = (presentation.page_size)();
     let sort = (presentation.sort)();
@@ -133,7 +128,6 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         {t!(language, "projects-add")}
                     }
                     SnapshotHistoryButton {}
-                    ProjectsViewToggle { presentation }
                 }
             }
             if let Some((filter, trigger)) = snapshots() {
@@ -186,10 +180,11 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                             }
                         },
                         None => rsx! {
-                            div { class: PROJECT_GRID_CLASSES, aria_label: t!(language, "projects-loading"),
-                                for index in 0..6 {
-                                    Skeleton { key: "{index}", class: "h-52 rounded-panel" }
-                                }
+                            div {
+                                class: "flex min-h-64 items-center justify-center",
+                                role: "status",
+                                aria_label: t!(language, "projects-loading"),
+                                LoadingSpinner {}
                             }
                         },
                         Some([]) => rsx! {
@@ -199,22 +194,13 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                                 message: t!(language, "projects-empty-message"),
                             }
                         },
-                        Some(items) if mode == ProjectsViewMode::Table => rsx! {
+                        Some(items) => rsx! {
                             ProjectTable {
                                 projects: items.to_vec(),
                                 disabled,
                                 sort,
                                 sorting_disabled: (presentation.pending)() || loading_page,
                                 onsort: sort_projects,
-                            }
-                        },
-                        Some(items) => rsx! {
-                            div {
-                                class: PROJECT_GRID_CLASSES,
-                                aria_label: t!(language, "projects-table-caption"),
-                                for project in items.iter() {
-                                    ProjectCard { key: "{project.id}", project: project.clone(), disabled }
-                                }
                             }
                         },
                     }
@@ -328,3 +314,5 @@ fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Ele
         }
     }
 }
+
+mod push_confirmation_setting;

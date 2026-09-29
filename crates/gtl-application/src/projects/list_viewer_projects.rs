@@ -40,7 +40,7 @@ pub fn execute(
     };
     let mut projects = Vec::new();
     while let Some(row) = rows.next()? {
-        projects.push(read_project(row, connection)?);
+        projects.push(read_project(row)?);
     }
     if reverse {
         projects.reverse();
@@ -71,7 +71,7 @@ pub fn status_refresh_candidates(connection: &Connection) -> anyhow::Result<Vec<
     let mut rows = statement.query([gtl_models::projects::catalogue::PROJECTS_MAX])?;
     let mut projects = Vec::new();
     while let Some(row) = rows.next()? {
-        projects.push(read_project(row, connection)?);
+        projects.push(read_project(row)?);
     }
     Ok(projects)
 }
@@ -146,7 +146,7 @@ fn sorted_page(
     while let Some(row) = rows.next()? {
         let position: u32 = row.get(4)?;
         count_before = count_before.min(position - 1);
-        projects.push(read_project(row, connection)?);
+        projects.push(read_project(row)?);
     }
     if reverse {
         projects.reverse();
@@ -160,31 +160,16 @@ pub fn get_project(
 ) -> anyhow::Result<Option<ViewerProject>> {
     let mut statement = connection.prepare_cached(&format!("{PROJECT_SELECT} AND p.id = ?1"))?;
     let mut rows = statement.query([id.as_ref()])?;
-    rows.next()?
-        .map(|row| read_project(row, connection))
-        .transpose()
+    rows.next()?.map(read_project).transpose()
 }
 
-fn read_project(row: &Row<'_>, connection: &Connection) -> anyhow::Result<ViewerProject> {
-    use rusqlite::OptionalExtension as _;
-
+fn read_project(row: &Row<'_>) -> anyhow::Result<ViewerProject> {
     let source: ProjectDirectorySource = row.get::<_, String>(2)?.try_into()?;
     let path = source.resolve()?;
-    let rendered: Option<String> = connection
-        .query_row(
-            "SELECT rendered_at FROM project_render_recency WHERE source_value = ?1",
-            [path.to_string()],
-            |row| row.get(0),
-        )
-        .optional()?;
     Ok(ViewerProject {
         id: row.get::<_, String>(0)?.try_into()?,
         name: row.get::<_, String>(1)?.try_into()?,
         path,
         comparison_branch: row.get::<_, String>(3)?.try_into()?,
-        last_rendered_at: rendered
-            .map(TryInto::try_into)
-            .transpose()
-            .context("invalid project render timestamp")?,
     })
 }

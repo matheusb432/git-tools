@@ -29,7 +29,6 @@ pub struct RenderProjectDiff {
 /// The stored artifact plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderProjectDiffOk {
-    pub rendered_repositories: Vec<gtl_models::paths::RepositoryRoot>,
     pub placement: Option<PlacedArtifact>,
     pub notes: Vec<Note>,
 }
@@ -72,7 +71,6 @@ pub fn execute(
 
     if batch.views.is_empty() {
         return Ok(RenderProjectDiffOk {
-            rendered_repositories: batch.completed,
             placement: None,
             notes,
         });
@@ -103,7 +101,6 @@ pub fn execute(
     )));
     notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderProjectDiffOk {
-        rendered_repositories: batch.completed,
         placement: Some(placed),
         notes,
     })

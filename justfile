@@ -61,7 +61,7 @@ _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
 # Compare Criterion benchmarks against the local baseline. Use --update to replace it.
-[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|story-set-registry|user-settings|view-cache|viewer-render")]
+[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-mutations|app-state-record-render|grpc-requests|parser-syntax|story-set-registry|user-settings|view-cache|viewer-render")]
 [arg("case", help="Exact Criterion benchmark case")]
 [arg("update", long="update", value="--save-baseline local", help="Compare and replace the local baseline")]
 [arg("quick", long="quick", value="--quick", help="Stop once Criterion reaches statistical significance")]

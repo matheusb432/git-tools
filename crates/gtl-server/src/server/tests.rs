@@ -451,11 +451,6 @@ async fn viewer_edit_settings_preserves_false_updates_over_a_real_listener() -> 
                     gtl_wire::v1::projects_page_size_field_update::Operation::Update(30),
                 ),
             }),
-            projects_view: Some(gtl_wire::v1::ProjectsViewFieldUpdate {
-                operation: Some(gtl_wire::v1::projects_view_field_update::Operation::Update(
-                    gtl_wire::v1::ProjectsViewMode::Table as i32,
-                )),
-            }),
             push_confirmation_required: Some(BoolFieldUpdate {
                 operation: Some(bool_field_update::Operation::Update(false)),
             }),
@@ -466,10 +461,6 @@ async fn viewer_edit_settings_preserves_false_updates_over_a_real_listener() -> 
         .get_viewer_settings(GetViewerSettingsRequest {})
         .await?
         .into_inner();
-    assert_eq!(
-        settings.projects_view,
-        gtl_wire::v1::ProjectsViewMode::Table as i32
-    );
     assert_eq!(settings.projects_page_size, 30);
     assert_eq!(
         settings.projects_sort,

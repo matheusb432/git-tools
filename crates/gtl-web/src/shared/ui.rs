@@ -13,7 +13,6 @@ mod dialog;
 mod empty_notice;
 mod extension_selection;
 mod field_error;
-mod field_label;
 pub(crate) mod icon_popover;
 mod loading_spinner;
 mod menu_action;
@@ -47,14 +46,13 @@ pub(crate) use count_badge::CountBadge;
 pub(crate) use empty_notice::EmptyNotice;
 pub(crate) use extension_selection::{ExtensionSelectionAction, ExtensionSelectionInput};
 pub(crate) use field_error::FieldError;
-pub(crate) use field_label::FieldLabel;
 pub(crate) use icon_popover::IconPopover;
 pub(crate) use loading_spinner::LoadingSpinner;
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
 pub(crate) use navigation_bar::NavigationBar;
 pub(crate) use page_notice::PageNotice;
 pub(crate) use panel_dialog::PanelDialog;
-pub(crate) use scroll_area::{ScrollArea, ScrollAreaVariant};
+pub(crate) use scroll_area::ScrollArea;
 pub(crate) use search_panel::{SearchPanel, SearchPanelPlacement};
 pub(crate) use sectioned_surface::{
     SectionedSurface, SectionedSurfaceBody, SectionedSurfaceFooter, SectionedSurfaceHeader,
@@ -63,10 +61,7 @@ pub(crate) use select::{Select, SelectOption};
 pub(crate) use skeleton::Skeleton;
 pub(crate) use text_input::{TextInput, TextInputLabelVisibility};
 pub(crate) use toast::{ToastHandle, ToastHost, ToastKind, ToastText, use_toast};
-pub(crate) use viewer_tab::{
-    ViewerTabItem, ViewerTabOverflowMenu, ViewerTabRailMeasurementItem,
-    ViewerTabSelectionIndicator, viewer_tab_element_id,
-};
+pub(crate) use viewer_tab::{ViewerTabItem, ViewerTabSelectionIndicator, viewer_tab_element_id};
 #[cfg(feature = "component-preview")]
 pub(crate) use viewer_theme_picker::ViewerThemePicker;
 
@@ -78,3 +73,11 @@ pub(crate) mod menu_keyboard;
 
 mod inline_text_editor;
 pub(crate) use inline_text_editor::{InlineTextEditor, InlineTextSubmission};
+
+mod checkbox;
+mod radio;
+pub(crate) use checkbox::Checkbox;
+pub(crate) use radio::Radio;
+
+mod viewer_tab_rail;
+pub(crate) use viewer_tab_rail::ViewerTabRail;

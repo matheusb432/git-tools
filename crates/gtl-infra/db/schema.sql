@@ -20,11 +20,6 @@ CREATE TABLE project_groups (
     PRIMARY KEY ([project_id], [group_name])
 ) STRICT;
 
-CREATE TABLE project_render_recency (
-  source_value TEXT PRIMARY KEY,
-  rendered_at TEXT NOT NULL
-) STRICT;
-
 CREATE TABLE project_sources (
     [source_id] INTEGER PRIMARY KEY,
     [source_kind] TEXT NOT NULL,

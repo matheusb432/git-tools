@@ -226,7 +226,7 @@ viewer_request!(
 viewer_request!(
     get_push_availability,
     gtl_wire::viewer::ViewerViewIdentity,
-    gtl_wire::viewer::push::ViewerPushAvailability,
+    gtl_wire::viewer::push::ViewerPushState,
     get_push_availability
 );
 

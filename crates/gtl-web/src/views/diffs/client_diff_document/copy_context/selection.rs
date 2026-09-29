@@ -7,8 +7,12 @@ use gtl_wire::viewer::{
 };
 use wasm_bindgen::{JsCast as _, closure::Closure};
 
-use super::{ContextCopyStatus, ContextualizedCopy, SelectedDiffLines};
+use super::{CopyFormat, SelectedDiffCopy, SelectedDiffLines, SelectionCopyStatus};
 use crate::{
+    app::{
+        application_layout::{ViewerContext, ViewerShellLoad},
+        user_settings::UserSettings,
+    },
     entities::diffs::{ClientDiffWorkspace, viewer_server},
     shared::{
         browser,
@@ -33,6 +37,12 @@ struct Selection {
     old_side: bool,
 }
 
+#[derive(Clone, Copy)]
+struct CopyRequest {
+    selection: Selection,
+    format: CopyFormat,
+}
+
 impl Selection {
     fn rows(self, file: usize, count: usize) -> std::ops::Range<usize> {
         let start = if file == self.start.file {
@@ -54,16 +64,39 @@ pub(in crate::views::diffs::client_diff_document) fn use_diff_copy(
     workspace: ReadStore<ClientDiffWorkspace>,
 ) {
     let toast = use_toast();
-    let mut copy = use_action(move |selection: Selection| async move {
-        complete_copy(read_text(identity, workspace, selection).await, toast).await;
+    let settings = try_consume_context::<UserSettings>();
+    let viewer = try_consume_context::<ViewerContext>();
+    let mut copy = use_action(move |request: CopyRequest| async move {
+        complete_copy(read_text(identity, workspace, request).await, toast).await;
         Ok::<(), std::convert::Infallible>(())
     });
     use_effect(use_reactive((&identity,), move |_| copy.cancel()));
-    let defer = use_callback(move |selection| {
-        copy.call(selection);
+    let defer = use_callback(move |request| {
+        copy.call(request);
     });
     let callback = use_callback(move |event: web_sys::ClipboardEvent| {
-        handle_copy(&event, workspace, toast, defer);
+        let enabled = settings
+            .and_then(|settings| {
+                settings
+                    .selection
+                    .peek()
+                    .as_ref()
+                    .map(|selection| selection.copy_with_line_context)
+            })
+            .or_else(|| {
+                viewer.and_then(|viewer| match &*viewer.shell().peek() {
+                    ViewerShellLoad::Ready(shell) => Some(shell.preferences.copy_with_line_context),
+                    _ => None,
+                })
+            })
+            .unwrap_or(true);
+        handle_copy(
+            &event,
+            workspace,
+            toast,
+            defer,
+            CopyFormat::from_setting(enabled),
+        );
     });
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
         move || {
@@ -93,7 +126,7 @@ pub(in crate::views::diffs::client_diff_document) fn use_diff_copy(
 }
 
 async fn complete_copy(
-    result: Result<Option<ContextualizedCopy>, ViewerClientError>,
+    result: Result<Option<SelectedDiffCopy>, ViewerClientError>,
     toast: ToastHandle,
 ) {
     match result {
@@ -113,7 +146,8 @@ fn handle_copy(
     event: &web_sys::ClipboardEvent,
     workspace: ReadStore<ClientDiffWorkspace>,
     toast: ToastHandle,
-    defer: Callback<Selection>,
+    defer: Callback<CopyRequest>,
+    format: CopyFormat,
 ) {
     if event.default_prevented()
         || event
@@ -132,9 +166,12 @@ fn handle_copy(
     let Some(selection) = selection(&workspace.peek()) else {
         return;
     };
-    match cached_text(&workspace.peek(), selection) {
+    match cached_text(&workspace.peek(), selection, format) {
         Ok(Some(text)) => {
-            if selection.old_side && fully_mounted(selection) {
+            if matches!(format, CopyFormat::WithLineContext)
+                && selection.old_side
+                && fully_mounted(selection)
+            {
                 return;
             }
             if event
@@ -149,12 +186,12 @@ fn handle_copy(
         Err(()) => {
             event.prevent_default();
             toast.info(localized_toast(SelectionCopyMessage::Pending));
-            defer.call(selection);
+            defer.call(CopyRequest { selection, format });
         }
     }
 }
 
-fn copy_status_toast(status: ContextCopyStatus) -> ToastText {
+fn copy_status_toast(status: SelectionCopyStatus) -> ToastText {
     ToastText::localized(move |language| status.message(language))
 }
 
@@ -282,7 +319,8 @@ fn fully_mounted(selection: Selection) -> bool {
 fn cached_text(
     workspace: &ClientDiffWorkspace,
     selection: Selection,
-) -> Result<Option<ContextualizedCopy>, ()> {
+    format: CopyFormat,
+) -> Result<Option<SelectedDiffCopy>, ()> {
     let mut sections = Vec::new();
     for file_index in selection.start.file..=selection.end.file {
         let file = workspace.files.get(file_index).ok_or(())?;
@@ -291,14 +329,15 @@ fn cached_text(
             selection.rows(file_index, file.summary.row_count),
             selection.old_side,
         )?;
-        if let Some(text) = selected.with_context(
+        if let Some(text) = selected.format(
             &file.summary.path.to_string_lossy(),
             super::super::file::copy_comment_leader(&file.summary.path),
+            format,
         ) {
             sections.push(text);
         }
     }
-    Ok(join_sections(sections))
+    Ok(join_sections(sections, format))
 }
 
 fn cached_lines(
@@ -318,9 +357,10 @@ fn cached_lines(
 async fn read_text(
     identity: ViewerViewIdentity,
     workspace: ReadStore<ClientDiffWorkspace>,
-    selection: Selection,
-) -> Result<Option<ContextualizedCopy>, ViewerClientError> {
+    request: CopyRequest,
+) -> Result<Option<SelectedDiffCopy>, ViewerClientError> {
     let mut sections = Vec::new();
+    let CopyRequest { selection, format } = request;
     for file_index in selection.start.file..=selection.end.file {
         let summary = workspace
             .peek()
@@ -331,14 +371,15 @@ async fn read_text(
             .clone();
         let rows = selection.rows(file_index, summary.row_count);
         let selected = read_lines(identity, summary.id.clone(), rows, selection.old_side).await?;
-        if let Some(text) = selected.with_context(
+        if let Some(text) = selected.format(
             &summary.path.to_string_lossy(),
             super::super::file::copy_comment_leader(&summary.path),
+            format,
         ) {
             sections.push(text);
         }
     }
-    Ok(join_sections(sections))
+    Ok(join_sections(sections, format))
 }
 
 async fn read_lines(
@@ -369,19 +410,48 @@ async fn read_lines(
     Ok(selected)
 }
 
-fn join_sections(mut sections: Vec<ContextualizedCopy>) -> Option<ContextualizedCopy> {
+fn join_sections(
+    mut sections: Vec<SelectedDiffCopy>,
+    format: CopyFormat,
+) -> Option<SelectedDiffCopy> {
     if sections.len() == 1 {
         return sections.pop();
     }
     if sections.is_empty() {
         return None;
     }
-    Some(ContextualizedCopy {
-        status: ContextCopyStatus::Files(sections.len()),
+    Some(SelectedDiffCopy {
+        status: match format {
+            CopyFormat::Plain => SelectionCopyStatus::Plain,
+            CopyFormat::WithLineContext => SelectionCopyStatus::Files(sections.len()),
+        },
         text: sections
             .into_iter()
             .map(|section| section.text)
             .collect::<Vec<_>>()
             .join("\n\n"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_copy_of_multiple_files_has_no_context_headers() {
+        let sections = ["first", "second"]
+            .into_iter()
+            .map(|text| SelectedDiffCopy {
+                text: text.to_owned(),
+                status: SelectionCopyStatus::Plain,
+            })
+            .collect();
+        assert_eq!(
+            join_sections(sections, CopyFormat::Plain),
+            Some(SelectedDiffCopy {
+                text: "first\n\nsecond".to_owned(),
+                status: SelectionCopyStatus::Plain,
+            })
+        );
+    }
 }

@@ -116,15 +116,6 @@ impl ProjectStatus {
             review,
         }
     }
-
-    pub(super) fn issue(&self) -> Option<&ProjectIssue> {
-        match self.review {
-            ProjectReview::ComparisonUnavailable
-            | ProjectReview::StatusUnavailable
-            | ProjectReview::Absent => self.ahead.issue().or_else(|| self.local.issue()),
-            ProjectReview::Loading | ProjectReview::Pending | ProjectReview::Clean => None,
-        }
-    }
 }
 
 fn upstream_signal(status: &RepositoryStatus) -> ProjectSignal {

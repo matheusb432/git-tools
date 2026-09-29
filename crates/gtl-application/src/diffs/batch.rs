@@ -23,7 +23,6 @@ pub struct RepoRef {
 /// The views collected from a batch render, plus how many were skipped.
 pub(crate) struct BatchBuild {
     pub views: Vec<View>,
-    pub completed: Vec<RepositoryRoot>,
     pub skipped: usize,
 }
 
@@ -41,13 +40,9 @@ pub(crate) fn render_batch(
 ) -> anyhow::Result<BatchBuild> {
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
-    let mut completed = Vec::new();
     for repo in repos {
         let filter = filters.extension_filter(&repo.top)?;
         let built = diff_computation::build(git, &repo.top, target, &filter, comparisons);
-        if built.is_ok() {
-            completed.push(repo.top.clone());
-        }
         if let Err(error) = &built
             && error.is_unavailable()
         {
@@ -81,11 +76,7 @@ pub(crate) fn render_batch(
             Err(_) => skipped += 1,
         }
     }
-    Ok(BatchBuild {
-        views,
-        completed,
-        skipped,
-    })
+    Ok(BatchBuild { views, skipped })
 }
 
 /// `{YYYY-MM-DD} {label}`, dated from `clock`.

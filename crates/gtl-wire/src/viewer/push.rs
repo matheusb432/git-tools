@@ -31,6 +31,7 @@ pub struct ViewerPushPreview {
     pub remote_url: RemoteUrl,
     pub commit: CommitId,
     pub count: u64,
+    pub no_confirmation: bool,
     pub command: String,
     pub command_arguments: Vec<ViewerPushCommandArgument>,
 }
@@ -70,4 +71,10 @@ pub enum ViewerPushAvailability {
     Blocked {
         failure: Failure,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerPushState {
+    pub availability: ViewerPushAvailability,
+    pub snapshot_has_unpushed_commits: Option<bool>,
 }

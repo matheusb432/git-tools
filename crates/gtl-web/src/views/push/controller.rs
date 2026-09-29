@@ -2,19 +2,24 @@ use std::{collections::HashMap, time::Duration};
 
 use dioxus::{core::spawn_forever, prelude::*};
 use gtl_models::{
-    failure::Failure, paths::RepositoryRoot, settings::ViewerLanguage, viewer::ViewerTabId,
+    failure::Failure,
+    paths::RepositoryRoot,
+    settings::ViewerLanguage,
+    viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
 };
 use gtl_wire::viewer::push::{
     CreateViewerPush, ViewerPushPreview, ViewerPushRequest, ViewerPushStatus,
 };
+use wasm_bindgen::JsCast as _;
 
 use crate::{
-    app::application_layout::ViewerContext,
+    app::application_layout::{ViewerContext, ViewerShellLoad},
     entities::diffs::viewer_server,
     shared::{
         browser,
         failure_notice::client_error_message,
         i18n::{t, use_language},
+        keyboard::native_keyboard_event_matches,
         ui::{
             AlertDialog, AlertDialogSize, Button, ButtonSize, ButtonState, ButtonVariant,
             ToastHandle, ToastText, use_toast,
@@ -130,6 +135,7 @@ pub(crate) fn use_push_provider() {
         viewer,
         toast,
     });
+    super::availability::use_view_push_status_provider();
 }
 
 impl PushController {
@@ -366,14 +372,24 @@ fn push_button_presentation(
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq)]
+pub(crate) enum PushButtonPlacement {
+    #[default]
+    Header,
+    ReviewDock,
+}
+
 #[component]
 pub(crate) fn PushButton(
     id: String,
     source: CreateViewerPush,
     #[props(default)] disabled: bool,
     #[props(default)] icon_only: bool,
+    #[props(default)] placement: PushButtonPlacement,
     title: Option<String>,
 ) -> Element {
+    let language = use_language();
+    let shortcut = push_shortcut_hint(use_context::<ViewerContext>(), &source);
     let (presentation, activate) = use_push_trigger(source, disabled, title);
     let PushButtonPresentation {
         label,
@@ -381,16 +397,28 @@ pub(crate) fn PushButton(
         state,
         unresolved,
     } = presentation;
+    let visible_label = if placement == PushButtonPlacement::ReviewDock {
+        if unresolved {
+            t!(language, "review-push-check")
+        } else {
+            t!(language, "review-push")
+        }
+    } else {
+        label.clone()
+    };
     let trigger = id.clone();
     rsx! {
         Button {
             id,
-            size: if icon_only { ButtonSize::IconSmall } else { ButtonSize::Small },
+            size: if placement == PushButtonPlacement::ReviewDock { ButtonSize::Medium } else if icon_only { ButtonSize::IconSmall } else { ButtonSize::Small },
             variant: ButtonVariant::Accent,
-            class: "mobile:size-11 mobile:p-0",
+            class: if placement == PushButtonPlacement::ReviewDock { "review-push-action" } else { "mobile:size-11 mobile:p-0" },
             state,
             aria_label: label.clone(),
-            title,
+            title: shortcut
+                .as_ref()
+                .map_or_else(|| title.clone(), |(display, _)| format!("{title} ({display})")),
+            aria_keyshortcuts: shortcut.map(|(_, aria)| aria),
             icon: rsx! {
                 if unresolved {
                     lucide_dioxus::RefreshCw { size: 14 }
@@ -400,7 +428,9 @@ pub(crate) fn PushButton(
             },
             onclick: move |_| activate.call(trigger.clone()),
             if !icon_only {
-                span { class: "mobile:hidden", "{label}" }
+                span { class: if placement == PushButtonPlacement::ReviewDock { "" } else { "mobile:hidden" },
+                    "{visible_label}"
+                }
             }
         }
     }
@@ -433,6 +463,88 @@ fn use_push_trigger(
     (presentation, activate)
 }
 
+pub(crate) fn use_diff_push_shortcut(source: CreateViewerPush, disabled: bool) {
+    let viewer = use_context::<ViewerContext>();
+    let (presentation, activate) = use_push_trigger(source, disabled, None);
+    let state = presentation.state;
+    let onkeydown = use_callback(move |event: web_sys::KeyboardEvent| {
+        if event.default_prevented() || event.is_composing() {
+            return;
+        }
+        let keybindings = viewer.shell().with(|shell| match shell {
+            ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
+            _ => ViewerKeybindings::default(),
+        });
+        if !native_keyboard_event_matches(&event, keybindings, ViewerKeybindingAction::PushDiff) {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        if document
+            .query_selector("dialog[open]")
+            .ok()
+            .flatten()
+            .is_some()
+            || document.active_element().is_some_and(|element| {
+                element
+                    .closest(
+                        "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some()
+            })
+        {
+            return;
+        }
+        event.prevent_default();
+        event.stop_immediate_propagation();
+        if event.repeat() {
+            return;
+        }
+        let menu = document
+            .query_selector(".viewer-tab-context-menu:popover-open")
+            .ok()
+            .flatten();
+        let aria = keybindings.aria_keyshortcuts(ViewerKeybindingAction::PushDiff);
+        let menu_action = menu.as_ref().and_then(|menu| {
+            menu.query_selector(&format!("[aria-keyshortcuts='{aria}']:enabled"))
+                .ok()
+                .flatten()
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        });
+        if let Some(action) = menu_action {
+            action.click();
+        } else if menu.is_none() && state == ButtonState::Enabled {
+            activate.call("review-push-trigger".to_owned());
+        }
+    });
+    browser::use_window_keydown(move |event| onkeydown.call(event));
+}
+
+fn push_shortcut_hint(
+    viewer: ViewerContext,
+    source: &CreateViewerPush,
+) -> Option<(String, String)> {
+    if !matches!(source, CreateViewerPush::View { .. }) {
+        return None;
+    }
+    let keybindings = viewer.shell().with(|shell| match shell {
+        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
+        _ => ViewerKeybindings::default(),
+    });
+    let display = keybindings
+        .display_keys(ViewerKeybindingAction::PushDiff)
+        .map(|key| key.to_string())
+        .collect::<Vec<_>>()
+        .join("+");
+    Some((
+        display,
+        keybindings.aria_keyshortcuts(ViewerKeybindingAction::PushDiff),
+    ))
+}
+
 #[component]
 pub(super) fn PushMenuAction(
     source: CreateViewerPush,
@@ -441,6 +553,7 @@ pub(super) fn PushMenuAction(
     menu_id: String,
     trigger_id: String,
 ) -> Element {
+    let shortcut = push_shortcut_hint(use_context::<ViewerContext>(), &source);
     let (presentation, activate) = use_push_trigger(source, disabled, Some(title));
     let PushButtonPresentation {
         label,
@@ -456,7 +569,10 @@ pub(super) fn PushMenuAction(
             role: "menuitem",
             tabindex: "-1",
             state,
-            title,
+            title: shortcut
+                .as_ref()
+                .map_or_else(|| title.clone(), |(display, _)| format!("{title} ({display})")),
+            aria_keyshortcuts: shortcut.as_ref().map(|(_, aria)| aria.clone()),
             icon: rsx! {
                 span { class: "inline-flex text-acc", aria_hidden: "true",
                     if unresolved {
@@ -470,7 +586,10 @@ pub(super) fn PushMenuAction(
                 browser::hide_popover(&menu_id);
                 activate.call(trigger_id.clone());
             },
-            "{label}"
+            span { "{label}" }
+            if let Some((display, _)) = shortcut {
+                span { class: "ml-auto text-ink-3", aria_hidden: "true", "{display}" }
+            }
         }
     }
 }
@@ -534,6 +653,7 @@ async fn prepare(controller: &PushController, ticket: u64, source: CreateViewerP
     .await;
     match result {
         Ok((request, ViewerPushStatus::Review(preview))) => {
+            let no_confirmation = preview.no_confirmation;
             controller.set_dialog_phase(
                 ticket,
                 PushPhase::Review {
@@ -541,6 +661,9 @@ async fn prepare(controller: &PushController, ticket: u64, source: CreateViewerP
                     preview: Box::new(preview),
                 },
             );
+            if no_confirmation && controller.current_dialog(ticket) {
+                (*controller).confirm();
+            }
         }
         Ok((_, ViewerPushStatus::Failed { failure })) => {
             controller.finish_dialog(ticket, PushReport::Failed(failure));

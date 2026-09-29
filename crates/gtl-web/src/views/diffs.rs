@@ -8,7 +8,6 @@ mod line_changes;
 pub(crate) mod presentation;
 pub(crate) use presentation::use_diff_presentation_provider;
 pub(crate) mod project_diff;
-mod search_keybindings;
 
 pub(crate) use client_diff_document::ClientDiffDocument;
 pub(crate) use diff_history::SnapshotHistory;

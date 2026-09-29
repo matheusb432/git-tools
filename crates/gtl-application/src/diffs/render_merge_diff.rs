@@ -38,7 +38,6 @@ pub struct RenderMergeDiff {
 /// The stored artifact plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderMergeDiffOk {
-    pub rendered_repositories: Vec<gtl_models::paths::RepositoryRoot>,
     pub placement: PlacedArtifact,
     pub notes: Vec<Note>,
 }
@@ -121,7 +120,6 @@ pub fn execute(
     )));
     notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderMergeDiffOk {
-        rendered_repositories: vec![computed.top.clone()],
         placement: placed,
         notes,
     })

@@ -9,7 +9,6 @@ use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 use crate::{
     history::persistence::{LabelPartColumns, RecipeColumns},
     ports::Clock,
-    projects::record_project_render,
     recipes::{Recipe, RecipeLabelParts},
 };
 
@@ -195,7 +194,7 @@ fn start_render(
                 ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              RETURNING id",
         )?
-        .query_row(
+        .query_one(
             params![
                 source_id,
                 columns.operation,
@@ -210,9 +209,10 @@ fn start_render(
             ],
             |row| row.get(0),
         )?;
+    let render_id = RenderHistoryId::try_new(render_id).map_err(anyhow::Error::from)?;
     prune_recent_renders(&transaction)?;
     transaction.commit()?;
-    RenderHistoryId::try_new(render_id).map_err(anyhow::Error::from)
+    Ok(render_id)
 }
 
 fn touch_render_source(
@@ -229,7 +229,7 @@ fn touch_render_source(
              ON CONFLICT (kind, value) DO UPDATE SET updated_at = excluded.created_at
              RETURNING id",
         )?
-        .query_row(
+        .query_one(
             params![
                 columns.source_kind,
                 columns.source_value,
@@ -276,32 +276,8 @@ pub fn succeed(
     let transaction = connection.transaction()?;
     let rendered_at = pending_rendered_at(&transaction, render_id)?;
     let source_id = touch_render_source(&transaction, &columns, &rendered_at)?;
-    let duplicate_id = transaction
-        .query_row(
-            "SELECT id FROM recent_renders
-             WHERE id != ?1
-               AND render_status = 'success'
-               AND source_id = ?2
-               AND repo_name = ?3
-               AND pinned_base IS ?4
-               AND pinned_head IS ?5",
-            params![
-                i64::from(render_id),
-                source_id,
-                request.repo_name.as_str(),
-                columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
-                columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
-            ],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?;
-    if duplicate_id.is_some() {
-        transaction.execute(
-            "DELETE FROM recent_renders WHERE id = ?1 AND render_status = 'pending'",
-            [i64::from(render_id)],
-        )?;
-    } else {
-        let updated = transaction.execute(
+    let updated = transaction
+        .prepare_cached(
             "UPDATE recent_renders
              SET source_id = ?2,
                  operation_id = (SELECT id FROM render_operations WHERE name = ?3),
@@ -317,7 +293,10 @@ pub fn succeed(
                  merge_upstream = ?13,
                  render_status = ?14,
                  comparison_name = ?15
-             WHERE id = ?1 AND render_status = 'pending'",
+             WHERE id = ?1 AND render_status = 'pending'
+             RETURNING id",
+        )?
+        .query_one(
             params![
                 i64::from(render_id),
                 source_id,
@@ -335,23 +314,48 @@ pub fn succeed(
                 RenderStatus::Success.as_str(),
                 request.comparison_name.as_ref().map(AsRef::<str>::as_ref),
             ],
-        )?;
-        if updated != 1 {
+            |row| row.get::<_, i64>(0),
+        );
+    let completed_id = match updated {
+        Ok(id) => id,
+        Err(error @ rusqlite::Error::SqliteFailure(code, _))
+            if code.code == rusqlite::ErrorCode::ConstraintViolation
+                && !transaction.is_autocommit() =>
+        {
+            // A duplicate keeps its original metadata, including when the new metadata is invalid.
+            let id = transaction
+                .prepare_cached(
+                    "SELECT id FROM recent_renders
+                 WHERE id != ?1 AND render_status = 'success'
+                   AND source_id = ?2 AND repo_name = ?3
+                   AND pinned_base IS ?4 AND pinned_head IS ?5",
+                )?
+                .query_one(
+                    params![
+                        i64::from(render_id),
+                        source_id,
+                        request.repo_name.as_str(),
+                        columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
+                        columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
+                    ],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .ok_or(error)?;
+            transaction.execute(
+                "DELETE FROM recent_renders WHERE id = ?1 AND render_status = 'pending'",
+                [i64::from(render_id)],
+            )?;
+            id
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
             return Err(anyhow::anyhow!("pending render {render_id} was not updated").into());
         }
-    }
-    let crate::recipes::RecipeSource::LocalRepo(path) = &request.recipe.source;
-    record_project_render::execute(
-        &crate::projects::record_project_render::RecordProjectRender {
-            path: path.clone(),
-            rendered_at: rendered_at.clone(),
-        },
-        &transaction,
-    )?;
+        Err(error) => return Err(error.into()),
+    };
+    let completed_id = RenderHistoryId::try_new(completed_id).map_err(anyhow::Error::from)?;
     transaction.commit()?;
-    duplicate_id.map_or(Ok(render_id), |id| {
-        RenderHistoryId::try_new(id).map_err(|error| RecordRenderError::Unexpected(error.into()))
-    })
+    Ok(completed_id)
 }
 
 fn pending_rendered_at(
@@ -386,15 +390,20 @@ pub fn fail(
     connection: &mut Connection,
 ) -> Result<(), RecordRenderError> {
     let transaction = connection.transaction()?;
-    pending_rendered_at(&transaction, render_id)?;
-    let updated = transaction.execute(
-        "UPDATE recent_renders SET render_status = ?2
-         WHERE id = ?1 AND render_status = 'pending'",
-        params![i64::from(render_id), RenderStatus::Error.as_str()],
-    )?;
-    if updated != 1 {
+    let rendered_at = transaction
+        .query_one(
+            "UPDATE recent_renders SET render_status = ?2
+             WHERE id = ?1 AND render_status = 'pending'
+             RETURNING rendered_at",
+            params![i64::from(render_id), RenderStatus::Error.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(rendered_at) = rendered_at else {
+        pending_rendered_at(&transaction, render_id)?;
         return Err(anyhow::anyhow!("pending render {render_id} was not updated").into());
-    }
+    };
+    MachineTimestamp::try_from(rendered_at).map_err(anyhow::Error::from)?;
     let mut statement = transaction.prepare_cached(
         "INSERT INTO render_errors (recent_render_id, error_code, error_detail)
          VALUES (?1, ?2, ?3)",
@@ -534,6 +543,26 @@ mod tests {
     }
 
     #[test]
+    fn invalid_generated_render_identity_rolls_back_the_insert() {
+        let mut connection = store_test();
+        crate::history::persistence::seed_recent_render(&connection, -2, "legacy");
+        let result = record_render::start(
+            &StartRender::new(recipe("/repos/other")),
+            &mut connection,
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+        );
+        assert!(result.is_err());
+        let renders: i64 = connection
+            .query_row("SELECT count(*) FROM recent_renders", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(renders, 1);
+        assert_eq!(
+            render_sources(&connection),
+            [("/repos/gt".to_owned(), None)]
+        );
+    }
+
+    #[test]
     fn pending_render_transitions_to_success_without_changing_identity() {
         let mut connection = store_test();
         let command = command(4);
@@ -588,6 +617,7 @@ mod tests {
 
         record_render::fail(render_id, &failure, &mut connection).unwrap();
 
+        assert!(record_render::fail(render_id, &failure, &mut connection).is_err());
         assert_eq!(render_status(&connection, render_id), "error");
         let errors = connection
             .prepare(
@@ -615,6 +645,60 @@ mod tests {
             ]
         );
         assert!(list_recent(&connection).is_empty());
+    }
+
+    #[test]
+    fn render_failure_rejects_missing_or_completed_attempts() {
+        let mut connection = store_test();
+        let failure = RenderFailure::new(RenderErrorCode::RenderFailed, "render failed");
+        let missing_id = RenderHistoryId::try_new(1).unwrap();
+        assert!(record_render::fail(missing_id, &failure, &mut connection).is_err());
+        let request = command(1);
+        let render_id = record_render::start(
+            &StartRender::new(request.recipe.clone()),
+            &mut connection,
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+        )
+        .unwrap();
+        record_render::succeed(render_id, &request, &mut connection).unwrap();
+        assert!(record_render::fail(render_id, &failure, &mut connection).is_err());
+        assert_eq!(render_status(&connection, render_id), "success");
+        let errors: i64 = connection
+            .query_row("SELECT count(*) FROM render_errors", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
+    fn render_failure_rolls_back_invalid_timestamp_or_diagnostic_insert() {
+        for invalid_timestamp in [true, false] {
+            let mut connection = store_test();
+            let render_id = record_render::start(
+                &StartRender::new(recipe("/repos/gt")),
+                &mut connection,
+                &FixedClock::from_raw("2026-07-07T00:00:00Z"),
+            )
+            .unwrap();
+            if invalid_timestamp {
+                connection
+                    .execute("UPDATE recent_renders SET rendered_at = 'invalid'", [])
+                    .unwrap();
+            } else {
+                connection
+                    .execute_batch(
+                        "CREATE TRIGGER reject_render_error BEFORE INSERT ON render_errors
+                    BEGIN SELECT RAISE(ABORT, 'test diagnostic failure'); END;",
+                    )
+                    .unwrap();
+            }
+            let failure = RenderFailure::new(RenderErrorCode::RenderFailed, "render failed");
+            assert!(record_render::fail(render_id, &failure, &mut connection).is_err());
+            assert_eq!(render_status(&connection, render_id), "pending");
+            let errors: i64 = connection
+                .query_row("SELECT count(*) FROM render_errors", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(errors, 0);
+        }
     }
 
     #[test]
@@ -699,17 +783,73 @@ mod tests {
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
         .unwrap();
-        record_render::execute(
-            &repeated,
+        let original_id = list_recent(&connection)[0].id;
+        let pending_id = record_render::start(
+            &StartRender::new(repeated.recipe.clone()),
             &mut connection,
             &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
         .unwrap();
+        let completed_id = record_render::succeed(pending_id, &repeated, &mut connection).unwrap();
+        assert_eq!(completed_id, original_id);
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].label_parts, unpushed_commits(1));
         assert_eq!(renders[0].rendered_at.as_ref(), "2026-07-07T00:00:00Z");
+    }
+
+    #[test]
+    fn render_success_propagates_unrelated_unique_constraints() {
+        let mut connection = store_test();
+        connection
+            .execute_batch(
+                "CREATE UNIQUE INDEX test_unique_success_name ON recent_renders (repo_name)
+             WHERE render_status = 'success';",
+            )
+            .unwrap();
+        let first = command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head"));
+        let second = command_for_recipe(2, "gt", pinned_recipe("/repos/gt", "base", "other-head"));
+        let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
+        record_render::execute(&first, &mut connection, &clock).unwrap();
+        let pending_id = record_render::start(
+            &StartRender::new(second.recipe.clone()),
+            &mut connection,
+            &clock,
+        )
+        .unwrap();
+        let RecordRenderError::Unexpected(error) =
+            record_render::succeed(pending_id, &second, &mut connection).unwrap_err();
+        assert!(
+            matches!(error.downcast_ref::<rusqlite::Error>(), Some(rusqlite::Error::SqliteFailure(code, _)) if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE)
+        );
+        assert_eq!(render_status(&connection, pending_id), "pending");
+        let renders = list_recent(&connection);
+        assert_eq!(renders.len(), 1);
+        assert_eq!(renders[0].label_parts, unpushed_commits(1));
+    }
+
+    #[test]
+    fn duplicate_render_keeps_original_metadata_when_replacement_is_invalid() {
+        let mut connection = store_test();
+        let first = command(1);
+        let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
+        record_render::execute(&first, &mut connection, &clock).unwrap();
+        let original = list_recent(&connection).remove(0);
+        let mut repeated = first.clone();
+        repeated.label_parts = RecipeLabelParts::Merge {
+            branch: gtl_models::git::GitHead::Detached,
+            upstream: "main".try_into().unwrap(),
+        };
+        let pending_id = record_render::start(
+            &StartRender::new(repeated.recipe.clone()),
+            &mut connection,
+            &clock,
+        )
+        .unwrap();
+        let completed_id = record_render::succeed(pending_id, &repeated, &mut connection).unwrap();
+        assert_eq!(completed_id, original.id);
+        assert_eq!(list_recent(&connection), [original]);
     }
 
     #[test]

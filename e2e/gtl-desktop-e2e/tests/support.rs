@@ -218,17 +218,14 @@ async fn probe_active_diff(
     marker: &str,
 ) -> Result<Option<()>> {
     let active_tabs = driver
-        .find_all(By::Css(format!(
-            "[role='tab'][aria-selected='true'], {}",
-            gtl_web_contracts::test_ids::VIEWER_TAB_OVERFLOW_TRIGGER.selector()
-        )))
+        .find_all(By::Css("[role='tab'][aria-selected='true']"))
         .await?;
     let Some(active_tab) = active_tabs.into_iter().next() else {
         return Ok(None);
     };
-    let title = active_tab.attr("title").await?.unwrap_or_default();
+    let label = active_tab.prop("textContent").await?.unwrap_or_default();
     if !active_tab.is_displayed().await?
-        || !title.contains(repository)
+        || !label.contains(repository)
         || active_tab.attr("aria-busy").await?.as_deref() == Some("true")
     {
         return Ok(None);

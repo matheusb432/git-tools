@@ -1,4 +1,8 @@
 @layer components {
+  .viewer-tab-rail { @apply h-9 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain; }
+  .viewer-tab-rail[data-overflow-left="true"] { mask-image: linear-gradient(to right, transparent, black 0.75rem); }
+  .viewer-tab-rail[data-overflow-right="true"] { mask-image: linear-gradient(to left, transparent, black 0.75rem); }
+  .viewer-tab-rail[data-overflow-left="true"][data-overflow-right="true"] { mask-image: linear-gradient(to right, transparent, black 0.75rem, black calc(100% - 0.75rem), transparent); }
   .viewer-tab {
     @apply relative flex h-9 min-w-24 max-w-80 shrink-0 select-none items-center duration-[160ms] ease-out motion-reduce:transition-none;
   }
@@ -9,10 +13,10 @@
   .viewer-tab[data-drag-state="dragging"] { @apply opacity-0; }
 
   .viewer-tab-trigger {
-    @apply flex h-full min-w-0 flex-1 items-center gap-1 border-0 bg-transparent pl-1.5 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
+    @apply flex h-full min-w-0 flex-1 items-center gap-1 border-0 bg-transparent pl-1.5 text-left text-inherit focus-visible:focus-outline focus-visible:-outline-offset-2;
   }
-  .viewer-tab-trigger[data-reorderable="true"] { @apply touch-none cursor-default; }
-  .viewer-tab-trigger[data-reorderable="false"] { @apply cursor-default; }
+  .viewer-tab-trigger[data-reorderable="true"] { @apply touch-pan-x cursor-pointer; }
+  .viewer-tab-trigger[data-reorderable="false"] { @apply cursor-pointer; }
   .viewer-tab-label {
     @apply min-w-0 overflow-hidden whitespace-nowrap pr-8;
     mask-image: linear-gradient(to right, black calc(100% - 2rem), transparent calc(100% - 1.25rem));
@@ -20,7 +24,7 @@
   .viewer-tab-editing { @apply pr-7; }
 
   .viewer-tab-pinned {
-    @apply relative flex size-9 shrink-0 cursor-default select-none items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
+    @apply relative flex size-9 shrink-0 cursor-pointer select-none items-center justify-center focus-visible:focus-outline focus-visible:-outline-offset-2;
   }
   .viewer-tab-pinned[aria-current="page"] { @apply bg-surface-2 text-ink; }
   .viewer-tab-pinned:not([aria-current="page"]) { @apply bg-sunk text-ink-2 hover:bg-surface-2 hover:text-ink; }
@@ -31,35 +35,18 @@
   .viewer-tab-selection-indicator[data-active="true"] { @apply opacity-100 transition-opacity ease-out motion-reduce:transition-none; }
   .viewer-tab-selection-indicator[data-active="false"] { @apply opacity-0; }
 
-  .viewer-tab-close { @apply relative mr-0.5 flex-none text-ink-2 hover:bg-line hover:text-ink focus-visible:bg-line focus-visible:text-ink; }
+  .viewer-tab-close { @apply relative mr-0.5 flex-none text-ink-2; }
+  .viewer-tab-close-surface { @apply pointer-events-none absolute inset-0 m-auto size-5 rounded-full bg-[#c1121f] opacity-0 transition-opacity duration-100 ease-out group-hover/viewer-tab-close:opacity-100 group-focus-visible/viewer-tab-close:opacity-100 motion-reduce:transition-none; }
+  .viewer-tab-close-icon { @apply pointer-events-none absolute inset-0 z-2 grid place-items-center group-hover/viewer-tab-close:text-white group-focus-visible/viewer-tab-close:text-white; }
   .viewer-tab > .viewer-tab-close,
   .viewer-tab > .viewer-tab-pin { @apply absolute right-0.5 top-1/2 m-0 -translate-y-1/2; }
 
-  .viewer-tab-overflow { @apply flex flex-1 items-end; }
-  .viewer-tab-overflow-trigger { @apply relative flex max-w-[30rem] cursor-default select-none items-center border-0 bg-surface-2 text-left text-ink hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc group-has-[:popover-open]/viewer-tab-overflow:bg-line; }
-  .viewer-tab-overflow-chevron {
-    @apply flex-none text-ink-3 transition-transform ease-out group-has-[:popover-open]/viewer-tab-overflow:rotate-180 motion-reduce:transition-none;
-  }
-  .viewer-tab-overflow-panel { @apply fixed inset-auto z-70 max-h-[min(28rem,calc(100%-0.75rem))] w-[min(26rem,calc(100vw-1rem))] origin-top-right grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-panel border border-line-2 bg-surface text-ink shadow-floating [position-area:bottom_span-left] open:grid motion-reduce:animate-none; }
-  .viewer-tab-overflow-header { @apply flex items-center border-b border-line; }
 
-  .viewer-tab-menu-item {
-    @apply relative flex min-w-0 select-none items-center rounded-sm duration-[160ms] ease-out motion-reduce:transition-none;
-  }
-  .viewer-tab-menu-item[data-active="true"] { @apply bg-surface-2 text-ink; }
-  .viewer-tab-menu-item[data-active="false"] { @apply bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink; }
-  .viewer-tab-menu-item[data-drag-state="shifting"] { @apply transition-transform will-change-transform motion-reduce:transition-none; }
-  .viewer-tab-menu-item[data-drag-state="dragging"] { @apply opacity-0; }
-  .viewer-tab-menu-trigger {
-    @apply flex min-h-10 min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-2 py-1 text-left text-inherit focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc;
-  }
-  .viewer-tab-menu-trigger[data-reorderable="true"] { @apply touch-none cursor-default; }
-  .viewer-tab-menu-trigger[data-reorderable="false"] { @apply cursor-default; }
 }
 
 @layer components {
   .inline-text-editor { @apply relative grid min-w-0 flex-1 animate-inline-edit-enter motion-reduce:animate-none; }
-  .inline-text-editor-input { @apply absolute inset-y-0 h-6 w-full min-w-0 rounded-sm border border-acc-line bg-acc-soft px-0 text-xs text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-acc focus:ring-1 focus:ring-acc-line read-only:text-ink-3; }
+  .inline-text-editor-input { @apply absolute inset-y-0 h-6 w-full min-w-0 rounded-sm border border-line-2 bg-sunk px-0 text-xs text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus-visible:focus-outline focus-visible:outline-offset-2 read-only:text-ink-3; }
   .inline-text-editor-input[aria-invalid="true"] { @apply border-del ring-1 ring-del-line; }
   .inline-text-editor[data-pending="true"] input { @apply pr-6; }
   .inline-text-editor-status { @apply pointer-events-none absolute inset-y-0 right-1 flex items-center text-acc; }

@@ -2,10 +2,14 @@ use dioxus::prelude::*;
 
 use super::{
     HeaderTone,
-    content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
+    content::{ChangedTextTone, code_cell_content, non_breaking_if_empty},
 };
-use crate::entities::diffs::{
-    ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerSplitRow,
+use crate::{
+    entities::diffs::{
+        ClientDiffFile, ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ViewerCodeLine,
+        ViewerSplitRow,
+    },
+    shared::i18n::use_language,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +24,56 @@ enum SplitCellPresentation {
     NewContext,
     Removed,
     Added,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SplitCellSource {
+    Context(ReadStore<ViewerSplitRow>),
+    Old(ReadStore<ViewerSplitRow>),
+    New(ReadStore<ViewerSplitRow>),
+}
+
+impl SplitCellSource {
+    fn with<R>(self, read: impl FnOnce(Option<&ViewerCodeLine>) -> R) -> R {
+        match self {
+            Self::Context(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Context { code, .. } => Some(code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Pair { .. } => None,
+                };
+                read(code)
+            }
+            Self::Old(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Pair {
+                        old: Some(cell), ..
+                    } => Some(&cell.code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Context { .. }
+                    | ViewerSplitRow::Pair { old: None, .. } => None,
+                };
+                read(code)
+            }
+            Self::New(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Pair {
+                        new: Some(cell), ..
+                    } => Some(&cell.code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Context { .. }
+                    | ViewerSplitRow::Pair { new: None, .. } => None,
+                };
+                read(code)
+            }
+        }
+    }
 }
 
 #[component]
@@ -173,7 +227,7 @@ fn SplitContextCell(
                 SplitSide::Old => SplitCellPresentation::OldContext,
                 SplitSide::New => SplitCellPresentation::NewContext,
             },
-            source: CodeLineSource::SplitContext(row),
+            source: SplitCellSource::Context(row),
 
             copy_line_number,
         }
@@ -196,7 +250,7 @@ fn SplitCell(
             SplitGutter { side, number: Some(line_number) }
             SplitCodeCell {
                 presentation,
-                source: CodeLineSource::SplitOld(row),
+                source: SplitCellSource::Old(row),
 
                 copy_line_number,
             }
@@ -205,7 +259,7 @@ fn SplitCell(
             SplitGutter { side, number: Some(line_number) }
             SplitCodeCell {
                 presentation,
-                source: CodeLineSource::SplitNew(row),
+                source: SplitCellSource::New(row),
 
                 copy_line_number,
             }
@@ -231,7 +285,7 @@ fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
 #[component]
 fn SplitCodeCell(
     presentation: SplitCellPresentation,
-    source: CodeLineSource,
+    source: SplitCellSource,
     copy_line_number: Option<u32>,
 ) -> Element {
     let marker = Some(match presentation {
@@ -254,6 +308,18 @@ fn SplitCodeCell(
     };
     let copy_line = copy_line_number.map(|_| "");
     let new_line_number = copy_line_number.map(|number| number.to_string());
+    let language = use_language();
+    let content = source.with(|code| {
+        code.map(|code| {
+            code_cell_content(
+                code,
+                marker,
+                changed_text_tone,
+                copy_line_number.is_some(),
+                language,
+            )
+        })
+    });
 
     rsx! {
         code {
@@ -261,13 +327,7 @@ fn SplitCodeCell(
             "data-diff-cell": presentation,
             "data-gtl-copy-line": copy_line,
             "data-gtl-new-line": new_line_number,
-            CodeCellContent {
-                source,
-                marker,
-                changed_text_tone,
-
-                copy_text: copy_line_number.is_some(),
-            }
+            {content}
         }
     }
 }

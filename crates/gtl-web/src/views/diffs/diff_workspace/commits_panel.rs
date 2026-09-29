@@ -1,6 +1,9 @@
+use std::time::Duration;
+
 use dioxus::prelude::*;
 use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
+use lucide_dioxus::{Check, X};
 
 use crate::shared::{
     browser,
@@ -9,7 +12,7 @@ use crate::shared::{
     i18n::{t, use_language},
     ui::{
         Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
-        EmptyNotice, HoverPopover, LoadingSpinner, ScrollArea, use_hover_popover,
+        EmptyNotice, HoverPopover, ScrollArea, use_hover_popover,
     },
 };
 
@@ -158,19 +161,10 @@ fn CommitsPanelHeader(actions: Option<Element>) -> Element {
                     h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
                         {t!(language, "workspace-commits")}
                     }
-                    CommitPanelHint {}
                 }
                 {actions}
             }
         }
-    }
-}
-
-#[component]
-fn CommitPanelHint() -> Element {
-    let language = use_language();
-    rsx! {
-        p { class: "mt-1 mb-0 text-xs text-ink-3", {t!(language, "commits-hint")} }
     }
 }
 
@@ -240,11 +234,7 @@ fn CommitCard(
                     onclick: move |_| onselect.call(id.clone()),
                 }
             }
-            CommitCardContent {
-                commit,
-                selectable,
-                loading: selected && selection_pending,
-            }
+            CommitCardContent { commit, selectable }
             CommitDetailsPopover {
                 commit,
                 id: popover_id.clone(),
@@ -256,11 +246,7 @@ fn CommitCard(
 }
 
 #[component]
-fn CommitCardContent(
-    commit: ReadStore<ViewerCommitSummary>,
-    selectable: bool,
-    loading: bool,
-) -> Element {
+fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selectable: bool) -> Element {
     let language = use_language();
     let commit = commit.read();
     rsx! {
@@ -272,13 +258,6 @@ fn CommitCardContent(
             }
             span { class: "flex min-w-0 items-center gap-1.5",
                 CommitIdButton { id: commit.id.clone() }
-                if loading {
-                    span {
-                        role: "status",
-                        aria_label: t!(language, "commits-loading-commit"),
-                        LoadingSpinner {}
-                    }
-                }
                 if commit.is_merge {
                     Badge { variant: BadgeVariant::Neutral, {t!(language, "commits-merge")} }
                 }
@@ -353,29 +332,61 @@ fn CommitDetailsContent(commit: ReadStore<ViewerCommitSummary>) -> Element {
 
 #[component]
 fn CommitIdButton(id: CommitId) -> Element {
-    fn copy_commit_id(id: CommitId) {
-        spawn(async move {
-            browser::copy_text(id.as_ref()).await;
-            // TODO: add toast notif upon completion
-        });
-    }
-
     let language = use_language();
     let abbreviated_id = id.abbreviated(CommitIdAbbreviation::TenCharacters);
+    let mut copy_result = use_signal(|| None::<bool>);
+    let mut copy_action = use_action(move || {
+        let id = id.clone();
+        async move {
+            copy_result.set(Some(browser::copy_text(id.as_ref()).await));
+            dioxus_sdk_time::sleep(Duration::from_millis(1_500)).await;
+            copy_result.set(None);
+            Ok::<(), std::convert::Infallible>(())
+        }
+    });
+    let copy_feedback = match copy_result() {
+        Some(true) => t!(language, "copy-copied"),
+        Some(false) => t!(language, "copy-failed"),
+        None => String::new(),
+    };
+    let copy_title = if copy_feedback.is_empty() {
+        t!(language, "commits-copy-id")
+    } else {
+        copy_feedback.clone()
+    };
 
     rsx! {
         span { class: "pointer-events-auto relative z-20 flex flex-none",
             Button {
-                class: "min-h-5 text-xs font-medium leading-none text-acc hover:text-acc-2 active:text-ink",
+                class: "inline-flex min-h-5 min-w-[10ch] items-center text-xs font-medium leading-none text-acc hover:text-acc-2 active:text-ink",
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Bare,
-                title: t!(language, "commits-copy-id"),
+                title: copy_title,
+                aria_label: t!(language, "commits-copy-id"),
                 onclick: move |e: Event<MouseData>| {
                     e.stop_propagation();
-                    copy_commit_id(id.clone());
+                    copy_result.set(None);
+                    copy_action.call();
                 },
-                code { "{abbreviated_id}" }
+                match copy_result() {
+                    Some(true) => rsx! {
+                        span { class: "inline-flex items-center gap-1 text-add",
+                            Check { size: 12, stroke_width: 2 }
+                            "{copy_feedback}"
+                        }
+                    },
+                    Some(false) => rsx! {
+                        span { class: "inline-flex items-center gap-1 text-del",
+                            X { size: 12, stroke_width: 2 }
+                            "{copy_feedback}"
+                        }
+                    },
+                    None => rsx! {
+                        code { "{abbreviated_id}" }
+                    },
+                }
             }
+            span { class: "sr-only", role: "status", aria_live: "polite", "{copy_feedback}" }
         }
     }
 }
@@ -384,7 +395,7 @@ const fn commit_card_tone_classes(selected: bool) -> &'static str {
     if selected {
         "bg-acc-soft"
     } else {
-        "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
+        "bg-transparent hover:bg-surface-2"
     }
 }
 
@@ -401,7 +412,7 @@ mod tests {
         assert_eq!(commit_card_tone_classes(true), "bg-acc-soft");
         assert_eq!(
             commit_card_tone_classes(false),
-            "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
+            "bg-transparent hover:bg-surface-2"
         );
         assert!(COMMIT_CARD_CLASSES.contains("diff-commit-card w-full px-3 py-3"));
         let stylesheet = include_str!("../../../app/assets/styles/diff-workspace.css");

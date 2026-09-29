@@ -15,7 +15,6 @@ pub(super) struct Labels {
     pub old_line: &'static str,
     pub new_line: &'static str,
     pub line: &'static str,
-    pub change: &'static str,
     pub source: &'static str,
     language: ViewerLanguage,
 }
@@ -34,7 +33,6 @@ impl Labels {
                 old_line: "Old line",
                 new_line: "New line",
                 line: "Line",
-                change: "Change",
                 source: "Source",
                 language,
             },
@@ -49,7 +47,6 @@ impl Labels {
                 old_line: "Linha anterior",
                 new_line: "Linha nova",
                 line: "Linha",
-                change: "Alteração",
                 source: "Código",
                 language,
             },

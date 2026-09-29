@@ -8,7 +8,59 @@ use gtl_application::{
     settings::{UserSettingsFieldUpdate, UserSettingsPatch},
 };
 use gtl_infra::user_config::TomlSettingsStore;
-use gtl_models::{settings::ProjectsViewMode, timestamps::MachineTimestamp, viewer::Theme};
+use gtl_models::{timestamps::MachineTimestamp, viewer::Theme};
+
+#[test]
+fn viewer_push_confirmation_is_opted_out_per_project_and_preserves_cli_preferences()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("config.toml");
+    fs::write(&path, "# keep this\n[push]\nconfirm = false\n")?;
+    let mut store = TomlSettingsStore::new(Some(path.clone()));
+    assert!(
+        store
+            .load()?
+            .viewer_push_no_confirmation_projects()
+            .is_empty()
+    );
+    let project = gtl_models::paths::ProjectName::try_new("review-project")?;
+    store.edit(UserSettingsPatch {
+        viewer_push_no_confirmation_projects: UserSettingsFieldUpdate::Update(
+            [project.clone()].into(),
+        ),
+        ..Default::default()
+    })?;
+    let loaded = TomlSettingsStore::new(Some(path.clone())).load()?;
+    assert!(
+        loaded
+            .viewer_push_no_confirmation_projects()
+            .contains(&project)
+    );
+    assert!(
+        !loaded
+            .viewer_push_no_confirmation_projects()
+            .contains(&gtl_models::paths::ProjectName::try_new("another-project")?)
+    );
+    assert!(!loaded.push_confirmation_required());
+    assert!(fs::read_to_string(&path)?.contains("# keep this"));
+    store.edit(UserSettingsPatch {
+        viewer_push_no_confirmation_projects: UserSettingsFieldUpdate::Clear,
+        ..Default::default()
+    })?;
+    assert!(
+        store
+            .load()?
+            .viewer_push_no_confirmation_projects()
+            .is_empty()
+    );
+    assert!(!store.load()?.push_confirmation_required());
+    fs::write(path, "viewer_push_no_confirmation_projects = [42]\n")?;
+    assert!(matches!(
+        store.load(),
+        Err(UserSettingsLoadError::InvalidConfiguration(_))
+    ));
+    Ok(())
+}
 
 #[test]
 fn project_sort_persists_through_cached_reads_edits_and_clear() -> anyhow::Result<()> {
@@ -63,9 +115,7 @@ fn write_settings(path: &Path, theme: &str, page_size: u32) -> std::io::Result<(
     let theme = format!("\"{theme}\"");
     fs::write(
         path,
-        format!(
-            "theme = {theme:10}\nprojects_page_size = {page_size}\nprojects_view = \"table\"\n"
-        ),
+        format!("theme = {theme:10}\nprojects_page_size = {page_size}\n"),
     )
 }
 
@@ -78,7 +128,6 @@ fn assert_settings(
     let (viewer_settings, projects) = store.clone().load_viewer_settings()?;
     assert_eq!(settings.theme(), Some(theme));
     assert_eq!(viewer_settings, settings);
-    assert_eq!(projects.view, ProjectsViewMode::Table);
     assert_eq!(projects.page_size.into_inner(), page_size);
     Ok(())
 }
@@ -226,7 +275,7 @@ fn reads_follow_atomic_replacement_and_symbolic_link_retargeting() {
 
     let mut replacement = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
     replacement
-        .write_all(b"theme = \"graphite\"\nprojects_page_size = 15\nprojects_view = \"table\"\n")
+        .write_all(b"theme = \"graphite\"\nprojects_page_size = 15\n")
         .unwrap();
     replacement.persist(&target).unwrap();
     assert_settings(&store, Theme::Graphite, 15).unwrap();

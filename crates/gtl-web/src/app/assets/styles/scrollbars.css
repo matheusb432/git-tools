@@ -1,5 +1,5 @@
 @layer base {
-  :root { scrollbar-color: var(--scrollbar-thumb) transparent; }
+  :root { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: auto; }
 
   @supports selector(::-webkit-scrollbar) {
     :root, * { scrollbar-color: auto; }
@@ -24,14 +24,13 @@
 
 @layer components {
   .scroll-area { @apply overflow-auto; }
-  .scroll-area-rail { @apply overflow-x-auto overflow-y-hidden; }
   .scroll-area-vertical { @apply overflow-x-hidden overflow-y-auto; }
   [data-scroll-enhanced="true"] { scrollbar-width: none; }
   [data-scroll-enhanced="true"]::-webkit-scrollbar { display: none; }
   .scroll-area-content { @apply flow-root; }
   .scrollbars { @apply pointer-events-none sticky z-30 block h-0 w-0 print:hidden; top: var(--scroll-top, 0px); left: var(--scroll-left, 0px); transform: translate(calc(-1 * var(--scroll-left, 0px)), calc(-1 * var(--scroll-top, 0px))); }
   .scrollbars[data-scrollbars="file-bottom"] { @apply relative top-0 left-0; transform: none; }
-  .scrollbar-rail { visibility: var(--scrollbar-visibility, visible); @apply pointer-events-auto absolute touch-none select-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
+  .scrollbar-rail { visibility: var(--scrollbar-visibility, visible); @apply pointer-events-auto absolute touch-none select-none focus-visible:focus-outline focus-visible:-outline-offset-2; }
   .scrollbar-rail[aria-hidden="true"] { @apply invisible; }
   .scrollbar-rail[data-scroll-axis="horizontal"] { @apply left-0 h-3; top: calc(var(--scroll-height) - 12px); width: var(--scroll-width); }
   .scrollbar-rail[data-scroll-axis="vertical"] { @apply top-0 w-3; left: calc(var(--scroll-width) - 12px); height: var(--scroll-height); }
@@ -43,4 +42,9 @@
     .scrollbar-thumb { forced-color-adjust: none; }
     .scrollbar-rail[data-dragging="true"] { --color-scrollbar: Highlight; }
   }
+}
+
+@layer components {
+  .viewer-tab-rail { scrollbar-width: none; }
+  .viewer-tab-rail::-webkit-scrollbar { display: none; }
 }

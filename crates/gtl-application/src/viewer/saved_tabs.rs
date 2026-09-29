@@ -167,7 +167,7 @@ pub fn restore(
     state.update(|session| {
         let mut ids = Vec::with_capacity(tabs.len());
         let mut active = None;
-        for tab in tabs {
+        for tab in tabs.into_iter().rev() {
             let id = session
                 .open_labeled(tab.recipe, RecipeBatchId::generate(), tab.label)
                 .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
@@ -181,7 +181,7 @@ pub fn restore(
                 active = Some(id);
             }
             if !ids.contains(&id) {
-                ids.push(id);
+                ids.insert(0, id);
             }
         }
         if let Some(id) = active {

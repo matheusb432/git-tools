@@ -85,6 +85,7 @@ pub fn project(
             sidebars: settings.sidebar_visibility(),
             theme: project_theme(settings.theme().unwrap_or_default()),
             render_options: project_render_options(options),
+            copy_with_line_context: settings.copy_with_line_context(),
             keybindings: settings.viewer_keybindings(),
         },
         feedback,

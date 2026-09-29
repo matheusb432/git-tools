@@ -29,7 +29,7 @@ fn extension_filter_mode_default() -> String {
 
 /// Bumped when the renderer's HTML output changes materially so range reuse never serves an
 /// artifact rendered by an older renderer.
-pub const RENDERER_VERSION: u32 = 10;
+pub const RENDERER_VERSION: u32 = 11;
 
 /// Keys that earlier sidecars carried and nothing reads anymore.
 const RETIRED_SIDECAR_KEYS: [&str; 7] = [

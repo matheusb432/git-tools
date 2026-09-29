@@ -17,6 +17,17 @@ pub(super) enum Sidebar {
 }
 
 impl Sidebar {
+    fn drag_toggles(self, visible: bool, distance: f64) -> bool {
+        let outward = match self {
+            Self::Files => -distance,
+            Self::Commits => distance,
+        };
+        if visible {
+            outward >= 40.0
+        } else {
+            outward <= -40.0
+        }
+    }
     const fn name(self) -> &'static str {
         match self {
             Self::Files => "files",
@@ -36,6 +47,99 @@ impl Sidebar {
             Self::Files => ViewerKeybindingAction::ToggleFilesSidebar,
             Self::Commits => ViewerKeybindingAction::ToggleCommitsSidebar,
         }
+    }
+}
+
+#[component]
+pub(super) fn SidebarEdge(
+    sidebar: Sidebar,
+    visible: bool,
+    ontoggle: EventHandler<Sidebar>,
+) -> Element {
+    let mut gesture = use_signal(|| None::<(i32, f64)>);
+    let mut ready = use_signal(|| false);
+    let mut suppress_click = use_signal(|| false);
+    let label = sidebar.toggle_label(use_language());
+    rsx! {
+        button {
+            r#type: "button",
+            class: "sidebar-edge",
+            "data-sidebar-edge": sidebar.name(),
+            "data-ready": ready().to_string(),
+            "data-visible": visible.to_string(),
+            aria_label: label,
+            aria_expanded: visible.to_string(),
+            onpointerdown: move |event: PointerEvent| {
+                if event.trigger_button() != Some(dioxus::html::input_data::MouseButton::Primary)
+                {
+                    return;
+                }
+                suppress_click.set(false);
+                if capture_pointer(&event) {
+                    gesture.set(Some((event.pointer_id(), event.client_coordinates().x)));
+                    ready.set(false);
+                }
+            },
+            onpointermove: move |event: PointerEvent| {
+                if let Some((pointer, start)) = gesture()
+                    && pointer == event.pointer_id() {
+                    ready
+                        .set(
+                            sidebar.drag_toggles(visible, event.client_coordinates().x - start),
+                        );
+                }
+            },
+            onpointerup: move |event: PointerEvent| {
+                if let Some((pointer, start)) = gesture()
+                    && pointer == event.pointer_id() {
+                    gesture.set(None);
+                    ready.set(false);
+                    suppress_click.set(true);
+                    if sidebar.drag_toggles(visible, event.client_coordinates().x - start) {
+                        ontoggle.call(sidebar);
+                    }
+                }
+            },
+            onpointercancel: move |_| {
+                gesture.set(None);
+                ready.set(false);
+            },
+            onlostpointercapture: move |_| {
+                gesture.set(None);
+                ready.set(false);
+            },
+            onclick: move |_| {
+                if !suppress_click() {
+                    ontoggle.call(sidebar);
+                }
+            },
+            onkeydown: move |event: KeyboardEvent| {
+                suppress_click.set(false);
+                if event.key() == Key::Escape {
+                    gesture.set(None);
+                    ready.set(false);
+                    suppress_click.set(true);
+                }
+            },
+        }
+    }
+}
+
+fn capture_pointer(event: &PointerEvent) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast as _;
+        event
+            .data()
+            .downcast::<web_sys::PointerEvent>()
+            .and_then(|event| event.target())
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|element| element.set_pointer_capture(event.pointer_id()).is_ok())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = event;
+        false
     }
 }
 
@@ -222,4 +326,20 @@ fn use_sidebar_controls() -> SidebarControls {
         save.call(request);
     });
     SidebarControls { visibility, toggle }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Sidebar;
+
+    #[test]
+    fn panel_drags_require_a_deliberate_movement_toward_the_target_edge() {
+        for (sidebar, outward) in [(Sidebar::Files, -40.0), (Sidebar::Commits, 40.0)] {
+            assert!(sidebar.drag_toggles(true, outward));
+            assert!(!sidebar.drag_toggles(true, outward / 2.0));
+            assert!(!sidebar.drag_toggles(true, -outward));
+            assert!(sidebar.drag_toggles(false, -outward));
+            assert!(!sidebar.drag_toggles(false, outward));
+        }
+    }
 }

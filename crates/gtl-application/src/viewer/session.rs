@@ -258,7 +258,12 @@ impl ViewerSession {
         batch_id: RecipeBatchId,
         label: RecipeLabel,
     ) -> Option<ViewerTabId> {
-        if let Some(existing) = self.tabs.iter_mut().find(|tab| tab.opens(&recipe)) {
+        let existing = self
+            .tabs
+            .iter()
+            .position(|tab| tab.recipe == recipe)
+            .or_else(|| self.tabs.iter().position(|tab| tab.opens(&recipe)));
+        if let Some(existing) = existing.map(|index| &mut self.tabs[index]) {
             existing.recipe = recipe;
             existing.batch_id = batch_id;
             self.active = Some(existing.tab.id());
@@ -271,20 +276,23 @@ impl ViewerSession {
             .next_id
             .and_then(|value| ViewerTabId::try_new(value).ok())?;
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
-        self.tabs.push(SessionTab {
-            history_id: None,
-            comparison_name: None,
-            extension_filter: None,
-            tab: ViewerTab::new(id, label, false, ViewerTabState::Pending),
-            recipe,
-            batch_id,
-            generation: ViewerRangeGeneration::default(),
-            selection_generation: ViewerSelectionGeneration::default(),
-            selection: CommitSelection::None,
-            live_head: None,
-            modified_files_active: false,
-            pinned: false,
-        });
+        self.tabs.insert(
+            0,
+            SessionTab {
+                history_id: None,
+                comparison_name: None,
+                extension_filter: None,
+                tab: ViewerTab::new(id, label, false, ViewerTabState::Pending),
+                recipe,
+                batch_id,
+                generation: ViewerRangeGeneration::default(),
+                selection_generation: ViewerSelectionGeneration::default(),
+                selection: CommitSelection::None,
+                live_head: None,
+                modified_files_active: false,
+                pinned: false,
+            },
+        );
         self.active = Some(id);
         self.bump_version();
         Some(id)
@@ -906,7 +914,6 @@ impl ViewerSession {
             self.active = self
                 .tabs
                 .iter()
-                .rev()
                 .find(|t| t.tab.id() != id)
                 .map(|t| t.tab.id());
             CloseOutcome::ActiveChanged
@@ -1476,7 +1483,7 @@ mod tests {
     }
 
     #[test]
-    fn pinning_protects_snapshots_and_keeps_pins_before_other_tabs() {
+    fn pinning_protects_snapshots_from_replacement_closure_and_cross_group_moves() {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let first_recipe = pinned_unpushed_recipe("b");
         let first = session.open(first_recipe.clone(), batch_id(1)).unwrap();
@@ -1490,7 +1497,7 @@ mod tests {
         session.close(first);
         assert!(session.tab(first).is_some());
         session.move_tab(second, first, ViewerTabPlacement::Before);
-        assert_eq!(session.tabs().next().unwrap().tab.id(), first);
+        assert_eq!(session.tabs().next().unwrap().tab.id(), second);
         session.set_pinned(first, false);
         session.close(first);
         assert!(session.tab(first).is_none());
@@ -2129,6 +2136,38 @@ mod tests {
     }
 
     #[test]
+    fn new_snapshots_lead_the_review_list_and_active_close_returns_to_its_start() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let ids = ["/first", "/second", "/third"].map(|path| {
+            let mut next = recipe();
+            next.source = RecipeSource::LocalRepo(repository_root(path));
+            session.open(next, batch_id(1)).unwrap()
+        });
+        assert_eq!(
+            session.tabs().map(|tab| tab.tab.id()).collect::<Vec<_>>(),
+            [ids[2], ids[1], ids[0]]
+        );
+        session.activate(ids[0]);
+        assert_eq!(session.close(ids[0]), Some(CloseOutcome::ActiveChanged));
+        assert_eq!(session.active(), Some(ids[2]));
+        assert_eq!(session.close(ids[2]), Some(CloseOutcome::ActiveChanged));
+        assert_eq!(session.active(), Some(ids[1]));
+        assert_eq!(session.close(ids[1]), Some(CloseOutcome::ActiveChanged));
+        assert_eq!(session.active(), None);
+    }
+
+    #[test]
+    fn closing_a_background_snapshot_preserves_the_review_in_progress() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let oldest = session.open(recipe(), batch_id(1)).unwrap();
+        let mut next = recipe();
+        next.source = RecipeSource::LocalRepo(repository_root("/next"));
+        let active = session.open(next, batch_id(1)).unwrap();
+        assert_eq!(session.close(oldest), Some(CloseOutcome::ActiveUnchanged));
+        assert_eq!(session.active(), Some(active));
+    }
+
+    #[test]
     fn session_can_be_guarded_and_shared_across_tauri_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<std::sync::Mutex<ViewerSession>>();
@@ -2212,7 +2251,7 @@ mod tests {
         );
         assert_eq!(
             session.tabs().map(|tab| tab.tab.id()).collect::<Vec<_>>(),
-            vec![second, third, first, fourth]
+            vec![fourth, third, first, second]
         );
         assert_eq!(session.active(), Some(second));
         assert!(session.version() > version);
@@ -2229,7 +2268,7 @@ mod tests {
         let version = session.version();
 
         assert_eq!(
-            session.move_tab(first, second, ViewerTabPlacement::Before),
+            session.move_tab(first, second, ViewerTabPlacement::After),
             Some(MoveOutcome::Unchanged)
         );
         assert_eq!(session.version(), version);

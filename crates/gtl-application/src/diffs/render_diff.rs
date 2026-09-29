@@ -30,7 +30,6 @@ pub struct RenderDiff {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiffOk {
-    pub rendered_repositories: Vec<gtl_models::paths::RepositoryRoot>,
     pub outcome: RenderDiffOutcome,
     pub notes: Vec<Note>,
 }
@@ -174,7 +173,6 @@ pub fn execute(
             hit.display()
         )));
         return Ok(RenderDiffOk {
-            rendered_repositories: vec![top.clone()],
             outcome: RenderDiffOutcome::Rendered(PlacedArtifact::Reused { path: hit }),
             notes,
         });
@@ -193,7 +191,6 @@ pub fn execute(
             "diff-artifact: {summary}, nothing to show (no commits or changes); skipping"
         )));
         return Ok(RenderDiffOk {
-            rendered_repositories: vec![top.clone()],
             outcome: RenderDiffOutcome::Empty,
             notes,
         });
@@ -222,7 +219,6 @@ pub fn execute(
     )));
     notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderDiffOk {
-        rendered_repositories: vec![top.clone()],
         outcome: RenderDiffOutcome::Rendered(placed),
         notes,
     })

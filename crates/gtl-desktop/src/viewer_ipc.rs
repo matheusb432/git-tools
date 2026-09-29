@@ -831,7 +831,7 @@ viewer_request_command!(
 viewer_request_command!(
     viewer_get_push_availability,
     gtl_wire::viewer::ViewerViewIdentity,
-    gtl_wire::viewer::push::ViewerPushAvailability,
+    gtl_wire::viewer::push::ViewerPushState,
     get_push_availability
 );
 
@@ -841,3 +841,38 @@ viewer_request_command!(
     (),
     rename_snapshot
 );
+
+// Tauri's command macro expands to an unreachable fallback arm.
+#[allow(clippy::unreachable)]
+mod settings_source_command {
+    use super::{State, ViewerClientError, ViewerIpcState};
+
+    #[tauri::command]
+    pub(crate) async fn viewer_read_settings_file(
+        state: State<'_, ViewerIpcState>,
+    ) -> Result<String, ViewerClientError> {
+        let settings = state.client().await?.get_settings().await?;
+        let Some(path) = settings.configuration_path else {
+            return Ok(String::new());
+        };
+        tauri::async_runtime::spawn_blocking(move || {
+            use std::io::Read as _;
+            let mut source = String::new();
+            std::fs::File::open(path)?
+                .take(1_048_577)
+                .read_to_string(&mut source)?;
+            if source.len() > 1_048_576 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Settings source exceeds 1 MiB",
+                ));
+            }
+            Ok(source)
+        })
+        .await
+        .map_err(|error| ViewerClientError::desktop(&error))?
+        .map_err(|error| ViewerClientError::desktop(&error))
+    }
+}
+
+pub(crate) use settings_source_command::viewer_read_settings_file;

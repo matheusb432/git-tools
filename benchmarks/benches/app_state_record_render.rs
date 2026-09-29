@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use gtl_application::{
-    history::record_render::{self, RecordRender},
+    history::record_render::{self, RecordRender, RenderErrorCode, RenderFailure, StartRender},
     ports::Clock,
 };
 use gtl_benchmarks::require;
@@ -67,6 +67,28 @@ fn record_render(criterion: &mut Criterion) {
                 );
             },
             BatchSize::SmallInput,
+        );
+    });
+
+    let request = StartRender::new(request().recipe);
+    let failure = RenderFailure::new(RenderErrorCode::RenderFailed, "benchmark render failure");
+    criterion.bench_function("app-state-record-render/failure", |bencher| {
+        bencher.iter_batched(
+            || {
+                let mut connection = require(app_state.connection_lock(), "locking app state");
+                require(
+                    record_render::start(&request, &mut connection, &clock),
+                    "starting a render",
+                )
+            },
+            |id| {
+                let mut connection = require(app_state.connection_lock(), "locking app state");
+                require(
+                    record_render::fail(id, black_box(&failure), &mut connection),
+                    "recording a failed render",
+                );
+            },
+            BatchSize::PerIteration,
         );
     });
 }

@@ -28,7 +28,7 @@ pub struct UserSettingsPatch {
     pub files_sidebar_visible: UserSettingsFieldUpdate<bool>,
     pub commits_sidebar_visible: UserSettingsFieldUpdate<bool>,
     pub wrap_lines: UserSettingsFieldUpdate<bool>,
-    pub projects_view: UserSettingsFieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub copy_with_line_context: UserSettingsFieldUpdate<bool>,
     pub projects_sort: UserSettingsFieldUpdate<gtl_models::settings::ProjectsSort>,
     pub projects_page_size: UserSettingsFieldUpdate<gtl_models::settings::ProjectsPageSize>,
     /// Changes the configured viewer theme.
@@ -37,7 +37,9 @@ pub struct UserSettingsPatch {
     pub layout: UserSettingsFieldUpdate<DiffLayout>,
     /// Changes the configured diff density.
     pub density: UserSettingsFieldUpdate<DiffDensity>,
-    /// Changes whether pushes require confirmation.
+    pub viewer_push_no_confirmation_projects:
+        UserSettingsFieldUpdate<std::collections::BTreeSet<gtl_models::paths::ProjectName>>,
+    /// Changes whether CLI pushes require confirmation.
     pub push_confirmation_required: UserSettingsFieldUpdate<bool>,
 }
 

@@ -254,7 +254,6 @@ pub fn encode_project(project: &ViewerProject) -> v1::ViewerProject {
         name: project.name.to_string(),
         comparison_branch: project.comparison_branch.to_string(),
         path: project.path.to_string(),
-        last_rendered_at: project.last_rendered_at.as_ref().map(ToString::to_string),
     }
 }
 
@@ -283,10 +282,6 @@ pub fn decode_projects(
                     name: project.name.try_into()?,
                     comparison_branch: project.comparison_branch.try_into()?,
                     path: gtl_models::paths::RepositoryRoot::try_new(project.path.into())?,
-                    last_rendered_at: project
-                        .last_rendered_at
-                        .map(TryInto::try_into)
-                        .transpose()?,
                 })
             };
             decode().map_err(|_| ViewerCodecError::InvalidMessage)

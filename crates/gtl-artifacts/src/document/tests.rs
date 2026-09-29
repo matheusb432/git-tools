@@ -78,6 +78,38 @@ fn document_is_complete_without_scripts_or_external_assets() {
 }
 
 #[test]
+fn diff_rows_omit_change_markers_but_preserve_source_characters() {
+    let mut view = sample_view();
+    view.files[0].path =
+        gtl_models::paths::RepositoryRelativePath::try_new("changes.txt".into()).unwrap();
+    view.files[0].lines = [
+        "--- a/changes.txt",
+        "+++ b/changes.txt",
+        "@@ -1 +1 @@",
+        "--old",
+        "++new",
+    ]
+    .into_iter()
+    .collect();
+    view.files[0].full_lines = None;
+
+    let html = build_html(&view, RenderOptions::DEFAULT, None, ViewerLanguage::EnUs).unwrap();
+
+    assert!(html.contains("<colgroup><col class=\"number\"><col></colgroup>"));
+    assert!(html.contains("<th>Line</th><th>Source</th>"));
+    assert!(!html.contains("class=\"marker\""));
+    assert!(html.contains("<td class=\"source\" colspan=\"2\">"));
+    assert!(html.contains("<tr class=\"removed\">"));
+    assert!(html.contains("<tr class=\"added\">"));
+    assert!(html.contains("<code>-old</code>"));
+    assert!(html.contains("<code>+new</code>"));
+    assert!(html.contains("<code>--- a/changes.txt</code>"));
+    assert!(html.contains("<code>+++ b/changes.txt</code>"));
+    assert!(html.contains("<span class=\"added-count\">+1</span>"));
+    assert!(html.contains("<span class=\"removed-count\">−1</span>"));
+}
+
+#[test]
 fn repository_content_is_escaped_in_text_and_attributes() {
     let mut view = sample_view();
     view.repo_name =

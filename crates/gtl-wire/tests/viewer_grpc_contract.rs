@@ -172,6 +172,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
             .collect::<TestResult<_>>()?,
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            copy_with_line_context: true,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::PtBr,
             date_format: gtl_models::settings::ViewerDateFormat::Relative,
@@ -187,6 +188,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
                 |action| match action {
                     ViewerKeybindingAction::SearchFiles => "alt+p".parse().unwrap(),
                     ViewerKeybindingAction::SearchTextInAllFiles => "ctrl+shift+f".parse().unwrap(),
+                    ViewerKeybindingAction::PushDiff => "alt+enter".parse().unwrap(),
                     ViewerKeybindingAction::ToggleFilesSidebar
                     | ViewerKeybindingAction::ToggleCommitsSidebar => {
                         ViewerKeybindings::default()[action]
@@ -219,6 +221,7 @@ fn encoded_pending_shell() -> TestResult<v1::ViewerShell> {
         )?],
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            copy_with_line_context: false,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::default(),
             date_format: gtl_models::settings::ViewerDateFormat::default(),
@@ -234,6 +237,35 @@ fn encoded_pending_shell() -> TestResult<v1::ViewerShell> {
         feedback: None,
     };
     Ok(encode_viewer_shell(shell)?)
+}
+
+#[test]
+fn shell_push_keybinding_defaults_when_absent_and_rejects_invalid_overrides() -> TestResult {
+    let encoded = encoded_pending_shell()?;
+    let decode = |push_diff| {
+        let mut shell = encoded.clone();
+        shell
+            .preferences
+            .as_mut()
+            .unwrap()
+            .keybindings
+            .as_mut()
+            .unwrap()
+            .push_diff = push_diff;
+        decode_get_viewer_shell_response(v1::GetViewerShellResponse { shell: Some(shell) })
+    };
+    let shell = decode(None)?;
+    assert_eq!(
+        shell.preferences.keybindings[ViewerKeybindingAction::PushDiff].to_string(),
+        "ctrl+enter"
+    );
+    for value in ["", "cmd+enter", "ctrl+p"] {
+        assert_eq!(
+            decode(Some(value.to_owned())),
+            Err(ViewerCodecError::InvalidMessage)
+        );
+    }
+    Ok(())
 }
 
 #[test]
@@ -358,6 +390,7 @@ fn encoded_ready_shell(active: v1::ViewerActiveView) -> TestResult<v1::ViewerShe
         tabs: Vec::new(),
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
+            copy_with_line_context: true,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::PtBr,
             date_format: gtl_models::settings::ViewerDateFormat::Relative,
@@ -489,6 +522,7 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                     state: Some(v1::viewer_active_state::State::Empty(v1::Empty {})),
                 }),
                 preferences: Some(v1::ViewerPreferences {
+                    copy_with_line_context: Some(true),
                     language: v1::ViewerLanguage::EnUs as i32,
                     date_format: v1::ViewerDateFormat::Iso as i32,
                     accessibility: Some(v1::ViewerAccessibility {
@@ -506,6 +540,7 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                         density: v1::ViewerDiffDensity::Compact as i32,
                     }),
                     keybindings: Some(v1::ViewerKeybindings {
+                        push_diff: None,
                         toggle_files_sidebar: "ctrl+b".to_owned(),
                         toggle_commits_sidebar: "ctrl+alt+b".to_owned(),
                         platform: v1::ViewerKeybindingPlatform::Linux as i32,
@@ -767,11 +802,11 @@ fn settings_codec_round_trips_effective_values() {
         date_format: gtl_models::settings::ViewerDateFormat::MonthFirst,
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x22; 32]),
         focus_window_on_diff: true,
+        copy_with_line_context: false,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,
         },
-        projects_view: gtl_models::settings::ProjectsViewMode::Table,
         projects_sort: gtl_models::settings::ProjectsSort::BranchDescending,
         projects_page_size: gtl_models::settings::ProjectsPageSize::default(),
         configuration_path: Some("/home/dev/.config/git-tools.toml".into()),
@@ -782,6 +817,7 @@ fn settings_codec_round_trips_effective_values() {
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Full,
         },
+        viewer_push_no_confirmation_projects: Vec::new(),
         push_confirmation_required: true,
     };
 
@@ -796,6 +832,10 @@ fn settings_codec_round_trips_effective_values() {
         encoded.focus_window_on_diff = None;
         assert!(decode_get_viewer_settings_response(encoded).is_err());
     }
+
+    let mut missing_copy_setting = encode_get_viewer_settings_response(settings.clone());
+    missing_copy_setting.copy_with_line_context = None;
+    assert!(decode_get_viewer_settings_response(missing_copy_setting).is_err());
 
     let mut malformed_revision = encode_get_viewer_settings_response(settings);
     malformed_revision.revision = "AA".repeat(32);
@@ -815,10 +855,10 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             [0x33; 32],
         )),
         focus_window_on_diff: FieldUpdate::Update(false),
+        copy_with_line_context: FieldUpdate::Update(false),
         files_sidebar_visible: FieldUpdate::Update(false),
         commits_sidebar_visible: FieldUpdate::Clear,
         wrap_lines: FieldUpdate::Update(true),
-        projects_view: FieldUpdate::Update(gtl_models::settings::ProjectsViewMode::Table),
         projects_sort: FieldUpdate::Update(gtl_models::settings::ProjectsSort::NameDescending),
         projects_page_size: FieldUpdate::Update(
             gtl_models::settings::ProjectsPageSize::try_new(30).unwrap(),
@@ -826,6 +866,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         theme: FieldUpdate::Clear,
         layout: FieldUpdate::Unchanged,
         density: FieldUpdate::Update(ViewerDiffDensity::Compact),
+        viewer_push_no_confirmation_projects: FieldUpdate::Unchanged,
         push_confirmation_required: FieldUpdate::Update(false),
     };
 
@@ -840,6 +881,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             focus_window_on_diff: wrap_lines.clone(),
             files_sidebar_visible: wrap_lines.clone(),
             commits_sidebar_visible: wrap_lines.clone(),
+            copy_with_line_context: wrap_lines.clone(),
             wrap_lines,
             ..request.clone()
         };
@@ -882,7 +924,6 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
         id: "ALP".try_into().unwrap(),
         path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
         name: ProjectName::try_new("Alpha").unwrap(),
-        last_rendered_at: Some("2026-09-06T10:00:00Z".try_into().unwrap()),
     };
     let response = v1::ListViewerProjectsResponse {
         projects: vec![projects::encode_project(&project)],
@@ -913,7 +954,6 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
                 id: "invalid".into(),
                 name: "Alpha".into(),
                 path: "/repos/alpha".into(),
-                last_rendered_at: None
             }],
             total: 1,
             count_before: 0,

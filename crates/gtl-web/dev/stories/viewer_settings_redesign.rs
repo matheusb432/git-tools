@@ -1,4 +1,4 @@
-use std::{convert::Infallible, error::Error, path::PathBuf, time::Duration};
+use std::{error::Error, path::PathBuf};
 
 use dioxus::prelude::*;
 use dx_story::{stories, story};
@@ -18,21 +18,19 @@ use gtl_wire::viewer::{
     ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerRows, ViewerTab,
     ViewerTabState, ViewerUnifiedRow, ViewerUnifiedSourceRow, ViewerViewIdentity,
 };
-use lucide_dioxus::Settings;
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
     shared::{
         field_errors::FieldErrors,
-        ui::{
-            NavigationBar, ScrollArea, ScrollAreaVariant, SectionedSurface, SectionedSurfaceBody,
-            SectionedSurfaceHeader, ViewerTabItem,
-        },
+        ui::{NavigationBar, ViewerTabItem, ViewerTabRail},
     },
     views::{
         diffs::diff_workspace::{PreviewDiffSearch, PreviewDiffWorkspace},
         viewer_settings_button::ViewerSettingsButton,
-        viewer_settings_form::{SettingsField, ViewerSettingsForm, ViewerSettingsSelection},
+        viewer_settings_form::{
+            SettingsField, SettingsSection, ViewerSettingsForm, ViewerSettingsSelection,
+        },
     },
 };
 
@@ -108,7 +106,8 @@ fn alternate_preview_keybindings() -> Option<ViewerKeybindings> {
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
         ViewerKeybindingAction::ToggleFilesSidebar
-        | ViewerKeybindingAction::ToggleCommitsSidebar => ViewerKeybindings::default()[action],
+        | ViewerKeybindingAction::ToggleCommitsSidebar
+        | ViewerKeybindingAction::PushDiff => ViewerKeybindings::default()[action],
     })
     .ok()
 }
@@ -121,7 +120,7 @@ fn mobile_viewer() -> Element {
     }
 }
 
-/// Editable staged settings with stable inline validation.
+/// Settings with autosave feedback.
 #[story(name = "Settings form")]
 fn settings_form() -> Element {
     rsx! {
@@ -195,23 +194,21 @@ fn PreviewApplicationTabs(tabs: Vec<ViewerTab>, mobile: bool) -> Element {
         NavigationBar {
             aria_label: "Viewer navigation",
             rail: rsx! {
-                ScrollArea {
-                    variant: ScrollAreaVariant::Rail,
-                    class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
-                    role: "tablist",
-                    aria_label: "Open diffs",
-                    for (index, tab) in tabs.iter().enumerate() {
-                        if !mobile || index == 0 {
-                            {
-                                let tab_id = tab.id;
-                                rsx! {
-                                    ViewerTabItem {
-                                        key: "{tab.id}",
-                                        tab: tab.clone(),
-                                        active: active_tab_id() == Some(tab_id),
-                                        onactivate: move |()| active_tab_id.set(Some(tab_id)),
-                                        onkeydown: move |_| {},
-                                        onclose: move |_| {},
+                ViewerTabRail { active_tab_id: active_tab_id(),
+                    div { class: "flex w-max items-end",
+                        for (index, tab) in tabs.iter().enumerate() {
+                            if !mobile || index == 0 {
+                                {
+                                    let tab_id = tab.id;
+                                    rsx! {
+                                        ViewerTabItem {
+                                            key: "{tab.id}",
+                                            tab: tab.clone(),
+                                            active: active_tab_id() == Some(tab_id),
+                                            onactivate: move |()| active_tab_id.set(Some(tab_id)),
+                                            onkeydown: move |_| {},
+                                            onclose: move |_| {},
+                                        }
                                     }
                                 }
                             }
@@ -501,60 +498,39 @@ fn source_row(
 #[component]
 fn SettingsMock() -> Element {
     rsx! {
-        main {
-            class: "story-settings-preview mx-auto w-full px-4 py-5 sm:px-6",
-            aria_label: "Editable settings redesign mockup",
-            div { class: "grid gap-5",
-                header { class: "border-b border-line pb-4",
-                    div { class: "flex items-center gap-2 text-acc",
-                        Settings { size: 16 }
-                        p { class: "font-semibold tracking-widest uppercase",
-                            "Application preferences"
-                        }
-                    }
-                    h1 { class: "mt-1 text-lg font-semibold tracking-tight text-ink",
-                        "User settings"
-                    }
-                    p { class: "mt-1 max-w-2xl leading-5 text-ink-2",
-                        "Choose viewer defaults and command safeguards, then submit to save them."
-                    }
-                }
-                SettingsFormPreview {}
-                SettingsResolved {}
+        main { class: "settings-page-shell h-[42rem]",
+            header { class: "settings-page-header",
+                h1 { class: "settings-page-title text-lg font-semibold", "User settings" }
             }
+            SettingsFormPreview {}
         }
     }
 }
 
 #[component]
 fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
-    let initial = ViewerSettingsSelection::new(
-        gtl_models::settings::ViewerLanguage::EnUs,
-        gtl_models::settings::ViewerDateFormat::Iso,
-        Some(gtl_wire::viewer::ViewerTheme::Mirage),
-        ViewerRenderOptions {
+    let initial = ViewerSettingsSelection {
+        language: gtl_models::settings::ViewerLanguage::EnUs,
+        date_format: gtl_models::settings::ViewerDateFormat::Iso,
+        theme: Some(gtl_wire::viewer::ViewerTheme::Mirage),
+        render_options: ViewerRenderOptions {
             wrap_lines: false,
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Compact,
         },
-        true,
-        true,
-        gtl_models::settings::ViewerAccessibility::default(),
-    );
-    let mut pending = use_signal(|| false);
-    let mut saved = use_signal(|| false);
-    let mut finish_save = use_action(move || async move {
-        dioxus_sdk_time::sleep(Duration::from_millis(650)).await;
-        pending.set(false);
-        saved.set(true);
-        Ok::<(), Infallible>(())
-    });
+        focus_window_on_diff: true,
+        copy_with_line_context: true,
+        push_confirmation_required: true,
+        accessibility: gtl_models::settings::ViewerAccessibility::default(),
+    };
+    let mut selected = use_signal(|| initial);
+    let mut section = use_signal(SettingsSection::default);
     rsx! {
         ViewerSettingsForm {
-            initial,
-            pending: pending(),
-            saved: saved(),
-            save_error: rejected.map(|_| "Correct the highlighted setting and save again.".to_owned()),
+            selected: selected(),
+            section: section(),
+            onsection: move |value| section.set(value),
+            save_error: rejected.map(|_| "Correct the highlighted setting and retry.".to_owned()),
             field_errors: rejected
                 .map(|field| {
                     let mut errors = FieldErrors::default();
@@ -563,34 +539,11 @@ fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
                 })
                 .unwrap_or_default(),
             reload_available: false,
-            onmodified: move |()| saved.set(false),
+            onretry: move |()| {},
             onreload: move |()| {},
-            onsubmit: move |_| {
-                saved.set(false);
-                pending.set(true);
-                finish_save.call();
+            onchange: move |value: crate::views::viewer_settings_form::SettingsEdit| {
+                value.apply(&mut selected.write());
             },
-        }
-    }
-}
-
-#[component]
-fn SettingsResolved() -> Element {
-    rsx! {
-        SectionedSurface { aria_label: "Resolved viewer settings",
-            SectionedSurfaceHeader { class: "px-4 py-3",
-                h2 { class: "font-semibold text-ink", "Resolved configuration" }
-                p { class: "mt-0.5 text-xs text-ink-3", "Current sources and effective values." }
-            }
-            SectionedSurfaceBody {
-                dl { class: "divide-y divide-line",
-                    SettingsRow {
-                        term: "Configuration file",
-                        value: "~/.config/git-tools/config.toml",
-                    }
-                    SettingsRow { term: "Effective theme", value: "Mirage" }
-                }
-            }
         }
     }
 }

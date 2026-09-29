@@ -224,8 +224,6 @@ impl DiffService for DiffGrpcService {
         })
         .await?
         .into_grpc()?;
-
-        viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         Ok(Response::new(render_response(result)))
     }
 
@@ -248,8 +246,6 @@ impl DiffService for DiffGrpcService {
         })
         .await?
         .into_grpc()?;
-
-        viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         Ok(Response::new(render_merge_response(
             &result.placement,
             &result.notes,
@@ -276,8 +272,6 @@ impl DiffService for DiffGrpcService {
             .into_grpc()
         })
         .await??;
-
-        viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
         Ok(Response::new(render_subrepositories_response(result)))
     }
 
@@ -320,9 +314,6 @@ impl DiffService for DiffGrpcService {
         .await??;
 
         let (result, notes) = result;
-        if let Some(result) = &result {
-            viewer_runtime::record_project_renders(&self.state, &result.rendered_repositories);
-        }
         Ok(Response::new({
             let mut response = result.map_or_else(empty_projects_response, |result| {
                 render_project_response(&result)

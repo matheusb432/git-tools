@@ -39,7 +39,10 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
             |value| value,
         ),
         wrap_lines: application_field_update(request.wrap_lines, |value| value),
-        projects_view: application_field_update(request.projects_view, |value| value),
+        copy_with_line_context: application_field_update(
+            request.copy_with_line_context,
+            std::convert::identity,
+        ),
         projects_sort: application_field_update(request.projects_sort, |value| value),
         projects_page_size: application_field_update(request.projects_page_size, |value| value),
         theme: application_field_update(request.theme, |value| match value {
@@ -57,6 +60,10 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
             ViewerDiffDensity::Compact => DiffDensity::Compact,
             ViewerDiffDensity::Full => DiffDensity::Full,
         }),
+        viewer_push_no_confirmation_projects: application_field_update(
+            request.viewer_push_no_confirmation_projects,
+            |projects| projects.into_iter().collect(),
+        ),
         push_confirmation_required: application_field_update(
             request.push_confirmation_required,
             |value| value,
@@ -98,8 +105,8 @@ pub fn project_settings(
         date_format: settings.date_format(),
         revision,
         focus_window_on_diff: settings.focus_window_on_diff(),
+        copy_with_line_context: settings.copy_with_line_context(),
         sidebars: settings.sidebar_visibility(),
-        projects_view: projects.view,
         projects_sort: projects.sort,
         projects_page_size: projects.page_size,
         configuration_path,
@@ -107,6 +114,11 @@ pub fn project_settings(
         effective_theme: super::project_theme(settings.theme().unwrap_or_default()),
         render_options: super::project_render_options(settings.viewer_render_options()),
         push_confirmation_required: settings.push_confirmation_required(),
+        viewer_push_no_confirmation_projects: settings
+            .viewer_push_no_confirmation_projects()
+            .iter()
+            .cloned()
+            .collect(),
     }
 }
 

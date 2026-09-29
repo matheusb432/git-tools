@@ -267,7 +267,7 @@ fn DiffDocumentBody(
                 onopen,
                 onretry,
             }
-            div { class: "h-15 tablet:h-12 print:hidden", aria_hidden: "true" }
+            div { class: "diff-document-clearance", aria_hidden: "true" }
         }
     }
 }

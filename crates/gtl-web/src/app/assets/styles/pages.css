@@ -4,33 +4,32 @@
   .projects-title { @apply text-ink focus:outline-none; }
   .projects-header-actions { @apply flex shrink-0 items-center; }
   .projects-content { @apply flex-1 overflow-auto; }
-  .projects-grid { @apply grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))]; }
   .projects-error { @apply flex items-center rounded-sm border border-warn-line bg-warn-bg text-warn; }
 
-  .project-card { @apply grid content-start rounded-panel border border-line bg-surface hover:border-line-2; }
-  .project-card-header { @apply flex items-center; }
-  .project-card-title { @apply truncate text-ink; }
-  .project-card-meta { @apply flex items-center text-ink-2; }
-  .project-card-actions { @apply grid overflow-hidden rounded-sm border border-line-2 bg-sunk; }
-
-  .project-signal-row { @apply flex items-center border-t border-line text-left text-ink-2 select-text first:border-t-0 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-ink-2; }
-  .project-signal-value { @apply w-[4ch] shrink-0; }
   .project-review-dot { @apply inline-block shrink-0 rounded-full; }
 
-  .project-table-link { @apply flex items-center select-text focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
-  .project-view-toggle { @apply flex items-center rounded-sm border border-line-2 bg-sunk; }
+  .project-table-link { @apply flex items-center select-text focus-visible:focus-outline focus-visible:-outline-offset-2; }
 
-  .settings-page-shell { @apply overflow-hidden bg-bg; }
-  .settings-page-container { @apply grid max-w-5xl; }
-  .settings-page-header { @apply border-b border-line; }
+  .settings-page-shell { @apply grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-bg; }
+  .settings-page-header { @apply flex min-h-20 items-center gap-3 border-b border-line px-5 sm:px-8; }
   .settings-page-title { @apply text-ink focus:outline-none; }
-  .settings-page-description { @apply max-w-2xl text-ink-2; }
-  .settings-rows { @apply divide-y divide-line; }
-  .settings-row { @apply grid sm:grid-cols-[14rem_minmax(0,1fr)]; }
-  .settings-row-value { @apply break-words text-ink; }
-  .settings-form-grid { @apply grid sm:grid-cols-2 xl:grid-cols-4; }
-  .settings-form-field { @apply flex flex-col; }
-  .settings-form-footer { @apply flex items-center justify-between; }
+  .settings-source-link { @apply ml-auto inline-flex items-center gap-2 rounded-sm p-2 text-xs text-ink-2 hover:text-acc focus-visible:focus-outline; }
+  .settings-layout { @apply grid min-h-0 grid-rows-[auto_minmax(0,1fr)] md:grid-cols-[15rem_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)]; }
+  .settings-navigation { @apply flex gap-1 overflow-x-auto border-b border-line p-3 md:flex-col md:border-r md:border-b-0 md:p-4; }
+  .settings-navigation-item { @apply flex min-h-11 shrink-0 items-center gap-3 rounded-md px-3 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:focus-outline; }
+  .settings-navigation-item[aria-current="page"] { @apply bg-acc-soft text-acc; }
+  .settings-content { @apply min-h-0 px-5 py-5 sm:px-8 sm:py-6; }
+  .settings-content-inner { @apply max-w-2xl; }
+  .settings-section-heading { @apply mb-3 flex flex-wrap items-baseline justify-between gap-2 pb-2; }
+  .settings-save-status { @apply text-xs text-ink-2; }
+  .settings-save-error { @apply mb-4 grid gap-3 rounded-md border border-del-line bg-del-bg p-4 text-del; }
+  .settings-field-row { @apply m-0 min-w-0 border-0 border-b border-line py-3; }
+  .settings-select-row { @apply grid items-center gap-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4; }
+  .settings-select-control { @apply w-full sm:w-72; }
+  .settings-radio-group { @apply mt-4 pt-0; }
+  .settings-radio-group legend { @apply mb-1; }
+  .settings-radio-options { @apply grid; }
+  .settings-field-row .control-field-error:not([data-visible]) { @apply hidden; }
 
   .settings-recovery-path { @apply max-w-3xl break-all text-ink; }
   .settings-recovery-diagnostic { @apply max-w-3xl whitespace-pre-wrap break-words text-left text-ink-2; }

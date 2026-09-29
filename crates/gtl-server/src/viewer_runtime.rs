@@ -5,7 +5,6 @@ use gtl_application::{
         get_recent_render,
         record_render::{self, RenderErrorCode, RenderFailure, StartRender},
     },
-    ports::Clock as _,
     recipes::RecipeBatch,
     viewer::{
         saved_tabs::{self, SavedViewerTab},
@@ -144,11 +143,10 @@ fn run_recipe(state: &AppState, mut work: ReservedRecipeWork) {
         Ok(RecipePublication::Published { history }) => {
             finish_history(state, ticket, render_id, previous, &history);
         }
-        Ok(RecipePublication::Skipped { path }) => {
+        Ok(RecipePublication::Skipped | RecipePublication::Stale) => {
             if let Some(render_id) = render_id {
                 discard_history(state, render_id);
             }
-            record_project_renders(state, &[path]);
         }
         Ok(RecipePublication::Broken { state: broken }) => {
             if let Some(render_id) = render_id {
@@ -164,11 +162,6 @@ fn run_recipe(state: &AppState, mut work: ReservedRecipeWork) {
                 );
             }
             tracing::error!(error = ?error, "viewer recipe computation failed");
-        }
-        Ok(RecipePublication::Stale) => {
-            if let Some(render_id) = render_id {
-                discard_history(state, render_id);
-            }
         }
         Err(error) => {
             if let Some(render_id) = render_id {
@@ -228,7 +221,6 @@ fn finish_history(
             {
                 tracing::error!(error = ?error, "viewer history reuse failed");
             }
-            record_project_renders(state, &[history.recipe.cwd()]);
             return;
         }
         Some(_) => start_history(state, &history.recipe),
@@ -334,30 +326,4 @@ fn broken_failure(state: &ViewerTabState) -> RenderFailure {
         _ => RenderErrorCode::SourceUnavailable,
     };
     RenderFailure::new(code, failure.to_string())
-}
-
-pub(crate) fn record_project_renders(
-    state: &AppState,
-    paths: &[gtl_models::paths::RepositoryRoot],
-) {
-    use gtl_application::projects::record_project_render::{self, RecordProjectRender};
-    let result = (|| -> anyhow::Result<()> {
-        let mut connection = state.database.connection_lock()?;
-        let transaction = connection.transaction()?;
-        let rendered_at = state.clock.now()?;
-        for path in paths {
-            record_project_render::execute(
-                &RecordProjectRender {
-                    path: path.clone(),
-                    rendered_at: rendered_at.clone(),
-                },
-                &transaction,
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    })();
-    if let Err(error) = result {
-        tracing::error!(error = ?error, "project render recency recording failed");
-    }
 }

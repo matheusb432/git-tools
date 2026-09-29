@@ -1,7 +1,6 @@
 use gtl_models::{
     paths::{ProjectName, RepositoryRoot},
     repository::status::RepositoryStatus,
-    timestamps::MachineTimestamp,
     viewer::ViewerTabId,
 };
 use serde::{Deserialize, Serialize};
@@ -160,7 +159,6 @@ pub struct ViewerProject {
     pub id: gtl_models::projects::catalogue::ProjectId,
     pub path: RepositoryRoot,
     pub name: ProjectName,
-    pub last_rendered_at: Option<MachineTimestamp>,
     pub comparison_branch: gtl_models::projects::comparison::ComparisonBranch,
 }
 

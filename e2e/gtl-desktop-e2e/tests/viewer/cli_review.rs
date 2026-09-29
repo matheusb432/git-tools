@@ -12,6 +12,7 @@ async fn user_reviews_a_cli_snapshot_and_reopens_it_from_history() -> Result<()>
             fixture.forward()?;
             let driver = session.driver();
             support::wait_for_active_diff(driver, "long-lines", "alpha-one-shot-marker").await?;
+            copy_commit_id_without_selecting(driver).await?;
 
             support::click(driver, By::Css("a[aria-label='Projects']")).await?;
             fixture.forward()?;
@@ -64,11 +65,36 @@ async fn user_reviews_a_cli_snapshot_and_reopens_it_from_history() -> Result<()>
                 .await?
                 .click()
                 .await?;
-            support::visible(driver, By::Css("[role='tab'][title='Auth review']")).await?;
+            support::visible(
+                driver,
+                By::XPath("//*[@role='tab' and contains(., 'Auth review')]"),
+            )
+            .await?;
             support::wait_for_active_diff(driver, "Auth review", "alpha-one-shot-marker").await
         })
     })
     .await
+}
+
+async fn copy_commit_id_without_selecting(driver: &WebDriver) -> Result<()> {
+    let copy_button = support::visible(
+        driver,
+        By::Css("aside[aria-label='Commits'] button[title='Copy commit ID']"),
+    )
+    .await?;
+    copy_button.click().await?;
+    wait::until("commit ID copied", wait::ASSERTION_TIMEOUT, || async {
+        Ok(copy_button.text().await?.contains("Copied").then_some(()))
+    })
+    .await?;
+    ensure!(
+        driver
+            .find_all(By::Css("aside[aria-label='Commits'] [aria-pressed='true']"))
+            .await?
+            .is_empty(),
+        "copying the commit ID selected the commit"
+    );
+    Ok(())
 }
 
 async fn find_in_all_files(driver: &WebDriver, text: &str) -> Result<()> {
@@ -129,6 +155,10 @@ async fn rename_snapshot(driver: &WebDriver, name: &str) -> Result<()> {
     let editor = support::visible(driver, By::Css("input[aria-label='Snapshot name']")).await?;
     editor.send_keys(name).await?;
     editor.send_keys(Key::Enter).await?;
-    support::visible(driver, By::Css(format!("[role='tab'][title='{name}']"))).await?;
+    support::visible(
+        driver,
+        By::XPath(format!("//*[@role='tab' and contains(., '{name}')]")),
+    )
+    .await?;
     Ok(())
 }

@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-pub(super) fn comparison_popover_id(path: &RepositoryRoot) -> String {
+fn comparison_popover_id(path: &RepositoryRoot) -> String {
     let mut id = String::from("project-comparison");
     for character in path.to_string().chars() {
         if character.is_ascii_alphanumeric() {
@@ -72,6 +72,7 @@ pub(crate) enum ComparisonEditorTrigger {
 pub(crate) fn ComparisonBranchEditor(
     project: RepositoryRoot,
     branch: ComparisonBranch,
+    project_name: Option<gtl_models::paths::ProjectName>,
     #[props(default)] trigger: ComparisonEditorTrigger,
     #[props(default)] disabled: bool,
     #[props(default = true)] active: bool,
@@ -81,15 +82,25 @@ pub(crate) fn ComparisonBranchEditor(
         ComparisonEditorTrigger::Icon => comparison_popover_id(&project),
         ComparisonEditorTrigger::Labeled => format!("{}-action", comparison_popover_id(&project)),
     };
-    let label = t!(
-        use_language(),
-        "projects-comparison-branch-value",
-        branch = branch.to_string()
-    );
+    let language = use_language();
+    let label = if project_name.is_some() {
+        t!(
+            language,
+            "projects-settings-label",
+            branch = branch.to_string()
+        )
+    } else {
+        t!(
+            language,
+            "projects-comparison-branch-value",
+            branch = branch.to_string()
+        )
+    };
     let form = rsx! {
         ComparisonBranchForm {
             project,
             branch,
+            project_name,
             popover_id: popover_id.clone(),
             disabled,
             active,
@@ -141,6 +152,7 @@ pub(super) fn ProjectComparisonEditor(project: ViewerProject, disabled: bool) ->
     rsx! {
         ComparisonBranchEditor {
             project: project.path,
+            project_name: project.name,
             branch: project.comparison_branch,
             disabled,
             active: (projects.active)(),
@@ -247,6 +259,7 @@ fn use_comparison_branch_edit(
 fn ComparisonBranchForm(
     project: RepositoryRoot,
     branch: ComparisonBranch,
+    project_name: Option<gtl_models::paths::ProjectName>,
     popover_id: String,
     disabled: bool,
     active: bool,
@@ -259,7 +272,8 @@ fn ComparisonBranchForm(
     let form_error = (edit.form_error)();
     rsx! {
         form {
-            class: "grid gap-3 p-3",
+            class: "grid w-full min-w-0 gap-3 p-3",
+            novalidate: true,
             onsubmit: move |event| {
                 event.prevent_default();
                 (edit.save)(());
@@ -289,6 +303,9 @@ fn ComparisonBranchForm(
                     state: if pending { ButtonState::Loading } else if disabled || (edit.draft)().is_none() { ButtonState::Disabled } else { ButtonState::Enabled },
                     {t!(language, "projects-comparison-save")}
                 }
+            }
+            if let Some(project) = project_name {
+                super::push_confirmation_setting::ProjectPushConfirmationSetting { project, id: "{popover_id}-push-no-confirmation" }
             }
         }
     }

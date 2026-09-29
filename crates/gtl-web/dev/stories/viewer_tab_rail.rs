@@ -10,8 +10,8 @@ use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
 use crate::shared::{
     recipe_label::recipe_label_text,
     ui::{
-        Button, ButtonSize, ButtonVariant, InlineTextSubmission, NavigationBar, ScrollArea,
-        ScrollAreaVariant, ViewerTabItem, ViewerTabOverflowMenu,
+        Button, ButtonSize, ButtonVariant, InlineTextSubmission, NavigationBar, ViewerTabItem,
+        ViewerTabRail,
     },
 };
 
@@ -19,149 +19,29 @@ type PreviewResult<T> = Result<T, Box<dyn Error>>;
 
 #[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
-    let (tabs, active_tab) = match preview_tabs_with_active() {
-        Ok(fixture) => fixture,
-        Err(error) => return preview_error(error),
-    };
-
     rsx! {
-        div { class: "pointer-events-none flex min-h-24 items-start overflow-hidden border-b border-line bg-surface",
-            ViewerTabOverflowMenu {
-                id: "preview-tab-overflow-thumbnail",
-                tabs,
-                active_tab,
-                onactivate: move |_| {},
-                onclose: move |_| {},
-                onmove: move |_| {},
-            }
-        }
+        div { class: "pointer-events-none", {demo(false)} }
     }
 }
 
-/// Interactive collapsed rail with enough tabs to exercise selection and close behavior.
 #[story]
 fn interactive() -> Element {
-    rsx! {
-        ViewerTabOverflowDemo { width: PreviewWidth::Desktop }
-    }
+    demo(false)
 }
 
-/// The same control constrained to a phone-width viewer rail.
 #[story(name = "Narrow rail")]
 fn narrow_rail() -> Element {
-    rsx! {
-        ViewerTabOverflowDemo { width: PreviewWidth::Narrow }
-    }
+    demo(true)
 }
 
-/// Seamless tabs with immediate selection, close actions, and drag reordering.
-#[story(name = "Interactive tab rail")]
-fn tab_rail() -> Element {
+fn demo(narrow: bool) -> Element {
     let tabs = match preview_tabs() {
         Ok(tabs) => tabs,
         Err(error) => return preview_error(error),
     };
-
     rsx! {
-        ViewerTabRailDemo { tabs }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PreviewWidth {
-    Desktop,
-    Narrow,
-}
-
-impl PreviewWidth {
-    const fn frame_classes(self) -> &'static str {
-        match self {
-            Self::Desktop => "story-viewer-frame mx-auto w-full",
-            Self::Narrow => "story-viewer-frame-narrow mx-auto max-w-full",
-        }
-    }
-
-    const fn frame_label(self) -> &'static str {
-        match self {
-            Self::Desktop => "Desktop collapsed tab rail preview",
-            Self::Narrow => "Narrow collapsed tab rail preview",
-        }
-    }
-
-    const fn menu_id(self) -> &'static str {
-        match self {
-            Self::Desktop => "preview-tab-overflow-desktop",
-            Self::Narrow => "preview-tab-overflow-narrow",
-        }
-    }
-}
-
-#[component]
-fn ViewerTabOverflowDemo(width: PreviewWidth) -> Element {
-    let tabs = match preview_tabs() {
-        Ok(tabs) => tabs,
-        Err(error) => return preview_error(error),
-    };
-
-    rsx! {
-        ViewerTabOverflowDemoReady { width, tabs }
-    }
-}
-
-#[component]
-fn ViewerTabOverflowDemoReady(width: PreviewWidth, tabs: Vec<ViewerTab>) -> Element {
-    let tabs_reset = tabs.clone();
-    let mut preview_state = use_signal(move || PreviewTabState::new(tabs));
-    let state = preview_state();
-    let active_tab = state.active_tab().cloned();
-    let active_label = active_tab
-        .as_ref()
-        .map_or_else(|| "No open diff".to_owned(), label_text);
-
-    rsx! {
-        section { class: width.frame_classes(), aria_label: width.frame_label(),
-            NavigationBar {
-                aria_label: "Viewer navigation preview",
-                rail: rsx! {
-                    if let Some(active_tab) = active_tab {
-                        ViewerTabOverflowMenu {
-                            id: width.menu_id(),
-                            tabs: state.tabs.clone(),
-                            active_tab,
-                            diff_rows_loading_tab_id: state.tabs.iter().find(|tab| tab.state == ViewerTabState::Pending).map(|tab| tab.id),
-                            onactivate: move |tab_id| {
-                                preview_state.set(preview_state().activate(tab_id));
-                            },
-                            onclose: move |tab_id| {
-                                preview_state.set(preview_state().close(tab_id));
-                            },
-                            onmove: move |request| {
-                                preview_state.set(preview_state().move_tab(request));
-                            },
-                        }
-                    } else {
-                        p { class: "flex h-9 min-w-0 flex-1 items-center px-3 text-ink-3", "No open diffs" }
-                        Button {
-                            size: ButtonSize::Small,
-                            variant: ButtonVariant::Ghost,
-                            class: "self-center",
-                            onclick: move |_| {
-                                preview_state.set(PreviewTabState::new(tabs_reset.clone()));
-                            },
-                            "Reset"
-                        }
-                    }
-                },
-            }
-            div {
-                id: "viewer-active-view",
-                class: "story-active-view min-h-40 px-6 py-10",
-                div {
-                    p { class: "text-xs text-ink-3", "Viewing" }
-                    p { class: "mt-1 font-semibold text-ink", "{active_label}" }
-                }
-            }
-            output { class: "sr-only", aria_live: "polite", "{state.announcement}" }
+        div { class: if narrow { "mx-auto w-80 max-w-full" } else { "w-full" },
+            ViewerTabRailDemo { tabs }
         }
     }
 }
@@ -181,40 +61,38 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
             NavigationBar {
                 aria_label: "Viewer navigation preview",
                 rail: rsx! {
-                    ScrollArea {
-                        variant: ScrollAreaVariant::Rail,
-                        class: "flex min-w-0 flex-1 items-end gap-0 overflow-x-auto",
-                        role: "tablist",
-                        aria_label: "Open diffs",
-                        for tab in &state.tabs {
-                            {
-                                let tab_id = tab.id;
-                                let active = state.active_tab_id == Some(tab_id);
-                                rsx! {
-                                    ViewerTabItem {
-                                        key: "{tab.id}",
-                                        tab: tab.clone(),
-                                        active,
-                                        rows_loading: tab.state == ViewerTabState::Pending,
-                                        reorderable: true,
-                                        onactivate: move |()| {
-                                            preview_state.set(preview_state().activate(tab_id));
-                                        },
-                                        onkeydown: move |_| {},
-                                        onclose: move |_| {
-                                            preview_state.set(preview_state().close(tab_id));
-                                        },
-                                        onmove: move |request| {
-                                            preview_state.set(preview_state().move_tab(request));
-                                        },
-                                        onpin: move |pinned| {
-                                            preview_state.set(preview_state().pin(tab_id, pinned));
-                                        },
-                                        onrename: move |submission: InlineTextSubmission| {
-                                            preview_state
-                                                .set(preview_state().rename(tab_id, &submission.value));
-                                            (submission.complete)(Ok(()));
-                                        },
+                    ViewerTabRail { active_tab_id: state.active_tab_id,
+                        div { class: "flex w-max items-end",
+                            for tab in &state.tabs {
+                                {
+                                    let tab_id = tab.id;
+                                    let active = state.active_tab_id == Some(tab_id);
+                                    rsx! {
+                                        ViewerTabItem {
+                                            key: "{tab.id}",
+                                            tab: tab.clone(),
+                                            active,
+                                            rows_loading: tab.state == ViewerTabState::Pending,
+                                            reorderable: true,
+                                            onactivate: move |()| {
+                                                preview_state.set(preview_state().activate(tab_id));
+                                            },
+                                            onkeydown: move |_| {},
+                                            onclose: move |_| {
+                                                preview_state.set(preview_state().close(tab_id));
+                                            },
+                                            onmove: move |request| {
+                                                preview_state.set(preview_state().move_tab(request));
+                                            },
+                                            onpin: move |pinned| {
+                                                preview_state.set(preview_state().pin(tab_id, pinned));
+                                            },
+                                            onrename: move |submission: InlineTextSubmission| {
+                                                preview_state
+                                                    .set(preview_state().rename(tab_id, &submission.value));
+                                                (submission.complete)(Ok(()));
+                                            },
+                                        }
                                     }
                                 }
                             }
@@ -231,6 +109,28 @@ fn ViewerTabRailDemo(tabs: Vec<ViewerTab>) -> Element {
                 }
             }
             output { class: "sr-only", aria_live: "polite", "{state.announcement}" }
+            div { class: "flex flex-wrap gap-2 border-t border-line p-3",
+                Button {
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Outline,
+                    onclick: move |_| {
+                        if let Some(tab) = preview_state().tabs.first() {
+                            preview_state.set(preview_state().activate(tab.id));
+                        }
+                    },
+                    "Review first diff"
+                }
+                Button {
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Outline,
+                    onclick: move |_| {
+                        if let Some(tab) = preview_state().tabs.last() {
+                            preview_state.set(preview_state().activate(tab.id));
+                        }
+                    },
+                    "Review last diff"
+                }
+            }
         }
     }
 }
@@ -272,11 +172,7 @@ impl PreviewTabState {
         };
         let closed_tab = self.tabs.remove(tab_index);
         if self.active_tab_id == Some(tab_id) {
-            self.active_tab_id = self
-                .tabs
-                .get(tab_index)
-                .or_else(|| self.tabs.last())
-                .map(|tab| tab.id);
+            self.active_tab_id = self.tabs.first().map(|tab| tab.id);
         }
         self.announcement = format!("Closed {}", label_text(&closed_tab));
         self
@@ -345,15 +241,6 @@ impl PreviewTabState {
     }
 }
 
-fn preview_tabs_with_active() -> PreviewResult<(Vec<ViewerTab>, ViewerTab)> {
-    let tabs = preview_tabs()?;
-    let active_tab = tabs
-        .first()
-        .cloned()
-        .ok_or_else(|| "viewer tab preview requires one tab".to_owned())?;
-    Ok((tabs, active_tab))
-}
-
 fn preview_tabs() -> PreviewResult<Vec<ViewerTab>> {
     let fixtures = [
         ("Working tree", true, ViewerTabState::Ready),
@@ -403,10 +290,10 @@ mod tests {
     use super::{PreviewResult, PreviewTabState, preview_tabs};
 
     #[test]
-    fn closing_the_active_tab_selects_its_next_neighbor() -> PreviewResult<()> {
+    fn closing_the_active_tab_selects_the_first_remaining() -> PreviewResult<()> {
         let tabs = preview_tabs()?;
         let closing_tab_id = tabs[1].id;
-        let expected_tab_id = tabs[2].id;
+        let expected_tab_id = tabs[0].id;
         let state = PreviewTabState::new(tabs)
             .activate(closing_tab_id)
             .close(closing_tab_id);
@@ -476,10 +363,10 @@ mod tests {
     }
 }
 
-/// Collapsed tab rail menu.
+/// Horizontally scrolling diff tabs.
 #[stories(
-    id = "viewer-tab-overflow-menu",
-    name = "Viewer tab overflow menu",
+    id = "viewer-tab-rail",
+    name = "Viewer tab rail",
     thumbnail = thumbnail
 )]
-const VIEWER_TAB_OVERFLOW_MENU_STORIES: () = &[interactive, narrow_rail, tab_rail];
+const VIEWER_TAB_RAIL_STORIES: () = &[interactive, narrow_rail];

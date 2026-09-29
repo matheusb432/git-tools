@@ -13,7 +13,7 @@ use crate::{
         i18n::{t, use_language},
         ui::{ToastHandle, use_toast},
     },
-    views::{DiffWorkspaceView, UserSettingsView},
+    views::{DiffWorkspaceView, viewer_settings_form::SettingsSection},
 };
 
 #[derive(Debug, Clone, Routable, PartialEq, Eq)]
@@ -29,8 +29,38 @@ pub(crate) enum Route {
         CurrentDiff {},
         #[route("/diffs/:tab_id")]
         Diff { tab_id: ViewerTabId },
-        #[route("/settings")]
-        Settings {},
+        #[redirect("/settings", || Route::Settings { section: SettingsSection::Appearance })]
+        #[route("/settings/:section")]
+        Settings { section: SettingsSection },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SettingsNavigation {
+    pub(crate) open: Callback<()>,
+    pub(crate) select: Callback<SettingsSection>,
+}
+
+pub(super) fn use_settings_navigation_provider() {
+    let navigator = use_navigator();
+    let settings = use_context::<super::user_settings::UserSettings>();
+    let initial = match dioxus::router::router().current::<Route>() {
+        Route::Settings { section } => section,
+        _ => SettingsSection::default(),
+    };
+    let mut last_section = use_signal(|| initial);
+    let open = use_callback(move |()| {
+        if settings.error.peek().is_none() {
+            settings.reload.call(());
+        }
+        navigator.push(Route::Settings {
+            section: *last_section.peek(),
+        });
+    });
+    let select = use_callback(move |section| {
+        last_section.set(section);
+        navigator.replace(Route::Settings { section });
+    });
+    use_context_provider(|| SettingsNavigation { open, select });
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -77,7 +107,7 @@ impl Route {
             Self::Diff { tab_id } => Some(*tab_id),
             Self::Projects {}
             | Self::CurrentDiff {}
-            | Self::Settings {}
+            | Self::Settings { .. }
             | Self::ProjectDiff { .. } => None,
         }
     }
@@ -149,7 +179,7 @@ impl ViewerRouteObservation {
             },
             Route::Projects {}
             | Route::Diff { .. }
-            | Route::Settings {}
+            | Route::Settings { .. }
             | Route::ProjectDiff { .. } => ViewerRouteAction::None,
         };
         (next, action)
@@ -201,10 +231,19 @@ async fn apply_viewer_route(
     match action {
         ViewerRouteAction::None => {}
         ViewerRouteAction::Replace(target) => {
-            let focus_workspace = matches!(target, Route::Diff { .. });
+            // A close also requests tab focus; route replacement must preserve it.
+            let focus_target = match &target {
+                Route::Diff { tab_id }
+                    if route.tab_id().is_some_and(|previous| previous != *tab_id) =>
+                {
+                    Some(crate::shared::ui::viewer_tab_element_id(*tab_id))
+                }
+                Route::Diff { .. } => Some("workspace-heading".to_owned()),
+                _ => None,
+            };
             navigator.replace(target);
-            if focus_workspace {
-                browser::focus_element("workspace-heading".to_owned());
+            if let Some(target) = focus_target {
+                browser::focus_element(target);
             }
         }
         ViewerRouteAction::Focus(target) => {
@@ -254,9 +293,9 @@ fn Diff(tab_id: ViewerTabId) -> Element {
 }
 
 #[component]
-fn Settings() -> Element {
+fn Settings(section: SettingsSection) -> Element {
     rsx! {
-        UserSettingsView {}
+        crate::views::UserSettingsView { section }
     }
 }
 
@@ -294,6 +333,7 @@ mod tests {
                 ViewerActiveState::Pending { tab_id }
             }),
             preferences: ViewerPreferences {
+                copy_with_line_context: true,
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 language: gtl_models::settings::ViewerLanguage::default(),
                 date_format: gtl_models::settings::ViewerDateFormat::default(),
@@ -345,7 +385,12 @@ mod tests {
         assert_eq!(Route::Projects {}.to_string(), "/projects");
         assert_eq!("/".parse::<Route>().ok(), Some(Route::Projects {}));
         assert_eq!("/projects".parse::<Route>().ok(), Some(Route::Projects {}));
-        for route in [Route::Projects {}, Route::Settings {}] {
+        for route in [
+            Route::Projects {},
+            Route::Settings {
+                section: SettingsSection::Appearance,
+            },
+        ] {
             assert_eq!(route.tab_id(), None);
         }
     }
@@ -360,6 +405,26 @@ mod tests {
         assert!("/diffs/0".parse::<Route>().is_err());
         assert!("/diffs/invalid".parse::<Route>().is_err());
         Ok(())
+    }
+
+    #[test]
+    fn settings_routes_own_the_selected_category() {
+        for section in [
+            SettingsSection::Appearance,
+            SettingsSection::Locale,
+            SettingsSection::Snapshots,
+            SettingsSection::Git,
+        ] {
+            let route = Route::Settings { section };
+            assert_eq!(route.to_string().parse::<Route>().ok(), Some(route));
+        }
+        assert_eq!(
+            "/settings".parse::<Route>().ok(),
+            Some(Route::Settings {
+                section: SettingsSection::Appearance
+            })
+        );
+        assert!("/settings/unknown".parse::<Route>().is_err());
     }
 
     #[test]
@@ -412,11 +477,23 @@ mod tests {
             &shell,
         );
         shell.focus_request_version = Some(ViewerVersion::new(2));
-        let (observed, action) = observed.next("server".to_owned(), &Route::Settings {}, &shell);
+        let (observed, action) = observed.next(
+            "server".to_owned(),
+            &Route::Settings {
+                section: SettingsSection::Appearance,
+            },
+            &shell,
+        );
         assert_eq!(action, ViewerRouteAction::Focus(Route::Diff { tab_id }));
 
         shell.version = shell.version.next();
-        let (_, action) = observed.next("server".to_owned(), &Route::Settings {}, &shell);
+        let (_, action) = observed.next(
+            "server".to_owned(),
+            &Route::Settings {
+                section: SettingsSection::Appearance,
+            },
+            &shell,
+        );
         assert_eq!(action, ViewerRouteAction::None);
         Ok(())
     }
@@ -470,7 +547,13 @@ mod tests {
             action,
             ViewerRouteAction::Replace(Route::Diff { tab_id: second })
         );
-        let (_, action) = observed.next("new".to_owned(), &Route::Settings {}, &shell);
+        let (_, action) = observed.next(
+            "new".to_owned(),
+            &Route::Settings {
+                section: SettingsSection::Appearance,
+            },
+            &shell,
+        );
         assert_eq!(action, ViewerRouteAction::None);
 
         let empty = self::shell(None, None)?;

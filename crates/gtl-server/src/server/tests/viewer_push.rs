@@ -118,6 +118,10 @@ async fn confirmation_pins_sha_and_upstream_while_new_commits_and_dirty_files_st
     };
     assert_eq!(preview.commit.as_ref(), fixture.latest);
     assert_eq!(preview.count, 2);
+    assert!(
+        !preview.no_confirmation,
+        "CLI opt-out must not bypass viewer confirmation"
+    );
     assert_eq!(preview.project, None);
     assert_eq!(preview.branch.as_ref(), "feature");
     assert_eq!(preview.remote_branch.as_ref(), "main");
@@ -192,6 +196,42 @@ async fn confirmation_uses_catalogue_project_title_when_available() -> TestResul
         preview.project.as_ref().map(AsRef::as_ref),
         Some("Named project")
     );
+    assert!(!preview.no_confirmation);
+    fixture
+        .client
+        .edit_settings(proto::viewer::encode_edit_settings_request(
+            &gtl_wire::viewer::EditSettingsRequest {
+                viewer_push_no_confirmation_projects: gtl_wire::viewer::FieldUpdate::Update(vec![
+                    "Another project".to_owned().try_into()?,
+                ]),
+                ..Default::default()
+            },
+        ))
+        .await?;
+    let request = fixture.prepare().await?;
+    let ViewerPushStatus::Review(preview) = fixture.status(request).await? else {
+        return Err("expected review".into());
+    };
+    assert!(
+        !preview.no_confirmation,
+        "other projects retain confirmation"
+    );
+    fixture
+        .client
+        .edit_settings(proto::viewer::encode_edit_settings_request(
+            &gtl_wire::viewer::EditSettingsRequest {
+                viewer_push_no_confirmation_projects: gtl_wire::viewer::FieldUpdate::Update(vec![
+                    "Named project".to_owned().try_into()?,
+                ]),
+                ..Default::default()
+            },
+        ))
+        .await?;
+    let request = fixture.prepare().await?;
+    let ViewerPushStatus::Review(preview) = fixture.status(request).await? else {
+        return Err("expected review".into());
+    };
+    assert!(preview.no_confirmation);
     Ok(())
 }
 
@@ -465,7 +505,7 @@ async fn selected_commit_pushes_only_its_ancestors_and_refreshes_the_live_diff()
 
 #[tokio::test]
 async fn push_availability_reads_current_git_without_replacing_the_displayed_view() -> TestResult {
-    use gtl_wire::viewer::push::ViewerPushAvailability;
+    use gtl_wire::viewer::push::{ViewerPushAvailability, ViewerPushState};
     let mut fixture = Fixture::new().await?;
     let view = tokio::time::timeout(
         Duration::from_secs(10),
@@ -484,7 +524,10 @@ async fn push_availability_reads_current_git_without_replacing_the_displayed_vie
                 .await?
                 .into_inner()
         )?,
-        ViewerPushAvailability::Available
+        ViewerPushState {
+            availability: ViewerPushAvailability::Available,
+            snapshot_has_unpushed_commits: Some(true)
+        }
     );
 
     fixture
@@ -498,7 +541,10 @@ async fn push_availability_reads_current_git_without_replacing_the_displayed_vie
                 .await?
                 .into_inner()
         )?,
-        ViewerPushAvailability::NothingToPush
+        ViewerPushState {
+            availability: ViewerPushAvailability::NothingToPush,
+            snapshot_has_unpushed_commits: Some(false)
+        }
     );
 
     fixture.repository.git(&["reset", "--soft", &fixture.first]);
@@ -511,6 +557,7 @@ async fn push_availability_reads_current_git_without_replacing_the_displayed_vie
             .await?
             .into_inner(),
     )?
+    .availability
     else {
         return Err("rewritten target was reported as pushable".into());
     };

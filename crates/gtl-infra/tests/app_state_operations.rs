@@ -186,7 +186,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
 }
 
 #[test]
-fn project_comparisons_reopen_their_tab_and_repeat_renders_update_recency() -> anyhow::Result<()> {
+fn project_comparisons_reopen_their_tab() -> anyhow::Result<()> {
     use gtl_application::{
         projects::open_viewer_project::{self, OpenProjectComparison},
         utils::{FixedClock, FixedUserSettingsStore},
@@ -230,14 +230,12 @@ fn project_comparisons_reopen_their_tab_and_repeat_renders_update_recency() -> a
     else {
         anyhow::bail!("valid comparison must publish");
     };
-    for rendered_at in ["2026-09-06T10:00:00Z", "2026-09-06T11:00:00Z"] {
-        record_render::execute(
-            &history,
-            &mut connection,
-            &FixedClock::new(rendered_at.try_into().unwrap()),
-        )
-        .unwrap();
-    }
+    record_render::execute(
+        &history,
+        &mut connection,
+        &FixedClock::new("2026-09-06T10:00:00Z".try_into().unwrap()),
+    )
+    .unwrap();
     let repeated = open_viewer_project::execute(
         OpenProjectComparison {
             project: request,
@@ -248,11 +246,11 @@ fn project_comparisons_reopen_their_tab_and_repeat_renders_update_recency() -> a
     )
     .unwrap();
     assert_eq!(repeated.ticket().tab_id, id);
-    assert_viewer_project_recency(&home, &connection)?;
+    assert_viewer_project_status(&home, &connection)?;
     Ok(())
 }
 
-fn assert_viewer_project_recency(
+fn assert_viewer_project_status(
     home: &std::path::Path,
     connection: &rusqlite::Connection,
 ) -> anyhow::Result<()> {
@@ -280,10 +278,6 @@ fn assert_viewer_project_recency(
             ..
         }
     ));
-    assert_eq!(
-        project.last_rendered_at.as_ref().unwrap().as_ref(),
-        "2026-09-06T11:00:00Z"
-    );
     Ok(())
 }
 
@@ -318,10 +312,7 @@ fn register_viewer_project(
 
 #[test]
 fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyhow::Result<()> {
-    use gtl_application::projects::{
-        list_viewer_projects,
-        record_project_render::{self, RecordProjectRender},
-    };
+    use gtl_application::projects::list_viewer_projects;
     use gtl_wire::viewer::projects::{
         ListViewerProjects, ViewerProjectsCursor, ViewerProjectsPageSize,
     };
@@ -337,13 +328,6 @@ fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyho
             directory.path().join(id).to_str().unwrap(),
         )?;
     }
-    record_project_render::execute(
-        &RecordProjectRender {
-            path: repository_root(&directory.path().join("GAM")),
-            rendered_at: "2026-09-06T13:00:00Z".try_into()?,
-        },
-        &connection,
-    )?;
     let request = ListViewerProjects {
         sort: None,
         page_size: ViewerProjectsPageSize::try_new(2)?,
@@ -367,14 +351,6 @@ fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyho
         &connection,
     )?;
     assert_eq!(page.projects()[0].id.as_ref(), "GAM");
-    assert_eq!(
-        page.projects()[0]
-            .last_rendered_at
-            .as_ref()
-            .unwrap()
-            .as_ref(),
-        "2026-09-06T13:00:00Z"
-    );
     assert_eq!(page.count_before(), 2);
     assert!(!page.projects()[0].path.as_ref().exists());
     Ok(())

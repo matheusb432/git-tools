@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_wire::viewer::{ViewerActiveState, ViewerCommitSelection};
+use gtl_wire::viewer::ViewerActiveState;
 use lucide_dioxus::{ChevronsDownUp, ChevronsUpDown, Upload};
 
 use crate::{
@@ -43,8 +43,7 @@ pub(super) fn DiffTabActions(target: ViewerTabMenuTarget) -> Element {
         if let Some(view) = view {
             ViewPushMenuAction {
                 identity: view.identity,
-                disabled: view.modified_files || view.commit_count == 0
-                    || matches!(view.commit_selection, ViewerCommitSelection::Pending { .. }),
+                disabled: view.modified_files || view.commit_count == 0,
                 menu_id: target.menu_id,
                 trigger_id: target.trigger_id,
             }

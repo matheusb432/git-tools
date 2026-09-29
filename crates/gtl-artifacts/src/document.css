@@ -67,7 +67,6 @@ table.diff{width:100%;border-collapse:collapse;font:14px/20px var(--mono)}
 .diff thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .diff td{vertical-align:top}
 .diff .number{width:1%;min-width:28px;padding:0 4px;text-align:center;white-space:nowrap;color:var(--ink-3);font-variant-numeric:tabular-nums;user-select:none}
-.marker{width:1%;padding:0 0 0 4px;color:var(--ink-3);user-select:none}
 .source{padding:0 4px;color:var(--code)}
 .source code{white-space:pre}
 .wrap .source code{white-space:pre-wrap;overflow-wrap:anywhere}
@@ -75,8 +74,6 @@ table.diff{width:100%;border-collapse:collapse;font:14px/20px var(--mono)}
 .removed{background:color-mix(in srgb,var(--del-bg) 50%,transparent)}
 .added .number{background:var(--add-gut);color:var(--add)}
 .removed .number{background:var(--del-gut);color:var(--del)}
-.added .marker{color:var(--add)}
-.removed .marker{color:var(--del)}
 .meta .source,.hunk .source{padding:0 12px;color:var(--ink-3)}
 .meta{opacity:.6}
 .hunk{background:var(--sunk);font-weight:600}

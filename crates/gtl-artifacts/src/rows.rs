@@ -25,10 +25,9 @@ pub(super) fn render(
         .parse(lines.iter());
     write!(
         output,
-        "<div class=\"diff-scroll\" tabindex=\"0\" role=\"region\" aria-label=\"{}\"><table class=\"diff\"><colgroup><col class=\"number\"><col class=\"marker\"><col></colgroup><thead><tr><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>",
+        "<div class=\"diff-scroll\" tabindex=\"0\" role=\"region\" aria-label=\"{}\"><table class=\"diff\"><colgroup><col class=\"number\"><col></colgroup><thead><tr><th>{}</th><th>{}</th></tr></thead><tbody>",
         Escaped(&file.path.to_string_lossy()),
         labels.line,
-        labels.change,
         labels.source
     )?;
     for row in parsed.rows() {
@@ -39,17 +38,17 @@ pub(super) fn render(
 }
 
 fn render_row(output: &mut String, row: &DiffRow, labels: &Labels) -> fmt::Result {
-    let (class, marker) = match row.kind() {
-        DiffRowKind::Meta => ("meta", ""),
-        DiffRowKind::Hunk => ("hunk", ""),
-        DiffRowKind::Context => ("context", " "),
-        DiffRowKind::Added => ("added", "+"),
-        DiffRowKind::Removed => ("removed", "−"),
+    let class = match row.kind() {
+        DiffRowKind::Meta => "meta",
+        DiffRowKind::Hunk => "hunk",
+        DiffRowKind::Context => "context",
+        DiffRowKind::Added => "added",
+        DiffRowKind::Removed => "removed",
     };
     if matches!(row.kind(), DiffRowKind::Meta | DiffRowKind::Hunk) {
         write!(
             output,
-            "<tr class=\"{class}\"><td class=\"source\" colspan=\"3\">"
+            "<tr class=\"{class}\"><td class=\"source\" colspan=\"2\">"
         )?;
     } else {
         let (number, label) = if row.kind() == DiffRowKind::Removed {
@@ -67,10 +66,7 @@ fn render_row(output: &mut String, row: &DiffRow, labels: &Labels) -> fmt::Resul
         } else {
             output.push_str("<td class=\"number\">");
         }
-        write!(
-            output,
-            "</td><td class=\"marker\">{marker}</td><td class=\"source\">"
-        )?;
+        output.push_str("</td><td class=\"source\">");
     }
     render_source(output, row, labels)?;
     output.push_str("</td></tr>");

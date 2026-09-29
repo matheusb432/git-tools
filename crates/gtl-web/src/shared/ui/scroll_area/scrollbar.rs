@@ -23,7 +23,7 @@ impl ScrollbarPlacement {
                 &[ScrollAxis::Horizontal, ScrollAxis::Vertical]
             }
             Self::Viewport(ScrollAreaVariant::Vertical) => &[ScrollAxis::Vertical],
-            Self::Viewport(ScrollAreaVariant::Rail) | Self::FileBottom => &[ScrollAxis::Horizontal],
+            Self::FileBottom => &[ScrollAxis::Horizontal],
         }
     }
 }

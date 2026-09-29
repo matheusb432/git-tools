@@ -14,10 +14,7 @@ use self::{
     files_panel::{FilesPanel, WorkspaceFilesModel},
 };
 #[cfg(feature = "component-preview")]
-use super::{
-    client_diff_document::search_bar::{DiffSearchBar, DiffSearchScope},
-    search_keybindings::keyboard_event_matches,
-};
+use super::client_diff_document::search_bar::{DiffSearchBar, DiffSearchScope};
 use crate::shared::{
     i18n::{t, use_language},
     ui::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, CountBadge},
@@ -25,7 +22,7 @@ use crate::shared::{
 #[cfg(feature = "component-preview")]
 use crate::{
     entities::diffs::ClientDiffWorkspace,
-    shared::{browser, ui::PanelDialog},
+    shared::{browser, keyboard::keyboard_event_matches, ui::PanelDialog},
     views::diffs::client_diff_document::PreviewDiffDocument,
 };
 
@@ -447,6 +444,7 @@ impl PreviewViewMarkup {
 fn DiffWorkspaceDocument(
     #[props(default)] sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     diff_document: Element,
+    ontoggle_sidebar: Option<EventHandler<sidebars::Sidebar>>,
     onnavigate: EventHandler<String>,
     mobile_navigation: Option<Element>,
     commits_actions: Option<Element>,
@@ -462,6 +460,18 @@ fn DiffWorkspaceDocument(
             class: "diff-workspace-grid h-full min-h-0",
             "data-files-sidebar-visible": sidebars.files.to_string(),
             "data-commits-sidebar-visible": sidebars.commits.to_string(),
+            if let Some(ontoggle) = ontoggle_sidebar {
+                sidebars::SidebarEdge {
+                    sidebar: sidebars::Sidebar::Files,
+                    visible: sidebars.files,
+                    ontoggle,
+                }
+                sidebars::SidebarEdge {
+                    sidebar: sidebars::Sidebar::Commits,
+                    visible: sidebars.commits,
+                    ontoggle,
+                }
+            }
             path_filter::PathFilter { onnavigate }
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}
@@ -499,3 +509,5 @@ enum MobilePanel {
     Files,
     Commits,
 }
+
+pub(crate) mod review_actions;

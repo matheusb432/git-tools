@@ -11,7 +11,7 @@ async fn a_tab_made_live_follows_new_commits_across_server_and_viewer_restarts()
             fixture.forward()?;
             support::wait_for_active_diff(session.driver(), "live-view", "alpha-v1").await?;
             fixture.commit_alpha_v2()?;
-            let tab = support::visible(session.driver(), By::Css("[role='tab'][title*='live-view']")).await?;
+            let tab = support::visible(session.driver(), By::XPath("//*[@role='tab' and contains(., 'live-view')]")).await?;
             support::context_click_element(session.driver(), &tab).await?;
             support::click(session.driver(), By::XPath("//*[@role='menu' and @aria-label='Tab actions']//*[@role='menuitem' and normalize-space(.)='Refresh']")).await?;
             support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2").await?;
@@ -35,7 +35,7 @@ async fn a_tab_made_live_follows_new_commits_across_server_and_viewer_restarts()
             session.restart().await?;
             support::click(
                 session.driver(),
-                By::Css("[role='tab'][title*='live-view']"),
+                By::XPath("//*[@role='tab' and contains(., 'live-view')]"),
             )
             .await?;
             support::wait_for_active_diff(session.driver(), "live-view", "additional-live-marker")

@@ -35,7 +35,7 @@ pub(super) async fn measure(
     open_initial_diff_file(driver).await?;
     wait::until("second tab viewport", wait::ASSERTION_TIMEOUT, || async {
         let ready: bool = driver.execute(
-            "return document.querySelector('[role=tab][aria-selected=true]')?.getAttribute('title') === arguments[0] && !!document.querySelector('[data-gtl-copy-text]');",
+            "return document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === arguments[0] && !!document.querySelector('[data-gtl-copy-text]');",
             vec![serde_json::json!(second)],
         ).await?.convert()?;
         Ok(ready.then_some(()))
@@ -155,10 +155,10 @@ const wait = async predicate => {
         let action, complete;
         if (kind === 'tab') {
             const title = iteration % 2 === 0 ? first : second;
-            const tab = [...document.querySelectorAll('[role=tab]')].find(tab => tab.title === title);
+            const tab = [...document.querySelectorAll('[role=tab]')].find(tab => tab.textContent?.trim() === title);
             const id = tab.closest('[data-viewer-tab-id]').getAttribute('data-viewer-tab-id');
             action = () => tab.click();
-            complete = () => document.querySelector('[role=tab][aria-selected=true]')?.title === title &&
+            complete = () => document.querySelector('[role=tab][aria-selected=true]')?.textContent?.trim() === title &&
                 root()?.getAttribute('data-view-identity')?.startsWith(`${id}:`) && ready();
         } else if (kind === 'viewport') {
             const view = root();

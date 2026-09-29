@@ -12,9 +12,9 @@ use crate::shared::{browser, i18n};
 /// language the viewer stays hidden until the settings load or the first
 /// connection attempt fails, so copy never switches language on screen.
 ///
-/// Shell actions reach the owner through the current scope's context: they run
-/// in handlers and tasks of the viewer's components, and component tests that
-/// render without the desktop root have no owner to update.
+/// The shared settings owner supplies changes. The shell supplies the initial
+/// language until those settings load. Component previews can supply their own
+/// language without the desktop root.
 #[derive(Clone, Copy)]
 pub(crate) struct DisplayedLanguage(Signal<Option<ViewerLanguage>>);
 
@@ -48,9 +48,20 @@ impl DisplayedLanguage {
 
 /// Provides the displayed language to the viewer and to [`i18n::use_language`].
 pub(super) fn use_displayed_language_provider() {
+    let settings = crate::app::user_settings::use_settings_selection_provider();
     let displayed = use_signal(browser::stored_viewer_language);
-    let language = use_memo(move || displayed().unwrap_or_default());
+    let language = use_memo(move || {
+        settings().map_or_else(
+            || displayed().unwrap_or_default(),
+            |settings| settings.language,
+        )
+    });
     i18n::use_language_provider(language.into());
-    use_effect(move || browser::apply_document_language(language()));
+    use_effect(move || {
+        browser::apply_document_language(language());
+        if settings.peek().is_some() {
+            browser::store_viewer_language(language());
+        }
+    });
     use_context_provider(|| DisplayedLanguage(displayed));
 }

@@ -214,7 +214,13 @@ impl PushFixture {
         git(&repository, ["branch", "--set-upstream-to=origin/main"])?;
         fs::write(
             repository.join("work.txt"),
-            "base\npush-first-marker\npush-latest-marker\n",
+            "base\npush-first-marker\npush-earlier-marker\n",
+        )?;
+        git(&repository, ["add", "work.txt"])?;
+        git(&repository, ["commit", "-qm", "push earlier"])?;
+        fs::write(
+            repository.join("work.txt"),
+            "base\npush-first-marker\npush-earlier-marker\npush-latest-marker\n",
         )?;
         git(&repository, ["add", "work.txt"])?;
         git(&repository, ["commit", "-qm", "push latest"])?;
@@ -243,6 +249,22 @@ impl PushFixture {
             .context("forward push snapshot")
     }
 
+    pub fn register_project(&self, data_root: &Path) -> Result<()> {
+        let cli = required_environment_path("GTL_E2E_CLI_BINARY")?;
+        let payload = serde_json::json!({
+            "project_id": "PUSH",
+            "title": "push-review",
+            "source": { "kind": "directory", "path": self.repository },
+        })
+        .to_string();
+        command_checked_with_data_root(cli, ["project", "add", &payload], None, data_root)
+            .context("register the push review project")
+    }
+
+    pub fn current_head(&self) -> Result<String> {
+        Self::revision(&self.repository, "HEAD")
+    }
+
     pub fn remote_head(&self) -> Result<String> {
         Self::revision(&self.remote, "main")
     }
@@ -250,7 +272,7 @@ impl PushFixture {
     pub fn add_newer(&self) -> Result<()> {
         fs::write(
             self.repository.join("work.txt"),
-            "base\npush-first-marker\npush-latest-marker\npush-newer-marker\n",
+            "base\npush-first-marker\npush-earlier-marker\npush-latest-marker\npush-newer-marker\n",
         )?;
         git(&self.repository, ["add", "work.txt"])?;
         git(&self.repository, ["commit", "-qm", "push newer"])

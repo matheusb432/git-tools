@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 51;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 53;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -392,6 +392,7 @@ pub struct ViewerPreferences {
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
+    pub copy_with_line_context: bool,
     pub keybindings: ViewerKeybindings,
 }
 
@@ -483,8 +484,8 @@ pub struct ViewerUserSettings {
     pub date_format: gtl_models::settings::ViewerDateFormat,
     pub revision: UserSettingsRevision,
     pub focus_window_on_diff: bool,
+    pub copy_with_line_context: bool,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
-    pub projects_view: gtl_models::settings::ProjectsViewMode,
     pub projects_sort: gtl_models::settings::ProjectsSort,
     pub projects_page_size: gtl_models::settings::ProjectsPageSize,
     pub configuration_path: Option<String>,
@@ -492,6 +493,7 @@ pub struct ViewerUserSettings {
     pub effective_theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
     pub push_confirmation_required: bool,
+    pub viewer_push_no_confirmation_projects: Vec<ProjectName>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -513,13 +515,14 @@ pub struct EditSettingsRequest {
     pub files_sidebar_visible: FieldUpdate<bool>,
     pub commits_sidebar_visible: FieldUpdate<bool>,
     pub wrap_lines: FieldUpdate<bool>,
-    pub projects_view: FieldUpdate<gtl_models::settings::ProjectsViewMode>,
+    pub copy_with_line_context: FieldUpdate<bool>,
     pub projects_sort: FieldUpdate<gtl_models::settings::ProjectsSort>,
     pub projects_page_size: FieldUpdate<gtl_models::settings::ProjectsPageSize>,
     pub theme: FieldUpdate<ViewerTheme>,
     pub layout: FieldUpdate<ViewerDiffLayout>,
     pub density: FieldUpdate<ViewerDiffDensity>,
     pub push_confirmation_required: FieldUpdate<bool>,
+    pub viewer_push_no_confirmation_projects: FieldUpdate<Vec<ProjectName>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

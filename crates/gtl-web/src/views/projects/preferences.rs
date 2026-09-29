@@ -1,27 +1,19 @@
 use dioxus::prelude::*;
-use gtl_models::settings::{ProjectsPageSize, ProjectsPreferences, ProjectsSort, ProjectsViewMode};
+use gtl_models::settings::{ProjectsPageSize, ProjectsPreferences, ProjectsSort};
 use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate, ViewerUserSettings};
-use lucide_dioxus::{LayoutGrid, List};
 
 use crate::{
-    app::application_layout::ViewerContext,
-    entities::diffs::viewer_server,
-    shared::{
-        i18n::{t, use_language},
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant},
-        viewer_client::ViewerClientError,
-    },
+    app::application_layout::ViewerContext, entities::diffs::viewer_server,
+    shared::viewer_client::ViewerClientError,
 };
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) struct ProjectsPresentation {
-    pub(super) mode: Memo<ProjectsViewMode>,
     pub(super) page_size: Memo<ProjectsPageSize>,
     pub(super) sort: Memo<ProjectsSort>,
     pub(super) pending: Memo<bool>,
     pub(super) ready: Memo<bool>,
     pub(super) error: Memo<Option<ViewerClientError>>,
-    pub(super) select: Callback<ProjectsViewMode>,
     pub(super) select_page_size: Callback<ProjectsPageSize>,
     pub(super) select_sort: Callback<ProjectsSort>,
     pub(super) retry: Callback<()>,
@@ -42,13 +34,11 @@ pub(super) fn use_projects_presentation(active: Memo<bool>) -> ProjectsPresentat
             .as_ref()
             .and_then(|result| result.as_ref().ok())
             .map(|settings| ProjectsPreferences {
-                view: settings.projects_view,
                 page_size: settings.projects_page_size,
                 sort: settings.projects_sort,
             })
             .unwrap_or_default()
     });
-    let mode = use_memo(move || preferences().view);
     let sort = use_memo(move || preferences().sort);
     let page_size = use_memo(move || preferences().page_size);
     let ready = use_memo(move || settings.read().as_ref().is_some_and(Result::is_ok));
@@ -88,12 +78,6 @@ pub(super) fn use_projects_presentation(active: Memo<bool>) -> ProjectsPresentat
         save_error.set(None);
         save.call(request);
     });
-    let select = use_callback(move |mode: ProjectsViewMode| {
-        update(EditSettingsRequest {
-            projects_view: FieldUpdate::Update(mode),
-            ..Default::default()
-        });
-    });
     let select_sort = use_callback(move |sort: ProjectsSort| {
         update(EditSettingsRequest {
             projects_sort: FieldUpdate::Update(sort),
@@ -115,13 +99,11 @@ pub(super) fn use_projects_presentation(active: Memo<bool>) -> ProjectsPresentat
         }
     });
     ProjectsPresentation {
-        mode,
         page_size,
         sort,
         pending,
         ready,
         error,
-        select,
         select_page_size,
         select_sort,
         retry,
@@ -133,38 +115,4 @@ async fn load_preferences(active: bool) -> Result<ViewerUserSettings, ViewerClie
         std::future::pending::<()>().await;
     }
     viewer_server::get_settings().await
-}
-
-#[component]
-pub(super) fn ProjectsViewToggle(presentation: ProjectsPresentation) -> Element {
-    let language = use_language();
-    let mode = (presentation.mode)();
-    rsx! {
-        div {
-            class: "project-view-toggle gap-px p-px",
-            role: "group",
-            aria_label: t!(language, "projects-view-label"),
-            for (value, label) in [
-                (ProjectsViewMode::Grid, t!(language, "projects-view-grid")),
-                (ProjectsViewMode::Table, t!(language, "projects-view-list")),
-            ]
-            {
-                Button {
-                    variant: if mode == value { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
-                    size: ButtonSize::IconSmall,
-                    class: "max-sm:size-11",
-                    state: if (presentation.pending)() { ButtonState::Disabled } else { ButtonState::Enabled },
-                    aria_label: label.clone(),
-                    title: label,
-                    aria_pressed: (mode == value).to_string(),
-                    onclick: move |_| (presentation.select)(value),
-                    if value == ProjectsViewMode::Grid {
-                        LayoutGrid { size: 16 }
-                    } else {
-                        List { size: 16 }
-                    }
-                }
-            }
-        }
-    }
 }

@@ -173,6 +173,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
         tabs: shell.tabs.into_iter().map(encode_viewer_tab).collect(),
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
+            copy_with_line_context: Some(shell.preferences.copy_with_line_context),
             language: encode_viewer_language(shell.preferences.language) as i32,
             date_format: encode_viewer_date_format(shell.preferences.date_format) as i32,
             accessibility: Some(encode_viewer_accessibility(shell.preferences.accessibility)),
@@ -783,8 +784,8 @@ pub fn decode_get_viewer_settings_response(
             .parse()
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         focus_window_on_diff: required(response.focus_window_on_diff)?,
+        copy_with_line_context: required(response.copy_with_line_context)?,
         sidebars: decode_sidebar_visibility(required(response.sidebars)?),
-        projects_view: decode_projects_view(response.projects_view)?,
         projects_sort: decode_projects_sort(response.projects_sort)?,
         projects_page_size: gtl_models::settings::ProjectsPageSize::try_new(
             response.projects_page_size,
@@ -798,6 +799,9 @@ pub fn decode_get_viewer_settings_response(
         effective_theme: decode_viewer_theme(response.effective_theme)?,
         render_options: decode_viewer_render_options(required(response.render_options)?)?,
         push_confirmation_required: response.push_confirmation_required,
+        viewer_push_no_confirmation_projects: decode_project_names(
+            response.viewer_push_no_confirmation_projects,
+        )?,
     })
 }
 
@@ -812,8 +816,8 @@ pub fn encode_get_viewer_settings_response(
         accessibility: Some(encode_viewer_accessibility(settings.accessibility)),
         revision: settings.revision.to_string(),
         focus_window_on_diff: Some(settings.focus_window_on_diff),
+        copy_with_line_context: Some(settings.copy_with_line_context),
         sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
-        projects_view: encode_projects_view(settings.projects_view) as i32,
         projects_sort: encode_projects_sort(settings.projects_sort) as i32,
         projects_page_size: settings.projects_page_size.into_inner(),
         configuration_path: settings.configuration_path,
@@ -823,6 +827,11 @@ pub fn encode_get_viewer_settings_response(
         effective_theme: encode_viewer_theme(settings.effective_theme) as i32,
         render_options: Some(encode_viewer_render_options(settings.render_options)),
         push_confirmation_required: settings.push_confirmation_required,
+        viewer_push_no_confirmation_projects: settings
+            .viewer_push_no_confirmation_projects
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect(),
     }
 }
 
@@ -876,13 +885,16 @@ pub fn encode_edit_settings_request(request: &EditSettingsRequest) -> v1::EditSe
         files_sidebar_visible: encode_bool_field_update(&request.files_sidebar_visible),
         commits_sidebar_visible: encode_bool_field_update(&request.commits_sidebar_visible),
         wrap_lines,
-        projects_view: encode_projects_view_update(&request.projects_view),
+        copy_with_line_context: encode_bool_field_update(&request.copy_with_line_context),
         projects_sort: encode_projects_sort_update(&request.projects_sort),
         projects_page_size: encode_projects_page_size_update(&request.projects_page_size),
         theme,
         layout,
         density,
         push_confirmation_required,
+        viewer_push_no_confirmation_projects: encode_project_names_update(
+            request.viewer_push_no_confirmation_projects.clone(),
+        ),
     }
 }
 
@@ -920,12 +932,16 @@ pub fn decode_edit_settings_request(
             .map_err(field("projects_page_size"))?,
         projects_sort: decode_projects_sort_update(request.projects_sort)
             .map_err(field("projects_sort"))?,
-        projects_view: decode_projects_view_update(request.projects_view)
-            .map_err(field("projects_view"))?,
         theme: decode_theme_update(request.theme).map_err(field("theme"))?,
         layout: decode_layout_update(request.layout).map_err(field("layout"))?,
         density: decode_density_update(request.density).map_err(field("density"))?,
         wrap_lines: decode_bool_field_update(request.wrap_lines).map_err(field("wrap_lines"))?,
+        copy_with_line_context: decode_bool_field_update(request.copy_with_line_context)
+            .map_err(field("copy_with_line_context"))?,
+        viewer_push_no_confirmation_projects: decode_project_names_update(
+            request.viewer_push_no_confirmation_projects,
+        )
+        .map_err(field("viewer_push_no_confirmation_projects"))?,
         push_confirmation_required: decode_bool_field_update(request.push_confirmation_required)
             .map_err(field("push_confirmation_required"))?,
     })
@@ -941,20 +957,6 @@ fn decode_projects_sort_update(
         v1::projects_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
         v1::projects_sort_field_update::Operation::Update(value) => {
             FieldUpdate::Update(decode_projects_sort(value)?)
-        }
-    })
-}
-
-fn decode_projects_view_update(
-    update: Option<v1::ProjectsViewFieldUpdate>,
-) -> Result<FieldUpdate<gtl_models::settings::ProjectsViewMode>, ViewerCodecError> {
-    let Some(update) = update else {
-        return Ok(FieldUpdate::Unchanged);
-    };
-    Ok(match required(update.operation)? {
-        v1::projects_view_field_update::Operation::Clear(_) => FieldUpdate::Clear,
-        v1::projects_view_field_update::Operation::Update(value) => {
-            FieldUpdate::Update(decode_projects_view(value)?)
         }
     })
 }
@@ -1243,6 +1245,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
             .collect::<Result<Vec<_>, _>>()?,
         active: decode_viewer_active_state(required(shell.active)?)?,
         preferences: ViewerPreferences {
+            copy_with_line_context: required(preferences.copy_with_line_context)?,
             language: decode_viewer_language(preferences.language)?,
             date_format: decode_viewer_date_format(preferences.date_format)?,
             accessibility: decode_viewer_accessibility(required(preferences.accessibility)?)?,
@@ -1257,6 +1260,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
 
 fn encode_viewer_keybindings(keybindings: ViewerKeybindings) -> v1::ViewerKeybindings {
     v1::ViewerKeybindings {
+        push_diff: Some(keybindings[ViewerKeybindingAction::PushDiff].to_string()),
         toggle_files_sidebar: keybindings[ViewerKeybindingAction::ToggleFilesSidebar].to_string(),
         toggle_commits_sidebar: keybindings[ViewerKeybindingAction::ToggleCommitsSidebar]
             .to_string(),
@@ -1300,9 +1304,17 @@ fn decode_viewer_keybindings(
         .toggle_commits_sidebar
         .parse::<ViewerKeybinding>()
         .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let push_diff = keybindings
+        .push_diff
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?
+        .unwrap_or(ViewerKeybindings::for_platform(platform)[ViewerKeybindingAction::PushDiff]);
     ViewerKeybindings::try_from_fn(platform, |action| match action {
         ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
         ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
+        ViewerKeybindingAction::PushDiff => push_diff,
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
     })
@@ -1993,42 +2005,6 @@ fn required<T>(value: Option<T>) -> Result<T, ViewerCodecError> {
     value.ok_or(ViewerCodecError::InvalidMessage)
 }
 
-fn decode_projects_view(
-    value: i32,
-) -> Result<gtl_models::settings::ProjectsViewMode, ViewerCodecError> {
-    match v1::ProjectsViewMode::try_from(value) {
-        Ok(v1::ProjectsViewMode::Grid) => Ok(gtl_models::settings::ProjectsViewMode::Grid),
-        Ok(v1::ProjectsViewMode::Table) => Ok(gtl_models::settings::ProjectsViewMode::Table),
-        _ => Err(ViewerCodecError::InvalidMessage),
-    }
-}
-
-const fn encode_projects_view(
-    value: gtl_models::settings::ProjectsViewMode,
-) -> v1::ProjectsViewMode {
-    match value {
-        gtl_models::settings::ProjectsViewMode::Grid => v1::ProjectsViewMode::Grid,
-        gtl_models::settings::ProjectsViewMode::Table => v1::ProjectsViewMode::Table,
-    }
-}
-
-fn encode_projects_view_update(
-    update: &FieldUpdate<gtl_models::settings::ProjectsViewMode>,
-) -> Option<v1::ProjectsViewFieldUpdate> {
-    match update {
-        FieldUpdate::Unchanged => None,
-        FieldUpdate::Clear => Some(v1::ProjectsViewFieldUpdate {
-            operation: Some(v1::projects_view_field_update::Operation::Clear(
-                v1::ClearSetting {},
-            )),
-        }),
-        FieldUpdate::Update(value) => Some(v1::ProjectsViewFieldUpdate {
-            operation: Some(v1::projects_view_field_update::Operation::Update(
-                encode_projects_view(*value) as i32,
-            )),
-        }),
-    }
-}
 #[must_use]
 pub fn decode_get_settings_recovery_response(
     response: v1::GetSettingsRecoveryResponse,
@@ -2205,4 +2181,48 @@ pub fn encode_rename_viewer_snapshot_request(
         tab_id: u64::from(request.tab_id),
         name: request.name,
     }
+}
+
+fn decode_project_names(
+    names: Vec<String>,
+) -> Result<Vec<gtl_models::paths::ProjectName>, ViewerCodecError> {
+    if names.len() > 1000 {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            gtl_models::paths::ProjectName::try_new(name)
+                .map_err(|_| ViewerCodecError::InvalidMessage)
+        })
+        .collect()
+}
+
+fn encode_project_names_update(
+    value: FieldUpdate<Vec<gtl_models::paths::ProjectName>>,
+) -> Option<v1::ViewerProjectNamesFieldUpdate> {
+    use v1::viewer_project_names_field_update::Operation;
+    let operation = match value {
+        FieldUpdate::Update(names) => Operation::Update(v1::ViewerProjectNames {
+            values: names.into_iter().map(|name| name.to_string()).collect(),
+        }),
+        FieldUpdate::Clear => Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Unchanged => return None,
+    };
+    Some(v1::ViewerProjectNamesFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+fn decode_project_names_update(
+    value: Option<v1::ViewerProjectNamesFieldUpdate>,
+) -> Result<FieldUpdate<Vec<gtl_models::paths::ProjectName>>, ViewerCodecError> {
+    use v1::viewer_project_names_field_update::Operation;
+    Ok(match value {
+        None => FieldUpdate::Unchanged,
+        Some(value) => match required(value.operation)? {
+            Operation::Update(names) => FieldUpdate::Update(decode_project_names(names.values)?),
+            Operation::Clear(_) => FieldUpdate::Clear,
+        },
+    })
 }

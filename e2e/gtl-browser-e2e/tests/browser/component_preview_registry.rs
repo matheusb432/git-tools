@@ -106,6 +106,10 @@ async fn csr_registry_owns_stateful_component_stories() -> anyhow::Result<()> {
             "story selection did not update the stable route"
         );
 
+        spec.session
+            .context
+            .grant_permissions(&["clipboard-read", "clipboard-write"], None)
+            .await?;
         assert_commits_panel_preview(&spec.session.page, &base_url).await?;
         assert_alert_dialog_preview(&spec.session.page, &base_url).await?;
         Ok(())
@@ -222,7 +226,40 @@ async fn assert_commits_panel_preview(page: &Page, base_url: &str) -> anyhow::Re
     expect(commits_panel.locator("svg"))
         .to_have_count(0)
         .await
-        .context("omit decorative timeline markers from the commit stack")
+        .context("omit decorative timeline markers from the commit stack")?;
+
+    let copy_button = commits_panel
+        .get_by_role(
+            AriaRole::Button,
+            Some(
+                GetByRoleOptions::default()
+                    .name("Copy commit ID")
+                    .exact(true),
+            ),
+        )
+        .first();
+    copy_button
+        .click(None)
+        .await
+        .context("copy the first commit ID")?;
+    expect(copy_button)
+        .to_have_text("Copied")
+        .await
+        .context("show copy success on the commit ID")?;
+    expect(commits_panel.locator("[aria-pressed='true']"))
+        .to_have_count(0)
+        .await
+        .context("copy without selecting the commit")?;
+    // playwright-rs has no clipboard read binding.
+    let copied: String = page
+        .evaluate("() => navigator.clipboard.readText()", None::<&()>)
+        .await
+        .context("read the browser clipboard")?;
+    ensure!(
+        copied == "9f904e7331d8a61bb9b75143ad54ee876e544a01",
+        "copy did not write the full commit ID: {copied:?}"
+    );
+    Ok(())
 }
 
 async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Result<()> {

@@ -61,6 +61,14 @@ pub(crate) fn use_diff_presentation_provider() {
 }
 
 impl DiffPresentation {
+    #[cfg(test)]
+    pub(super) fn detached() -> Self {
+        Self {
+            tabs: Signal::new(HashMap::new()),
+            fold_command: Signal::new(None),
+        }
+    }
+
     pub(super) fn panel_scroll(self, tab: ViewerTabId, panel: Panel) -> PanelScrollPosition {
         let tabs = self.tabs.peek();
         let Some(tab) = tabs.get(&tab) else {
@@ -189,12 +197,7 @@ mod tests {
 
     fn in_presentation(test: impl FnOnce(DiffPresentation) -> TestResult) -> TestResult {
         let owner = VirtualDom::new(VNode::empty);
-        owner.in_scope(ScopeId::ROOT, || {
-            test(DiffPresentation {
-                tabs: Signal::new(HashMap::new()),
-                fold_command: Signal::new(None),
-            })
-        })
+        owner.in_scope(ScopeId::ROOT, || test(DiffPresentation::detached()))
     }
 
     #[test]

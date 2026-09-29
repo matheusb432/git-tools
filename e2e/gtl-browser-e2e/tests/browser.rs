@@ -15,3 +15,6 @@ mod raw_artifact_lifecycle;
 
 #[path = "browser/component_preview_registry.rs"]
 mod component_preview_registry;
+
+#[path = "browser/review_controls.rs"]
+mod review_controls;

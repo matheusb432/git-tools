@@ -17,6 +17,9 @@ use super::{ManagedOptions, ManagedRun};
 use crate::{failure::CommandFailure, server_client::ServerClient};
 mod palette;
 
+const STATUS_BADGE_WIDTH_CHARS: usize = 4;
+const STATUS_NAME_GAP_SPACES: usize = 2;
+
 #[must_use]
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let response =
@@ -192,37 +195,41 @@ fn format_status(json: bool, color: bool, results: &[StatusResult]) -> anyhow::R
 
 fn format_status_line(result: &StatusResult, palette: Option<&StatusColorPalette>) -> String {
     let detail = result.detail();
+    let (badge, badge_width_chars) = format_bracketed_status(&detail, palette);
+    let gap_spaces =
+        STATUS_NAME_GAP_SPACES + STATUS_BADGE_WIDTH_CHARS.saturating_sub(badge_width_chars);
+    let gap = " ".repeat(gap_spaces);
     if !result.is_present() {
-        return format!(
-            "{} {}",
-            result.name(),
-            format_bracketed_status(&detail, palette)
-        );
+        return format!("{badge}{gap}{}", result.name());
     }
 
     let branch = result.branch_label().unwrap_or("(unknown)");
-    format!(
-        "{} {} {}",
-        result.name(),
-        branch,
-        format_bracketed_status(&detail, palette)
-    )
+    format!("{badge}{gap}{} {branch}", result.name())
 }
 
-fn format_bracketed_status(detail: &str, palette: Option<&StatusColorPalette>) -> String {
+fn format_bracketed_status(detail: &str, palette: Option<&StatusColorPalette>) -> (String, usize) {
+    let separator = match detail.rsplit_once(' ') {
+        Some((_, "!" | "?" | "!?" | "?!")) => "",
+        _ => " ",
+    };
+    let plain_detail = detail.replace(' ', separator);
+    let badge_width_chars = plain_detail.chars().count() + 2;
     let Some(palette) = palette else {
-        return format!("[{detail}]");
+        return (format!("[{plain_detail}]"), badge_width_chars);
     };
 
-    format!(
-        "\x1b[1m{}{}{}\x1b[0m",
-        palette.brackets.paint("["),
-        colorize_status_detail(detail, palette),
-        palette.brackets.paint("]")
+    (
+        format!(
+            "\x1b[1m{}{}{}\x1b[0m",
+            palette.brackets.paint("["),
+            colorize_status_detail(detail, palette, separator),
+            palette.brackets.paint("]")
+        ),
+        badge_width_chars,
     )
 }
 
-fn colorize_status_detail(detail: &str, palette: &StatusColorPalette) -> String {
+fn colorize_status_detail(detail: &str, palette: &StatusColorPalette, separator: &str) -> String {
     detail
         .split_whitespace()
         .map(|token| match token {
@@ -232,7 +239,7 @@ fn colorize_status_detail(detail: &str, palette: &StatusColorPalette) -> String 
             _ => token.to_string(),
         })
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(separator)
 }
 
 fn colorize_ahead(value: &str, palette: &StatusColorPalette) -> String {
@@ -270,19 +277,34 @@ mod tests {
     }
 
     #[test]
-    fn status_formatting_preserves_present_and_absent_rows() {
+    fn status_formatting_aligns_common_badges_and_preserves_long_badges() {
         let results = [
             branch_status(
                 "repo",
                 1,
                 StatusChanges::from_counts(PathCount::new(1), PathCount::new(1)),
             ),
+            branch_status("clean", 0, StatusChanges::Clean),
+            branch_status("ahead", 1, StatusChanges::Clean),
+            branch_status(
+                "many",
+                100,
+                StatusChanges::from_counts(PathCount::new(1), PathCount::new(1)),
+            ),
+            StatusResult::present(
+                project_name("untracked"),
+                StatusHead::Branch {
+                    name: BranchName::main(),
+                    upstream: StatusUpstream::Missing,
+                },
+                StatusChanges::from_counts(PathCount::new(0), PathCount::new(1)),
+            ),
             StatusResult::absent(project_name("missing")),
         ];
 
         assert_eq!(
             format_status(false, false, &results).unwrap(),
-            "repo main [⇡1 !?]\nmissing [not present]"
+            "[⇡1!?]  repo main\n[✓]   clean main\n[⇡1]  ahead main\n[⇡100!?]  many main\n[no-upstream?]  untracked main\n[not present]  missing"
         );
     }
 
@@ -298,8 +320,12 @@ mod tests {
         ];
         let rendered = format_status(false, true, &results).unwrap();
 
+        assert!(rendered.starts_with("\x1b[1m"));
+        assert!(rendered.contains("\x1b[0m  dirty main"));
+        assert!(rendered.contains("\x1b[0m   clean main"));
         assert!(rendered.contains("\x1b[1m\x1b[38;2;242;133;0m[\x1b[39m"));
         assert!(rendered.contains("\x1b[38;2;242;133;0m⇡\x1b[39m1"));
+        assert!(rendered.contains("⇡\x1b[39m1\x1b[38;2;255;77;77m!?"));
         assert!(rendered.contains("\x1b[38;2;255;77;77m!?\x1b[39m"));
         assert!(rendered.contains("\x1b[38;2;46;204;113m✓\x1b[39m"));
     }

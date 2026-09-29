@@ -70,6 +70,7 @@ pub struct PushPlan {
     repository: PushRepository,
     commit: CommitId,
     count: u64,
+    no_confirmation: bool,
 }
 
 impl PushPlan {
@@ -93,6 +94,7 @@ impl PushPlan {
         ViewerPushPreview {
             repository: self.path.clone(),
             project: self.project.clone(),
+            no_confirmation: self.no_confirmation,
             branch: self.repository.branch.clone(),
             remote_branch: self.repository.destination_branch.clone(),
             remote: self.repository.remote.clone(),

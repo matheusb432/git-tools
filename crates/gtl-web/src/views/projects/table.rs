@@ -4,10 +4,10 @@ use gtl_wire::viewer::projects::ViewerProject;
 use lucide_dioxus::{ArrowUp, Check, FilePenLine, FilePlus, GitBranch, TriangleAlert};
 
 use super::{
-    comparison_action::{ProjectActionShape, ProjectComparisonAction},
+    comparison_action::ProjectComparisonAction,
     comparison_editor::ProjectComparisonEditor,
     presentation::{
-        ProjectPresentation, ProjectSignalGlyph, ReviewStatusDot, project_presentation,
+        ProjectPresentation, ProjectStatusSpinner, ReviewStatusDot, project_presentation,
     },
     status::ProjectSignal,
 };
@@ -101,8 +101,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
         review,
         local,
         ahead,
-        ..
-    } = project_presentation(&project, result, language);
+    } = project_presentation(result, language);
     let destination =
         (!disabled && local.is_available()).then(|| Route::project_diff(&project.path));
     rsx! {
@@ -163,7 +162,6 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 DataTableActions {
                     ProjectComparisonAction {
                         path: project.path.clone(),
-                        shape: ProjectActionShape::Icon,
                         disabled: disabled || !local.is_available(),
                     }
                     super::SnapshotHistoryButton { project: project.name.clone() }
@@ -292,7 +290,7 @@ fn ProjectChanges(
                             TriangleAlert { size: 16 }
                         }
                     } else if local == ProjectSignal::Loading || ahead == ProjectSignal::Loading {
-                        ProjectSignalGlyph { signal: ProjectSignal::Loading }
+                        ProjectStatusSpinner {}
                     }
                 }
             }

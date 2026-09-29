@@ -241,6 +241,34 @@ pub(crate) struct ViewerContext {
 }
 
 impl ViewerContext {
+    pub(crate) fn close_tab(self, tab_id: ViewerTabId, focus: bool) {
+        if !self.actions_enabled() {
+            return;
+        }
+        spawn_forever(async move {
+            self.close_tab_and_focus(tab_id, focus)
+                .await
+                .unwrap_or_else(|error| self.toast.client_error(&error));
+        });
+    }
+
+    async fn close_tab_and_focus(
+        self,
+        tab_id: ViewerTabId,
+        focus: bool,
+    ) -> Result<(), ViewerClientError> {
+        let shell = viewer_server::close_tab(gtl_wire::viewer::ViewerTabRequest { tab_id }).await?;
+        let next = super::application_router::active_tab_id(&shell.active);
+        self.replace_shell(shell);
+        if focus {
+            browser::focus_element(next.map_or_else(
+                || "workspace-heading".to_owned(),
+                crate::shared::ui::viewer_tab_element_id,
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn live_errors(
         self,
     ) -> ReadSignal<
@@ -321,7 +349,11 @@ impl ViewerContext {
             retained.commit_selection = incoming.commit_selection.clone();
             *incoming = retained;
         }
-        DisplayedLanguage::show_configured(shell.preferences.language);
+        if try_consume_context::<crate::app::user_settings::UserSettings>()
+            .is_none_or(|settings| settings.selection.peek().is_none())
+        {
+            DisplayedLanguage::show_configured(shell.preferences.language);
+        }
         let next = ViewerShellLoad::Ready(shell);
         if *self.shell.peek() != next {
             self.shell.set(next);
@@ -529,12 +561,16 @@ fn ApplicationLayoutContent() -> Element {
     };
     let displayed_language = use_context::<DisplayedLanguage>();
     use_context_provider(|| context);
+    let settings = crate::app::user_settings::use_user_settings_provider();
     crate::views::diffs::diff_workspace::sidebars::use_sidebar_controls_provider();
-    let date_format = use_memo(move || match &*shell.read() {
-        ViewerShellLoad::Ready(shell) => shell.preferences.date_format,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
-            gtl_models::settings::ViewerDateFormat::default()
-        }
+    let date_format = use_memo(move || {
+        (settings.selection)().map_or_else(
+            || match &*shell.read() {
+                ViewerShellLoad::Ready(shell) => shell.preferences.date_format,
+                _ => gtl_models::settings::ViewerDateFormat::default(),
+            },
+            |selection| selection.date_format,
+        )
     });
     crate::shared::date_display::use_date_display_provider(date_format.into());
     crate::views::diffs::use_diff_presentation_provider();
@@ -542,6 +578,7 @@ fn ApplicationLayoutContent() -> Element {
     crate::views::projects::cache::use_status_cache_provider();
     crate::views::push::use_push_provider();
     use_viewer_routes(context);
+    super::application_router::use_settings_navigation_provider();
 
     let visible = browser::use_document_visible();
     let route = use_route::<Route>();
@@ -645,18 +682,20 @@ fn ApplicationLayoutContent() -> Element {
     let shell = context.shell();
     let state = shell.read();
     let connection = context.connection();
-    let theme = match &*state {
+    let selected_theme =
+        use_memo(move || (settings.selection)().map(|selected| selected.theme.unwrap_or_default()));
+    let theme = selected_theme().unwrap_or_else(|| match &*state {
         ViewerShellLoad::Ready(shell) => shell.preferences.theme,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerTheme::default(),
-    };
+        _ => ViewerTheme::default(),
+    });
     use_effect(use_reactive((&theme,), move |(theme,)| {
         browser::apply_theme(theme.as_str());
     }));
     // Only a loaded preference recolors the native icons, so startup does not flash the default.
-    let icon_theme = match &*state {
+    let icon_theme = selected_theme().or_else(|| match &*state {
         ViewerShellLoad::Ready(shell) => Some(shell.preferences.theme),
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
-    };
+    });
     use_effect(use_reactive((&icon_theme,), move |(icon_theme,)| {
         let Some(theme) = icon_theme else {
             return;
@@ -668,12 +707,12 @@ fn ApplicationLayoutContent() -> Element {
         });
     }));
 
-    let accessibility = match &*state {
+    let selected_accessibility =
+        use_memo(move || (settings.selection)().map(|selected| selected.accessibility));
+    let accessibility = selected_accessibility().unwrap_or_else(|| match &*state {
         ViewerShellLoad::Ready(shell) => shell.preferences.accessibility,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => {
-            gtl_models::settings::ViewerAccessibility::default()
-        }
-    };
+        _ => gtl_models::settings::ViewerAccessibility::default(),
+    });
     let language = use_language();
     use_effect(use_reactive((&language,), move |(language,)| {
         let labels = gtl_wire::window::TrayLabels {
@@ -848,6 +887,7 @@ mod tests {
                 tab_id: viewer_tab_id(tab_id)?,
             },
             preferences: ViewerPreferences {
+                copy_with_line_context: true,
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 language: gtl_models::settings::ViewerLanguage::default(),
                 date_format: gtl_models::settings::ViewerDateFormat::default(),

@@ -2,10 +2,10 @@
   .control-pagination { @apply relative grid shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-t border-line bg-surface max-md:grid-cols-1 max-md:justify-items-center max-md:py-2; }
   .control-pagination-progress { @apply absolute inset-x-4 top-0 h-px bg-line; }
   .control-pagination-navigation { @apply col-start-2 flex items-center justify-center max-md:col-start-1; }
-  .control-data-table { @apply overflow-x-auto rounded-panel border border-line bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc; }
+  .control-data-table { @apply overflow-x-auto rounded-panel border border-line bg-surface focus-visible:focus-outline focus-visible:outline-offset-2; }
   .control-data-table-table { @apply min-w-[44rem] border-collapse text-left; }
   .control-data-table-head { @apply border-b border-line-2 bg-sunk whitespace-nowrap text-ink-3; }
-  .control-table-sort { @apply -mx-2 inline-flex h-9 min-w-11 cursor-pointer items-center gap-1.5 rounded-sm px-2 text-left font-medium text-ink-3 outline-none enabled:hover:bg-surface-2 enabled:hover:text-ink enabled:active:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc disabled:cursor-default disabled:opacity-50; }
+  .control-table-sort { @apply -mx-2 inline-flex h-9 min-w-11 cursor-pointer items-center gap-1.5 rounded-sm px-2 text-left font-medium text-ink-3 outline-none enabled:hover:bg-surface-2 enabled:hover:text-ink enabled:active:bg-line focus-visible:focus-outline focus-visible:-outline-offset-2 disabled:cursor-default disabled:opacity-50; }
   .control-table-sort:enabled svg { @apply text-acc; }
   th[aria-sort] .control-table-sort { @apply text-acc; }
   .control-table-column { @apply align-middle whitespace-nowrap; }
@@ -18,13 +18,13 @@
   .control-navigation-bar-leading { @apply flex shrink-0 items-stretch; }
   .control-navigation-bar-rail { @apply relative flex flex-1 items-end; }
   .control-navigation-bar-trailing { @apply flex shrink-0 items-center; }
-  .control-select { @apply block cursor-pointer appearance-none rounded-sm border border-line-2 bg-surface-2 text-ink outline-none hover:border-ink-3 focus-visible:border-acc focus-visible:ring-2 focus-visible:ring-acc-soft disabled:cursor-not-allowed disabled:opacity-50; }
+  .control-select { @apply block cursor-pointer appearance-none rounded-sm border border-line-2 bg-surface-2 text-ink outline-none hover:border-ink-3 focus-visible:focus-outline focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50; }
   .control-select-error-overlay { @apply pointer-events-none absolute inset-0 rounded-sm border border-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none peer-focus-visible:ring-2 peer-focus-visible:ring-del-bg; }
   .peer[aria-invalid="true"] + .control-select-error-overlay { @apply opacity-100; }
-  .control-select-chevron { @apply pointer-events-none absolute top-1/2 right-3 grid -translate-y-1/2 place-items-center text-ink-3 peer-focus:text-acc peer-disabled:opacity-50; }
+  .control-select-chevron { @apply pointer-events-none absolute top-1/2 right-3 grid -translate-y-1/2 place-items-center text-ink-3 peer-focus:text-ink peer-disabled:opacity-50; }
   .control-skeleton { @apply animate-pulse rounded-sm bg-line-2 motion-reduce:animate-none; }
   .control-page-notice { @apply grid place-content-center text-center; }
-  .control-viewer-theme-picker { @apply flex flex-none items-center rounded-sm border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50; }
+  .control-viewer-theme-picker { @apply flex flex-none items-center rounded-sm border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-ink-3 has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50; }
   .control-viewer-theme-select { @apply cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed; }
   .alert-dialog { @apply fixed inset-0 m-0 h-dvh max-h-dvh w-full max-w-none overflow-hidden border-0 bg-transparent p-3 text-ink; }
   .alert-dialog[open] { @apply flex items-center justify-center; }
@@ -61,7 +61,7 @@
     .alert-dialog[data-state="closing"] .alert-dialog-surface,
     .alert-dialog[data-state="closing"]::backdrop { animation: none; }
   }
-  .toast-viewport { @apply pointer-events-none fixed inset-x-4 bottom-4 z-60 flex justify-end; }
+  .toast-viewport { @apply pointer-events-none fixed inset-0 z-60 grid place-items-center p-4; }
   .toast-stack { @apply pointer-events-auto relative min-w-0 max-w-md; }
   .toast-stack-layer { @apply absolute inset-0 origin-top rounded-panel border border-line-2 bg-surface shadow-floating; }
   .toast-stack-layer[data-depth="1"] { transform: translateY(-6px) scale(0.95); }

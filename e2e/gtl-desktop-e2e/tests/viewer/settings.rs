@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use thirtyfour::{By, WebDriver, components::SelectElement};
 
 use crate::support::{self, fixture::OneShotFixture};
@@ -14,13 +14,47 @@ async fn saved_viewer_settings_apply_and_survive_restart() -> Result<()> {
                 .await?;
 
             open_settings(driver).await?;
+            observe_input_stability(driver).await?;
+            select_value(driver, "settings-theme", "glacier").await?;
+            select_value(driver, "settings-theme", "mirage").await?;
             select_value(driver, "settings-theme", "carbon").await?;
-            select_value(driver, "settings-layout", "split").await?;
-            select_value(driver, "settings-density", "full").await?;
-            select_value(driver, "settings-language", "pt-BR").await?;
-            support::click(driver, By::Css("button[type='submit']")).await?;
+            support::evidence::capture(driver, "settings-appearance", true).await?;
+            support::click(driver, By::Css("[data-settings-section='snapshots']")).await?;
+            ensure!(driver.current_url().await?.path().ends_with("/settings/snapshots"), "settings category did not update the route");
+            choose_radio(driver, "settings-layout", "split").await?;
+            choose_radio(driver, "settings-density", "full").await?;
+            support::click(driver, By::Css("#settings-wrap-lines")).await?;
+            support::click(driver, By::Css("#settings-copy-with-line-context")).await?;
+            support::click(driver, By::Css("#settings-wrap-lines")).await?;
+            support::click(driver, By::Css("#settings-wrap-lines")).await?;
+            support::evidence::capture(driver, "settings-snapshots", true).await?;
+            support::click(driver, By::Css("[data-settings-section='locale']")).await?;
+            choose_radio(driver, "settings-language", "pt-BR").await?;
+            choose_radio(driver, "settings-language", "en-US").await?;
+            choose_radio(driver, "settings-language", "pt-BR").await?;
             support::visible(driver, By::Css("html[data-theme='carbon'][lang='pt-BR']")).await?;
 
+            support::click(driver, By::Css("#settings-source-link")).await?;
+            support::visible(driver, By::Css("#settings-source pre")).await?;
+            support::click(
+                driver,
+                By::Css("button[aria-label='Fechar Arquivo de configuração']"),
+            )
+            .await?;
+            support::evidence::capture(driver, "settings-locale", true).await?;
+            support::click(driver, By::Css("button[aria-label='Voltar']")).await?;
+            support::visible(
+                driver,
+                By::Css("[data-gtl-diff-document][data-layout='split'][data-density='full']"),
+            )
+            .await?;
+            let copied = support::copy_selected_diff_line(driver, "work.txt", "alpha-one-shot-marker").await?;
+            ensure!(copied == "alpha-one-shot-marker", "plain diff copy included context: {copied:?}");
+            support::click(driver, By::Css("button[aria-label='Configurações']")).await?;
+            let language = support::visible(driver, By::Css("input[name='settings-language'][value='pt-BR']")).await?;
+            ensure!(language.is_selected().await?, "returning to settings lost the selected language");
+            let changes = driver.execute("cancelAnimationFrame(window.settingsObservation.frame); return window.settingsObservation.regressions;", Vec::new()).await?.convert::<Vec<String>>()?;
+            ensure!(changes.is_empty(), "settings reverted after input: {changes:?}");
             session.restart().await?;
             let driver = session.driver();
             support::visible(driver, By::Css("html[data-theme='carbon'][lang='pt-BR']")).await?;
@@ -32,6 +66,8 @@ async fn saved_viewer_settings_apply_and_survive_restart() -> Result<()> {
                 By::Css("[data-gtl-diff-document][data-layout='split'][data-density='full']"),
             )
             .await?;
+            let copied = support::copy_selected_diff_line(driver, "work.txt", "alpha-one-shot-marker").await?;
+            ensure!(copied == "alpha-one-shot-marker", "restarted viewer did not retain plain diff copy: {copied:?}");
             Ok(())
         })
     })
@@ -50,5 +86,70 @@ pub(super) async fn select_value(driver: &WebDriver, id: &str, value: &str) -> R
         .await?
         .select_by_value(value)
         .await?;
+    Ok(())
+}
+
+async fn choose_radio(driver: &WebDriver, name: &str, value: &str) -> Result<()> {
+    support::click(
+        driver,
+        By::Css(format!(
+            "input[type='radio'][name='{name}'][value='{value}']"
+        )),
+    )
+    .await
+}
+
+// Observe native control values at paint boundaries; interactions still use WebDriver.
+async fn observe_input_stability(driver: &WebDriver) -> Result<()> {
+    driver.execute(r#"
+        const observation = { expected: new Map(), regressions: [], layout: null, frame: null };
+        window.settingsObservation = observation;
+        document.addEventListener('change', event => {
+            const input = event.target;
+            if (!input.closest('.settings-page-shell')) return;
+            const key = input.type === 'radio' ? input.name : input.id;
+            observation.layout = input.name === 'settings-language' ? null : {
+                route: location.pathname,
+                hint: document.querySelector('.settings-save-status')?.textContent,
+                rows: [...document.querySelectorAll('.settings-field-row')].map(row => row.getBoundingClientRect().y),
+            };
+            observation.expected.set(key, {
+                radio: input.type === 'radio',
+                checkbox: input.type === 'checkbox',
+                value: input.type === 'checkbox' ? input.checked : input.value,
+            });
+        }, true);
+        function sample() {
+            for (const [key, expected] of observation.expected) {
+                const input = expected.radio
+                    ? document.querySelector(`input[name="${key}"]:checked`)
+                    : document.getElementById(key);
+                if (!input) continue;
+                const value = expected.checkbox ? input.checked : input.value;
+                if (value !== expected.value && observation.regressions.length < 32) {
+                    observation.regressions.push(`${key}: expected ${expected.value}, displayed ${value}`);
+                }
+            }
+            const layout = observation.layout;
+            if (layout && layout.route === location.pathname) {
+                const rows = [...document.querySelectorAll('.settings-field-row')];
+                const moved = rows.some((row, i) => Math.abs(row.getBoundingClientRect().y - layout.rows[i]) > 1);
+                const hint = document.querySelector('.settings-save-status')?.textContent;
+                if ((moved || hint !== layout.hint) && observation.regressions.length < 32) {
+                    observation.regressions.push('local save changed the settings layout or status message');
+                }
+            } else {
+                observation.layout = null;
+            }
+            if (location.pathname.startsWith('/settings/') && document.querySelector('.settings-page-shell')) {
+                const tabs = document.querySelector('[role="tablist"]');
+                if (tabs?.getClientRects().length && observation.regressions.length < 32) {
+                    observation.regressions.push('workspace tabs remained visible on the settings route');
+                }
+            }
+            observation.frame = requestAnimationFrame(sample);
+        }
+        sample();
+    "#, Vec::new()).await?;
     Ok(())
 }

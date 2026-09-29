@@ -2,8 +2,10 @@ use dioxus::prelude::*;
 use gtl_wire::window::WindowAction;
 
 use super::{
-    application_layout::ViewerContext, application_navigation::ApplicationNavigation,
-    application_router::Route, window_chrome::WindowTitleBar,
+    application_layout::ViewerContext,
+    application_navigation::ApplicationNavigation,
+    application_router::{Route, SettingsNavigation},
+    window_chrome::WindowTitleBar,
 };
 use crate::{
     shared::{browser, ui::use_toast},
@@ -16,8 +18,9 @@ use crate::{
 #[component]
 pub(super) fn WindowHeader() -> Element {
     let viewer = use_context::<ViewerContext>();
-    let navigator = use_navigator();
+    let settings = use_context::<SettingsNavigation>();
     let route = use_route::<Route>();
+    let settings_active = matches!(route, Route::Settings { .. });
     let mut revision = use_signal(|| 0_u64);
     browser::use_window_resize(move || revision += 1);
     let window = use_resource(move || async move {
@@ -46,19 +49,20 @@ pub(super) fn WindowHeader() -> Element {
             actions: rsx! {
                 div {
                     class: "viewer-window-actions",
+                    hidden: settings_active,
                     "inert": (!viewer.actions_enabled()).then_some(""),
-                    ViewerSettingsButton {
-                        onsettings: move |()| {
-                            navigator.push(Route::Settings {});
-                        },
-                    }
+                    ViewerSettingsButton { onsettings: settings.open }
                     if matches!(route, Route::Diff { .. } | Route::CurrentDiff {}) {
                         WorkspaceSidebarButtons {}
                     }
                 }
             },
+            if settings_active {
+                div { class: "h-9 min-w-0 flex-1" }
+            }
             div {
                 class: "min-w-0 flex-1",
+                hidden: settings_active,
                 "inert": (!viewer.actions_enabled()).then_some(""),
                 ApplicationNavigation {}
             }

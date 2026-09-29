@@ -13,17 +13,6 @@ use crate::{
 };
 
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, strum::Display,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
-pub enum ProjectsViewMode {
-    #[default]
-    Grid,
-    Table,
-}
-
-#[derive(
     Debug,
     Clone,
     Copy,
@@ -56,7 +45,6 @@ pub struct ProjectsPageSize(u32);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ProjectsPreferences {
-    pub view: ProjectsViewMode,
     pub page_size: ProjectsPageSize,
     pub sort: ProjectsSort,
 }
@@ -328,11 +316,13 @@ pub struct UserSettings {
     language: ViewerLanguage,
     date_format: ViewerDateFormat,
     focus_window_on_diff: bool,
+    copy_with_line_context: bool,
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
     viewer_keybindings: ViewerKeybindings,
     sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
     push_confirmation_required: bool,
+    viewer_push_no_confirmation_projects: BTreeSet<ProjectName>,
     push_all_exclusions: PushAllExclusions,
     tag_patterns: TagPatternSettings,
 }
@@ -351,6 +341,7 @@ impl Default for UserSettings {
 
 impl UserSettings {
     pub const PUSH_CONFIRMATION_REQUIRED_DEFAULT: bool = true;
+    pub const COPY_WITH_LINE_CONTEXT_DEFAULT: bool = true;
 
     /// Constructs a complete settings snapshot from validated values.
     #[must_use]
@@ -366,11 +357,13 @@ impl UserSettings {
             language: ViewerLanguage::default(),
             date_format: ViewerDateFormat::default(),
             focus_window_on_diff: true,
+            copy_with_line_context: Self::COPY_WITH_LINE_CONTEXT_DEFAULT,
             theme,
             viewer_render_options,
             viewer_keybindings,
             sidebar_visibility: crate::viewer::ViewerSidebarVisibility::default(),
             push_confirmation_required,
+            viewer_push_no_confirmation_projects: BTreeSet::new(),
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
         }
@@ -426,6 +419,19 @@ impl UserSettings {
     }
 
     #[must_use]
+    pub fn with_copy_with_line_context(self, copy_with_line_context: bool) -> Self {
+        Self {
+            copy_with_line_context,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn copy_with_line_context(&self) -> bool {
+        self.copy_with_line_context
+    }
+
+    #[must_use]
     pub fn with_sidebar_visibility(
         self,
         sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
@@ -468,6 +474,22 @@ impl UserSettings {
             push_confirmation_required,
             ..self
         }
+    }
+
+    #[must_use]
+    pub fn with_viewer_push_no_confirmation_projects(
+        self,
+        projects: BTreeSet<ProjectName>,
+    ) -> Self {
+        Self {
+            viewer_push_no_confirmation_projects: projects,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn viewer_push_no_confirmation_projects(&self) -> &BTreeSet<ProjectName> {
+        &self.viewer_push_no_confirmation_projects
     }
 
     #[must_use]

@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 19]> = LazyLock::new(|| {
+static MIGRATIONS_SLICE: LazyLock<[M<'static>; 20]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -260,6 +260,9 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 19]> = LazyLock::new(|| {
         )),
         M::up(include_str!(
             "../../db/migrations/0019_viewer_tab_history.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0020_retire_project_render_recency.sql"
         )),
     ]
 });
@@ -392,6 +395,56 @@ mod tests {
             barrier.wait();
             open_app_db(&root).map(|_| ())
         })
+    }
+
+    #[test]
+    fn migration_retires_project_recency_and_preserves_projects_and_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..19])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch(r"
+            INSERT INTO project_sources (source_id, source_kind, source_value)
+            VALUES (1, 'directory', '/repos/project');
+            INSERT INTO projects (id, title, source_id) VALUES ('PRJ', 'Project', 1);
+            INSERT INTO project_render_recency (source_value, rendered_at)
+            VALUES ('/repos/project', '2026-09-25T00:00:00Z');
+            INSERT INTO render_sources (id, kind, value, created_at)
+            VALUES (1, 'directory', '/repos/project', '2026-09-25T00:00:00Z');
+            INSERT INTO recent_renders (id, source_id, operation_id, target_id, pinned_base, pinned_head, repo_name, range_label, rendered_at)
+            VALUES (1, 1, 1, 1, 'base', 'head', 'project', 'base..head', '2026-09-25T00:00:00Z');
+        ").unwrap();
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+        let preserved: (String, String, String) = connection
+            .query_row(
+                "SELECT p.title, s.source_value, r.range_label
+                 FROM projects p JOIN project_sources s USING (source_id)
+                 JOIN recent_renders r ON r.id = 1 WHERE p.id = 'PRJ'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved,
+            (
+                "Project".into(),
+                "/repos/project".into(),
+                "base..head".into()
+            )
+        );
+        let recency_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'project_render_recency')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!recency_exists);
     }
 
     #[test]

@@ -6,14 +6,12 @@ use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
 const SCROLL_AREA_STANDARD_CLASSES: &str = "scroll-area";
-const SCROLL_AREA_RAIL_CLASSES: &str = "scroll-area-rail";
 const SCROLL_AREA_VERTICAL_CLASSES: &str = "scroll-area-vertical";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ScrollAreaVariant {
     #[default]
     Standard,
-    Rail,
     Vertical,
 }
 
@@ -21,7 +19,6 @@ impl ScrollAreaVariant {
     const fn classes(self) -> &'static str {
         match self {
             Self::Standard => SCROLL_AREA_STANDARD_CLASSES,
-            Self::Rail => SCROLL_AREA_RAIL_CLASSES,
             Self::Vertical => SCROLL_AREA_VERTICAL_CLASSES,
         }
     }
@@ -90,7 +87,7 @@ pub(crate) fn ScrollArea(
 #[cfg(test)]
 mod tests {
 
-    use super::{SCROLL_AREA_RAIL_CLASSES, SCROLL_AREA_STANDARD_CLASSES, ScrollAreaVariant};
+    use super::{SCROLL_AREA_STANDARD_CLASSES, ScrollAreaVariant};
 
     #[test]
     fn scroll_area_variant_owns_its_scrollbar_treatment() {
@@ -98,6 +95,5 @@ mod tests {
             ScrollAreaVariant::Standard.classes(),
             SCROLL_AREA_STANDARD_CLASSES
         );
-        assert_eq!(ScrollAreaVariant::Rail.classes(), SCROLL_AREA_RAIL_CLASSES);
     }
 }

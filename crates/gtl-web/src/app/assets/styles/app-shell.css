@@ -3,7 +3,7 @@
   .viewer-window-drag-region { @apply h-9 w-6 shrink-0 select-none; }
   .viewer-window-actions { @apply flex h-9 shrink-0 items-center; }
   .viewer-window-controls { @apply flex h-9 shrink-0 items-center; }
-  .viewer-window-button { @apply flex size-9 shrink-0 cursor-default items-center justify-center border-0 bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc; }
+  .viewer-window-button { @apply flex size-9 shrink-0 cursor-default items-center justify-center border-0 bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-line focus-visible:focus-outline focus-visible:-outline-offset-2; }
   .viewer-window-button[data-close="true"] { @apply hover:bg-del hover:text-white active:bg-del active:text-white; }
 
   .viewer-connection-content { @apply flex min-h-0 flex-1 flex-col; }
@@ -12,7 +12,4 @@
 
   .viewer-navigation-icon { @apply inline-flex flex-none items-center justify-center; }
   .viewer-navigation-empty { @apply flex items-center text-ink-3; }
-  .viewer-navigation-overflow { @apply absolute inset-x-0 bottom-0 z-20 flex items-end; }
-  .viewer-tab-rail { @apply min-w-0 flex-1 overflow-x-auto; }
-  .viewer-tab-rail[data-viewer-tab-rail-mode="measurement"] { @apply pointer-events-none invisible overflow-hidden; }
 }
