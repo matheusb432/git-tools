@@ -471,7 +471,7 @@ pub(super) fn seed_recent_render(connection: &Connection, id: i64, name: &str) {
     connection
         .execute_batch(&format!(
             "INSERT OR IGNORE INTO render_sources (id, kind, value, created_at) \
-             VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
+             VALUES (7, 'directory', '//fixture.invalid/repositories/repos/gt', '2026-07-11T00:00:00Z');
              INSERT INTO recent_renders \
              (id, source_id, operation_id, target_id, pinned_base, pinned_head, \
               recipe_name, repo_name, range_label, rendered_at) \
@@ -568,7 +568,9 @@ mod tests {
             ]);
         for (index, op) in ops.enumerate() {
             assert_round_trips(&Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root("/repos/gt")),
+                source: RecipeSource::LocalRepo(crate::utils::repository_root(
+                    "//fixture.invalid/repositories/repos/gt",
+                )),
                 op,
                 name: (index % 2 == 0).then(|| crate::utils::project_name("named")),
             });

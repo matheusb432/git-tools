@@ -322,7 +322,7 @@ mod tests {
     fn view<'path>(paths_and_statuses: impl IntoIterator<Item = (&'path str, FileStatus)>) -> View {
         View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            repo_root: utils::repository_root("/repos/git-tools"),
+            repo_root: utils::repository_root("//fixture.invalid/repositories/repos/git-tools"),
             files: paths_and_statuses
                 .into_iter()
                 .map(|(path, status)| FileDiff {
@@ -348,8 +348,12 @@ mod tests {
     fn available_file_system() -> ScriptedFileSystem {
         ScriptedFileSystem::with_results(
             [
-                Ok(PathBuf::from("/repos/git-tools")),
-                Ok(PathBuf::from("/repos/git-tools/src/main.rs")),
+                Ok(PathBuf::from(
+                    "//fixture.invalid/repositories/repos/git-tools",
+                )),
+                Ok(PathBuf::from(
+                    "//fixture.invalid/repositories/repos/git-tools/src/main.rs",
+                )),
             ],
             [Ok(FileSystemEntryKind::File)],
         )
@@ -368,8 +372,10 @@ mod tests {
         ] {
             let invocation = TextEditorInvocation::try_new(
                 configured_command,
-                &utils::repository_root("/repos/git-tools"),
-                &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
+                &utils::repository_root("//fixture.invalid/repositories/repos/git-tools"),
+                &utils::absolute_file_path(
+                    "//fixture.invalid/repositories/repos/git-tools/src/main.rs",
+                ),
             )
             .unwrap();
 
@@ -382,9 +388,9 @@ mod tests {
             );
             assert!(invocation.arguments.ends_with(&[
                 String::from("--reuse-window"),
-                String::from("/repos/git-tools"),
+                String::from("//fixture.invalid/repositories/repos/git-tools"),
                 String::from("--goto"),
-                String::from("/repos/git-tools/src/main.rs"),
+                String::from("//fixture.invalid/repositories/repos/git-tools/src/main.rs"),
             ]));
         }
     }
@@ -406,8 +412,11 @@ mod tests {
             text_editor.opened(),
             Some(RecordedOpen {
                 program: PathBuf::from("helix"),
-                arguments: vec!["--reuse".into(), "/repos/git-tools/src/main.rs".into()],
-                working_directory: PathBuf::from("/repos/git-tools"),
+                arguments: vec![
+                    "--reuse".into(),
+                    "//fixture.invalid/repositories/repos/git-tools/src/main.rs".into()
+                ],
+                working_directory: PathBuf::from("//fixture.invalid/repositories/repos/git-tools"),
             })
         );
     }
@@ -416,8 +425,10 @@ mod tests {
     fn generic_editor_preserves_configured_arguments_and_appends_file() {
         let invocation = TextEditorInvocation::try_new(
             r#""/opt/IDE Suite/editor" --reuse"#,
-            &utils::repository_root("/repos/git-tools"),
-            &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/git-tools"),
+            &utils::absolute_file_path(
+                "//fixture.invalid/repositories/repos/git-tools/src/main.rs",
+            ),
         )
         .unwrap();
 
@@ -426,7 +437,7 @@ mod tests {
             invocation.arguments,
             vec![
                 String::from("--reuse"),
-                String::from("/repos/git-tools/src/main.rs"),
+                String::from("//fixture.invalid/repositories/repos/git-tools/src/main.rs"),
             ]
         );
     }
@@ -470,7 +481,12 @@ mod tests {
 
     #[test]
     fn absolute_parent_or_non_normal_path_is_rejected_by_the_request_type() {
-        for path in ["/tmp/outside", "../outside", "src/./main.rs", ""] {
+        for path in [
+            "//fixture.invalid/repositories/tmp/outside",
+            "../outside",
+            "src/./main.rs",
+            "",
+        ] {
             assert!(RepositoryRelativePath::try_new(path.into()).is_err());
         }
     }
@@ -478,7 +494,9 @@ mod tests {
     #[test]
     fn missing_non_file_or_canonically_escaping_path_is_rejected_before_editor_discovery() {
         let not_found_file_system = ScriptedFileSystem::with_canonicalize_results([
-            Ok(PathBuf::from("/repos/git-tools")),
+            Ok(PathBuf::from(
+                "//fixture.invalid/repositories/repos/git-tools",
+            )),
             Err(FileSystemClientError::new(
                 FileSystemClientErrorKind::NotFound,
                 "missing",
@@ -501,8 +519,12 @@ mod tests {
 
         let non_file_system = ScriptedFileSystem::with_results(
             [
-                Ok(PathBuf::from("/repos/git-tools")),
-                Ok(PathBuf::from("/repos/git-tools/src/main.rs")),
+                Ok(PathBuf::from(
+                    "//fixture.invalid/repositories/repos/git-tools",
+                )),
+                Ok(PathBuf::from(
+                    "//fixture.invalid/repositories/repos/git-tools/src/main.rs",
+                )),
             ],
             [Ok(FileSystemEntryKind::Other)],
         );
@@ -522,8 +544,12 @@ mod tests {
         assert_eq!(non_file_editor.opened(), None);
 
         let escaping_file_system = ScriptedFileSystem::with_canonicalize_results([
-            Ok(PathBuf::from("/repos/git-tools")),
-            Ok(PathBuf::from("/repos/outside.rs")),
+            Ok(PathBuf::from(
+                "//fixture.invalid/repositories/repos/git-tools",
+            )),
+            Ok(PathBuf::from(
+                "//fixture.invalid/repositories/repos/outside.rs",
+            )),
         ]);
         let escaping_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
         let escaping_error = open_diff_file_in_configured_editor::execute(

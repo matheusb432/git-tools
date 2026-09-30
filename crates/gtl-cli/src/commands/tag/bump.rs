@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn tag_preview_shows_only_the_project_version_and_publication() {
         let preview = v1::TagBumpPreview {
-            repository_root: "/repos/example-project".into(),
+            repository_root: "//fixture.invalid/repositories/repos/example-project".into(),
             base_tag: Some("v1.2.3".into()),
             next_tag: "v1.2.4".into(),
             push: true,

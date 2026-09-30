@@ -180,7 +180,9 @@ mod tests {
     fn repo(name: &str) -> RepositoryTarget {
         RepositoryTarget {
             label: crate::utils::project_name(name),
-            path: crate::utils::repository_root(&format!("/repos/{name}")),
+            path: crate::utils::repository_root(&format!(
+                "//fixture.invalid/repositories/repos/{name}"
+            )),
         }
     }
 
@@ -191,7 +193,7 @@ mod tests {
             .absent_repos
             .lock()
             .unwrap()
-            .push("/repos/api".into());
+            .push("//fixture.invalid/repositories/repos/api".into());
 
         let results = get_repository_statuses::execute(vec![repo("api")], &runner);
 
@@ -297,7 +299,9 @@ mod tests {
         let parent = repo("parent");
         let child = RepositoryTarget {
             label: crate::utils::project_name("parent/child"),
-            path: crate::utils::repository_root("/repos/parent/child"),
+            path: crate::utils::repository_root(
+                "//fixture.invalid/repositories/repos/parent/child",
+            ),
         };
 
         let results = execute_with_known_descendants(vec![parent, child], &runner);

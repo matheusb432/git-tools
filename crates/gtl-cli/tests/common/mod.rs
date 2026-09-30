@@ -5,6 +5,11 @@ use std::{
 
 use anyhow::{Context as _, Result, bail};
 
+pub fn cli_binary() -> std::ffi::OsString {
+    std::env::var_os("GTL_CLI_TEST_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_git-tools").into())
+}
+
 pub struct ServerHarness {
     _data_root: tempfile::TempDir,
 }

@@ -47,7 +47,7 @@ pub(crate) fn view() -> View {
     View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
         repo_name: crate::utils::project_name("repo"),
-        repo_root: crate::utils::repository_root("/repo"),
+        repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
         branch: GitHead::Branch(crate::utils::branch_name("feature")),
         upstream: crate::utils::git_revision("origin/main"),
         commits: Vec::new(),

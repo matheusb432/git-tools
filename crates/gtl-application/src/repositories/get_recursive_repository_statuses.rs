@@ -101,7 +101,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         utils::make_repository(&root.path().join("api"));
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("HEAD\n"),
             ScriptedGitClient::applied(""),
         ]);

@@ -95,14 +95,17 @@ mod tests {
     #[test]
     fn maps_settings_state_and_concurrency_failures_to_typed_reasons() {
         let invalid = status(&SetSettingKeyError::Settings(
-            UserSettingsConfigurationError::new("/tmp/config.toml".into(), anyhow::anyhow!("bad"))
-                .into(),
+            UserSettingsConfigurationError::new(
+                "//fixture.invalid/repositories/tmp/config.toml".into(),
+                anyhow::anyhow!("bad"),
+            )
+            .into(),
         ));
         assert_eq!(invalid.code(), tonic::Code::FailedPrecondition);
 
         let concurrent = status(&SetSettingKeyError::Settings(
             UserSettingsEditConflict::ConcurrentModification {
-                path: "/tmp/config.toml".into(),
+                path: "//fixture.invalid/repositories/tmp/config.toml".into(),
             }
             .into(),
         ));
@@ -114,7 +117,7 @@ mod tests {
 
         let locked = status(&SetSettingKeyError::Settings(
             UserSettingsEditConflict::LockTimeout {
-                path: "/tmp/config.toml".into(),
+                path: "//fixture.invalid/repositories/tmp/config.toml".into(),
                 wait_seconds: 5,
             }
             .into(),

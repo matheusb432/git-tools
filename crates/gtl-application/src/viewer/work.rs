@@ -525,7 +525,7 @@ mod tests {
 
     fn recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root("/repo")),
+            source: RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/repo")),
             op: RecipeOp::MergeDiff {
                 base: Some(git_revision("main")),
                 pinned: None,
@@ -563,7 +563,7 @@ mod tests {
             &FixedUserSettingsStore::default(),
             &crate::utils::FakeGitClient {
                 repository_state: Some(crate::ports::GitRepositoryState::Repository {
-                    top_level: repository_root("/repo"),
+                    top_level: repository_root("//fixture.invalid/repositories/repo"),
                 }),
                 ..Default::default()
             },
@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn pinned_empty_snapshot_shows_its_empty_view() {
         let state = ViewerState::new();
-        let reserved = reserve_pending(&state, "/repo/empty");
+        let reserved = reserve_pending(&state, "//fixture.invalid/repositories/repo/empty");
         let tab_id = reserved.ticket().tab_id;
         state
             .update(|session| session.set_pinned(tab_id, true))
@@ -625,8 +625,12 @@ mod tests {
     #[test]
     fn an_explicitly_opened_empty_tab_shows_its_empty_view() {
         let state = ViewerState::new();
-        let reserved =
-            reserve_open(&state, recipe_at("/repo/empty"), RecipeBatchId::generate()).unwrap();
+        let reserved = reserve_open(
+            &state,
+            recipe_at("//fixture.invalid/repositories/repo/empty"),
+            RecipeBatchId::generate(),
+        )
+        .unwrap();
 
         let publication = publish_recipe(&state, computed_empty(&reserved)).unwrap();
 
@@ -689,7 +693,7 @@ mod tests {
     #[test]
     fn skipped_snapshot_reaches_the_next_shell_once() {
         let state = ViewerState::new();
-        let reserved = reserve_pending(&state, "/repo/empty");
+        let reserved = reserve_pending(&state, "//fixture.invalid/repositories/repo/empty");
         let label = crate::recipes::recipe_label::pending(reserved.recipe());
         let work = computed_empty(&reserved);
         let shell_feedback = || {
@@ -714,7 +718,7 @@ mod tests {
     #[test]
     fn activating_a_pending_tab_reserves_its_refresh() {
         let state = ViewerState::new();
-        let initial = reserve_pending(&state, "/repo");
+        let initial = reserve_pending(&state, "//fixture.invalid/repositories/repo");
 
         let refresh = activate_tab(&state, initial.ticket().tab_id)
             .unwrap()
@@ -727,7 +731,7 @@ mod tests {
     #[test]
     fn reopening_the_same_tab_requests_focus_but_refreshing_does_not() {
         let state = ViewerState::new();
-        let first = reserve_pending(&state, "/repo");
+        let first = reserve_pending(&state, "//fixture.invalid/repositories/repo");
         let focus_first = state
             .inspect(|session| session.focus_request_version())
             .unwrap();
@@ -742,7 +746,7 @@ mod tests {
             focus_first
         );
 
-        let reopened = reserve_pending(&state, "/repo");
+        let reopened = reserve_pending(&state, "//fixture.invalid/repositories/repo");
         let focus_reopened = state
             .inspect(|session| session.focus_request_version())
             .unwrap();

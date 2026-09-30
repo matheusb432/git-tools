@@ -200,6 +200,22 @@ fn finish_import(data_root: &Path, snapshot_directory: &Path) -> Result<()> {
         "no staged git-tools import at {}",
         staged_path.display()
     );
+    let endpoint = gtl_local_transport::LocalEndpoint::from_root(data_root)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    // Owning the endpoint excludes both a live server and a concurrent restart during the swap.
+    let _listener = runtime
+        .block_on(async {
+            gtl_local_transport::LocalListener::bind(&endpoint, std::time::Duration::from_secs(1))
+                .await
+        })
+        .map_err(|source| {
+            anyhow::Error::new(RefusedSnapshotError(
+                "stop gtl-server before importing data; its local endpoint is unavailable".into(),
+            ))
+            .context(source)
+        })?;
     snapshot::replace_database_file(&staged_path, data_root)?;
     restore_configuration(snapshot_directory)
 }
@@ -233,5 +249,68 @@ fn remove_file_if_present(path: &Path) -> Result<()> {
         Err(error) => {
             Err(error).with_context(|| format!("removing stale staged import {}", path.display()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn import_preserves_every_database_file_while_the_server_owns_the_endpoint() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let endpoint = gtl_local_transport::LocalEndpoint::from_root(&root).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _listener = runtime
+            .block_on(async {
+                gtl_local_transport::LocalListener::bind(
+                    &endpoint,
+                    std::time::Duration::from_secs(1),
+                )
+                .await
+            })
+            .unwrap();
+        for name in [
+            "gtl.db",
+            "gtl.db-wal",
+            "gtl.db-shm",
+            STAGED_DATABASE_FILE_NAME,
+        ] {
+            fs::write(root.join(name), name).unwrap();
+        }
+
+        let error = finish_import(&root, &root).unwrap_err();
+
+        assert!(
+            error.downcast_ref::<RefusedSnapshotError>().is_some(),
+            "{error:#}"
+        );
+        for name in [
+            "gtl.db",
+            "gtl.db-wal",
+            "gtl.db-shm",
+            STAGED_DATABASE_FILE_NAME,
+        ] {
+            assert_eq!(fs::read(root.join(name)).unwrap(), name.as_bytes());
+        }
+    }
+
+    #[test]
+    fn import_replaces_the_database_after_the_endpoint_is_released() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("gtl.db"), b"old database").unwrap();
+        fs::write(root.join("gtl.db-wal"), b"old WAL").unwrap();
+        fs::write(root.join(STAGED_DATABASE_FILE_NAME), b"imported database").unwrap();
+
+        finish_import(&root, &root).unwrap();
+
+        assert_eq!(fs::read(root.join("gtl.db")).unwrap(), b"imported database");
+        assert!(!root.join("gtl.db-wal").exists());
+        assert!(!root.join(STAGED_DATABASE_FILE_NAME).exists());
     }
 }

@@ -52,9 +52,12 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
         "",
     )
     .context("write non-executable viewer stub")?;
-    let executable_path =
-        std::env::join_paths([viewer_stub.path(), Path::new("/usr/bin"), Path::new("/bin")])
-            .context("build isolated executable path")?;
+    let inherited_path = std::env::var_os("PATH").context("missing executable path")?;
+    let executable_path = std::env::join_paths(
+        std::iter::once(viewer_stub.path().to_path_buf())
+            .chain(std::env::split_paths(&inherited_path)),
+    )
+    .context("build isolated executable path")?;
     unsafe {
         std::env::set_var("PATH", executable_path);
         std::env::remove_var("DISPLAY");
@@ -63,7 +66,7 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
     }
     let _server = common::ServerHarness::start(None, None)?;
 
-    Command::new(env!("CARGO_BIN_EXE_git-tools"))
+    Command::new(common::cli_binary())
         .current_dir(repository.path())
         .args(["d", "-l"])
         .assert()
@@ -71,7 +74,7 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
         .stderr(contains("diff: viewer unavailable"))
         .stdout(contains("file://"));
 
-    Command::new(env!("CARGO_BIN_EXE_git-tools"))
+    Command::new(common::cli_binary())
         .current_dir(repository.path())
         .args(["d", "-l", "--raw"])
         .assert()
@@ -84,7 +87,7 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
         "cli-untracked-marker\n",
     )?;
     let index = std::fs::read(repository.path().join(".git/index"))?;
-    let output = Command::new(env!("CARGO_BIN_EXE_git-tools"))
+    let output = Command::new(common::cli_binary())
         .current_dir(repository.path())
         .args(["diff", "HEAD", "--raw"])
         .assert()
@@ -95,8 +98,11 @@ fn default_diff_attempts_server_owned_viewer_without_display_environment() -> Re
     let output = String::from_utf8(output)?;
     let artifact = output
         .lines()
-        .find_map(|line| line.strip_prefix("file://"))
+        .find(|line| line.starts_with("file://"))
         .context("working-tree render must return an artifact")?;
+    let artifact = artifact
+        .strip_prefix(if cfg!(windows) { "file:///" } else { "file://" })
+        .context("artifact must use the platform's local file URL shape")?;
     ensure!(
         std::fs::read_to_string(artifact)?.contains("cli-untracked-marker"),
         "CLI working-tree comparison omitted untracked content"

@@ -59,8 +59,8 @@ mod tests {
     #[test]
     fn gitfile_target_reads_only_the_gitdir_line() {
         assert_eq!(
-            gitfile_target("gitdir: /repo/.git/worktrees/feature\n"),
-            Some("/repo/.git/worktrees/feature")
+            gitfile_target("gitdir: //fixture.invalid/repositories/repo/.git/worktrees/feature\n"),
+            Some("//fixture.invalid/repositories/repo/.git/worktrees/feature")
         );
         assert_eq!(
             gitfile_target("gitdir: ../.git/modules/sub\n"),

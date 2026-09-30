@@ -13,7 +13,7 @@ fn diff_set_theme_updates_the_user_settings_document() -> Result<()> {
     std::fs::write(&config, "layout = \"split\"\n").context("seed config")?;
     let _server = common::ServerHarness::start(Some(&config), None)?;
 
-    Command::new(env!("CARGO_BIN_EXE_git-tools"))
+    Command::new(common::cli_binary())
         .args(["diff", "--set-theme", "carbon"])
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()

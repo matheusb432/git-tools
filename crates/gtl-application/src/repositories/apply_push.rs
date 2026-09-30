@@ -286,7 +286,7 @@ mod tests {
     fn target() -> PushTarget {
         PushTarget {
             name: crate::utils::project_name("api"),
-            top: crate::utils::repository_root("/repos/api"),
+            top: crate::utils::repository_root("//fixture.invalid/repositories/repos/api"),
             branch: branch_name("main"),
             remote: remote_name("origin"),
             remote_urls: vec![

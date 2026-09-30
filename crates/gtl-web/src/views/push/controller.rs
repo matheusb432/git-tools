@@ -20,10 +20,7 @@ use crate::{
         failure_notice::client_error_message,
         i18n::{t, use_language},
         keyboard::native_keyboard_event_matches,
-        ui::{
-            AlertDialog, AlertDialogSize, Button, ButtonSize, ButtonState, ButtonVariant,
-            ToastHandle, ToastText, use_toast,
-        },
+        ui::{Button, ButtonSize, ButtonState, ButtonVariant, ToastHandle, ToastText, use_toast},
         viewer_client::ViewerClientError,
     },
 };
@@ -596,7 +593,6 @@ pub(super) fn PushMenuAction(
 
 #[component]
 pub(crate) fn PushDialogHost() -> Element {
-    let language = use_language();
     let mut controller = use_context::<PushController>();
     use_effect(move || {
         let instance = controller.viewer.server_instance_id();
@@ -627,17 +623,13 @@ pub(crate) fn PushDialogHost() -> Element {
         PushPhase::Preparing => rsx! {},
         PushPhase::Review { preview, .. } => {
             rsx! {
-                AlertDialog {
+                super::confirmation::PushConfirmationDialog {
                     id: "viewer-push-confirmation",
                     trigger_id: dialog.trigger,
                     open: true,
-                    size: AlertDialogSize::Wide,
-                    title: t!(language, "push-dialog-title", count = preview.count),
-                    description: t!(language, "push-dialog-description"),
-                    confirm_label: t!(language, "push-dialog-confirm", count = preview.count),
+                    preview: *preview,
                     onconfirm: move |()| controller.confirm(),
                     oncancel: move |()| controller.close(),
-                    super::PushConfirmationDetails { preview: *preview }
                 }
             }
         }

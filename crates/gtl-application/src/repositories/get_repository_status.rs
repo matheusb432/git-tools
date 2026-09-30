@@ -43,12 +43,16 @@ mod tests {
     #[test]
     fn resolves_a_nested_path_before_reading_status() {
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("HEAD\n"),
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = get_repository_status::execute("/repos/api/src".into(), &git).unwrap();
+        let result = get_repository_status::execute(
+            "//fixture.invalid/repositories/repos/api/src".into(),
+            &git,
+        )
+        .unwrap();
 
         assert_eq!(result.name().as_ref(), "api");
         assert_eq!(
@@ -64,12 +68,14 @@ mod tests {
     fn preserves_a_non_repository_as_a_typed_resolution_failure() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("not a repository")]);
 
-        let error = get_repository_status::execute("/tmp/plain".into(), &git).unwrap_err();
+        let error =
+            get_repository_status::execute("//fixture.invalid/repositories/tmp/plain".into(), &git)
+                .unwrap_err();
 
         assert!(matches!(
             error,
             ResolveRepositoryRootError::Rejected { repo_path, .. }
-                if repo_path == std::path::Path::new("/tmp/plain")
+                if repo_path == std::path::Path::new("//fixture.invalid/repositories/tmp/plain")
         ));
     }
 }

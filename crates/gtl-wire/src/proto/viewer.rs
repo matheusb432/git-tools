@@ -2514,7 +2514,10 @@ mod commit_search_tests {
         };
         for scope in [
             ViewerCommitSearchScope::ActiveBranch(
-                gtl_models::paths::RepositoryRoot::try_new("/repo".into()).unwrap(),
+                gtl_models::paths::RepositoryRoot::try_new(
+                    "//fixture.invalid/repositories/repo".into(),
+                )
+                .unwrap(),
             ),
             ViewerCommitSearchScope::Snapshot(identity),
             ViewerCommitSearchScope::ActiveBranchSnapshot(identity),

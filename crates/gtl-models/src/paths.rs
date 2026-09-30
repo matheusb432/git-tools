@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 const PROJECT_NAME_FALLBACK: &str = "repo";
 
 /// An absolute root established by filesystem or Git resolution.
+/// Windows verbatim prefixes are simplified when the ordinary spelling is safe.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct RepositoryRoot(PathBuf);
@@ -24,7 +25,12 @@ impl RepositoryRoot {
     /// Returns [`RepositoryRootError`] when `path` is not absolute.
     pub fn try_new(path: PathBuf) -> Result<Self, RepositoryRootError> {
         if is_model_absolute_path(&path) {
-            Ok(Self(path))
+            let simplified = dunce::simplified(&path);
+            if simplified == path {
+                Ok(Self(path))
+            } else {
+                Ok(Self(simplified.to_path_buf()))
+            }
         } else {
             Err(RepositoryRootError)
         }
@@ -298,6 +304,30 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_resolved_roots_keep_the_same_identity_as_directory_sources() {
+        use crate::projects::catalogue::ProjectDirectorySource;
+
+        let ordinary = RepositoryRoot::try_new(PathBuf::from(r"C:\repos\project")).unwrap();
+        let resolved = RepositoryRoot::try_new(PathBuf::from(r"\\?\C:\repos\project")).unwrap();
+        let source = ProjectDirectorySource::try_new(r"\\?\C:\repos\project".to_owned()).unwrap();
+
+        assert_eq!(resolved, ordinary);
+        assert_eq!(source.resolve().unwrap(), ordinary);
+        assert_eq!(source.as_ref(), ordinary.to_string());
+        assert_eq!(
+            serde_json::to_value(&resolved).unwrap(),
+            r"C:\repos\project"
+        );
+        assert_eq!(
+            serde_json::from_str::<RepositoryRoot>(r#""\\\\?\\C:\\repos\\project""#).unwrap(),
+            ordinary
+        );
+        let reserved = RepositoryRoot::try_new(PathBuf::from(r"\\?\C:\repos\COM1")).unwrap();
+        assert_eq!(reserved.as_ref(), Path::new(r"\\?\C:\repos\COM1"));
+    }
+
     #[test]
     fn portable_absolute_paths_cover_unix_windows_and_unc_syntax() {
         for path in [
@@ -348,28 +378,38 @@ mod tests {
 
     #[test]
     fn repository_root_joins_validated_relative_paths_into_absolute_files() {
-        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).unwrap();
+        let root =
+            RepositoryRoot::try_new(PathBuf::from("//fixture.invalid/repositories/repos/gt"))
+                .unwrap();
         let relative = RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).unwrap();
 
         assert_eq!(
             root.join(&relative).as_ref(),
-            Path::new("/repos/gt/src/lib.rs")
+            Path::new("//fixture.invalid/repositories/repos/gt/src/lib.rs")
         );
     }
 
     #[test]
     fn serde_preserves_primitive_wire_shapes_and_validates_decoding() {
-        let root = RepositoryRoot::try_new(PathBuf::from("/repos/gt")).unwrap();
+        let root =
+            RepositoryRoot::try_new(PathBuf::from("//fixture.invalid/repositories/repos/gt"))
+                .unwrap();
         let project = ProjectName::try_new("git-tools".to_owned()).unwrap();
         let relative = RepositoryRelativePath::try_new(PathBuf::from("src/lib.rs")).unwrap();
         let absolute = root.join(&relative);
 
-        assert_eq!(serde_json::to_value(&root).unwrap(), "/repos/gt");
+        assert_eq!(
+            serde_json::to_value(&root).unwrap(),
+            "//fixture.invalid/repositories/repos/gt"
+        );
         assert_eq!(serde_json::to_value(&project).unwrap(), "git-tools");
         assert_eq!(serde_json::to_value(&relative).unwrap(), "src/lib.rs");
         assert_eq!(
             serde_json::to_value(&absolute).unwrap(),
-            "/repos/gt/src/lib.rs"
+            root.as_ref()
+                .join("src/lib.rs")
+                .to_string_lossy()
+                .into_owned()
         );
         assert!(serde_json::from_str::<RepositoryRoot>(r#""relative""#).is_err());
         assert!(serde_json::from_str::<RepositoryRelativePath>(r#""../secret""#).is_err());
@@ -382,7 +422,7 @@ mod tests {
     fn path_roles_preserve_non_utf8_filesystem_components() {
         use std::os::unix::ffi::OsStringExt as _;
 
-        let mut root_path = PathBuf::from("/repos");
+        let mut root_path = PathBuf::from("//fixture.invalid/repositories/repos");
         root_path.push(std::ffi::OsString::from_vec(vec![b'g', 0x80, b't']));
         let root = RepositoryRoot::try_new(root_path.clone()).unwrap();
         let relative =

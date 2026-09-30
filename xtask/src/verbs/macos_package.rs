@@ -3,10 +3,9 @@
 use std::{fmt::Write as _, fs, path::Path, process::Command, thread, time::Duration};
 
 use anyhow::{Context as _, Result, bail, ensure};
-use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
 
-use super::{build, cargo_target_directory, repository_root};
+use super::{build, cargo_target_directory, release_package::release_version, repository_root};
 use crate::{cli::BuildTarget, process, task::Step};
 
 const APP_NAME: &str = "gtl-viewer.app";
@@ -47,11 +46,6 @@ if [ "$console_uid" -ne 0 ] && /bin/launchctl print "gui/$console_uid" >/dev/nul
     /bin/launchctl bootstrap "gui/$console_uid" /Library/LaunchAgents/gtl-server.plist
 fi
 "#;
-
-#[derive(Deserialize)]
-struct AppConfiguration {
-    version: String,
-}
 
 pub(crate) fn run() -> Result<()> {
     ensure!(
@@ -113,14 +107,10 @@ pub(crate) fn run() -> Result<()> {
     stage_payload(&app, &payload, &scripts)?;
     let components = staging.path().join("components.plist");
     fs::write(&components, COMPONENTS).context("write package component policy")?;
-    let configuration: AppConfiguration =
-        serde_json::from_slice(&fs::read(root.join("crates/gtl-desktop/tauri.conf.json"))?)?;
+    let version = release_version(&root)?;
     let output = root.join(".artifacts/macos");
     fs::create_dir_all(&output)?;
-    let filename = format!(
-        "git-tools-{}-macos-{architecture}.pkg",
-        configuration.version
-    );
+    let filename = format!("git-tools-{version}-macos-{architecture}.pkg");
     let package = output.join(&filename);
     process::run_step(&Step::new(
         "build-macos-installer",
@@ -135,7 +125,7 @@ pub(crate) fn run() -> Result<()> {
             "--identifier".to_owned(),
             "dev.gittools.installer".to_owned(),
             "--version".to_owned(),
-            configuration.version,
+            version,
             "--install-location".to_owned(),
             "/".to_owned(),
             "--ownership".to_owned(),
@@ -149,7 +139,7 @@ pub(crate) fn run() -> Result<()> {
         write!(checksum, "{byte:02x}")?;
     }
     writeln!(checksum, "  {filename}")?;
-    fs::write(output.join("SHA256SUMS"), checksum)?;
+    fs::write(output.join(format!("{filename}.sha256")), checksum)?;
     println!("macOS installer: {}", package.display());
     Ok(())
 }

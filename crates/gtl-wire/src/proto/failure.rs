@@ -579,7 +579,7 @@ mod tests {
             }),
             Failure::Viewer(ViewerFailure::FileOutsideRepository),
             Failure::Viewer(ViewerFailure::SourceNotRepository {
-                path: "/work/repo".into(),
+                path: "//fixture.invalid/repositories/work/repo".into(),
             }),
             Failure::Viewer(ViewerFailure::CommitFailed),
             Failure::Gone {
@@ -589,18 +589,25 @@ mod tests {
                 problem: ScanFolderProblem::NotUtf8,
             }),
             Failure::Project(ProjectFailure::NoCommonAncestor {
-                path: RepositoryRoot::try_new("/work/repo".into()).unwrap(),
+                path: RepositoryRoot::try_new("//fixture.invalid/repositories/work/repo".into())
+                    .unwrap(),
                 branch: "main".to_owned().try_into().unwrap(),
                 project: None,
             }),
             Failure::Project(ProjectFailure::ComparisonBranchMissing {
-                path: RepositoryRoot::try_new("/work/repo-review".into()).unwrap(),
+                path: RepositoryRoot::try_new(
+                    "//fixture.invalid/repositories/work/repo-review".into(),
+                )
+                .unwrap(),
                 branch: "develop".to_owned().try_into().unwrap(),
-                project: Some(RepositoryRoot::try_new("/work/repo".into()).unwrap()),
+                project: Some(
+                    RepositoryRoot::try_new("//fixture.invalid/repositories/work/repo".into())
+                        .unwrap(),
+                ),
             }),
             Failure::Project(ProjectFailure::CatalogueFull { projects_max: 4096 }),
             Failure::Repository(RepositoryFailure::SearchFailed {
-                path: "/work".into(),
+                path: "//fixture.invalid/repositories/work".into(),
                 diagnostic: ExternalDiagnostic::new("permission denied"),
             }),
         ]

@@ -48,7 +48,7 @@ pub(crate) enum ButtonVariant {
     Destructive,
     #[cfg_attr(
         not(feature = "component-preview"),
-        allow(dead_code, reason = "reserved for the viewer push feature")
+        allow(dead_code, reason = "used by alert dialog previews")
     )]
     Warning,
     Failure,

@@ -1,9 +1,7 @@
 use dioxus::prelude::*;
 use dx_story::{stories, story};
 
-use crate::shared::ui::{
-    AlertDialog, AlertDialogSize, AlertDialogVariant, Button, ButtonState, ButtonVariant,
-};
+use crate::shared::ui::{AlertDialog, AlertDialogVariant, Button, ButtonState, ButtonVariant};
 
 const PUSH_COMMIT_SHA: &str = "a101a101a101a101a101a101a101a101a101a101";
 
@@ -82,9 +80,11 @@ fn error() -> Element {
     }
 }
 
-/// GTL-0081 confirmation showing the immutable push target and exact command.
+/// Compact push review beside the production review dock.
 #[story(name = "Push confirmation")]
 fn push_confirmation() -> Element {
+    let mut open = use_signal(|| false);
+    let mut outcome = use_signal(|| "No action selected");
     let preview = gtl_wire::viewer::push::ViewerPushPreview {
         no_confirmation: false,
         repository: std::path::PathBuf::from("/repos/git-tools").try_into()?,
@@ -115,17 +115,45 @@ fn push_confirmation() -> Element {
         ],
     };
     rsx! {
-        AlertDialogStory {
-            id: "preview-push",
-            trigger_label: "Review push",
-            trigger_variant: ButtonVariant::Primary,
-            variant: AlertDialogVariant::Alert,
-            size: AlertDialogSize::Wide,
-            title: "Push 2 commits?",
-            description: "Only commits through the selected SHA will be pushed. Newer commits remain local.",
-            confirm_label: "Push 2 commits",
-            confirmed_outcome: "Push confirmed",
-            crate::views::push::PushConfirmationDetails { preview }
+        div { class: "grid gap-3",
+            div { class: "relative h-96 w-[min(48rem,calc(100vw-2rem))] overflow-hidden rounded-panel border border-line bg-bg",
+                pre { class: "p-5 text-sm leading-7 text-ink-2",
+                    "src/review.rs\n\n+ review_snapshot();\n+ approve_changes();\n+ continue_review();"
+                }
+                crate::views::diffs::diff_workspace::review_actions::ReviewActionDock {
+                    unpushed: Some(true),
+                    close_disabled: false,
+                    onclose: move |_| {},
+                    push: rsx! {
+                        Button {
+                            id: "preview-push-trigger",
+                            class: "review-push-action",
+                            variant: ButtonVariant::Accent,
+                            aria_label: "Review push",
+                            icon: rsx! {
+                                lucide_dioxus::Upload { size: 14 }
+                            },
+                            onclick: move |_| open.set(true),
+                            "Push"
+                        }
+                    },
+                }
+            }
+            output { class: "text-sm text-ink-2", aria_live: "polite", "{outcome}" }
+            crate::views::push::confirmation::PushConfirmationDialog {
+                id: "preview-push-dialog",
+                trigger_id: "preview-push-trigger",
+                open: open(),
+                preview,
+                oncancel: move |()| {
+                    open.set(false);
+                    outcome.set("Canceled");
+                },
+                onconfirm: move |()| {
+                    open.set(false);
+                    outcome.set("Push confirmed");
+                },
+            }
         }
     }
 }
@@ -166,7 +194,6 @@ fn AlertDialogStory(
     trigger_label: String,
     trigger_variant: ButtonVariant,
     variant: AlertDialogVariant,
-    #[props(default)] size: AlertDialogSize,
     title: String,
     description: String,
     confirm_label: String,
@@ -196,7 +223,6 @@ fn AlertDialogStory(
                 description,
                 confirm_label,
                 variant,
-                size,
                 oncancel: move |()| {
                     open.set(false);
                     outcome.set(canceled_outcome.clone());

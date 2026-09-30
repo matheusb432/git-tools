@@ -496,7 +496,7 @@ mod tests {
     }
 
     fn command(commit_count: u64) -> RecordRender {
-        command_for_repo(commit_count, "/repos/gt")
+        command_for_repo(commit_count, "//fixture.invalid/repositories/repos/gt")
     }
 
     fn command_for_repo(commit_count: u64, repo: &str) -> RecordRender {
@@ -547,7 +547,7 @@ mod tests {
         let mut connection = store_test();
         crate::history::persistence::seed_recent_render(&connection, -2, "legacy");
         let result = record_render::start(
-            &StartRender::new(recipe("/repos/other")),
+            &StartRender::new(recipe("//fixture.invalid/repositories/repos/other")),
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         );
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(renders, 1);
         assert_eq!(
             render_sources(&connection),
-            [("/repos/gt".to_owned(), None)]
+            [("//fixture.invalid/repositories/repos/gt".to_owned(), None)]
         );
     }
 
@@ -605,7 +605,7 @@ mod tests {
     fn pending_render_transitions_to_error_with_classified_source_details() {
         let mut connection = store_test();
         let render_id = record_render::start(
-            &StartRender::new(recipe("/repos/gt")),
+            &StartRender::new(recipe("//fixture.invalid/repositories/repos/gt")),
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
@@ -674,7 +674,7 @@ mod tests {
         for invalid_timestamp in [true, false] {
             let mut connection = store_test();
             let render_id = record_render::start(
-                &StartRender::new(recipe("/repos/gt")),
+                &StartRender::new(recipe("//fixture.invalid/repositories/repos/gt")),
                 &mut connection,
                 &FixedClock::from_raw("2026-07-07T00:00:00Z"),
             )
@@ -705,7 +705,7 @@ mod tests {
     fn discarding_pending_render_collects_its_orphaned_source() {
         let mut connection = store_test();
         let render_id = record_render::start(
-            &StartRender::new(recipe("/repos/abandoned")),
+            &StartRender::new(recipe("//fixture.invalid/repositories/repos/abandoned")),
             &mut connection,
             &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
@@ -736,7 +736,7 @@ mod tests {
                 comparison_name: None,
                 project_id: None,
                 id: gtl_models::viewer::RenderHistoryId::try_new(1).unwrap(),
-                recipe: recipe("/repos/gt"),
+                recipe: recipe("//fixture.invalid/repositories/repos/gt"),
                 repo_name: crate::utils::project_name("gt"),
                 label_parts: unpushed_commits(2),
                 range_label: "origin/main..HEAD".into(),
@@ -766,14 +766,21 @@ mod tests {
 
         assert_eq!(
             render_sources(&connection),
-            vec![("/repos/gt".into(), Some("2026-07-08T00:00:00Z".into()))]
+            vec![(
+                "//fixture.invalid/repositories/repos/gt".into(),
+                Some("2026-07-08T00:00:00Z".into())
+            )]
         );
     }
 
     #[test]
     fn repeated_fingerprint_preserves_the_original_render() {
         let mut connection = store_test();
-        let first = command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head"));
+        let first = command_for_recipe(
+            1,
+            "gt",
+            pinned_recipe("//fixture.invalid/repositories/repos/gt", "base", "head"),
+        );
         let mut repeated = first.clone();
         repeated.label_parts = unpushed_commits(2);
 
@@ -808,8 +815,20 @@ mod tests {
              WHERE render_status = 'success';",
             )
             .unwrap();
-        let first = command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head"));
-        let second = command_for_recipe(2, "gt", pinned_recipe("/repos/gt", "base", "other-head"));
+        let first = command_for_recipe(
+            1,
+            "gt",
+            pinned_recipe("//fixture.invalid/repositories/repos/gt", "base", "head"),
+        );
+        let second = command_for_recipe(
+            2,
+            "gt",
+            pinned_recipe(
+                "//fixture.invalid/repositories/repos/gt",
+                "base",
+                "other-head",
+            ),
+        );
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
         record_render::execute(&first, &mut connection, &clock).unwrap();
         let pending_id = record_render::start(
@@ -857,11 +876,39 @@ mod tests {
         let mut connection = store_test();
         let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
         let commands = [
-            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "head")),
-            command_for_recipe(1, "gt", pinned_recipe("/repos/other", "base", "head")),
-            command_for_recipe(1, "other", pinned_recipe("/repos/gt", "base", "head")),
-            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "other-base", "head")),
-            command_for_recipe(1, "gt", pinned_recipe("/repos/gt", "base", "other-head")),
+            command_for_recipe(
+                1,
+                "gt",
+                pinned_recipe("//fixture.invalid/repositories/repos/gt", "base", "head"),
+            ),
+            command_for_recipe(
+                1,
+                "gt",
+                pinned_recipe("//fixture.invalid/repositories/repos/other", "base", "head"),
+            ),
+            command_for_recipe(
+                1,
+                "other",
+                pinned_recipe("//fixture.invalid/repositories/repos/gt", "base", "head"),
+            ),
+            command_for_recipe(
+                1,
+                "gt",
+                pinned_recipe(
+                    "//fixture.invalid/repositories/repos/gt",
+                    "other-base",
+                    "head",
+                ),
+            ),
+            command_for_recipe(
+                1,
+                "gt",
+                pinned_recipe(
+                    "//fixture.invalid/repositories/repos/gt",
+                    "base",
+                    "other-head",
+                ),
+            ),
         ];
 
         for command in commands {
@@ -884,7 +931,7 @@ mod tests {
                     index,
                     "gt",
                     pinned_recipe(
-                        "/repos/old",
+                        "//fixture.invalid/repositories/repos/old",
                         &format!("base-{index}"),
                         &format!("head-{index}"),
                     ),
@@ -900,7 +947,7 @@ mod tests {
                     u64::try_from(index).unwrap(),
                     "gt",
                     pinned_recipe(
-                        "/repos/gt",
+                        "//fixture.invalid/repositories/repos/gt",
                         &format!("base-{index}"),
                         &format!("head-{index}"),
                     ),
@@ -929,7 +976,7 @@ mod tests {
                 .into_iter()
                 .map(|(value, _)| value)
                 .collect::<Vec<_>>(),
-            vec!["/repos/gt".to_owned()]
+            vec!["//fixture.invalid/repositories/repos/gt".to_owned()]
         );
     }
 }

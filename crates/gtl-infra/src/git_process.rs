@@ -40,12 +40,24 @@ pub(crate) fn run(repo_path: &Path, args: &[&str]) -> anyhow::Result<GitProcessO
     run_with_index(repo_path, args, None)
 }
 
+pub(crate) fn command() -> Command {
+    let mut command = Command::new("git");
+    command.stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 pub(crate) fn run_with_index(
     repo_path: &Path,
     args: &[&str],
     index: Option<&Path>,
 ) -> anyhow::Result<GitProcessOutput> {
-    let mut command = Command::new("git");
+    let mut command = command();
     command.arg("-C").arg(repo_path).args(args);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
@@ -76,7 +88,7 @@ pub(crate) fn run_bounded(
     args: &[&str],
     timeout: std::time::Duration,
 ) -> anyhow::Result<GitProcessOutput> {
-    let mut command = Command::new("git");
+    let mut command = command();
     command
         .arg("-C")
         .arg(repo)

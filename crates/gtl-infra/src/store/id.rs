@@ -56,8 +56,14 @@ mod tests {
     #[test]
     fn repo_id_uses_root_commit_and_is_path_independent() {
         let root = commit_id("a");
-        let from_sha = repo_id(Some(&root), &PathBuf::from("/tmp/repo"));
-        let from_path = repo_id(None, &PathBuf::from("/tmp/repo"));
+        let from_sha = repo_id(
+            Some(&root),
+            &PathBuf::from("//fixture.invalid/repositories/tmp/repo"),
+        );
+        let from_path = repo_id(
+            None,
+            &PathBuf::from("//fixture.invalid/repositories/tmp/repo"),
+        );
         assert_ne!(from_sha, from_path);
         assert_eq!(from_sha, repo_id(Some(&root), &PathBuf::from("/elsewhere")));
     }
@@ -65,7 +71,12 @@ mod tests {
     #[test]
     fn repo_id_falls_back_to_path_when_no_root_commit() {
         assert_eq!(
-            repo_id(None, &PathBuf::from("/tmp/repo")).as_ref().len(),
+            repo_id(
+                None,
+                &PathBuf::from("//fixture.invalid/repositories/tmp/repo")
+            )
+            .as_ref()
+            .len(),
             16
         );
     }

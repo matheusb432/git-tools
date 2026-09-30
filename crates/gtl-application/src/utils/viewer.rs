@@ -14,7 +14,9 @@ pub(crate) fn label(name: &str) -> RecipeLabel {
 
 pub(crate) fn recipe(op: RecipeOp) -> Recipe {
     Recipe {
-        source: RecipeSource::LocalRepo(crate::utils::repository_root("/repos/project")),
+        source: RecipeSource::LocalRepo(crate::utils::repository_root(
+            "//fixture.invalid/repositories/repos/project",
+        )),
         op,
         name: None,
     }
@@ -23,7 +25,7 @@ pub(crate) fn recipe(op: RecipeOp) -> Recipe {
 pub(crate) fn empty_view() -> View {
     let mut view = super::diffs::view();
     view.repo_name = crate::utils::project_name("project");
-    view.repo_root = crate::utils::repository_root("/repos/project");
+    view.repo_root = crate::utils::repository_root("//fixture.invalid/repositories/repos/project");
     view.upstream = crate::utils::git_revision("main");
     view.title = super::diffs::view_title("viewer");
     view.cmd.range = "main..HEAD".into();

@@ -15,7 +15,13 @@ mod tests {
 
     #[test]
     fn uses_the_final_component_or_a_fallback() {
-        assert_eq!(from_root(&repository_root("/work/api")).as_str(), "api");
-        assert_eq!(from_root(&repository_root("/")).as_str(), "repo");
+        assert_eq!(
+            from_root(&repository_root("//fixture.invalid/repositories/work/api")).as_str(),
+            "api"
+        );
+        assert_eq!(
+            from_root(&repository_root(if cfg!(windows) { r"C:\" } else { "/" })).as_str(),
+            "repo"
+        );
     }
 }

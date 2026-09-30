@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn porcelain_rejections_are_classified_per_ref() {
-        let porcelain = "To /remote.git\n\
+        let porcelain = "To //fixture.invalid/repositories/remote.git\n\
             !\t0123456789abcdef0123456789abcdef01234567:refs/heads/main\t[rejected] (fetch first)\n\
             !\trefs/heads/topic:refs/heads/topic\t[rejected] (non-fast-forward)\n\
             !\tHEAD:refs/heads/release\t[remote rejected] (protected branch hook declined)\n\
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn output_without_rejected_refs_has_no_rejections() {
-        assert!(rejected_refs("To /remote.git\nDone\n").is_empty());
+        assert!(rejected_refs("To //fixture.invalid/repositories/remote.git\nDone\n").is_empty());
         assert!(rejected_refs("").is_empty());
     }
 }

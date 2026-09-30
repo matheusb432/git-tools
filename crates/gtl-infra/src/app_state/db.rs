@@ -417,12 +417,12 @@ mod tests {
             .unwrap();
         connection.execute_batch(r"
             INSERT INTO project_sources (source_id, source_kind, source_value)
-            VALUES (1, 'directory', '/repos/project');
+            VALUES (1, 'directory', '//fixture.invalid/repositories/repos/project');
             INSERT INTO projects (id, title, source_id) VALUES ('PRJ', 'Project', 1);
             INSERT INTO project_render_recency (source_value, rendered_at)
-            VALUES ('/repos/project', '2026-09-25T00:00:00Z');
+            VALUES ('//fixture.invalid/repositories/repos/project', '2026-09-25T00:00:00Z');
             INSERT INTO render_sources (id, kind, value, created_at)
-            VALUES (1, 'directory', '/repos/project', '2026-09-25T00:00:00Z');
+            VALUES (1, 'directory', '//fixture.invalid/repositories/repos/project', '2026-09-25T00:00:00Z');
             INSERT INTO recent_renders (id, source_id, operation_id, target_id, pinned_base, pinned_head, repo_name, range_label, rendered_at)
             VALUES (1, 1, 1, 1, 'base', 'head', 'project', 'base..head', '2026-09-25T00:00:00Z');
         ").unwrap();
@@ -442,7 +442,7 @@ mod tests {
             preserved,
             (
                 "Project".into(),
-                "/repos/project".into(),
+                "//fixture.invalid/repositories/repos/project".into(),
                 "base..head".into()
             )
         );
@@ -467,12 +467,12 @@ mod tests {
             .unwrap();
         connection.execute_batch(r#"
             INSERT INTO render_sources (id, kind, value, created_at)
-            VALUES (1, 'directory', '/repos/project', '2026-09-25T00:00:00Z');
+            VALUES (1, 'directory', '//fixture.invalid/repositories/repos/project', '2026-09-25T00:00:00Z');
             INSERT INTO recent_renders (id, source_id, operation_id, target_id, pinned_base, pinned_head, repo_name, range_label, rendered_at)
             VALUES (1, 1, 1, 1, 'base', 'head', 'project', 'base..head', '2026-09-25T00:00:00Z');
             INSERT INTO viewer_tabs (position, recipe_json, pinned, live, active) VALUES
-            (0, '{"source":{"kind":"local_repo","value":"/repos/project"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"base","head":"head"}}}}', 1, 0, 1),
-            (1, '{"source":{"kind":"local_repo","value":"/repos/missing"},"op":{"op":"diff","target":{"target":"unpushed"}}}', 0, 0, 0);
+            (0, '{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/project"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"base","head":"head"}}}}', 1, 0, 1),
+            (1, '{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/missing"},"op":{"op":"diff","target":{"target":"unpushed"}}}', 0, 0, 0);
         "#).unwrap();
         MIGRATIONS.to_latest(&mut connection).unwrap();
         MIGRATIONS.to_latest(&mut connection).unwrap();
@@ -512,9 +512,9 @@ mod tests {
             .to_latest(&mut connection)
             .unwrap();
         connection.execute_batch("INSERT INTO live_views (source_kind, source_value, display_name, created_at, comparison) VALUES
-            ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'local_changes'),
-            ('LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
-            ('LocalRepo', '/repos/two', 'two', '2026-09-10T00:00:00Z', 'local_changes');").unwrap();
+            ('LocalRepo', '//fixture.invalid/repositories/repos/one', 'one', '2026-09-10T00:00:00Z', 'local_changes'),
+            ('LocalRepo', '//fixture.invalid/repositories/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+            ('LocalRepo', '//fixture.invalid/repositories/repos/two', 'two', '2026-09-10T00:00:00Z', 'local_changes');").unwrap();
         Migrations::from_slice(&MIGRATIONS_SLICE[..10])
             .to_latest(&mut connection)
             .unwrap();
@@ -536,12 +536,12 @@ mod tests {
             .unwrap();
         connection.execute_batch(r#"
             INSERT INTO pinned_viewer_tabs (position, recipe_json, live) VALUES
-                (0, '{"source":{"kind":"local_repo","value":"/repos/one"},"op":{"op":"diff","target":{"target":"unpushed"}},"name":"one"}', 1),
-                (1, '{"source":{"kind":"local_repo","value":"/repos/two"},"op":{"op":"merge_diff"}}', 0);
+                (0, '{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/one"},"op":{"op":"diff","target":{"target":"unpushed"}},"name":"one"}', 1),
+                (1, '{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/two"},"op":{"op":"merge_diff"}}', 0);
             INSERT INTO live_views (id, source_kind, source_value, display_name, created_at, comparison) VALUES
-                (2, 'LocalRepo', '/repos/three', 'three', '2026-09-10T00:00:00Z', 'unpushed_commits'),
-                (1, 'LocalRepo', '/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
-                (3, 'LocalRepo', '/repos/four', 'four', '2026-09-10T00:00:00Z', 'local_changes');
+                (2, 'LocalRepo', '//fixture.invalid/repositories/repos/three', 'three', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+                (1, 'LocalRepo', '//fixture.invalid/repositories/repos/one', 'one', '2026-09-10T00:00:00Z', 'unpushed_commits'),
+                (3, 'LocalRepo', '//fixture.invalid/repositories/repos/four', 'four', '2026-09-10T00:00:00Z', 'local_changes');
         "#).unwrap();
 
         MIGRATIONS.to_latest(&mut connection).unwrap();
@@ -571,16 +571,23 @@ mod tests {
             [
                 (
                     0,
-                    "/repos/one".into(),
+                    "//fixture.invalid/repositories/repos/one".into(),
                     Some("unpushed".into()),
                     true,
                     true,
                     false
                 ),
-                (1, "/repos/two".into(), None, true, false, false),
+                (
+                    1,
+                    "//fixture.invalid/repositories/repos/two".into(),
+                    None,
+                    true,
+                    false,
+                    false
+                ),
                 (
                     2,
-                    "/repos/three".into(),
+                    "//fixture.invalid/repositories/repos/three".into(),
                     Some("unpushed".into()),
                     false,
                     true,
@@ -588,7 +595,7 @@ mod tests {
                 ),
                 (
                     3,
-                    "/repos/four".into(),
+                    "//fixture.invalid/repositories/repos/four".into(),
                     Some("base".into()),
                     false,
                     true,
@@ -653,7 +660,7 @@ mod tests {
                 .unwrap(),
             "tools"
         );
-        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (2, 'directory', '/tools/new');
+        connection.execute_batch("INSERT INTO project_sources (source_id, source_kind, source_value) VALUES (2, 'directory', '//fixture.invalid/repositories/tools/new');
             INSERT INTO projects (id, source_id, title) VALUES ('NEW', 2, 'New');").unwrap();
         assert_eq!(
             connection
@@ -705,7 +712,7 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO render_sources (id, kind, value, created_at)
-             VALUES (1, 'directory', '/repos/project-0', '2026-01-01T00:00:00Z');
+             VALUES (1, 'directory', '//fixture.invalid/repositories/repos/project-0', '2026-01-01T00:00:00Z');
              INSERT INTO recent_renders
                (id, source_id, operation_id, target_id, title, repo_name,
                 range_label, rendered_at, project_id)
@@ -837,7 +844,7 @@ mod tests {
             .execute_batch(
                 "INSERT INTO project_sources (source_id, source_kind, source_value) VALUES
                (7, 'directory', '~/tools/git-tools'),
-               (8, 'directory', '/placeholder');
+               (8, 'directory', '//fixture.invalid/repositories/placeholder');
              INSERT INTO projects (id, source_id, title, paused_at, comparison_branch)
                VALUES ('GTL', 7, 'Git Tools', '2026-01-01T00:00:00.000Z', 'develop'),
                       ('OTH', 8, 'Other', NULL, 'main');
@@ -846,7 +853,7 @@ mod tests {
                (project_id, source_id, comparison_branch, commits_ahead, checked_at)
                VALUES ('GTL', 7, 'develop', 3, 1780000000);
              INSERT INTO render_sources (id, kind, value, created_at)
-               VALUES (1, 'directory', '/repos/gt', '2026-01-01T00:00:00Z');
+               VALUES (1, 'directory', '//fixture.invalid/repositories/repos/gt', '2026-01-01T00:00:00Z');
              INSERT INTO recent_renders
                (id, source_id, operation_id, target_id, title, repo_name,
                 range_label, rendered_at, project_id)
@@ -992,7 +999,7 @@ mod tests {
             .unwrap();
         connection
             .execute(
-                "INSERT INTO recent_renders (recipe_json, title, repo_name, kind, range_label, rendered_at) VALUES ('{\"source\":{\"kind\":\"local_repo\",\"value\":\"/repo\"},\"op\":{\"op\":\"diff\",\"target\":{\"target\":\"unpushed\"}}}', 'Render', 'repo', 'diff', 'main..HEAD', '2026-01-01T00:00:00Z')",
+                "INSERT INTO recent_renders (recipe_json, title, repo_name, kind, range_label, rendered_at) VALUES ('{\"source\":{\"kind\":\"local_repo\",\"value\":\"//fixture.invalid/repositories/repo\"},\"op\":{\"op\":\"diff\",\"target\":{\"target\":\"unpushed\"}}}', 'Render', 'repo', 'diff', 'main..HEAD', '2026-01-01T00:00:00Z')",
                 [],
             )
             .unwrap();
@@ -1028,15 +1035,15 @@ mod tests {
             .unwrap();
         let legacy_rows = [
             (
-                r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaa","head":"bbb"}}}}"#,
+                r#"{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaa","head":"bbb"}}}}"#,
                 "2026-01-01T00:00:00Z",
             ),
             (
-                r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"merge-diff","base":"main"}}"#,
+                r#"{"source":{"kind":"LocalRepo","value":"//fixture.invalid/repositories/repos/gt"},"op":{"op":"merge-diff","base":"main"}}"#,
                 "2026-01-03T00:00:00Z",
             ),
             (
-                r#"{"source":{"kind":"local_repo","value":"/repos/other"},"op":{"op":"diff","target":{"target":"last","count":3}},"name":"named"}"#,
+                r#"{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/other"},"op":{"op":"diff","target":{"target":"last","count":3}},"name":"named"}"#,
                 "2026-01-02T00:00:00Z",
             ),
             ("not json", "2026-01-04T00:00:00Z"),
@@ -1076,13 +1083,13 @@ mod tests {
             vec![
                 (
                     "directory".into(),
-                    "/repos/gt".into(),
+                    "//fixture.invalid/repositories/repos/gt".into(),
                     "2026-01-01T00:00:00Z".into(),
                     Some("2026-01-03T00:00:00Z".into()),
                 ),
                 (
                     "directory".into(),
-                    "/repos/other".into(),
+                    "//fixture.invalid/repositories/repos/other".into(),
                     "2026-01-02T00:00:00Z".into(),
                     Some("2026-01-02T00:00:00Z".into()),
                 ),
@@ -1135,7 +1142,7 @@ mod tests {
             renders,
             vec![
                 (
-                    "/repos/gt".into(),
+                    "//fixture.invalid/repositories/repos/gt".into(),
                     "diff".into(),
                     Some("unpushed".into()),
                     None,
@@ -1144,7 +1151,7 @@ mod tests {
                     None,
                 ),
                 (
-                    "/repos/gt".into(),
+                    "//fixture.invalid/repositories/repos/gt".into(),
                     "merge_diff".into(),
                     None,
                     Some("main".into()),
@@ -1153,7 +1160,7 @@ mod tests {
                     None,
                 ),
                 (
-                    "/repos/other".into(),
+                    "//fixture.invalid/repositories/repos/other".into(),
                     "diff".into(),
                     Some("last".into()),
                     Some("3".into()),
@@ -1176,10 +1183,10 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO project_sources (id, kind, value, created_at) VALUES
-                   (1, 'directory', '/repos/gt', '2026-07-01T00:00:00Z'),
-                   (2, 'remote', '/repos/gt', '2026-07-01T00:00:00Z'),
-                   (3, 'directory', '/repos/other', '2026-07-01T00:00:00Z'),
-                   (4, 'directory', '/repos/orphan', '2026-07-01T00:00:00Z');
+                   (1, 'directory', '//fixture.invalid/repositories/repos/gt', '2026-07-01T00:00:00Z'),
+                   (2, 'remote', '//fixture.invalid/repositories/repos/gt', '2026-07-01T00:00:00Z'),
+                   (3, 'directory', '//fixture.invalid/repositories/repos/other', '2026-07-01T00:00:00Z'),
+                   (4, 'directory', '//fixture.invalid/repositories/repos/orphan', '2026-07-01T00:00:00Z');
                  INSERT INTO recent_renders
                    (id, source_id, operation_id, target_id, pinned_base, pinned_head,
                     title, repo_name, range_label, rendered_at)
@@ -1262,7 +1269,7 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO render_sources (id, kind, value, created_at)
-                 VALUES (1, 'directory', '/repos/gt', '2026-09-19T00:00:00Z');
+                 VALUES (1, 'directory', '//fixture.invalid/repositories/repos/gt', '2026-09-19T00:00:00Z');
                  INSERT INTO recent_renders
                    (id, source_id, operation_id, target_id, pinned_base, pinned_head,
                     title, repo_name, range_label, rendered_at)
@@ -1334,9 +1341,9 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO render_sources (id, kind, value, created_at)
-                 VALUES (1, 'directory', '/repos/gt', '2026-09-19T00:00:00Z');
+                 VALUES (1, 'directory', '//fixture.invalid/repositories/repos/gt', '2026-09-19T00:00:00Z');
                  INSERT INTO project_sources (source_id, source_kind, source_value)
-                 VALUES (1, 'directory', '/repos/gt');
+                 VALUES (1, 'directory', '//fixture.invalid/repositories/repos/gt');
                  INSERT INTO projects (id, source_id, title) VALUES ('GT', 1, 'gt');
                  INSERT INTO recent_renders
                    (id, source_id, operation_id, target_id, argument, pinned_base, pinned_head,

@@ -30,7 +30,9 @@ pub fn import(args: &DataImportArgs) -> Result<ExitCode> {
         return Ok(exit_code_from(staged));
     }
 
+    #[cfg(target_os = "linux")]
     let server_was_active = server_lifecycle::is_active()?;
+    #[cfg(target_os = "linux")]
     if server_was_active {
         server_lifecycle::stop()?;
     }
@@ -38,6 +40,7 @@ pub fn import(args: &DataImportArgs) -> Result<ExitCode> {
     if !finished.success() {
         return Ok(exit_code_from(finished));
     }
+    #[cfg(target_os = "linux")]
     if server_was_active {
         server_lifecycle::start()
             .context("git-tools data was imported, but gtl-server did not start")?;
@@ -79,63 +82,39 @@ fn exit_code_from(status: ExitStatus) -> ExitCode {
     }
 }
 
+#[cfg(target_os = "linux")]
 mod server_lifecycle {
-    #[cfg(not(target_os = "linux"))]
-    pub(super) use fallback::{is_active, start, stop};
-    #[cfg(target_os = "linux")]
-    pub(super) use linux::{is_active, start, stop};
+    use std::process::Command;
 
-    #[cfg(target_os = "linux")]
-    mod linux {
-        use std::process::Command;
+    use anyhow::{Context as _, Result, ensure};
 
-        use anyhow::{Context as _, Result, ensure};
+    const SERVER_UNIT_NAME: &str = "gtl-server.service";
 
-        const SERVER_UNIT_NAME: &str = "gtl-server.service";
-
-        pub fn is_active() -> Result<bool> {
-            let status = Command::new("systemctl")
-                .args(["--user", "is-active", "--quiet", SERVER_UNIT_NAME])
-                .status()
-                .context("running systemctl to inspect gtl-server")?;
-            Ok(status.success())
-        }
-
-        pub fn stop() -> Result<()> {
-            systemctl_user("stop")
-        }
-
-        pub fn start() -> Result<()> {
-            systemctl_user("start")
-        }
-
-        fn systemctl_user(verb: &str) -> Result<()> {
-            let status = Command::new("systemctl")
-                .args(["--user", verb, SERVER_UNIT_NAME])
-                .status()
-                .with_context(|| format!("running systemctl --user {verb} {SERVER_UNIT_NAME}"))?;
-            ensure!(
-                status.success(),
-                "systemctl --user {verb} {SERVER_UNIT_NAME} failed with {status}"
-            );
-            Ok(())
-        }
+    pub fn is_active() -> Result<bool> {
+        let status = Command::new("systemctl")
+            .args(["--user", "is-active", "--quiet", SERVER_UNIT_NAME])
+            .status()
+            .context("running systemctl to inspect gtl-server")?;
+        Ok(status.success())
     }
 
-    #[cfg(not(target_os = "linux"))]
-    mod fallback {
-        use anyhow::Result;
+    pub fn stop() -> Result<()> {
+        systemctl_user("stop")
+    }
 
-        pub fn is_active() -> Result<bool> {
-            Ok(false)
-        }
+    pub fn start() -> Result<()> {
+        systemctl_user("start")
+    }
 
-        pub fn stop() -> Result<()> {
-            Ok(())
-        }
-
-        pub fn start() -> Result<()> {
-            Ok(())
-        }
+    fn systemctl_user(verb: &str) -> Result<()> {
+        let status = Command::new("systemctl")
+            .args(["--user", verb, SERVER_UNIT_NAME])
+            .status()
+            .with_context(|| format!("running systemctl --user {verb} {SERVER_UNIT_NAME}"))?;
+        ensure!(
+            status.success(),
+            "systemctl --user {verb} {SERVER_UNIT_NAME} failed with {status}"
+        );
+        Ok(())
     }
 }

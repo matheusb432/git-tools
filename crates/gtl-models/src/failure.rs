@@ -226,6 +226,22 @@ mod tests {
     use super::{ErrorClass, Failure, PushFailure};
 
     #[test]
+    fn derive_resolves_the_facade_inside_its_own_crate() {
+        use super::{Classification, Classified, ErrorMeta};
+
+        #[derive(ErrorMeta)]
+        enum Error {
+            #[meta(private(Internal))]
+            Private,
+        }
+
+        assert_eq!(
+            Error::Private.classify(),
+            Classification::Private(ErrorClass::Internal)
+        );
+    }
+
+    #[test]
     fn private_classes_select_generic_reasons() {
         assert_eq!(Failure::private(ErrorClass::Internal), Failure::Unexpected);
         assert_eq!(

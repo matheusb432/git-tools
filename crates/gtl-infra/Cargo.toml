@@ -11,6 +11,7 @@ testing = []
 anyhow.workspace = true
 gtl-application.workspace = true
 directories.workspace = true
+dunce.workspace = true
 gtl-models.workspace = true
 gix.workspace = true
 notify.workspace = true

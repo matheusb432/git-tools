@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn detached_head_is_a_refused_push_plan() {
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn missing_upstream_is_a_refused_push_plan() {
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("feature\n"),
             ScriptedGitClient::rejected("no upstream"),
         ]);
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn ready_plan_includes_remote_and_pending_changes() {
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),
             ScriptedGitClient::applied("git@example.invalid:team/example-project.git\n"),
@@ -164,7 +164,7 @@ mod tests {
             plan,
             PlanPushOk::Ready(PushTarget {
                 name: crate::utils::project_name("api"),
-                top: crate::utils::repository_root("/repos/api"),
+                top: crate::utils::repository_root("//fixture.invalid/repositories/repos/api"),
                 branch: branch_name("main"),
                 remote: remote_name("origin"),
                 remote_urls: vec![

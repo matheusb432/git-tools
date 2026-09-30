@@ -129,7 +129,7 @@ mod tests {
 
         let view = compute_commit_patch::execute(
             ComputeCommitPatch {
-                repo_root: crate::utils::repository_root("/repo"),
+                repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 commit: commit.clone(),
             },
             &FixedUserSettingsStore::default(),
@@ -158,7 +158,7 @@ mod tests {
 
         let view = compute_commit_patch::execute(
             ComputeCommitPatch {
-                repo_root: crate::utils::repository_root("/repo"),
+                repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 commit,
             },
             &FixedUserSettingsStore::default(),

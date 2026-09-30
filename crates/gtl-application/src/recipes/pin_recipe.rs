@@ -69,7 +69,7 @@ mod tests {
     fn pin(operation: RecipeOp, outputs: Vec<crate::utils::GitResponse>) -> crate::recipes::Recipe {
         pin_recipe::execute(
             PinRecipe {
-                repo_path: "/work/repo/nested".into(),
+                repo_path: "//fixture.invalid/repositories/work/repo/nested".into(),
                 operation,
                 name: Some(crate::utils::project_name("repo")),
             },
@@ -88,7 +88,7 @@ mod tests {
                 },
             },
             vec![
-                ScriptedGitClient::applied("/work/repo\n"),
+                ScriptedGitClient::applied("//fixture.invalid/repositories/work/repo\n"),
                 ScriptedGitClient::applied(BASE_ID),
                 ScriptedGitClient::applied(HEAD_ID),
             ],
@@ -97,7 +97,9 @@ mod tests {
         assert_eq!(
             recipe,
             crate::recipes::Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root("/work/repo")),
+                source: RecipeSource::LocalRepo(crate::utils::repository_root(
+                    "//fixture.invalid/repositories/work/repo"
+                )),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {
                         range: crate::utils::git_range("main..HEAD"),
@@ -176,7 +178,7 @@ mod tests {
             let recipe = pin(
                 operation,
                 vec![
-                    ScriptedGitClient::applied("/work/repo\n"),
+                    ScriptedGitClient::applied("//fixture.invalid/repositories/work/repo\n"),
                     ScriptedGitClient::applied(BASE_ID),
                     ScriptedGitClient::applied(HEAD_ID),
                 ],
@@ -194,7 +196,9 @@ mod tests {
                     rev: crate::utils::git_revision("main"),
                 },
             },
-            vec![ScriptedGitClient::applied("/work/repo\n")],
+            vec![ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/work/repo\n",
+            )],
         );
         let existing = pin(
             RecipeOp::Diff {
@@ -202,7 +206,9 @@ mod tests {
                     pinned: Some(pinned),
                 },
             },
-            vec![ScriptedGitClient::applied("/work/repo\n")],
+            vec![ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/work/repo\n",
+            )],
         );
 
         assert_eq!(
@@ -233,7 +239,7 @@ mod tests {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
             vec![
-                ScriptedGitClient::applied("/work/repo\n"),
+                ScriptedGitClient::applied("//fixture.invalid/repositories/work/repo\n"),
                 ScriptedGitClient::rejected("no upstream"),
             ],
         );
@@ -244,7 +250,9 @@ mod tests {
                     pinned: None,
                 },
             },
-            vec![ScriptedGitClient::applied("/work/repo\n")],
+            vec![ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/work/repo\n",
+            )],
         );
 
         assert_eq!(
@@ -267,13 +275,15 @@ mod tests {
     #[test]
     fn pin_resolution_failure_leaves_the_recipe_symbolic() {
         let git = ScriptedGitClient::with_results(vec![
-            Ok(ScriptedGitClient::applied("/work/repo\n")),
+            Ok(ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/work/repo\n",
+            )),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
         let recipe = pin_recipe::execute(
             PinRecipe {
-                repo_path: "/work/repo".into(),
+                repo_path: "//fixture.invalid/repositories/work/repo".into(),
                 operation: RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 },

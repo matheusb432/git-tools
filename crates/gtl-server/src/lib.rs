@@ -59,11 +59,18 @@ fn shutdown_signal() -> anyhow::Result<impl Future<Output = ()>> {
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn shutdown_signal() -> anyhow::Result<impl Future<Output = ()>> {
-    Ok(async {
-        if let Err(error) = tokio::signal::ctrl_c().await {
-            tracing::error!(error = ?error, "interrupt handler failed");
+    use tokio::signal::windows::{ctrl_break, ctrl_c, ctrl_close};
+
+    let mut interrupt = ctrl_c().context("registering Ctrl+C handler")?;
+    let mut terminate = ctrl_break().context("registering Ctrl+Break handler")?;
+    let mut close = ctrl_close().context("registering console-close handler")?;
+    Ok(async move {
+        tokio::select! {
+            _ = interrupt.recv() => {}
+            _ = terminate.recv() => {}
+            _ = close.recv() => {}
         }
         tracing::info!("shutdown signal received");
     })

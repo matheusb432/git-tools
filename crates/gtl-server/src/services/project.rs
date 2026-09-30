@@ -404,7 +404,7 @@ mod tests {
     fn invalid_push_settings_map_to_failed_precondition() {
         let status = super::super::status::status(&PushRepositoriesError::Settings(
             gtl_application::ports::UserSettingsConfigurationError::new(
-                "/tmp/config.toml".into(),
+                "//fixture.invalid/repositories/tmp/config.toml".into(),
                 anyhow::anyhow!("bad project settings"),
             )
             .into(),
@@ -415,7 +415,7 @@ mod tests {
             super::super::status::decoded_failure(&status),
             Some(gtl_models::failure::Failure::Settings(
                 gtl_models::failure::SettingsFailure::Invalid {
-                    path: "/tmp/config.toml".into(),
+                    path: "//fixture.invalid/repositories/tmp/config.toml".into(),
                     diagnostic: gtl_models::failure::ExternalDiagnostic::new(
                         "bad project settings"
                     ),

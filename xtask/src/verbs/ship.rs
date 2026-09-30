@@ -12,7 +12,7 @@ use crate::{process, task::Step};
 const WIN_TARGET: &str = "x86_64-pc-windows-msvc";
 
 fn viewer_build_arguments(smoke: bool) -> Vec<&'static str> {
-    let mut arguments = vec!["xwin", "build"];
+    let mut arguments = vec!["xwin", "build", "--locked"];
     if !smoke {
         arguments.push("--release");
     }
@@ -41,11 +41,11 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     }
 
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
-    let mut cli_args = vec!["xwin", "build"];
+    let mut cli_args = vec!["xwin", "build", "--locked"];
     cli_args.extend_from_slice(profile);
     cli_args.extend_from_slice(&["-p", "gtl-cli", "--target", WIN_TARGET]);
 
-    let mut server_args = vec!["xwin", "build"];
+    let mut server_args = vec!["xwin", "build", "--locked"];
     server_args.extend_from_slice(profile);
     server_args.extend_from_slice(&["-p", "gtl-server", "--target", WIN_TARGET]);
 
@@ -94,6 +94,7 @@ mod tests {
             [
                 "xwin",
                 "build",
+                "--locked",
                 "--release",
                 "-p",
                 "gtl-desktop",

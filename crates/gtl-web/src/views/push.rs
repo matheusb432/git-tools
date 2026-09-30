@@ -1,5 +1,4 @@
-mod confirmation;
-pub(crate) use confirmation::PushConfirmationDetails;
+pub(crate) mod confirmation;
 mod controller;
 pub(crate) use controller::{
     PushButton, PushButtonPlacement, PushController, PushDialogHost, use_diff_push_shortcut,

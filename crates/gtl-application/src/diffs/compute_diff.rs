@@ -97,7 +97,7 @@ mod tests {
 
     fn req(target: DiffTarget) -> ComputeDiff {
         ComputeDiff {
-            repo_root: repository_root("/repo"),
+            repo_root: repository_root("//fixture.invalid/repositories/repo"),
             target,
             changes_since: None,
         }
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn computes_the_view_without_touching_store_or_renderer() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -152,7 +152,7 @@ mod tests {
             ..crate::utils::diffs::commit_with(id, subject, &[parent])
         };
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn compact_compute_defers_full_context_source() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn empty_range_returns_an_empty_view_not_an_error() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             ..Default::default()
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn no_upstream_compares_committed_branch_changes_against_local_main() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: None,
             known_revs: vec!["refs/heads/main".into(), "HEAD".into()],
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn pinned_unpushed_computes_without_an_upstream() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: None,
             commits: vec![commit("abc1234")],
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn pinned_merge_target_skips_symbolic_verification() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             commits: vec![commit("abc1234")],
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn pinned_range_target_computes_over_the_pin_with_exact_range_labels() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             commits: vec![commit("abc1234")],
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn unknown_base_is_an_error() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             ..Default::default()
@@ -384,7 +384,7 @@ index 333..444 100644\n\
     #[test]
     fn full_compute_loads_the_deferred_source() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -417,7 +417,7 @@ index 333..444 100644\n\
     #[test]
     fn full_compute_does_not_fetch_when_no_modified_file_needs_context() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -452,7 +452,7 @@ new file mode 100644\n\
     #[test]
     fn saved_hidden_extensions_are_hidden_and_reported() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -465,7 +465,10 @@ new file mode 100644\n\
             request,
             &FixedUserSettingsStore::default(),
             &source,
-            &saved("/repo", hiding_extensions(&["md"])),
+            &saved(
+                "//fixture.invalid/repositories/repo",
+                hiding_extensions(&["md"]),
+            ),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -499,7 +502,7 @@ new file mode 100644\n\
     #[test]
     fn show_only_filters_hide_every_unlisted_extension() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -515,7 +518,7 @@ new file mode 100644\n\
             req(DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::default(),
             &source,
-            &saved("/repo", only_markdown.clone()),
+            &saved("//fixture.invalid/repositories/repo", only_markdown.clone()),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -540,7 +543,7 @@ new file mode 100644\n\
     #[test]
     fn filters_saved_for_another_repository_do_not_apply() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -553,7 +556,10 @@ new file mode 100644\n\
             request,
             &FixedUserSettingsStore::default(),
             &source,
-            &saved("/other/repo", hiding_extensions(&["md"])),
+            &saved(
+                "//fixture.invalid/repositories/other/repo",
+                hiding_extensions(&["md"]),
+            ),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();
@@ -566,7 +572,7 @@ new file mode 100644\n\
     #[test]
     fn idle_filters_matching_nothing_stay_invisible() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -579,7 +585,10 @@ new file mode 100644\n\
             request,
             &FixedUserSettingsStore::default(),
             &source,
-            &saved("/repo", hiding_extensions(&["md"])),
+            &saved(
+                "//fixture.invalid/repositories/repo",
+                hiding_extensions(&["md"]),
+            ),
             &crate::utils::ProjectComparisons::default(),
         )
         .unwrap();

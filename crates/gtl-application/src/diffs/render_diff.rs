@@ -285,7 +285,10 @@ mod tests {
     }
 
     fn hiding_markdown_in_repo() -> SavedExtensionFilters {
-        SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))])
+        SavedExtensionFilters::new([(
+            repository_root("//fixture.invalid/repositories/repo"),
+            hiding_extensions(&["md"]),
+        )])
     }
 
     fn range_key(base_id: &str, head_id: &str) -> ArtifactRangeKey {
@@ -304,7 +307,7 @@ mod tests {
     #[test]
     fn renders_and_stores_an_artifact_with_the_summary_notes() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -314,7 +317,10 @@ mod tests {
         let store = InMemoryArtifactStore::default();
 
         let response = render_diff::execute(
-            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            req(
+                "//fixture.invalid/repositories/repo",
+                &DiffTarget::Unpushed { pinned: None },
+            ),
             &FixedUserSettingsStore::new(UserSettings::default().with_viewer_render_options(
                 RenderOptions::DEFAULT.with_layout(gtl_models::viewer::DiffLayout::Split),
             )),
@@ -329,11 +335,15 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created {
-                path: crate::utils::absolute_file_path("/repo/.artifacts/gtl/artifact.html"),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html"
+                ),
             })
         );
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(
             artifact.meta.render_options.layout(),
@@ -341,13 +351,20 @@ mod tests {
         );
         assert_eq!(
             artifact.meta.repo_root,
-            crate::utils::repository_root("/repo")
+            crate::utils::repository_root("//fixture.invalid/repositories/repo")
         );
         assert_eq!(
             response.notes,
             vec![
                 Note::info("diff-artifact: 1 unpushed commit(s), 1 file(s)"),
-                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
+                Note::info(format!(
+                    "wrote {}",
+                    PathBuf::from("//fixture.invalid/repositories/repo")
+                        .join(".artifacts")
+                        .join("gtl")
+                        .join("artifact.html")
+                        .display()
+                )),
             ]
         );
     }
@@ -355,7 +372,7 @@ mod tests {
     #[test]
     fn render_uses_the_resolved_projects_settings_snapshot() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -367,7 +384,7 @@ mod tests {
 
         render_diff::execute(
             RenderDiff {
-                cwd: PathBuf::from("/repo"),
+                cwd: PathBuf::from("//fixture.invalid/repositories/repo"),
                 target: DiffTargetRequest::Unpushed,
                 name: None,
             },
@@ -381,7 +398,9 @@ mod tests {
         .unwrap();
 
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(artifact.meta.extension_filter, hiding_extensions(&["md"]));
         assert!(artifact.html.contains("graphite"));
@@ -390,7 +409,7 @@ mod tests {
     #[test]
     fn empty_view_returns_empty_with_the_skip_warning() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![],
@@ -400,7 +419,10 @@ mod tests {
         let store = InMemoryArtifactStore::default();
 
         let response = render_diff::execute(
-            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            req(
+                "//fixture.invalid/repositories/repo",
+                &DiffTarget::Unpushed { pinned: None },
+            ),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
@@ -422,7 +444,7 @@ mod tests {
     #[test]
     fn pure_range_reuses_an_existing_artifact() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             commit_ids: [
                 ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
@@ -434,11 +456,14 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
+        store.range_hit_insert(
+            range_key("id-a", "id-b"),
+            "//fixture.invalid/repositories/store/existing.html",
+        );
 
         let response = render_diff::execute(
             req(
-                "/repo",
+                "//fixture.invalid/repositories/repo",
                 &DiffTarget::Range {
                     range: crate::utils::git_range("a..b"),
                     pinned: None,
@@ -458,19 +483,23 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Reused {
-                path: crate::utils::absolute_file_path("/store/existing.html"),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/store/existing.html"
+                ),
             })
         );
         assert_eq!(
             response.notes,
-            vec![Note::info("diff-artifact: reusing /store/existing.html")]
+            vec![Note::info(
+                "diff-artifact: reusing //fixture.invalid/repositories/store/existing.html"
+            )]
         );
     }
 
     #[test]
     fn fast_path_never_reuses_an_artifact_rendered_under_a_different_extension_filter() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
@@ -484,10 +513,13 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hit_insert(range_key("id-a", "id-b"), "/store/unfiltered.html");
+        store.range_hit_insert(
+            range_key("id-a", "id-b"),
+            "//fixture.invalid/repositories/store/unfiltered.html",
+        );
 
         let request = req(
-            "/repo",
+            "//fixture.invalid/repositories/repo",
             &DiffTarget::Range {
                 range: crate::utils::git_range("a..b"),
                 pinned: None,
@@ -509,7 +541,9 @@ mod tests {
             RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created { .. })
         ));
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(
             artifact.meta.extension_filter,
@@ -521,7 +555,7 @@ mod tests {
     #[test]
     fn fast_path_never_reuses_an_artifact_rendered_under_a_different_theme() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
@@ -540,12 +574,12 @@ mod tests {
                 theme: Some(Theme::Dark),
                 ..range_key("id-a", "id-b")
             },
-            "/store/dark.html",
+            "//fixture.invalid/repositories/store/dark.html",
         );
 
         let response = render_diff::execute(
             req(
-                "/repo",
+                "//fixture.invalid/repositories/repo",
                 &DiffTarget::Range {
                     range: crate::utils::git_range("a..b"),
                     pinned: None,
@@ -569,7 +603,7 @@ mod tests {
     #[test]
     fn fast_path_reuses_an_artifact_rendered_under_the_same_extension_filter() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             commit_ids: [
                 ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
@@ -586,11 +620,11 @@ mod tests {
                 extension_filter: hiding_extensions(&["md"]),
                 ..range_key("id-a", "id-b")
             },
-            "/store/filtered.html",
+            "//fixture.invalid/repositories/store/filtered.html",
         );
 
         let request = req(
-            "/repo",
+            "//fixture.invalid/repositories/repo",
             &DiffTarget::Range {
                 range: crate::utils::git_range("a..b"),
                 pinned: None,
@@ -610,7 +644,9 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Reused {
-                path: crate::utils::absolute_file_path("/store/filtered.html"),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/store/filtered.html"
+                ),
             })
         );
     }
@@ -618,7 +654,7 @@ mod tests {
     #[test]
     fn named_run_skips_the_fast_path_and_overrides_the_title() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
@@ -632,10 +668,13 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
+        store.range_hit_insert(
+            range_key("id-a", "id-b"),
+            "//fixture.invalid/repositories/store/existing.html",
+        );
 
         let mut request = req(
-            "/repo",
+            "//fixture.invalid/repositories/repo",
             &DiffTarget::Range {
                 range: crate::utils::git_range("a..b"),
                 pinned: None,
@@ -658,7 +697,9 @@ mod tests {
             RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created { .. })
         ));
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert!(artifact.html.contains("\"custom\""));
     }
@@ -666,7 +707,7 @@ mod tests {
     #[test]
     fn unpushed_without_upstream_renders_committed_branch_changes() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             upstream: None,
             known_revs: vec!["refs/heads/main".into(), "HEAD".into()],
@@ -677,7 +718,10 @@ mod tests {
         let store = InMemoryArtifactStore::default();
 
         let response = render_diff::execute(
-            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            req(
+                "//fixture.invalid/repositories/repo",
+                &DiffTarget::Unpushed { pinned: None },
+            ),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
@@ -693,7 +737,14 @@ mod tests {
             vec![
                 Note::info("diff-artifact: no upstream; comparing branch changes against main"),
                 Note::info("diff-artifact: branch changes against refs/heads/main, 1 file(s)"),
-                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
+                Note::info(format!(
+                    "wrote {}",
+                    PathBuf::from("//fixture.invalid/repositories/repo")
+                        .join(".artifacts")
+                        .join("gtl")
+                        .join("artifact.html")
+                        .display()
+                )),
             ]
         );
     }
@@ -701,7 +752,7 @@ mod tests {
     #[test]
     fn unknown_base_is_an_error() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             ..Default::default()
@@ -710,7 +761,7 @@ mod tests {
 
         let error = render_diff::execute(
             req(
-                "/repo",
+                "//fixture.invalid/repositories/repo",
                 &DiffTarget::Base(crate::utils::git_revision("nope")),
             ),
             &FixedUserSettingsStore::default(),

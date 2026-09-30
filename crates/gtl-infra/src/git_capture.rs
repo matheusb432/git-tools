@@ -127,10 +127,14 @@ fn extension_pathspecs(magic: &str, extensions: &FileExtensions) -> Vec<String> 
             // `?*` demands a file stem: a bare dotfile such as `.lock` has no extension.
             let mut pathspec = format!(":({magic})**/?*.");
             for character in extension.chars() {
-                if matches!(character, '*' | '?' | '[' | '\\') {
-                    pathspec.push('\\');
+                // Bracket literals also work when Git for Windows treats backslashes as separators.
+                match character {
+                    '*' => pathspec.push_str("[*]"),
+                    '?' => pathspec.push_str("[?]"),
+                    '[' => pathspec.push_str("[[]"),
+                    '\\' => pathspec.push_str(r"\\"),
+                    other => pathspec.push(other),
                 }
-                pathspec.push(character);
             }
             pathspec
         })
@@ -321,10 +325,12 @@ mod tests {
             "dir.rs/Makefile",
             "Makefile",
             "bundle.tar.gz",
-            "x.äb",
-            "x.ÄB",
-            "glob.a*",
+            "lower.äb",
+            "upper.ÄB",
+            if cfg!(windows) { "glob.a[" } else { "glob.a*" },
             "glob.ab",
+            "glob.a]",
+            "glob.a[b]",
         ];
         for path in paths {
             repository.write(path, "content\n");
@@ -343,7 +349,8 @@ mod tests {
             unlisted(&["lock", "rs"]),
             listed(&["äb"]),
             unlisted(&["äb"]),
-            listed(&["a*"]),
+            listed(&[if cfg!(windows) { "a[" } else { "a*" }]),
+            listed(&["a]", "a[b]"]),
             unlisted(&["tar.gz"]),
             listed(&["tar.gz"]),
             ExtensionSelection::all(),

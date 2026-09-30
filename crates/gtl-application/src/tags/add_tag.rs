@@ -107,7 +107,7 @@ mod tests {
     fn validation_preserves_required_message_detail() {
         assert_eq!(
             validate(&AddTag {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 tag: crate::utils::tag_name("v1.0.0"),
                 message: "\n".into(),
             }),
@@ -123,7 +123,7 @@ mod tests {
 
         let error = add_tag::execute(
             AddTag {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 tag: crate::utils::tag_name("v1.0.0"),
                 message: "release".into(),
             },
@@ -147,7 +147,7 @@ mod tests {
         assert_eq!(
             add_tag::execute(
                 AddTag {
-                    repo_path: crate::utils::repository_root("/repo"),
+                    repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                     tag: crate::utils::tag_name("v1.0.0"),
                     message: "release".into(),
                 },
@@ -164,7 +164,7 @@ mod tests {
 
         let outcome = add_tag::execute(
             AddTag {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 tag: crate::utils::tag_name("v1.0.0"),
                 message: "release".into(),
             },

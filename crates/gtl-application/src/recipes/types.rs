@@ -152,7 +152,7 @@ mod tests {
 
     fn diff_recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(root("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
@@ -165,14 +165,14 @@ mod tests {
         let json = serde_json::to_string(&diff_recipe()).unwrap();
         assert_eq!(
             json,
-            r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#
+            r#"{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#
         );
     }
 
     #[test]
     fn canonical_merge_operation_tag_is_snake_case() {
         let recipe = Recipe {
-            source: RecipeSource::LocalRepo(root("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
             op: RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
@@ -190,7 +190,7 @@ mod tests {
         for recipe in [
             diff_recipe(),
             Recipe {
-                source: RecipeSource::LocalRepo(root("/repos/gt")),
+                source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
                 op: RecipeOp::MergeDiff {
                     base: None,
                     pinned: None,
@@ -222,7 +222,7 @@ mod tests {
             ),
         ] {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo(root("/repos/gt")),
+                source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
                 op,
                 name: None,
             };
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn pinned_unpushed_recipe_json_shape_is_pinned() {
         let recipe = Recipe {
-            source: RecipeSource::LocalRepo(root("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(pinned_range(
@@ -254,7 +254,7 @@ mod tests {
         let json = serde_json::to_string(&recipe).unwrap();
         assert_eq!(
             json,
-            r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#
+            r#"{"source":{"kind":"local_repo","value":"//fixture.invalid/repositories/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#
         );
         let back: Recipe = serde_json::from_str(&json).unwrap();
         assert_eq!(back, recipe);
@@ -294,7 +294,7 @@ mod tests {
         ];
         for op in cases {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo(root("/repos/gt")),
+                source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
                 op,
                 name: Some(project_name("n")),
             };
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn unpinned_projection_of_two_different_pins_is_equal() {
         let recipe_with = |head: &str| Recipe {
-            source: RecipeSource::LocalRepo(root("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("//fixture.invalid/repositories/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(pinned_range(&"a".repeat(40), &head.repeat(40))),

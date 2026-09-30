@@ -135,7 +135,7 @@ async fn file_filters_can_finish_for_an_inactive_tab_without_changing_the_active
     repository.git(&[
         "clone",
         "-q",
-        repository.path().to_str().ok_or("repository path")?,
+        repository.root().to_str().ok_or("repository path")?,
         other.to_str().ok_or("other path")?,
     ]);
     std::fs::write(other.join("work.txt"), "other change\n")?;

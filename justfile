@@ -259,10 +259,41 @@ prepare-tree-sitter:
     cargo build --locked -p gtl-parser --features syntax
 
 # Cross-build all three Win11 exes; runs `just test-all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
-# // uncomment to test VM
-# [group('windows')]
-# ship *args:
-#     cargo run --quiet -p xtask -- ship {{ args }}
+[group('windows')]
+[linux]
+ship *args:
+    cargo run --locked --quiet -p xtask -- ship {{ args }}
+
+# Lint Windows-specific application code after staging the viewer with `just web build`.
+[group('windows')]
+[linux]
+check-windows:
+    TAURI_CONFIG="$(cat crates/gtl-desktop/tauri.production.conf.json)" \
+        cargo xwin clippy --locked --target x86_64-pc-windows-msvc --all-targets \
+        -p gtl-cli -p gtl-server -p gtl-desktop -p gtl-infra -p gtl-client \
+        -p gtl-local-transport -p gtl-application -p gtl-models -p gtl-artifacts \
+        -p gtl-parser -p gtl-wire --features gtl-desktop/custom-protocol -- -D warnings
+
+# Archive the prebuilt Windows tests for execution on a Windows host.
+[group('windows')]
+[linux]
+archive-windows-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .artifacts/windows
+    eval "$(cargo xwin env --target x86_64-pc-windows-msvc)"
+    unset CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER
+    cargo nextest archive --locked --release --target x86_64-pc-windows-msvc \
+        -p gtl-cli -p gtl-server -p gtl-infra -p gtl-client -p gtl-local-transport \
+        -p gtl-application -p gtl-models -p gtl-artifacts -p gtl-parser -p gtl-wire \
+        --archive-file .artifacts/windows/tests.tar.zst
+
+# Package prebuilt Linux or Windows binaries with installation instructions and checksums.
+[group('release')]
+[arg('platform', pattern='linux|windows')]
+[linux]
+package platform:
+    cargo run --locked --quiet -p xtask -- release-package {{ platform }}
 
 # Configure this clone, build, and install git-tools.
 [group('setup')]

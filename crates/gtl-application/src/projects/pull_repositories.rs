@@ -70,7 +70,9 @@ mod tests {
     fn repo(name: &str) -> ProjectRepository {
         ProjectRepository {
             name: crate::utils::project_name(name),
-            path: crate::utils::repository_root(&format!("/repos/{name}")),
+            path: crate::utils::repository_root(&format!(
+                "//fixture.invalid/repositories/repos/{name}"
+            )),
             remote: None,
         }
     }

@@ -78,7 +78,7 @@ mod tests {
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
                     failure: gtl_models::failure::ViewerFailure::SourceDirectoryMissing {
-                        path: "/repos/project".into(),
+                        path: "//fixture.invalid/repositories/repos/project".into(),
                     },
                 },
             }
@@ -103,7 +103,7 @@ mod tests {
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
                     failure: gtl_models::failure::ViewerFailure::SourceNotRepository {
-                        path: "/repos/project".into(),
+                        path: "//fixture.invalid/repositories/repos/project".into(),
                     },
                 },
             }
@@ -120,7 +120,9 @@ mod tests {
                 }),
             },
             &git(GitRepositoryState::Repository {
-                top_level: crate::utils::repository_root("/repos/project"),
+                top_level: crate::utils::repository_root(
+                    "//fixture.invalid/repositories/repos/project",
+                ),
             }),
         )
         .unwrap();

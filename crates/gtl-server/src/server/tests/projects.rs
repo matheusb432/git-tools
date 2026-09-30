@@ -659,7 +659,8 @@ async fn resolves_managed_project_sources_including_paused_projects() -> TestRes
         project_id: "DEMO".into(),
     };
     let expected = std::env::temp_dir()
-        .join("tools/DEMO")
+        .join("tools")
+        .join("DEMO")
         .to_string_lossy()
         .into_owned();
     assert_eq!(

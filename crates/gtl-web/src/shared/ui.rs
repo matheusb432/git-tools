@@ -1,6 +1,6 @@
 #[cfg_attr(
     not(feature = "component-preview"),
-    allow(dead_code, reason = "reserved for the viewer push feature")
+    allow(dead_code, reason = "used by alert dialog previews")
 )]
 mod alert_dialog;
 mod animation;
@@ -9,7 +9,7 @@ mod button;
 pub mod code_text;
 mod count_badge;
 pub(crate) mod data_table;
-mod dialog;
+pub(crate) mod dialog;
 mod empty_notice;
 mod extension_selection;
 mod field_error;
@@ -35,9 +35,9 @@ mod viewer_theme_picker;
 
 #[cfg_attr(
     not(feature = "component-preview"),
-    expect(unused_imports, reason = "reserved for the viewer push feature")
+    expect(unused_imports, reason = "used by alert dialog previews")
 )]
-pub(crate) use alert_dialog::{AlertDialog, AlertDialogSize, AlertDialogVariant};
+pub(crate) use alert_dialog::{AlertDialog, AlertDialogVariant};
 pub(crate) use badge::{Badge, BadgeVariant};
 pub(crate) use button::{
     Button, ButtonLayout, ButtonSize, ButtonState, ButtonType, ButtonVariant, button_classes,

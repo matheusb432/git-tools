@@ -58,7 +58,9 @@ mod tests {
             range_label: "main...release".to_owned(),
             rendered_at: "2026-08-09T10:00:00Z".try_into().unwrap(),
             recipe: Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root("/repos/git-tools")),
+                source: RecipeSource::LocalRepo(crate::utils::repository_root(
+                    "//fixture.invalid/repositories/repos/git-tools",
+                )),
                 op: RecipeOp::MergeDiff {
                     base: Some(crate::utils::git_revision("main")),
                     pinned: None,
@@ -77,7 +79,10 @@ mod tests {
         );
         assert_eq!(json["repo_name"], "git-tools");
         assert_eq!(json["kind"], "merge-diff");
-        assert_eq!(json["recipe"]["source"]["value"], "/repos/git-tools");
+        assert_eq!(
+            json["recipe"]["source"]["value"],
+            "//fixture.invalid/repositories/repos/git-tools"
+        );
         assert_eq!(json["recipe"]["op"]["op"], "merge_diff");
     }
 }

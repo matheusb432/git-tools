@@ -73,7 +73,9 @@ mod tests {
     fn repo(name: &str) -> ProjectRepository {
         ProjectRepository {
             name: crate::utils::project_name(name),
-            path: crate::utils::repository_root(&format!("/repos/{name}")),
+            path: crate::utils::repository_root(&format!(
+                "//fixture.invalid/repositories/repos/{name}"
+            )),
             remote: Some(gtl_models::git::RemoteUrl::try_new("origin").unwrap()),
         }
     }
@@ -83,12 +85,12 @@ mod tests {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("2\n"),
-            ScriptedGitClient::applied("/real/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/api\n"),
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("0\n"),
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("1\n"),
-            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/web\n"),
             ScriptedGitClient::applied("api-base\n"),
             ScriptedGitClient::applied("api-head\n"),
             ScriptedGitClient::applied("web-base\n"),
@@ -117,7 +119,9 @@ mod tests {
         );
         assert_eq!(
             recipes[0].source,
-            RecipeSource::LocalRepo(crate::utils::repository_root("/real/api"))
+            RecipeSource::LocalRepo(crate::utils::repository_root(
+                "//fixture.invalid/repositories/real/api"
+            ))
         );
         assert_eq!(
             recipes[0].op,
@@ -134,7 +138,9 @@ mod tests {
         let git = ScriptedGitClient::with_results(vec![
             Ok(ScriptedGitClient::applied("origin/main\n")),
             Ok(ScriptedGitClient::applied("1\n")),
-            Ok(ScriptedGitClient::applied("/real/api\n")),
+            Ok(ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/real/api\n",
+            )),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 

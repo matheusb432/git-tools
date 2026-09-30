@@ -162,7 +162,7 @@ impl CliFixture {
         let output = self.output(arguments)?;
         let path = output
             .trim()
-            .strip_prefix("file://")
+            .strip_prefix(if cfg!(windows) { "file:///" } else { "file://" })
             .context("artifact URL")?;
         std::fs::read_to_string(path).context("read diff artifact")
     }
@@ -287,8 +287,7 @@ impl CliFixture {
     }
 
     fn command(&self, arguments: &[&str]) -> process::Command {
-        let executable = std::env::var_os("GTL_CLI_TEST_BINARY")
-            .unwrap_or_else(|| env!("CARGO_BIN_EXE_git-tools").into());
+        let executable = super::common::cli_binary();
         let mut command = process::Command::new(executable);
         command
             .args(arguments)

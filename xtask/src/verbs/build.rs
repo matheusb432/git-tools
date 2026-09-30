@@ -9,6 +9,7 @@ use crate::{cli::BuildTarget, process, task::Step};
 
 const VIEWER_BUILD_ARGS: &[&str] = &[
     "build",
+    "--locked",
     "--release",
     "-p",
     "gtl-desktop",
@@ -39,7 +40,15 @@ fn build_cli(root: &Path) -> Result<()> {
         &Step::new(
             "cli-release-build",
             "cargo",
-            ["build", "--release", "-p", "gtl-cli", "-p", "gtl-server"],
+            [
+                "build",
+                "--locked",
+                "--release",
+                "-p",
+                "gtl-cli",
+                "-p",
+                "gtl-server",
+            ],
         )
         .with_current_directory(root),
     )

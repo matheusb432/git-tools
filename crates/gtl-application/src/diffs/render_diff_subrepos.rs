@@ -156,7 +156,7 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
-            root: crate::utils::repository_root("/scan-root"),
+            root: crate::utils::repository_root("//fixture.invalid/repositories/scan-root"),
             target: DiffTargetRequest::Unpushed,
             repos,
         }
@@ -172,7 +172,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
-            top: crate::utils::repository_root("/repo-a"),
+            top: crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
             label: crate::utils::project_name("repo-a"),
         }];
         let filters = SavedRepositoryPreferences::default();
@@ -196,18 +196,29 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffSubreposOutcome::Rendered(crate::ports::PlacedArtifact::Created {
-                path: crate::utils::absolute_file_path("/scan-root/.artifacts/gtl/artifact.html",),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/scan-root/.artifacts/gtl/artifact.html",
+                ),
             })
         );
         assert_eq!(
             response.notes,
             vec![
                 Note::info("diff -r: 1 repo(s)"),
-                Note::info("wrote /scan-root/.artifacts/gtl/artifact.html"),
+                Note::info(format!(
+                    "wrote {}",
+                    PathBuf::from("//fixture.invalid/repositories/scan-root")
+                        .join(".artifacts")
+                        .join("gtl")
+                        .join("artifact.html")
+                        .display()
+                )),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/scan-root/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(
             artifact.meta.render_options.layout(),
@@ -230,7 +241,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
-            top: crate::utils::repository_root("/repo-a"),
+            top: crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
             label: crate::utils::project_name("repo-a"),
         }];
         let filters = SavedRepositoryPreferences::default();
@@ -278,17 +289,17 @@ diff --git a/notes.md b/notes.md\n\
         let app_settings =
             FixedUserSettingsStore::new(UserSettings::default().with_theme(Some(Theme::Graphite)));
         let filters = SavedRepositoryPreferences::from(SavedExtensionFilters::new([(
-            crate::utils::repository_root("/repo-a"),
+            crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
             crate::utils::hiding_extensions(&["md"]),
         )]));
         let store = InMemoryArtifactStore::default();
 
         render_diff_subrepos::execute(
             RenderDiffSubrepos {
-                root: crate::utils::repository_root("/scan-root"),
+                root: crate::utils::repository_root("//fixture.invalid/repositories/scan-root"),
                 target: DiffTargetRequest::Unpushed,
                 repos: vec![RepoRef {
-                    top: crate::utils::repository_root("/repo-a"),
+                    top: crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
                     label: crate::utils::project_name("repo-a"),
                 }],
             },
@@ -302,7 +313,9 @@ diff --git a/notes.md b/notes.md\n\
         .unwrap();
 
         let artifact = store
-            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/scan-root/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert!(
             artifact

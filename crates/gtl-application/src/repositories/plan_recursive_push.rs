@@ -83,7 +83,7 @@ mod tests {
         ]);
         let target = inspect(
             &runner,
-            &utils::repository_root("/repos/api"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/api"),
             utils::project_name("api"),
         );
         assert_eq!(
@@ -104,7 +104,7 @@ mod tests {
         ]);
         let target = inspect(
             &runner,
-            &utils::repository_root("/repos/api"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/api"),
             utils::project_name("api"),
         );
         assert_eq!(
@@ -125,7 +125,7 @@ mod tests {
         ]);
         let target = inspect(
             &runner,
-            &utils::repository_root("/repos/api"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/api"),
             utils::project_name("api"),
         );
         assert_eq!(
@@ -145,7 +145,7 @@ mod tests {
         ]);
         let target = inspect(
             &runner,
-            &utils::repository_root("/repos/api"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/api"),
             utils::project_name("api"),
         );
         assert_eq!(
@@ -161,7 +161,7 @@ mod tests {
         let runner = ScriptedGitClient::new(vec![ScriptedGitClient::applied("HEAD\n")]);
         let target = inspect(
             &runner,
-            &utils::repository_root("/repos/api"),
+            &utils::repository_root("//fixture.invalid/repositories/repos/api"),
             utils::project_name("api"),
         );
         assert_eq!(

@@ -140,7 +140,9 @@ mod tests {
     fn repo(name: &str) -> ProjectRepository {
         ProjectRepository {
             name: crate::utils::project_name(name),
-            path: crate::utils::repository_root(&format!("/repos/{name}")),
+            path: crate::utils::repository_root(&format!(
+                "//fixture.invalid/repositories/repos/{name}"
+            )),
             remote: None,
         }
     }
@@ -150,7 +152,7 @@ mod tests {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("2\n"),
-            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repos/api\n"),
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("0\n"),
             ScriptedGitClient::rejected("no upstream"),
@@ -161,7 +163,7 @@ mod tests {
         git.absent_repos
             .lock()
             .unwrap()
-            .push(PathBuf::from("/repos/absent"));
+            .push(PathBuf::from("//fixture.invalid/repositories/repos/absent"));
 
         let selected = select_comparison_repositories::execute(
             vec![
@@ -179,7 +181,7 @@ mod tests {
         assert_eq!(
             selected.repositories,
             vec![RepositoryTarget {
-                path: crate::utils::repository_root("/repos/api"),
+                path: crate::utils::repository_root("//fixture.invalid/repositories/repos/api"),
                 label: crate::utils::project_name("api"),
             }]
         );

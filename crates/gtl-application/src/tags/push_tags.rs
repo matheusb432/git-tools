@@ -198,7 +198,11 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap_err();
+        let error = push_tags::execute(
+            &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            &git,
+        )
+        .unwrap_err();
 
         assert_transport_error(&error);
     }
@@ -209,7 +213,11 @@ mod tests {
             ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
-            push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap(),
+            push_tags::execute(
+                &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+                &git
+            )
+            .unwrap(),
             failed("git for-each-ref failed: fatal: refs unavailable")
         );
     }
@@ -222,7 +230,11 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap_err();
+        let error = push_tags::execute(
+            &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            &git,
+        )
+        .unwrap_err();
 
         let PushTagsError::Unexpected { progress, source } = error;
         assert_eq!(
@@ -242,7 +254,11 @@ mod tests {
             ScriptedGitClient::rejected("fatal: remote rejected"),
         ]);
 
-        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap();
+        let outcome = push_tags::execute(
+            &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            &git,
+        )
+        .unwrap();
 
         assert_eq!(
             outcome.detail(),
@@ -264,7 +280,11 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap();
+        let outcome = push_tags::execute(
+            &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            &git,
+        )
+        .unwrap();
 
         assert_eq!(outcome.status(), TagActionStatus::Pushed);
         assert_eq!(outcome.detail(), "pushed 1 tag: v1.0.0");
@@ -279,7 +299,11 @@ mod tests {
             ),
         ]);
 
-        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git).unwrap();
+        let outcome = push_tags::execute(
+            &crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            &git,
+        )
+        .unwrap();
 
         assert_eq!(outcome.status(), TagActionStatus::Noop);
         assert_eq!(outcome.detail(), "tags already up to date");

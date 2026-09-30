@@ -243,7 +243,7 @@ mod tests {
 
     fn scripted_repo(tags: &str) -> ScriptedGitClient {
         ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/repo/example-project"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/repo/example-project"),
             ScriptedGitClient::applied(tags),
             ScriptedGitClient::applied("main"),
             ScriptedGitClient::applied("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -279,7 +279,7 @@ mod tests {
 
     fn query(pattern: Option<&str>) -> DryRunTagBump {
         DryRunTagBump {
-            repo_path: "/repo/example-project".into(),
+            repo_path: "//fixture.invalid/repositories/repo/example-project".into(),
             pattern: pattern.map(|name| TagPatternName::try_new(name).unwrap()),
             level: BumpLevel::Slot(TagSlot::RIGHTMOST),
             message: "release".into(),
@@ -336,7 +336,9 @@ mod tests {
 
     #[test]
     fn an_unknown_pattern_is_rejected_before_git_runs() {
-        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("/repo/example-project")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(
+            "//fixture.invalid/repositories/repo/example-project",
+        )]);
 
         let result =
             dry_run_tag_bump::execute(query(Some("nightly")), &git, &project_settings()).unwrap();

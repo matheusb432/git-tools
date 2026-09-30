@@ -136,7 +136,7 @@ mod tests {
 
     fn source() -> FakeGitClient {
         FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             upstream: Some("main".into()),
             ..Default::default()

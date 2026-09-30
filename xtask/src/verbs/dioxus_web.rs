@@ -40,11 +40,13 @@ const SOURCE_FILES: &[&str] = &[
     "crates/gtl-web/index.html",
     "crates/gtl-web-contracts/Cargo.toml",
     "xtask/src/verbs/dioxus_web.rs",
+    "xtask/src/verbs/wasm_c.rs",
 ];
 const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-wire/src",
     "crates/gtl-desktop/src",
     "crates/gtl-parser/src",
+    "crates/gtl-parser/wasm-compat",
     "crates/gtl-web/assets",
     "crates/gtl-web/src",
     "crates/gtl-web-contracts/src",
@@ -763,6 +765,23 @@ mod tests {
         let error = verify_staged_bundle(root.path()).unwrap_err().to_string();
 
         assert!(error.contains("bundle is stale"), "{error}");
+    }
+
+    #[test]
+    fn staged_bundle_rejects_wasm_compilation_input_drift() {
+        for input in [
+            "xtask/src/verbs/wasm_c.rs",
+            "crates/gtl-parser/wasm-compat/compat.h",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            fixture(root.path());
+            stage_fresh_bundle(root.path());
+            fs::write(root.path().join(input), "changed").unwrap();
+
+            let error = verify_staged_bundle(root.path()).unwrap_err().to_string();
+
+            assert!(error.contains("bundle is stale"), "{input}: {error}");
+        }
     }
 
     #[test]

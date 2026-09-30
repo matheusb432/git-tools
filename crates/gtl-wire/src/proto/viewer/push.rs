@@ -245,7 +245,9 @@ mod tests {
     #[test]
     fn review_round_trip_keeps_named_target_and_atomic_argument() {
         let review = ViewerPushStatus::Review(ViewerPushPreview {
-            repository: PathBuf::from("/repos/example").try_into().unwrap(),
+            repository: PathBuf::from("//fixture.invalid/repositories/repos/example")
+                .try_into()
+                .unwrap(),
             project: Some("Example".to_owned().try_into().unwrap()),
             branch: "feature".to_owned().try_into().unwrap(),
             remote_branch: "main".to_owned().try_into().unwrap(),

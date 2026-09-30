@@ -97,7 +97,7 @@ mod tests {
 
         let error = label_tag::execute(
             LabelTag {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 tag: crate::utils::tag_name("v1.0.0"),
                 label: crate::utils::tag_name("stable"),
             },
@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(
             label_tag::execute(
                 LabelTag {
-                    repo_path: crate::utils::repository_root("/repo"),
+                    repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                     tag: crate::utils::tag_name("v1.0.0"),
                     label: crate::utils::tag_name("stable"),
                 },

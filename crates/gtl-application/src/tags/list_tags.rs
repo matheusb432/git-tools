@@ -198,7 +198,7 @@ mod tests {
 
         list_tags::execute(
             ListTags {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 include_state: false,
             },
             &git,
@@ -327,7 +327,7 @@ mod tests {
 
     fn list_with_state() -> ListTags {
         ListTags {
-            repo_path: crate::utils::repository_root("/repo"),
+            repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
             include_state: true,
         }
     }

@@ -261,7 +261,14 @@ fn assemble_hides_filtered_extensions_at_the_git_level() {
 fn quoted_git_paths_keep_their_names_and_contents() {
     let repository = TestRepository::new();
     repository.commit_all("base");
-    for name in ["back\\slash.rs", "café.rs", "notes é.md", "say \"hi\".rs"] {
+    let names = if cfg!(windows) {
+        ["café.rs", "notes é.md", "say [hi].rs"]
+    } else {
+        ["café.rs", "notes é.md", "say \"hi\".rs"]
+    };
+    #[cfg(unix)]
+    repository.write("back\\slash.rs", "back\\slash.rs\n");
+    for name in names {
         repository.write(name, format!("{name}\n"));
     }
     repository.commit_all("quoted names");
@@ -279,10 +286,14 @@ fn quoted_git_paths_keep_their_names_and_contents() {
             "{name} lost its contents"
         );
     }
-    assert_eq!(
-        file_paths(&view),
-        ["back\\slash.rs", "café.rs", "say \"hi\".rs"]
-    );
+    let mut expected = names
+        .into_iter()
+        .filter(|name| *name != names[1])
+        .collect::<Vec<_>>();
+    #[cfg(unix)]
+    expected.push("back\\slash.rs");
+    expected.sort_unstable();
+    assert_eq!(file_paths(&view), expected);
     assert_eq!(
         view.extension_filter.unwrap().hidden_paths,
         [relative_path("notes é.md")]

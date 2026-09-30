@@ -44,7 +44,7 @@ fn caret_bang_target_diffs_only_that_commit() -> Result<()> {
     let repository = repository_with_changed_last_commit()?;
     let _server = common::ServerHarness::start(None, None)?;
 
-    let output = Command::new(env!("CARGO_BIN_EXE_git-tools"))
+    let output = Command::new(common::cli_binary())
         .current_dir(repository.path())
         .args(["diff", "HEAD^!", "--raw"])
         .assert()
@@ -55,7 +55,7 @@ fn caret_bang_target_diffs_only_that_commit() -> Result<()> {
     let output = String::from_utf8(output)?;
     let artifact = output
         .lines()
-        .find_map(|line| line.strip_prefix("file://"))
+        .find_map(|line| line.strip_prefix(if cfg!(windows) { "file:///" } else { "file://" }))
         .context("single-commit render must return an artifact")?;
     let rendered = std::fs::read_to_string(artifact)?;
     ensure!(

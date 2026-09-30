@@ -109,7 +109,8 @@ mod tests {
 
     #[test]
     fn latest_branch_value_replaces_history_and_cache_expires() {
-        let path = RepositoryRoot::try_new("/repos/test".into()).unwrap();
+        let path =
+            RepositoryRoot::try_new("//fixture.invalid/repositories/repos/test".into()).unwrap();
         let now = Instant::now();
         let mut cache = ProjectStatusCache::default();
         for _ in 0..10 {
@@ -132,7 +133,8 @@ mod tests {
 
     #[test]
     fn navigation_across_branches_keeps_a_bounded_latest_cache() {
-        let path = RepositoryRoot::try_new("/repos/test".into()).unwrap();
+        let path =
+            RepositoryRoot::try_new("//fixture.invalid/repositories/repos/test".into()).unwrap();
         let mut cache = ProjectStatusCache::default();
         for index in 0..200 {
             cache.insert(

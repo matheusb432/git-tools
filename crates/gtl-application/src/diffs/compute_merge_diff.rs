@@ -137,7 +137,7 @@ index 333..444 100644\n\
     #[test]
     fn compute_result_retains_the_render_inputs() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![commit("abc1234")],
@@ -145,7 +145,7 @@ index 333..444 100644\n\
             ..Default::default()
         };
         let request = ComputeMergeDiff {
-            repo_root: repository_root("/repo"),
+            repo_root: repository_root("//fixture.invalid/repositories/repo"),
             base: None,
             pinned: None,
             changes_since: None,
@@ -155,9 +155,12 @@ index 333..444 100644\n\
 
         assert_eq!(
             response.view.repo_root.as_ref(),
-            std::path::Path::new("/repo")
+            std::path::Path::new("//fixture.invalid/repositories/repo")
         );
-        assert_eq!(response.top.as_ref(), std::path::Path::new("/repo"));
+        assert_eq!(
+            response.top.as_ref(),
+            std::path::Path::new("//fixture.invalid/repositories/repo")
+        );
         assert_eq!(response.base.as_ref(), "main");
         assert_eq!(response.diff_range.as_arg(), "main...HEAD");
         assert_eq!(response.render_options, RenderOptions::DEFAULT);
@@ -168,19 +171,21 @@ index 333..444 100644\n\
     #[test]
     fn saved_filters_apply_to_the_resolved_repository() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![commit("abc1234")],
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let filters =
-            SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))]);
+        let filters = SavedExtensionFilters::new([(
+            repository_root("//fixture.invalid/repositories/repo"),
+            hiding_extensions(&["md"]),
+        )]);
 
         let response = compute_merge_diff::execute(
             ComputeMergeDiff {
-                repo_root: repository_root("/repo"),
+                repo_root: repository_root("//fixture.invalid/repositories/repo"),
                 base: None,
                 pinned: None,
                 changes_since: None,
@@ -210,7 +215,7 @@ index 333..444 100644\n\
     #[test]
     fn computes_the_merge_view_with_the_default_base() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![commit("abc1234")],
@@ -220,7 +225,7 @@ index 333..444 100644\n\
 
         let response = execute_default_settings(
             ComputeMergeDiff {
-                repo_root: repository_root("/repo"),
+                repo_root: repository_root("//fixture.invalid/repositories/repo"),
                 base: None,
                 pinned: None,
                 changes_since: None,
@@ -237,7 +242,7 @@ index 333..444 100644\n\
     #[test]
     fn pinned_merge_diff_computes_over_the_pinned_range_without_verification() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             commits: vec![commit("abc1234")],
@@ -247,7 +252,7 @@ index 333..444 100644\n\
 
         let response = execute_default_settings(
             ComputeMergeDiff {
-                repo_root: repository_root("/repo"),
+                repo_root: repository_root("//fixture.invalid/repositories/repo"),
                 base: None,
                 pinned: Some(crate::utils::pinned_range(
                     "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
@@ -269,7 +274,7 @@ index 333..444 100644\n\
     #[test]
     fn unknown_base_is_an_error() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             ..Default::default()
@@ -277,7 +282,7 @@ index 333..444 100644\n\
 
         let error = execute_default_settings(
             ComputeMergeDiff {
-                repo_root: repository_root("/repo"),
+                repo_root: repository_root("//fixture.invalid/repositories/repo"),
                 base: Some(crate::utils::git_revision("nope")),
                 pinned: None,
                 changes_since: None,

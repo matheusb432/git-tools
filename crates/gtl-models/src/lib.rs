@@ -1,5 +1,7 @@
 //! Pure business values and rules. Zero I/O and zero framework dependencies.
 
+extern crate self as gtl_models;
+
 pub mod artifacts;
 pub mod diffs;
 pub mod failure;

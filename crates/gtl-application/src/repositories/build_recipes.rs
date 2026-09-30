@@ -107,8 +107,8 @@ mod tests {
     fn recursive_build_preserves_discovery_order_labels_and_last_target() {
         let temporary = repository_root();
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/real/api\n"),
-            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/web\n"),
             ScriptedGitClient::applied("api-base\n"),
             ScriptedGitClient::applied("api-head\n"),
             ScriptedGitClient::applied("web-base\n"),
@@ -142,7 +142,9 @@ mod tests {
         assert_eq!(
             recipes[0],
             crate::recipes::Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root("/real/api")),
+                source: RecipeSource::LocalRepo(crate::utils::repository_root(
+                    "//fixture.invalid/repositories/real/api"
+                )),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Last {
                         count: NonZeroU32::new(2).unwrap(),
@@ -162,9 +164,9 @@ mod tests {
             &temporary.path().join("api/.git/worktrees/feature"),
         );
         let git = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/real/api\n"),
-            ScriptedGitClient::applied("/real/api-worktree\n"),
-            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/api-worktree\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/web\n"),
         ]);
 
         let recipes = build_recipes::execute(
@@ -196,8 +198,12 @@ mod tests {
     fn pin_resolution_failures_keep_repository_recipes_symbolic() {
         let temporary = repository_root();
         let git = ScriptedGitClient::with_results(vec![
-            Ok(ScriptedGitClient::applied("/real/api\n")),
-            Ok(ScriptedGitClient::applied("/real/web\n")),
+            Ok(ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/real/api\n",
+            )),
+            Ok(ScriptedGitClient::applied(
+                "//fixture.invalid/repositories/real/web\n",
+            )),
             Ok(ScriptedGitClient::applied("origin/main\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
             Ok(ScriptedGitClient::applied("origin/main\n")),

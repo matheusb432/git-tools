@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn renders_and_stores_an_artifact_with_the_summary_notes() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![commit("abc1234")],
@@ -171,7 +171,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         let computed = compute_merge_diff::execute(
             ComputeMergeDiff {
-                repo_root: crate::utils::repository_root("/repo"),
+                repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 base: None,
                 pinned: None,
                 changes_since: None,
@@ -183,7 +183,7 @@ mod tests {
         .unwrap();
 
         let response = render_merge_diff::execute(
-            req("/repo", None),
+            req("//fixture.invalid/repositories/repo", None),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
@@ -195,18 +195,27 @@ mod tests {
 
         assert_eq!(
             response.placement.path().as_path(),
-            PathBuf::from("/repo/.artifacts/gtl/artifact.html")
+            PathBuf::from("//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html")
         );
         assert!(!response.placement.is_reused());
         assert_eq!(
             response.notes,
             vec![
                 Note::info("merge-diff: 1 commit to merge into main, 1 file"),
-                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
+                Note::info(format!(
+                    "wrote {}",
+                    PathBuf::from("//fixture.invalid/repositories/repo")
+                        .join(".artifacts")
+                        .join("gtl")
+                        .join("artifact.html")
+                        .display()
+                )),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(artifact.meta.repo_root, computed.top);
         assert_eq!(artifact.meta.render_options, computed.render_options);
@@ -217,7 +226,7 @@ mod tests {
     #[test]
     fn render_uses_the_settings_theme_language_and_saved_repository_filter() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![commit("abc1234")],
@@ -233,7 +242,7 @@ mod tests {
 
         render_merge_diff::execute(
             RenderMergeDiff {
-                cwd: PathBuf::from("/repo"),
+                cwd: PathBuf::from("//fixture.invalid/repositories/repo"),
                 base: None,
             },
             &app_settings,
@@ -241,12 +250,17 @@ mod tests {
             &store,
             &StubRenderer,
             &FixedClock::from_raw("2026-07-02T00:00:00Z"),
-            &SavedExtensionFilters::new([(repository_root("/repo"), hiding_extensions(&["md"]))]),
+            &SavedExtensionFilters::new([(
+                repository_root("//fixture.invalid/repositories/repo"),
+                hiding_extensions(&["md"]),
+            )]),
         )
         .unwrap();
 
         let artifact = store
-            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/repo/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(artifact.meta.extension_filter, hiding_extensions(&["md"]));
         assert!(artifact.html.contains("graphite"));
@@ -260,7 +274,7 @@ mod tests {
     #[test]
     fn absent_base_falls_back_to_default() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
             commits: vec![],
@@ -270,7 +284,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
 
         let response = render_merge_diff::execute(
-            req("/repo", None),
+            req("//fixture.invalid/repositories/repo", None),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
@@ -289,7 +303,7 @@ mod tests {
     #[test]
     fn unknown_base_is_an_error() {
         let source = FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
             ..Default::default()
@@ -297,7 +311,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
 
         let error = render_merge_diff::execute(
-            req("/repo", Some("nope")),
+            req("//fixture.invalid/repositories/repo", Some("nope")),
             &FixedUserSettingsStore::default(),
             &source,
             &store,

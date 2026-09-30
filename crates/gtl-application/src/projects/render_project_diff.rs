@@ -135,7 +135,7 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderProjectDiff {
         RenderProjectDiff {
-            root: crate::utils::repository_root("/scan-root"),
+            root: crate::utils::repository_root("//fixture.invalid/repositories/scan-root"),
             repos,
         }
     }
@@ -151,11 +151,11 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         let repos = vec![
             RepoRef {
-                top: crate::utils::repository_root("/repo-a"),
+                top: crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
                 label: crate::utils::project_name("repo-a"),
             },
             RepoRef {
-                top: crate::utils::repository_root("/repo-b"),
+                top: crate::utils::repository_root("//fixture.invalid/repositories/repo-b"),
                 label: crate::utils::project_name("repo-b"),
             },
         ];
@@ -179,18 +179,27 @@ mod tests {
 
         assert_eq!(
             response.placement.as_ref().unwrap().path().as_path(),
-            PathBuf::from("/scan-root/.artifacts/gtl/artifact.html")
+            PathBuf::from("//fixture.invalid/repositories/scan-root/.artifacts/gtl/artifact.html")
         );
         assert!(!response.placement.as_ref().unwrap().is_reused());
         assert_eq!(
             response.notes,
             vec![
                 Note::info("diff-all: 2 repo(s)"),
-                Note::info("wrote /scan-root/.artifacts/gtl/artifact.html"),
+                Note::info(format!(
+                    "wrote {}",
+                    PathBuf::from("//fixture.invalid/repositories/scan-root")
+                        .join(".artifacts")
+                        .join("gtl")
+                        .join("artifact.html")
+                        .display()
+                )),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
+            .artifact(&PathBuf::from(
+                "//fixture.invalid/repositories/scan-root/.artifacts/gtl/artifact.html",
+            ))
             .unwrap();
         assert_eq!(artifact.meta.identity, ArtifactDiffIdentity::WorkTree);
         assert_eq!(
@@ -208,7 +217,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
-            top: crate::utils::repository_root("/repo"),
+            top: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
             label: crate::utils::project_name("repo"),
         }];
 
@@ -246,7 +255,10 @@ diff --git a/notes.md b/notes.md\n\
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
-        for top in ["/repo-a", "/repo-b"] {
+        for top in [
+            "//fixture.invalid/repositories/repo-a",
+            "//fixture.invalid/repositories/repo-b",
+        ] {
             source.per_repo.insert(
                 top.into(),
                 RepoOverride {
@@ -258,24 +270,28 @@ diff --git a/notes.md b/notes.md\n\
         let app_settings =
             SequenceUserSettingsStore::new([settings(Theme::Mirage), settings(Theme::Glacier)]);
         let filters = SavedRepositoryPreferences::from(SavedExtensionFilters::new([(
-            repository_root("/repo-a"),
+            repository_root("//fixture.invalid/repositories/repo-a"),
             hiding_extensions(&["md"]),
         )]));
         let store = InMemoryArtifactStore::default();
+        let artifact_path = PathBuf::from("//fixture.invalid/repositories/scan-root")
+            .join(".artifacts")
+            .join("gtl")
+            .join("artifact.html");
         let repos = vec![
             RepoRef {
-                top: crate::utils::repository_root("/repo-a"),
+                top: crate::utils::repository_root("//fixture.invalid/repositories/repo-a"),
                 label: crate::utils::project_name("repo-a"),
             },
             RepoRef {
-                top: crate::utils::repository_root("/repo-b"),
+                top: crate::utils::repository_root("//fixture.invalid/repositories/repo-b"),
                 label: crate::utils::project_name("repo-b"),
             },
         ];
 
         render_project_diff::execute(
             RenderProjectDiff {
-                root: crate::utils::repository_root("/scan-root"),
+                root: crate::utils::repository_root("//fixture.invalid/repositories/scan-root"),
                 repos: repos.clone(),
             },
             &app_settings,
@@ -286,22 +302,25 @@ diff --git a/notes.md b/notes.md\n\
             &filters,
         )
         .unwrap();
-        let first_html = store
-            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .unwrap()
-            .html;
+        let first_html = store.artifact(&artifact_path).unwrap().html;
         filters
             .filters
-            .save_extension_filter(&repository_root("/repo-a"), &ExtensionFilter::default())
+            .save_extension_filter(
+                &repository_root("//fixture.invalid/repositories/repo-a"),
+                &ExtensionFilter::default(),
+            )
             .unwrap();
         filters
             .filters
-            .save_extension_filter(&repository_root("/repo-b"), &hiding_extensions(&["txt"]))
+            .save_extension_filter(
+                &repository_root("//fixture.invalid/repositories/repo-b"),
+                &hiding_extensions(&["txt"]),
+            )
             .unwrap();
 
         render_project_diff::execute(
             RenderProjectDiff {
-                root: crate::utils::repository_root("/scan-root"),
+                root: crate::utils::repository_root("//fixture.invalid/repositories/scan-root"),
                 repos,
             },
             &app_settings,
@@ -312,10 +331,7 @@ diff --git a/notes.md b/notes.md\n\
             &filters,
         )
         .unwrap();
-        let second_html = store
-            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
-            .unwrap()
-            .html;
+        let second_html = store.artifact(&artifact_path).unwrap().html;
 
         assert!(first_html.contains(
             "repo-a:en-US:mirage:unified:compact:1|repo-b:en-US:mirage:unified:compact:2"

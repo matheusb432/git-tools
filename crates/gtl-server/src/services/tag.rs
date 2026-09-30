@@ -590,7 +590,8 @@ mod tests {
     #[test]
     fn preview_round_trip_preserves_detached_head_and_an_empty_lineage() {
         let preview = TagBumpPreview {
-            repo_path: repository_root("/repo".into(), "fixture").unwrap(),
+            repo_path: repository_root("//fixture.invalid/repositories/repo".into(), "fixture")
+                .unwrap(),
             branch: GitHead::Detached,
             target_id: CommitId::try_from("a".repeat(40)).unwrap(),
             pattern: TagPatternName::try_new("release").unwrap(),

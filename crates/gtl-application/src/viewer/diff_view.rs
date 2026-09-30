@@ -443,7 +443,8 @@ mod tests {
         renamed.cmd.lead = "gtl live ".into();
         renamed.cmd.range = "0123456..abcdef0".into();
         renamed.foot.cmd = "different command".into();
-        renamed.repo_root = utils::repository_root("/another-checkout");
+        renamed.repo_root =
+            utils::repository_root("//fixture.invalid/repositories/another-checkout");
         renamed.commits.clear();
         let mut other_identity = identity(ViewerDiffDensity::Compact);
         other_identity.tab_id = ViewerTabId::try_new(99).unwrap();

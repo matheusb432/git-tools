@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn project_updates_name_the_rejected_field() {
         let valid = v1::UpdateViewerProjectRequest {
-            path: "/repos/project".into(),
+            path: "//fixture.invalid/repositories/repos/project".into(),
             comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
                 operation: Some(v1::comparison_branch_field_update::Operation::Update(
                     "release".into(),

@@ -246,9 +246,24 @@ mod tests {
     fn saved_tabs_round_trip_in_strip_order() {
         let mut connection = store();
         let tabs = vec![
-            saved("/repos/pinned", true, true, false),
-            saved("/repos/active", false, false, true),
-            saved("/repos/other", false, true, false),
+            saved(
+                "//fixture.invalid/repositories/repos/pinned",
+                true,
+                true,
+                false,
+            ),
+            saved(
+                "//fixture.invalid/repositories/repos/active",
+                false,
+                false,
+                true,
+            ),
+            saved(
+                "//fixture.invalid/repositories/repos/other",
+                false,
+                true,
+                false,
+            ),
         ];
 
         save(&mut connection, &tabs).unwrap();
@@ -260,7 +275,12 @@ mod tests {
     #[test]
     fn a_tab_without_a_saved_label_shows_its_pending_label() {
         let connection = store();
-        let tab = saved("/repos/project", false, false, false);
+        let tab = saved(
+            "//fixture.invalid/repositories/repos/project",
+            false,
+            false,
+            false,
+        );
         connection
             .execute(
                 "INSERT INTO viewer_tabs (position, recipe_json, label_json, pinned, live, active) VALUES (0, ?1, NULL, 0, 0, 0)",
@@ -295,9 +315,24 @@ mod tests {
     fn restore_reopens_every_tab_and_computes_the_active_one_first() {
         let state = ViewerState::new();
         let tabs = vec![
-            saved("/repos/pinned", true, false, false),
-            saved("/repos/active", false, false, true),
-            saved("/repos/live", false, true, false),
+            saved(
+                "//fixture.invalid/repositories/repos/pinned",
+                true,
+                false,
+                false,
+            ),
+            saved(
+                "//fixture.invalid/repositories/repos/active",
+                false,
+                false,
+                true,
+            ),
+            saved(
+                "//fixture.invalid/repositories/repos/live",
+                false,
+                true,
+                false,
+            ),
         ];
 
         let work = restore(&state, tabs.clone()).unwrap();
@@ -311,7 +346,12 @@ mod tests {
                     .collect::<Vec<_>>();
                 assert_eq!(
                     order,
-                    ["/repos/active", "/repos/pinned", "/repos/live"].map(utils::repository_root)
+                    [
+                        "//fixture.invalid/repositories/repos/active",
+                        "//fixture.invalid/repositories/repos/pinned",
+                        "//fixture.invalid/repositories/repos/live"
+                    ]
+                    .map(utils::repository_root)
                 );
                 assert_eq!(session.active(), Some(work[0].ticket().tab_id));
                 assert!(

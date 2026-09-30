@@ -51,7 +51,10 @@ mod tests {
             file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
             repo_name: gtl_models::paths::ProjectName::try_from("api").unwrap(),
-            repo_root: gtl_models::paths::RepositoryRoot::try_new("/repo/api".into()).unwrap(),
+            repo_root: gtl_models::paths::RepositoryRoot::try_new(
+                "//fixture.invalid/repositories/repo/api".into(),
+            )
+            .unwrap(),
             branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
             upstream: GitRevision::try_new("origin/main").unwrap(),
             commits: Vec::new(),

@@ -300,7 +300,7 @@ mod tests {
         seed_history(&connection, 65);
         connection
             .execute_batch(
-                "INSERT INTO project_sources VALUES (1, 'directory', '/repos/gt');
+                "INSERT INTO project_sources VALUES (1, 'directory', '//fixture.invalid/repositories/repos/gt');
             INSERT INTO projects VALUES ('GT', 1, 'git-tools');
             UPDATE recent_renders SET project_id = 'GT' WHERE id % 2 = 1;",
             )

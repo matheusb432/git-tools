@@ -77,13 +77,11 @@ impl Plan {
 }
 
 pub(super) fn plan(path: &Path, cancellation: &AtomicBool) -> anyhow::Result<Plan> {
-    let path = match path.canonicalize() {
+    let path = match dunce::canonicalize(path) {
         Ok(path) => path,
         Err(error) if error.kind() == ErrorKind::NotFound => {
-            let parent = path
-                .parent()
-                .context("missing watch root has no parent")?
-                .canonicalize()?;
+            let parent =
+                dunce::canonicalize(path.parent().context("missing watch root has no parent")?)?;
             parent.join(path.file_name().context("missing watch root has no name")?)
         }
         Err(error) => return Err(error.into()),
@@ -172,7 +170,8 @@ fn collect_worktree(
                 continue;
             }
             let relative = path.strip_prefix(root)?;
-            let relative_bytes = gix::path::into_bstr(relative);
+            let relative_bytes =
+                gix::path::to_unix_separators_on_windows(gix::path::into_bstr(relative));
             let tracked_directory = index.path_is_directory(relative_bytes.as_bstr());
             let directory = entry.file_type()?.is_dir();
             let tracked =
@@ -204,7 +203,7 @@ fn collect_metadata(
     visited: &mut usize,
 ) -> anyhow::Result<()> {
     for metadata in [repository.git_dir(), repository.common_dir()] {
-        let metadata = metadata.canonicalize()?;
+        let metadata = dunce::canonicalize(metadata)?;
         plan.directory(metadata.clone())?;
         for name in [
             "HEAD",

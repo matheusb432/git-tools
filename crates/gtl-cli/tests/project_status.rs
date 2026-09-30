@@ -6,8 +6,7 @@ use predicates::str::contains;
 mod common;
 
 fn command(arguments: &[&str]) -> Command {
-    let executable = std::env::var_os("GTL_CLI_TEST_BINARY")
-        .unwrap_or_else(|| env!("CARGO_BIN_EXE_git-tools").into());
+    let executable = common::cli_binary();
     let mut command = Command::new(executable);
     command.args(arguments).env("NO_COLOR", "1");
     command

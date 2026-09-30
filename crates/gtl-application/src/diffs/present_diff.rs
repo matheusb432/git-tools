@@ -166,7 +166,7 @@ mod tests {
     fn request(mode: DiffPresentationMode) -> PresentDiff {
         PresentDiff {
             render: DiffRenderRequest::Diff(RenderDiff {
-                cwd: "/repo".into(),
+                cwd: "//fixture.invalid/repositories/repo".into(),
                 target: DiffTargetRequest::Unpushed,
                 name: None,
             }),
@@ -174,7 +174,7 @@ mod tests {
                 .parse::<RecipeBatchId>()
                 .unwrap(),
             recipes: vec![DiffRecipeIntent {
-                repo_root: crate::utils::repository_root("/repo"),
+                repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 operation: RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 },
@@ -186,7 +186,7 @@ mod tests {
 
     fn git() -> FakeGitClient {
         FakeGitClient {
-            top_level: Some("/repo".into()),
+            top_level: Some("//fixture.invalid/repositories/repo".into()),
             commit_ids: [
                 ("@{u}".to_string(), crate::utils::commit_id_fixture("base")),
                 ("HEAD".to_string(), crate::utils::commit_id_fixture("head")),
@@ -201,7 +201,9 @@ mod tests {
         let viewer = FakeViewer {
             forward_error: Some("must not forward".into()),
             render: DiffRenderOutcome::Rendered(crate::ports::PlacedArtifact::Created {
-                path: crate::utils::absolute_file_path("/tmp/diff.html"),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/tmp/diff.html",
+                ),
             }),
         };
 
@@ -213,7 +215,9 @@ mod tests {
             outcome,
             PresentDiffOk::Artifact {
                 outcome: DiffRenderOutcome::Rendered(crate::ports::PlacedArtifact::Created {
-                    path: crate::utils::absolute_file_path("/tmp/diff.html"),
+                    path: crate::utils::absolute_file_path(
+                        "//fixture.invalid/repositories/tmp/diff.html"
+                    ),
                 }),
                 route: ArtifactPresentationRoute::Direct,
                 notes: vec![Note::info("rendered")],
@@ -243,7 +247,9 @@ mod tests {
         let viewer = FakeViewer {
             forward_error: Some("viewer unavailable".into()),
             render: DiffRenderOutcome::Rendered(crate::ports::PlacedArtifact::Created {
-                path: crate::utils::absolute_file_path("/tmp/diff.html"),
+                path: crate::utils::absolute_file_path(
+                    "//fixture.invalid/repositories/tmp/diff.html",
+                ),
             }),
         };
 

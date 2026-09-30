@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn fetches_and_parses_the_full_context_git_format() {
-        let repo_root = repository_root("/repo");
+        let repo_root = repository_root("//fixture.invalid/repositories/repo");
         let source = source();
         let request = FetchFullContextDiff::new(&repo_root, &source);
         let git = FakeGitClient {
@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn reports_invalid_full_context_source_as_a_parse_error() {
-        let repo_root = repository_root("/repo");
+        let repo_root = repository_root("//fixture.invalid/repositories/repo");
         let source = source();
         let request = FetchFullContextDiff::new(&repo_root, &source);
         let git = FakeGitClient {

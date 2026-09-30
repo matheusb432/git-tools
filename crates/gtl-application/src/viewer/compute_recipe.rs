@@ -99,7 +99,7 @@ mod tests {
 
     fn source() -> FakeGitClient {
         FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             upstream: Some("main".into()),
             known_revs: vec![
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn pinned_diff_recipe_maps_the_contract_pin() {
         let source = FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()
         };
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn recipe_operations_dispatch_to_their_view_queries() {
         let source = FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()
         };
@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn operation_errors_identify_the_failed_recipe_kind() {
         let source = FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()
         };

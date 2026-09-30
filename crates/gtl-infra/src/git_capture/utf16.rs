@@ -2,7 +2,6 @@ use std::{
     borrow::Cow,
     io::Read as _,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use gtl_application::ports::GitDiffFormat;
@@ -130,7 +129,7 @@ fn read_blob(repo_path: &Path, object_id: &str) -> Option<Vec<u8>> {
     if size > TEXT_BLOB_BYTES_MAX {
         return None;
     }
-    let output = Command::new("git")
+    let output = crate::git_process::command()
         .arg("-C")
         .arg(repo_path)
         .args(["cat-file", "blob", object_id])

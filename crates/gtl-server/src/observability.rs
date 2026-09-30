@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn resolves_log_directory_from_the_state_root() {
         let state_directory = Path::new("/state");
-        let local_data_directory = Path::new("/local-data");
+        let local_data_directory = Path::new("//fixture.invalid/repositories/local-data");
 
         assert_eq!(
             log_directory(Some(state_directory), local_data_directory),
@@ -281,8 +281,8 @@ mod tests {
     #[test]
     fn falls_back_to_the_local_data_root() {
         assert_eq!(
-            log_directory(None, Path::new("/local-data")),
-            PathBuf::from("/local-data/git-tools/logs")
+            log_directory(None, Path::new("//fixture.invalid/repositories/local-data")),
+            PathBuf::from("//fixture.invalid/repositories/local-data/git-tools/logs")
         );
     }
 

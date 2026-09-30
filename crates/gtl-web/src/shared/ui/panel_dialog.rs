@@ -3,7 +3,10 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use lucide_dioxus::X;
 
-use super::{Button, ButtonSize, ButtonVariant, ScrollArea, dialog::use_dialog};
+use super::{
+    Button, ButtonSize, ButtonVariant, ScrollArea,
+    dialog::{DialogPlacement, use_dialog},
+};
 use crate::shared::i18n::{t, use_language};
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -25,7 +28,13 @@ pub(crate) fn PanelDialog(
     children: Element,
 ) -> Element {
     let language = use_language();
-    use_dialog(&id, &trigger_id, open, Duration::ZERO);
+    use_dialog(
+        &id,
+        &trigger_id,
+        open,
+        Duration::ZERO,
+        DialogPlacement::Center,
+    );
     let title_id = format!("{id}-title");
     let class = match variant {
         PanelDialogVariant::Panel => "dialog-surface m-auto p-0",

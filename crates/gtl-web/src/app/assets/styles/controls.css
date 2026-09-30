@@ -9,16 +9,16 @@
   .control-choice-label { @apply block leading-5; }
   .control-choice-hint { @apply mt-1 block text-xs leading-5 text-ink-2; }
 
-  .control-button { @apply cursor-pointer items-center whitespace-nowrap rounded-sm focus-visible:focus-outline focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50; }
+  .control-button { @apply cursor-pointer items-center whitespace-nowrap rounded-panel font-medium focus-visible:focus-outline focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40; }
   .control-button-layout-inline { @apply inline-flex shrink-0 justify-center; }
   .control-button-layout-full-width-start { @apply flex justify-start; }
-  .control-button-variant-primary { @apply border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2; }
-  .control-button-variant-destructive { @apply border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg; }
-  .control-button-variant-warning { @apply border border-warn-line bg-warn-bg text-warn hover:border-warn hover:bg-warn hover:text-bg active:border-warn active:bg-warn active:text-bg; }
-  .control-button-variant-failure { @apply border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg; }
-  .control-button-variant-outline { @apply border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
-  .control-button-variant-ghost { @apply border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink; }
-  .control-button-variant-accent { @apply border border-transparent bg-transparent text-acc enabled:hover:bg-surface-2 enabled:active:bg-line disabled:text-ink-3; }
+  .control-button-variant-primary { @apply border border-transparent bg-acc font-semibold text-bg enabled:hover:bg-acc-2 enabled:active:bg-acc; }
+  .control-button-variant-destructive { @apply border border-transparent bg-del-bg text-del enabled:hover:bg-del/20 enabled:active:bg-del/30; }
+  .control-button-variant-warning { @apply border border-transparent bg-warn-bg text-warn enabled:hover:bg-warn/20 enabled:active:bg-warn/30; }
+  .control-button-variant-failure { @apply border border-transparent bg-del font-semibold text-bg enabled:hover:bg-del/85 enabled:active:bg-del; }
+  .control-button-variant-outline { @apply border border-line bg-surface-2 text-ink enabled:hover:border-line-2 enabled:hover:bg-line enabled:active:bg-line-2; }
+  .control-button-variant-ghost { @apply border border-transparent bg-transparent text-ink-2 enabled:hover:bg-surface-2 enabled:hover:text-ink enabled:active:bg-line enabled:active:text-ink; }
+  .control-button-variant-accent { @apply border border-transparent bg-acc-soft text-acc enabled:hover:bg-acc/20 enabled:active:bg-acc/30 disabled:text-ink-3; }
   .control-button-variant-toggle[aria-pressed="true"] { @apply bg-acc-soft text-acc; }
 
 

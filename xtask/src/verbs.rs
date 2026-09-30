@@ -18,6 +18,7 @@ pub(crate) mod install;
 pub(crate) mod install_path;
 pub(crate) mod macos_package;
 pub(crate) mod pre_commit;
+pub(crate) mod release_package;
 pub(crate) mod server_highlighting;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;

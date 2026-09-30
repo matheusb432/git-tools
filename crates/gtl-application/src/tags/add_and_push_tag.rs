@@ -102,7 +102,7 @@ mod tests {
 
         let error: AddAndPushTagError = add_and_push_tag::execute(
             AddAndPushTag {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
                 tag: crate::utils::tag_name("v1.0.0"),
                 message: "release".into(),
                 label: Some(crate::utils::tag_name("stable")),

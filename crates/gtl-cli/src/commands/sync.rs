@@ -189,7 +189,7 @@ mod tests {
     fn commit_and_push_review_names_the_scope_and_destination() {
         let target = PushTarget {
             name: project_name("example-project"),
-            top: repository_root("/repos/example-project"),
+            top: repository_root("//fixture.invalid/repositories/repos/example-project"),
             branch: branch_name("main"),
             remote: remote_name("origin"),
             remote_urls: vec![remote_url("git@example.invalid:team/example-project.git")],
@@ -206,7 +206,7 @@ mod tests {
         assert!(text.contains("origin (git@example.invalid:team/example-project.git)"));
         assert!(text.contains("Remote"));
         assert!(!text.contains("Push  origin"));
-        assert!(!text.contains("/repos"));
+        assert!(!text.contains("//fixture.invalid/repositories/repos"));
         assert!(!text.contains("message"));
     }
 }

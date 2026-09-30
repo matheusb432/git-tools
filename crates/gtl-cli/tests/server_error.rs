@@ -15,7 +15,7 @@ fn server_request_failure_is_rendered_once_at_the_command_boundary() -> Result<(
         &["project", "push", "--all", "--dry"][..],
         &["diff", "HEAD", "--raw"][..],
     ] {
-        Command::new(env!("CARGO_BIN_EXE_git-tools"))
+        Command::new(common::cli_binary())
             .args(arguments)
             .assert()
             .code(3)

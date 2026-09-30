@@ -100,11 +100,11 @@ mod tests {
     fn two_repos() -> Vec<RepoRef> {
         vec![
             RepoRef {
-                top: repository_root("/repo-a"),
+                top: repository_root("//fixture.invalid/repositories/repo-a"),
                 label: project_name("repo-a"),
             },
             RepoRef {
-                top: repository_root("/repo-b"),
+                top: repository_root("//fixture.invalid/repositories/repo-b"),
                 label: project_name("repo-b"),
             },
         ]
@@ -129,7 +129,7 @@ mod tests {
         // Default fields (no commits, empty diff) apply to repo-a; repo-b overrides
         // with a real commit + diff, since the fake is otherwise single-scripted.
         source.per_repo.insert(
-            "/repo-b".into(),
+            "//fixture.invalid/repositories/repo-b".into(),
             RepoOverride {
                 commits: vec![commit("abc1234")],
                 diff_output: DIFF_SINGLE_FILE.into(),
@@ -162,7 +162,7 @@ mod tests {
             ..Default::default()
         };
         let repos = vec![RepoRef {
-            top: repository_root("/repo"),
+            top: repository_root("//fixture.invalid/repositories/repo"),
             label: project_name("repo"),
         }];
         let mut notes = Vec::new();
@@ -225,7 +225,10 @@ diff --git a/notes.md b/notes.md\n\
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
-        for top in ["/repo-a", "/repo-b"] {
+        for top in [
+            "//fixture.invalid/repositories/repo-a",
+            "//fixture.invalid/repositories/repo-b",
+        ] {
             source.per_repo.insert(
                 top.into(),
                 RepoOverride {
@@ -234,8 +237,10 @@ diff --git a/notes.md b/notes.md\n\
                 },
             );
         }
-        let filters =
-            SavedExtensionFilters::new([(repository_root("/repo-a"), hiding_extensions(&["md"]))]);
+        let filters = SavedExtensionFilters::new([(
+            repository_root("//fixture.invalid/repositories/repo-a"),
+            hiding_extensions(&["md"]),
+        )]);
         let repos = two_repos();
         let mut notes = Vec::new();
 

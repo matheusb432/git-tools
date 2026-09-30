@@ -4,6 +4,7 @@ use std::path::Path;
 
 use gtl_models::{
     failure::{ErrorMeta, Failure, ProjectFailure, RepositoryFailure},
+    paths::RepositoryRoot,
     projects::catalogue::{
         ProjectCollectionError, ProjectDirectorySource, ProjectGroups, ProjectId, ProjectIds,
         ProjectMetadata, ProjectOperationMode, ProjectTitle,
@@ -85,8 +86,12 @@ fn import_one(
         .map_err(|_| invalid_selection("path"))?;
     let path = Path::new(source.as_ref());
     match path.canonicalize() {
-        Ok(canonical) if canonical == path => {}
-        Ok(_) => return Err(ImportProjectRepositoryError::Stale),
+        Ok(canonical) => {
+            if !RepositoryRoot::try_new(canonical).is_ok_and(|canonical| canonical.as_ref() == path)
+            {
+                return Err(ImportProjectRepositoryError::Stale);
+            }
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(ImportProjectRepositoryError::Stale);
         }

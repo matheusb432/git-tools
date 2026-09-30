@@ -356,7 +356,8 @@ mod tests {
             base: None,
             pinned: None,
         });
-        root.source = RecipeSource::LocalRepo(repository_root("/"));
+        root.source =
+            RecipeSource::LocalRepo(repository_root(if cfg!(windows) { r"C:\" } else { "/" }));
 
         assert_eq!(
             pending(&root),

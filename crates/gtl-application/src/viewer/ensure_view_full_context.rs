@@ -154,7 +154,7 @@ mod tests {
 
     fn git() -> FakeGitClient {
         FakeGitClient {
-            top_level: Some("/repos/project".into()),
+            top_level: Some("//fixture.invalid/repositories/repos/project".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
@@ -167,7 +167,7 @@ mod tests {
     fn deferred_view(git: &FakeGitClient) -> View {
         compute_diff::execute(
             compute_diff::ComputeDiff {
-                repo_root: repository_root("/repos/project"),
+                repo_root: repository_root("//fixture.invalid/repositories/repos/project"),
                 target: DiffTarget::Unpushed { pinned: None },
                 changes_since: None,
             },

@@ -15,16 +15,16 @@ Run `gtl --help` and `gtl <command> --help` for the authoritative command refere
 
 ## Install
 
-For macOS, download the `.pkg` from a successful run of the
-[macos workflow](https://github.com/matheusb432/git-tools/actions/workflows/macos.yml). Select
-the artifact for your Mac's architecture. The installer adds the desktop app to `/Applications`,
-the CLI commands to `/usr/local/bin`, and a background service that starts at login. Git must
-already be installed. Keep `gtl-viewer.app` in `/Applications` so the commands and service can
-find their binaries.
+Download the archive or installer for your platform from
+[GitHub Releases](https://github.com/matheusb432/git-tools/releases), verify its accompanying
+SHA-256 checksum, and follow the included [installation instructions](release/INSTALL.md).
+Windows 11 x64 uses a ZIP with a per-user installer, Ubuntu 24.04 x64 uses a `.tar.gz`, and
+macOS uses `.pkg` installers for Apple Silicon and Intel. Git must already be on PATH;
+Windows also requires the WebView2 runtime.
 
-The macOS app uses ad-hoc signing and is not notarized. Allow installation and first launch in
-System Settings -> Privacy & Security when macOS blocks them. The artifact includes a SHA-256
-checksum and a screenshot from its native launch check.
+The packages include the CLI, alias, daemon, and standalone viewer. The macOS app uses ad-hoc
+signing and is not notarized; allow installation and first launch in System Settings ->
+Privacy & Security when macOS blocks them.
 
 Ubuntu 24.04 supports the full development and verification toolchain. macOS supports local
 builds and installation through `just update`. Windows 11 is a release target.
@@ -34,7 +34,7 @@ shell. From this checkout, install the build tools and configure the local insta
 
 ```sh
 mise trust
-mise install rust just protoc cargo-binstall cargo:dioxus-cli
+mise install rust just protoc cargo-binstall cargo:dioxus-cli http:zig
 just setup
 ```
 

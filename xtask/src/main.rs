@@ -46,6 +46,7 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::MacosPackage => verbs::macos_package::run(),
         cli::Command::MacosSmoke => verbs::macos_package::smoke(),
+        cli::Command::ReleasePackage { platform } => verbs::release_package::run(platform),
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
         cli::Command::WebStyles => verbs::dioxus_web::build_styles(),

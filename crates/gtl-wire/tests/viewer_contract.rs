@@ -182,15 +182,31 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
         value["active"]["view"]["commits"][0]["committed_at"],
         "2026-08-09T10:00:00Z"
     );
-    assert!(value.pointer("/active/view/commits/0/date").is_none());
-    assert!(value.pointer("/active/view/commits/0/sha").is_none());
     assert!(
         value
-            .pointer("/active/view/commits/0/abbreviated_sha")
+            .pointer("//fixture.invalid/repositories/active/view/commits/0/date")
             .is_none()
     );
-    assert!(value.pointer("/active/view/files/0/lines").is_none());
-    assert!(value.pointer("/active/view/repository_root").is_none());
+    assert!(
+        value
+            .pointer("//fixture.invalid/repositories/active/view/commits/0/sha")
+            .is_none()
+    );
+    assert!(
+        value
+            .pointer("//fixture.invalid/repositories/active/view/commits/0/abbreviated_sha")
+            .is_none()
+    );
+    assert!(
+        value
+            .pointer("//fixture.invalid/repositories/active/view/files/0/lines")
+            .is_none()
+    );
+    assert!(
+        value
+            .pointer("//fixture.invalid/repositories/active/view/repository_root")
+            .is_none()
+    );
     assert_eq!(
         value["preferences"]["keybindings"]["search_files"],
         "ctrl+p"
@@ -241,7 +257,9 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                     source_id: None,
                     id: ViewerDiffFileId::for_index(0),
                     path: relative_path("src/lib.rs")?,
-                    absolute_path: absolute_file_path("/repos/git-tools/src/lib.rs")?,
+                    absolute_path: absolute_file_path(
+                        "//fixture.invalid/repositories/repos/git-tools/src/lib.rs",
+                    )?,
                     anchor_id: "file-src-lib-rs".into(),
                     added: gtl_models::diffs::DiffLineCount::new(4),
                     removed: gtl_models::diffs::DiffLineCount::new(2),
@@ -373,7 +391,11 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         "2026-08-09T10:00:00Z"
     );
     assert!(history_json.pointer("/entries/0/recipe").is_none());
-    assert!(!history_json.to_string().contains("/repos/git-tools"));
+    assert!(
+        !history_json
+            .to_string()
+            .contains("//fixture.invalid/repositories/repos/git-tools")
+    );
     assert_eq!(
         serde_json::from_value::<ViewerHistoryPage>(history_json).unwrap(),
         history

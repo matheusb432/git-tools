@@ -73,7 +73,7 @@ mod tests {
 
     fn push_target(label: &str) -> RepoTarget {
         RepoTarget {
-            path: repository_root(&format!("/repos/{label}")),
+            path: repository_root(&format!("//fixture.invalid/repositories/repos/{label}")),
             label: project_name(label),
             dest: Dest::Push {
                 branch: crate::utils::branch_name("main"),
@@ -115,7 +115,7 @@ mod tests {
     fn apply_skips_targets_without_a_destination_without_calling_git() {
         let runner = ScriptedGitClient::default();
         let targets = vec![RepoTarget {
-            path: repository_root("/repos/web"),
+            path: repository_root("//fixture.invalid/repositories/repos/web"),
             label: project_name("web"),
             dest: Dest::Skip {
                 reason: "detached HEAD".into(),
@@ -133,7 +133,7 @@ mod tests {
     fn apply_reports_synced_targets_as_up_to_date_without_calling_git() {
         let runner = ScriptedGitClient::default();
         let targets = vec![RepoTarget {
-            path: repository_root("/repos/api"),
+            path: repository_root("//fixture.invalid/repositories/repos/api"),
             label: project_name("api"),
             dest: Dest::Synced {
                 branch: crate::utils::branch_name("main"),
@@ -151,7 +151,7 @@ mod tests {
         let targets = vec![
             push_target("pushed"),
             RepoTarget {
-                path: repository_root("/repos/current"),
+                path: repository_root("//fixture.invalid/repositories/repos/current"),
                 label: project_name("current"),
                 dest: Dest::Synced {
                     branch: crate::utils::branch_name("main"),
@@ -159,7 +159,7 @@ mod tests {
                 },
             },
             RepoTarget {
-                path: repository_root("/repos/loose"),
+                path: repository_root("//fixture.invalid/repositories/repos/loose"),
                 label: project_name("loose"),
                 dest: Dest::Skip {
                     reason: "no upstream tracking branch".into(),

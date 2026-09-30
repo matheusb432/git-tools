@@ -275,7 +275,7 @@ async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Res
     support::click(&trigger, "open the push confirmation").await?;
 
     let dialog = page.get_by_role(
-        AriaRole::Alertdialog,
+        AriaRole::Dialog,
         Some(
             GetByRoleOptions::default()
                 .name("Push 2 commits?")
@@ -286,18 +286,23 @@ async fn assert_alert_dialog_preview(page: &Page, base_url: &str) -> anyhow::Res
         .to_be_visible()
         .await
         .context("show the native push confirmation dialog")?;
-    expect(page.locator(".alert-dialog-surface"))
-        .to_have_css("animation-name", "none")
-        .await
-        .context("honor the system reduced-motion preference")?;
-    expect(dialog.clone())
-        .to_have_attribute("data-variant", "alert")
-        .await
-        .context("use the warning treatment for the push confirmation")?;
-    expect(page.locator(".alert-dialog-actions button:first-child"))
+    expect(page.locator("#preview-push-dialog [data-dialog-initial-focus]"))
         .to_be_focused()
         .await
-        .context("focus the safe action first")?;
+        .context("confirm a reviewed push with Enter")?;
+    expect(dialog.get_by_text("origin/main", true))
+        .to_be_visible()
+        .await
+        .context("show the push destination before expanding details")?;
+    expect(dialog.get_by_text("git@github.com:example/git-tools.git", false))
+        .to_be_hidden()
+        .await
+        .context("keep remote details collapsed initially")?;
+    support::click(
+        &dialog.get_by_text("Details & command", true),
+        "expand push details",
+    )
+    .await?;
     assert_push_command_details(page, &dialog).await?;
     page.keyboard().press("Escape", None).await?;
     expect(dialog)

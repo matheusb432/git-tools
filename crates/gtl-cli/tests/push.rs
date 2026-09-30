@@ -17,7 +17,9 @@ struct PushFixture {
 
 impl PushFixture {
     fn new() -> Result<Self> {
-        let home = std::env::var_os("HOME").context("fixture home")?;
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .context("fixture home")?;
         let temporary = tempfile::tempdir_in(home).context("temporary push fixture")?;
         let repository = temporary.path().join("repo");
         let remote = temporary.path().join("origin.git");
@@ -98,7 +100,7 @@ impl PushFixture {
     }
 
     fn run(&self, arguments: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_git-tools"));
+        let mut command = Command::new(common::cli_binary());
         command.args(arguments).current_dir(&self.repository);
         command
     }

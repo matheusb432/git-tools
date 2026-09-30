@@ -20,6 +20,7 @@ pub struct ProjectId(String);
 pub struct ProjectTitle(String);
 
 #[nutype(
+    sanitize(with = |value| dunce::simplified(Path::new(&value)).to_string_lossy().into_owned()),
     validate(predicate = |value| Path::new(value).is_absolute() && !value.contains('\0') && !value.split(['/', '\\']).any(|segment| matches!(segment, "." | ".."))),
     derive(Debug, Clone, PartialEq, Eq, AsRef, Display, TryFrom)
 )]
@@ -149,8 +150,8 @@ mod tests {
             "~/",
             "~/../outside",
             "relative/path",
-            "/repos/../outside",
-            "/repos/./inside",
+            "//fixture.invalid/repositories/repos/../outside",
+            "//fixture.invalid/repositories/repos/./inside",
         ] {
             assert!(ProjectDirectorySource::try_new(path).is_err(), "{path}");
         }

@@ -70,6 +70,7 @@ console = { version = "0.16.4", default-features = false, features = ["std"] }
 cqrsy = "0.11.0"
 criterion = "0.8.2"
 directories = "6.0.0"
+dunce = "1.0.5"
 dialoguer = { version = "0.12.0", default-features = false }
 expectrl = "0.9.0"
 dioxus = { version = "0.7.10", default-features = false }

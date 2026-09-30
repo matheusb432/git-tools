@@ -229,12 +229,11 @@ push-dialog-title =
         [one] Push { $count } commit?
        *[other] Push { $count } commits?
     }
-push-dialog-description = Only commits through the selected SHA will be pushed. Newer commits remain local.
-push-dialog-confirm =
-    { $count ->
-        [one] Push { $count } commit
-       *[other] Push { $count } commits
-    }
+push-dialog-description = Commits through { $commit } will be pushed. Newer commits stay local.
+push-details-disclosure = Details & command
+push-confirm-shortcut = Confirm push (Enter)
+push-detail-destination = Destination
+push-detail-remote-url = Remote URL
 push-detail-project = Project
 push-detail-directory = Directory
 push-detail-branch = Branch

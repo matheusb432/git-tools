@@ -282,7 +282,10 @@ mod tests {
         let document = json.as_object_mut().unwrap();
         for (key, value) in [
             ("repo_name", serde_json::json!("git-tools")),
-            ("repo_root", serde_json::json!("/repo")),
+            (
+                "repo_root",
+                serde_json::json!("//fixture.invalid/repositories/repo"),
+            ),
             ("range_label", serde_json::json!("main..HEAD")),
             (
                 "head_committed_at",
@@ -341,7 +344,7 @@ mod tests {
         let json = r#"{
             "repo_id":"deadbeef00000000",
             "repo_name":"git-tools",
-            "repo_root":"/repo",
+            "repo_root":"//fixture.invalid/repositories/repo",
             "kind":"two_dot",
             "base_sha":"aaaa",
             "head_sha":"bbbb",
@@ -363,7 +366,7 @@ mod tests {
         let json = r#"{
             "repo_id":"deadbeef00000000",
             "repo_name":"git-tools",
-            "repo_root":"/repo",
+            "repo_root":"//fixture.invalid/repositories/repo",
             "kind":"two_dot",
             "base_sha":"aaaa",
             "head_sha":"bbbb",
@@ -384,7 +387,7 @@ mod tests {
         let json = r#"{
             "repo_id":"deadbeef00000000",
             "repo_name":"git-tools",
-            "repo_root":"/repo",
+            "repo_root":"//fixture.invalid/repositories/repo",
             "kind":"two_dot",
             "base_sha":"aaaa",
             "head_sha":"bbbb",

@@ -147,7 +147,9 @@ fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
 fn tab(id: u64, label: RecipeLabel) -> TestResult<ViewerTab> {
     Ok(ViewerTab {
         details: Some(gtl_wire::viewer::ViewerTabDetails {
-            repository: gtl_models::paths::RepositoryRoot::try_new("/repos/git-tools".into())?,
+            repository: gtl_models::paths::RepositoryRoot::try_new(
+                "//fixture.invalid/repositories/repos/git-tools".into(),
+            )?,
             comparison: label.clone(),
             range: Some(gtl_models::diffs::PinnedRange {
                 base: gtl_models::diffs::CommitId::try_from("a".repeat(40))?,
@@ -989,7 +991,7 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
     let project = ViewerProject {
         comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
         id: "ALP".try_into().unwrap(),
-        path: RepositoryRoot::try_new("/repos/alpha".into()).unwrap(),
+        path: RepositoryRoot::try_new("//fixture.invalid/repositories/repos/alpha".into()).unwrap(),
         name: ProjectName::try_new("Alpha").unwrap(),
     };
     let response = v1::ListViewerProjectsResponse {
@@ -1020,7 +1022,7 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
                 comparison_branch: "main".to_owned(),
                 id: "invalid".into(),
                 name: "Alpha".into(),
-                path: "/repos/alpha".into(),
+                path: "//fixture.invalid/repositories/repos/alpha".into(),
             }],
             total: 1,
             count_before: 0,

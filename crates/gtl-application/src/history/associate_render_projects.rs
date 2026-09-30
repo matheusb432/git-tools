@@ -31,7 +31,7 @@ mod tests {
         seed_recent_render(&connection, 1, "snapshot");
         connection
             .execute_batch(
-                "INSERT INTO project_sources VALUES (1, 'directory', '/other-home/gt');
+                "INSERT INTO project_sources VALUES (1, 'directory', '//fixture.invalid/repositories/other-home/gt');
             INSERT INTO projects VALUES ('GT', 1, 'git-tools');",
             )
             .unwrap();
@@ -40,7 +40,7 @@ mod tests {
             .unwrap();
         assert!(all.entries[0].project_id.is_none());
         connection
-            .execute("UPDATE project_sources SET source_value = '/repos/gt'", [])
+            .execute("UPDATE project_sources SET source_value = '//fixture.invalid/repositories/repos/gt'", [])
             .unwrap();
         associate_render_projects::execute((), &connection).unwrap();
         let all = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)

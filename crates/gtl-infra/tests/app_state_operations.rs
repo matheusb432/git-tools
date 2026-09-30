@@ -38,7 +38,9 @@ fn repository_root(path: &Path) -> RepositoryRoot {
 
 fn unpushed_diff_recipe() -> Recipe {
     Recipe {
-        source: RecipeSource::LocalRepo(repository_root(Path::new("/repos/alpha"))),
+        source: RecipeSource::LocalRepo(repository_root(Path::new(
+            "//fixture.invalid/repositories/repos/alpha",
+        ))),
         op: RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         },
@@ -133,7 +135,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
         .unwrap()
         .execute_batch(
             "INSERT INTO render_sources (id, kind, value, created_at)
-             VALUES (1, 'directory', '/repos/fixture', '2026-07-18T00:00:00Z');
+             VALUES (1, 'directory', '//fixture.invalid/repositories/repos/fixture', '2026-07-18T00:00:00Z');
              WITH RECURSIVE render_number(value) AS (
                SELECT 1
                UNION ALL
@@ -463,7 +465,7 @@ fn register_project_status_combinations(connection: &rusqlite::Connection) -> an
             connection,
             id,
             &format!("Project {:02}", 20 - index),
-            &format!("/repos/{id}"),
+            &format!("//fixture.invalid/repositories/repos/{id}"),
         )?;
         let project = list_viewer_projects::get_project(&id.try_into()?, connection)?.unwrap();
         let status = ViewerProjectStatus {
@@ -486,7 +488,12 @@ fn register_project_status_combinations(connection: &rusqlite::Connection) -> an
         status_index::record(&project, Some(&status), connection)?;
         status_index::record(&project, None, connection)?;
     }
-    register_viewer_project(connection, "ZZ", "Unavailable", "/repos/ZZ")?;
+    register_viewer_project(
+        connection,
+        "ZZ",
+        "Unavailable",
+        "//fixture.invalid/repositories/repos/ZZ",
+    )?;
     Ok(())
 }
 
@@ -497,9 +504,14 @@ fn project_status_index_ignores_results_for_replaced_repositories() -> anyhow::R
     let directory = tempfile::tempdir()?;
     let database = SqliteAppState::open(directory.path())?;
     let connection = database.connection_lock()?;
-    register_viewer_project(&connection, "AA", "Original", "/repos/original")?;
+    register_viewer_project(
+        &connection,
+        "AA",
+        "Original",
+        "//fixture.invalid/repositories/repos/original",
+    )?;
     connection.execute(
-        "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', '/repos/replacement')",
+        "INSERT INTO project_sources (source_kind, source_value) VALUES ('directory', '//fixture.invalid/repositories/repos/replacement')",
         [],
     )?;
     let replacement = connection.last_insert_rowid();

@@ -1360,7 +1360,7 @@ mod tests {
 
     fn recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root("/repo")),
+            source: RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/repo")),
             op: RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
@@ -1374,7 +1374,7 @@ mod tests {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
             repo_name: project_name("repo"),
-            repo_root: repository_root("/repo"),
+            repo_root: repository_root("//fixture.invalid/repositories/repo"),
             branch: git_head("feature"),
             upstream: git_revision("main"),
             commits: Vec::new(),
@@ -1435,7 +1435,10 @@ mod tests {
         session.restore_history_id(id, Some(history_id));
         session.rename_snapshot(history_id, &project_name("Release review"));
         let details = session.tab_details(session.tab(id).unwrap());
-        assert_eq!(details.repository, repository_root("/repo"));
+        assert_eq!(
+            details.repository,
+            repository_root("//fixture.invalid/repositories/repo")
+        );
         assert_eq!(
             details.comparison,
             RecipeLabel::Compared {
@@ -1448,7 +1451,10 @@ mod tests {
         );
         session.cache.remove(id);
         let details = session.tab_details(session.tab(id).unwrap());
-        assert_eq!(details.repository, repository_root("/repo"));
+        assert_eq!(
+            details.repository,
+            repository_root("//fixture.invalid/repositories/repo")
+        );
         assert!(matches!(details.comparison, RecipeLabel::Changes { .. }));
     }
 
@@ -1549,7 +1555,9 @@ mod tests {
         session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(patch.clone()));
         let identity = session.active_content_identity();
         let mut other_recipe = recipe();
-        other_recipe.source = RecipeSource::LocalRepo(crate::utils::repository_root("/other"));
+        other_recipe.source = RecipeSource::LocalRepo(crate::utils::repository_root(
+            "//fixture.invalid/repositories/other",
+        ));
         let other = session.open(other_recipe, batch_id(2)).unwrap();
         assert_ne!(id, other);
         assert_eq!(session.content_identity(id), identity);
@@ -1665,7 +1673,10 @@ mod tests {
         let (mut session, id, ids) = ready_session_with_commits();
         let (ticket, repo_root, commit) = session.begin_commit_selection(id, &ids[0]).unwrap();
 
-        assert_eq!(repo_root, repository_root("/repo"));
+        assert_eq!(
+            repo_root,
+            repository_root("//fixture.invalid/repositories/repo")
+        );
         assert_eq!(commit.id, ids[0]);
         assert!(matches!(
             session.commit_selection_snapshot(id),
@@ -1995,7 +2006,11 @@ mod tests {
     #[test]
     fn pinned_snapshots_and_live_tabs_keep_an_empty_view() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let pinned = open_snapshot(&mut session, "/repo/pinned", 1);
+        let pinned = open_snapshot(
+            &mut session,
+            "//fixture.invalid/repositories/repo/pinned",
+            1,
+        );
         session.set_pinned(pinned.tab_id, true);
         let pinned = session.begin_compute(pinned.tab_id).unwrap();
         let live_id = session.open(recipe(), batch_id(2)).unwrap();
@@ -2023,9 +2038,14 @@ mod tests {
     #[test]
     fn skipped_snapshots_are_reported_once_their_batch_finishes() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let skipped = open_snapshot(&mut session, "/repo/empty", 1);
-        let computing = open_snapshot(&mut session, "/repo/changed", 1);
-        let other_batch = open_snapshot(&mut session, "/repo/other", 2);
+        let skipped = open_snapshot(&mut session, "//fixture.invalid/repositories/repo/empty", 1);
+        let computing = open_snapshot(
+            &mut session,
+            "//fixture.invalid/repositories/repo/changed",
+            1,
+        );
+        let other_batch =
+            open_snapshot(&mut session, "//fixture.invalid/repositories/repo/other", 2);
         let label = crate::utils::viewer::label("empty");
 
         session.skip_empty_snapshot_if_current(skipped, label.clone());
@@ -2048,7 +2068,11 @@ mod tests {
     fn skipped_snapshot_backlog_drops_its_oldest_labels() {
         let mut session = ViewerSession::new(cache_weight(1024));
         for index in 0..=SKIPPED_SNAPSHOTS_MAX {
-            let ticket = open_snapshot(&mut session, &format!("/repo/{index}"), 1);
+            let ticket = open_snapshot(
+                &mut session,
+                &format!("//fixture.invalid/repositories/repo/{index}"),
+                1,
+            );
             session.skip_empty_snapshot_if_current(
                 ticket,
                 crate::utils::viewer::label(&index.to_string()),
@@ -2164,7 +2188,8 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let first = session.open(recipe(), batch_id(1)).unwrap();
         let mut other = recipe();
-        other.source = RecipeSource::LocalRepo(repository_root("/other"));
+        other.source =
+            RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/other"));
         let second = session.open(other, batch_id(1)).unwrap();
 
         assert!(session.activate(first));
@@ -2176,7 +2201,12 @@ mod tests {
     #[test]
     fn new_snapshots_lead_the_review_list_and_active_close_returns_to_its_start() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let ids = ["/first", "/second", "/third"].map(|path| {
+        let ids = [
+            "//fixture.invalid/repositories/first",
+            "//fixture.invalid/repositories/second",
+            "//fixture.invalid/repositories/third",
+        ]
+        .map(|path| {
             let mut next = recipe();
             next.source = RecipeSource::LocalRepo(repository_root(path));
             session.open(next, batch_id(1)).unwrap()
@@ -2208,14 +2238,23 @@ mod tests {
             name: None,
         };
         let a1 = session
-            .open(range_recipe("/a", "a1..a2"), batch_id(1))
+            .open(
+                range_recipe("//fixture.invalid/repositories/a", "a1..a2"),
+                batch_id(1),
+            )
             .unwrap();
         let b1 = session
-            .open(range_recipe("/b", "b1..b2"), batch_id(2))
+            .open(
+                range_recipe("//fixture.invalid/repositories/b", "b1..b2"),
+                batch_id(2),
+            )
             .unwrap();
         // /a already has a tab, so the new /a tab enters next to it rather than the front.
         let a2 = session
-            .open(range_recipe("/a", "a3..a4"), batch_id(3))
+            .open(
+                range_recipe("//fixture.invalid/repositories/a", "a3..a4"),
+                batch_id(3),
+            )
             .unwrap();
 
         assert_eq!(
@@ -2229,7 +2268,8 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let oldest = session.open(recipe(), batch_id(1)).unwrap();
         let mut next = recipe();
-        next.source = RecipeSource::LocalRepo(repository_root("/next"));
+        next.source =
+            RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/next"));
         let active = session.open(next, batch_id(1)).unwrap();
         assert_eq!(session.close(oldest), Some(CloseOutcome::ActiveUnchanged));
         assert_eq!(session.active(), Some(active));
@@ -2243,7 +2283,9 @@ mod tests {
 
     fn pinned_unpushed_recipe(head: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
+            source: RecipeSource::LocalRepo(repository_root(
+                "//fixture.invalid/repositories/repos/gt",
+            )),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(crate::utils::pinned_range("a", head)),
@@ -2276,7 +2318,9 @@ mod tests {
     fn open_keeps_distinct_symbolic_intents_as_distinct_tabs() {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let range_recipe = |range: &str| Recipe {
-            source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
+            source: RecipeSource::LocalRepo(repository_root(
+                "//fixture.invalid/repositories/repos/gt",
+            )),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Range {
                     range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
@@ -2295,7 +2339,9 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let open = |session: &mut ViewerSession, range: &str, batch| {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo(repository_root("/repo")),
+                source: RecipeSource::LocalRepo(repository_root(
+                    "//fixture.invalid/repositories/repo",
+                )),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {
                         range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),

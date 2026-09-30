@@ -1,4 +1,6 @@
-use std::{path::PathBuf, time::Duration};
+#[cfg(unix)]
+use std::path::PathBuf;
+use std::time::Duration;
 
 use gtl_infra::testing::TestRepository;
 use gtl_models::failure::{Failure, PushFailure, PushRefRejection};

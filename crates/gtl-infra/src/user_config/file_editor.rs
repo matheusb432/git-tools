@@ -506,6 +506,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "requires Windows Developer Mode or the symbolic-link privilege"
+    )]
     fn set_through_relative_symlink_preserves_link_and_updates_target() {
         let directory = tempfile::tempdir().unwrap();
         let config_directory = directory.path().join("config");
@@ -533,6 +537,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "requires Windows Developer Mode or the symbolic-link privilege"
+    )]
     fn set_through_dangling_relative_symlink_creates_target() {
         let directory = tempfile::tempdir().unwrap();
         let config_directory = directory.path().join("config");
@@ -559,6 +567,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "requires Windows Developer Mode or the symbolic-link privilege"
+    )]
     fn symbolic_link_cycle_is_bounded_and_untouched() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.toml");
@@ -633,6 +645,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "requires Windows Developer Mode or the symbolic-link privilege"
+    )]
     fn symlink_aliases_share_the_lock_and_timeout_without_writing() {
         let directory = tempfile::tempdir().unwrap();
         let target = directory.path().join("managed").join("config.toml");

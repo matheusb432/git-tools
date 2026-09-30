@@ -89,6 +89,11 @@ pub enum Command {
     MacosPackage,
     /// Exercise the installed macOS package and save a desktop launch screenshot.
     MacosSmoke,
+    /// Package prebuilt Linux or Windows executables with their installation support.
+    ReleasePackage {
+        #[arg(value_enum)]
+        platform: crate::verbs::release_package::ReleasePlatform,
+    },
     /// Generate the viewer stylesheet and stage the release Dioxus Web bundle.
     WebBuild,
     /// Serve the Dioxus shell with repository-owned asset watchers.

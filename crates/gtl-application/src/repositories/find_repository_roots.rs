@@ -103,8 +103,8 @@ mod tests {
         utils::make_repository(&root.join("api"));
         utils::make_repository(&root.join("libs/inner"));
         let runner = ScriptedGitClient::new(vec![
-            ScriptedGitClient::applied("/real/api\n"),
-            ScriptedGitClient::applied("/real/libs/inner\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/api\n"),
+            ScriptedGitClient::applied("//fixture.invalid/repositories/real/libs/inner\n"),
         ]);
 
         let tops = find_repository_roots::execute(
@@ -120,11 +120,11 @@ mod tests {
             tops,
             vec![
                 RepositoryTarget {
-                    path: utils::repository_root("/real/api"),
+                    path: utils::repository_root("//fixture.invalid/repositories/real/api"),
                     label: utils::project_name("api"),
                 },
                 RepositoryTarget {
-                    path: utils::repository_root("/real/libs/inner"),
+                    path: utils::repository_root("//fixture.invalid/repositories/real/libs/inner"),
                     label: utils::project_name("libs/inner"),
                 },
             ]
@@ -151,7 +151,9 @@ mod tests {
             error.to_string(),
             format!(
                 "not a git repo: {}",
-                repository.canonicalize().unwrap().display()
+                RepositoryRoot::try_new(repository.canonicalize().unwrap())
+                    .unwrap()
+                    .display()
             )
         );
     }
