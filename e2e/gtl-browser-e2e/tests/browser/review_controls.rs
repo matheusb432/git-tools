@@ -93,9 +93,14 @@ async fn unpushed_status_keeps_review_buttons_in_place() -> Result<()> {
             ensure!(
                 push.bounding_box().await? == Some(before_push)
                     && close.bounding_box().await? == Some(before_close),
-                "review buttons moved when the unpushed border changed"
+                "review buttons moved when the unpushed status changed"
             );
         }
+        let push = page.locator("#review-push-trigger");
+        page.locator("#review-actions-hide").click(None).await?;
+        expect(push.clone()).to_be_hidden().await?;
+        page.locator("#review-actions-show").click(None).await?;
+        expect(push).to_be_visible().await?;
         Ok(())
     }
     .await;

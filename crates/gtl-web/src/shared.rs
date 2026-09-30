@@ -10,5 +10,6 @@ pub(crate) mod keyboard;
 pub(crate) mod recipe_label;
 pub(crate) mod retry_delay;
 pub(crate) mod ui;
+pub(crate) mod unsaved_changes_confirmation;
 pub(crate) mod viewer_client;
 pub(crate) mod viewer_theme;

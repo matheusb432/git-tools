@@ -6,7 +6,10 @@ mod extension_filter;
 mod kind;
 mod view_title;
 
-pub use commit::{Commit, CommitId, CommitIdAbbreviation, CommitIdError, PinnedRange};
+pub use commit::{
+    Commit, CommitId, CommitIdAbbreviation, CommitIdError, CommitTimeRange, CommitTimeRangeError,
+    PinnedRange,
+};
 pub use counts::DiffLineCount;
 pub use extension_filter::{
     AppliedExtensionFilter, ExtensionFilter, ExtensionFilterMode, ExtensionSelection,

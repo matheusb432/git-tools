@@ -11,8 +11,8 @@ use gtl_wire::viewer::{
     projects::{
         DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
         ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
-        ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
-        ViewerProjectStatus,
+        ProjectDiscovery, ProjectImportResult, SetViewerProjectStatus, UpdateViewerProject,
+        ViewerProjectPage, ViewerProjectStatus,
     },
 };
 use serde::Serialize;
@@ -786,6 +786,13 @@ viewer_request_command!(
     UpdateViewerProject,
     (),
     update_project
+);
+
+viewer_request_command!(
+    viewer_set_project_status,
+    SetViewerProjectStatus,
+    (),
+    set_project_status
 );
 
 viewer_request_command!(

@@ -7,8 +7,10 @@
   .sidebar-edge[data-sidebar-edge="commits"] { right: var(--commits-sidebar-width,var(--commits-sidebar-size)); @apply translate-x-1/2; }
   .sidebar-edge[data-sidebar-edge="files"][data-visible="false"] { @apply translate-x-0; }
   .sidebar-edge[data-sidebar-edge="commits"][data-visible="false"] { @apply translate-x-0; }
-  .sidebar-icon { @apply inline-flex; }
-  [data-sidebar-toggle][aria-pressed="false"] .sidebar-icon path { @apply hidden; }
+  .sidebar-toggle { @apply text-ink-3 transition-colors duration-150; }
+  .sidebar-toggle[aria-pressed="true"] { @apply text-acc enabled:hover:text-acc-2; }
+  .sidebar-icon-panel { @apply opacity-0 transition-opacity duration-150 ease-out; }
+  .sidebar-toggle[aria-pressed="true"] .sidebar-icon-panel { @apply opacity-40; }
   .diff-workspace-sidebar {
     @apply hidden workspace:block;
     transition: opacity 150ms ease-out, visibility 0s linear;
@@ -104,16 +106,24 @@
 }
 
 @layer components {
-  .review-action-dock { @apply pointer-events-none absolute right-5 bottom-5 z-30 print:hidden; }
-  .review-action-buttons { @apply pointer-events-auto relative flex items-center gap-1 rounded-lg border border-line-2 bg-surface p-1 shadow-floating; }
-  .review-action-buttons::before { @apply pointer-events-none absolute -inset-px rounded-[inherit] border-[2px] border-acc opacity-0 transition-opacity duration-200 ease-in-out; content: ""; }
-  .review-action-buttons[data-unpushed="true"]::before { @apply opacity-100; }
+  .review-action-dock { @apply pointer-events-none absolute bottom-5 left-1/2 z-30 grid -translate-x-1/2 place-items-center items-end print:hidden; }
+  .review-action-buttons {
+    @apply pointer-events-auto flex items-center gap-1 rounded-lg border border-line-2 bg-surface p-1 shadow-floating [grid-area:1/1];
+    transition: opacity 150ms ease-out, translate 200ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 0s;
+  }
+  .review-action-dock[data-collapsed="true"] .review-action-buttons { @apply pointer-events-none invisible opacity-0; translate: 0 0.75rem; transition-delay: 0s, 0s, 200ms; }
   .review-push-action, .review-close-action { @apply w-28 gap-1.5 px-2 text-xs; }
+  .review-action-divider { @apply mx-0.5 h-5 w-px bg-line-2; }
+  .review-action-reveal {
+    @apply pointer-events-none invisible inline-flex h-6 w-10 cursor-pointer items-center justify-center rounded-full border border-line-2 bg-surface text-ink-3 opacity-0 shadow-floating [grid-area:1/1] hover:bg-surface-2 hover:text-ink focus-visible:focus-outline focus-visible:outline-offset-2;
+    transition: opacity 150ms ease-out, visibility 0s linear 150ms;
+  }
+  .review-action-dock[data-collapsed="true"] .review-action-reveal { @apply pointer-events-auto visible opacity-100; transition-delay: 100ms, 0s; }
   .diff-document-clearance { @apply h-20 print:hidden; }
-  .project-push-setting { @apply border-t border-line pt-3 text-xs; }
   [id^="project-comparison"].popover-surface[data-placement] { @apply w-[min(22rem,calc(100vw-1rem))] max-h-[calc(100dvh-2rem)]; }
   @media (max-width: 479px) {
-    .review-action-dock { @apply right-3 bottom-3; }
+    .review-action-dock { @apply bottom-3; }
+    .review-step-action { @apply hidden; }
   }
 }
 
@@ -124,6 +134,8 @@
   .commit-search-icon { @apply pointer-events-none absolute top-2.5 left-2.5 z-1 text-ink-3; }
   .commit-search-actions { @apply absolute top-1.5 right-1.5 flex items-center; }
   .commit-search-hint { @apply mt-1 flex flex-wrap items-center justify-between gap-x-2 text-xs leading-4 text-ink-3; }
+  .commit-search-time { @apply mt-2 grid gap-2 text-xs; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); }
+  .commit-search-time input { @apply min-w-0 text-xs; }
   .commit-search-scope-menu.popover-surface[data-placement] { @apply w-44; }
   .commit-search-results { @apply min-h-0; }
   .commit-search-status { @apply m-0 min-h-8 px-3 py-2 text-xs text-ink-3; }

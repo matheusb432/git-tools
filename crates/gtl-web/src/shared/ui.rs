@@ -30,8 +30,6 @@ mod skeleton;
 mod text_input;
 mod toast;
 pub(crate) mod viewer_tab;
-#[cfg(feature = "component-preview")]
-mod viewer_theme_picker;
 
 #[cfg_attr(
     not(feature = "component-preview"),
@@ -39,9 +37,7 @@ mod viewer_theme_picker;
 )]
 pub(crate) use alert_dialog::{AlertDialog, AlertDialogVariant};
 pub(crate) use badge::{Badge, BadgeVariant};
-pub(crate) use button::{
-    Button, ButtonLayout, ButtonSize, ButtonState, ButtonType, ButtonVariant, button_classes,
-};
+pub(crate) use button::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonType, ButtonVariant};
 pub(crate) use count_badge::CountBadge;
 pub(crate) use empty_notice::EmptyNotice;
 pub(crate) use extension_selection::{ExtensionSelectionAction, ExtensionSelectionInput};
@@ -62,8 +58,6 @@ pub(crate) use skeleton::Skeleton;
 pub(crate) use text_input::{TextInput, TextInputLabelVisibility};
 pub(crate) use toast::{ToastHandle, ToastHost, ToastKind, ToastText, use_toast};
 pub(crate) use viewer_tab::{ViewerTabItem, ViewerTabSelectionIndicator, viewer_tab_element_id};
-#[cfg(feature = "component-preview")]
-pub(crate) use viewer_theme_picker::ViewerThemePicker;
 
 mod hover_popover;
 

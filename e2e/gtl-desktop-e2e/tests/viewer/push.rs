@@ -79,35 +79,51 @@ async fn user_pushes_exactly_the_reviewed_commit() -> Result<()> {
             support::visible(driver, By::Css("#viewer-push-trigger:disabled")).await?;
             wait_for_snapshot_status(driver, false).await?;
 
-            support::click(driver, By::Css("a[aria-label='Projects']")).await?;
-            support::click(
-                driver,
-                By::Css("tr[aria-label='push-review'] button[aria-label^='Project settings,']"),
-            )
-            .await?;
-            enable_project_opt_out(driver).await?;
-            support::evidence::capture(driver, "project-push-preference", true).await?;
-            let newer = fixture.current_head()?;
-            fixture.forward_snapshot(session.data_root())?;
-            support::wait_for_active_diff(driver, "push-review", "push-newer-marker").await?;
-            support::visible(driver, By::Css("#review-push-trigger:enabled")).await?;
-            push_with_keyboard(driver).await?;
-            support::dismiss_toast(driver, "Push completed.").await?;
-            ensure!(
-                fixture.remote_head()? == newer,
-                "project opt-out did not push the reviewed snapshot"
-            );
-            ensure!(
-                driver
-                    .find(By::Css("#viewer-push-confirmation[open]"))
-                    .await
-                    .is_err(),
-                "project opt-out showed confirmation"
-            );
-            Ok(())
+            push_without_confirmation(driver, &fixture, session.data_root()).await
         })
     })
     .await
+}
+
+async fn push_without_confirmation(
+    driver: &WebDriver,
+    fixture: &support::fixture::PushFixture,
+    data_root: &std::path::Path,
+) -> Result<()> {
+    support::click(driver, By::Css("a[aria-label='Projects']")).await?;
+    support::click(
+        driver,
+        By::Css("tr[aria-label='push-review'] button[aria-label='Edit push-review']"),
+    )
+    .await?;
+    select_project_opt_out(driver).await?;
+    let newer = fixture.current_head()?;
+    fixture.forward_snapshot(data_root)?;
+    support::wait_for_active_diff(driver, "push-review", "push-newer-marker").await?;
+    support::click(driver, By::Css("a[aria-label='Projects']")).await?;
+    save_project_opt_out(driver).await?;
+    support::evidence::capture(driver, "project-push-preference", true).await?;
+    support::click(
+        driver,
+        By::XPath("//*[@role='tab' and contains(., 'push-review')]"),
+    )
+    .await?;
+    support::wait_for_active_diff(driver, "push-review", "push-newer-marker").await?;
+    support::visible(driver, By::Css("#review-push-trigger:enabled")).await?;
+    push_with_keyboard(driver).await?;
+    support::dismiss_toast(driver, "Push completed.").await?;
+    ensure!(
+        fixture.remote_head()? == newer,
+        "project opt-out did not push the reviewed snapshot"
+    );
+    ensure!(
+        driver
+            .find(By::Css("#viewer-push-confirmation[open]"))
+            .await
+            .is_err(),
+        "project opt-out showed confirmation"
+    );
+    Ok(())
 }
 
 async fn push_with_keyboard(driver: &WebDriver) -> Result<()> {
@@ -134,20 +150,40 @@ async fn wait_for_snapshot_status(driver: &WebDriver, unpushed: bool) -> Result<
     .await
 }
 
-async fn enable_project_opt_out(driver: &WebDriver) -> Result<()> {
-    let setting = By::Css("input[id$='-push-no-confirmation']:enabled");
-    let checkbox = support::visible(driver, setting.clone()).await?;
+const PROJECT_OPT_OUT: &str = "#project-edit-push-no-confirmation:enabled";
+
+async fn select_project_opt_out(driver: &WebDriver) -> Result<()> {
+    let checkbox = support::visible(driver, By::Css(PROJECT_OPT_OUT)).await?;
     ensure!(
         !checkbox.is_selected().await?,
         "viewer confirmation opt-out must default off"
     );
     checkbox.click().await?;
+    Ok(())
+}
+
+async fn save_project_opt_out(driver: &WebDriver) -> Result<()> {
+    ensure!(
+        support::visible(driver, By::Css(PROJECT_OPT_OUT))
+            .await?
+            .is_selected()
+            .await?,
+        "leaving Projects discarded the unsaved opt-out"
+    );
+    support::click(
+        driver,
+        By::XPath("//dialog[@id='project-edit-dialog']//button[normalize-space()='Save']"),
+    )
+    .await?;
     wait::until(
         "project push preference saved",
         wait::ASSERTION_TIMEOUT,
         || async {
-            let checkbox = driver.find(setting.clone()).await?;
-            Ok((checkbox.is_enabled().await? && checkbox.is_selected().await?).then_some(()))
+            Ok(driver
+                .find(By::Id("project-edit-dialog"))
+                .await
+                .is_err()
+                .then_some(()))
         },
     )
     .await

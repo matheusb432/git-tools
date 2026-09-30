@@ -12,7 +12,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 12] = [
+const EDGE_POLICIES: [EdgePolicy; 11] = [
     EdgePolicy {
         from: "gtl-artifacts",
         label: "gtl-artifacts owns standalone document rendering",
@@ -177,13 +177,6 @@ const EDGE_POLICIES: [EdgePolicy; 12] = [
         forbidden: &["gtl-application", "gtl-infra"],
         forbid_workspace_packages: false,
         reason: "the CLI must call gtl-server through gtl-client instead of executing application or infrastructure behavior",
-    },
-    EdgePolicy {
-        from: "gtl-macros",
-        label: "gtl-macros stays a leaf proc macro",
-        forbidden: &[],
-        forbid_workspace_packages: true,
-        reason: "derive expansions name gtl-models paths; the proc macro itself must not depend on workspace packages",
     },
     EdgePolicy {
         from: "gtl-parser",

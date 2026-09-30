@@ -6,7 +6,7 @@ publish.workspace = true
 
 [dependencies]
 dunce.workspace = true
-gtl-macros.workspace = true
+error-meta.workspace = true
 nutype = { workspace = true, features = ["serde"] }
 serde.workspace = true
 strum.workspace = true

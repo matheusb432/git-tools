@@ -205,6 +205,7 @@ mod tests {
             name: "Test".try_into().unwrap(),
             path: gtl_models::paths::RepositoryRoot::try_new("/repos/test".into()).unwrap(),
             comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
+            status: gtl_models::projects::catalogue::ProjectStatus::Active,
         };
         let status = ViewerProjectStatus {
             project_id: project.id.clone(),
@@ -245,6 +246,7 @@ mod tests {
             name: "Test".try_into().unwrap(),
             path: gtl_models::paths::RepositoryRoot::try_new("/repos/test".into()).unwrap(),
             comparison_branch: gtl_models::projects::comparison::ComparisonBranch::default(),
+            status: gtl_models::projects::catalogue::ProjectStatus::Active,
         };
         let quiet = ViewerProject {
             id: "QUI".try_into().unwrap(),

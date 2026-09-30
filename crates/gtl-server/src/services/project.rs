@@ -4,7 +4,7 @@ use gtl_application::{
     projects::{
         RepoSyncResult, SyncExit, SyncStatus,
         catalogue::{
-            create_project, get_project, list_active_projects,
+            create_project, get_project, list_projects,
             set_project_membership::{self, ProjectMembership, SetProjectMembership},
         },
         get_project_repository::{self, GetProjectRepository},
@@ -16,7 +16,7 @@ use gtl_application::{
 use gtl_models::{
     git::GitEffectMode,
     paths::ProjectName,
-    projects::catalogue::{ProjectIds, ProjectStatus},
+    projects::catalogue::{ProjectIds, ProjectStatus, ProjectStatusFilter},
     repository::traversal::RepositoryTarget,
 };
 use gtl_wire::v1::{self, project_service_server::ProjectService};
@@ -116,7 +116,7 @@ impl ProjectService for ProjectGrpcService {
                 .database
                 .connection_lock()
                 .map_err(|error| catalogue::lock_error(&error))?;
-            list_active_projects::execute((), &connection).into_grpc()
+            list_projects::execute(ProjectStatusFilter::Active, &connection).into_grpc()
         })
         .await??;
         Ok(Response::new(v1::ListActiveProjectsResponse {

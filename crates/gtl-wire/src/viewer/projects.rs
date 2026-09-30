@@ -78,6 +78,7 @@ pub struct ListViewerProjects {
     pub cursor: ViewerProjectsCursor,
     pub page_size: ViewerProjectsPageSize,
     pub sort: Option<gtl_models::settings::ProjectsSort>,
+    pub status: gtl_models::projects::catalogue::ProjectStatusFilter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,6 +161,13 @@ pub struct ViewerProject {
     pub path: RepositoryRoot,
     pub name: ProjectName,
     pub comparison_branch: gtl_models::projects::comparison::ComparisonBranch,
+    pub status: gtl_models::projects::catalogue::ProjectStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetViewerProjectStatus {
+    pub project_id: gtl_models::projects::catalogue::ProjectId,
+    pub status: gtl_models::projects::catalogue::ProjectStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,7 +6,10 @@ mod row_sessions;
 use gtl_local_transport::LocalEndpoint;
 use gtl_wire::{
     proto,
-    v1::{self, viewer_service_client::ViewerServiceClient},
+    v1::{
+        self, project_service_client::ProjectServiceClient,
+        viewer_service_client::ViewerServiceClient,
+    },
     viewer::{
         EditSettingsRequest, FindViewerDiff, GetViewerHistoryCopy, ListViewerCommits,
         ListViewerHistory, MoveViewerTab, OpenViewerDiffFile, OpenViewerHistory, SearchViewerFiles,
@@ -17,8 +20,8 @@ use gtl_wire::{
         projects::{
             DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
             ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
-            ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
-            ViewerProjectStatus,
+            ProjectDiscovery, ProjectImportResult, SetViewerProjectStatus, UpdateViewerProject,
+            ViewerProjectPage, ViewerProjectStatus,
         },
     },
 };
@@ -70,6 +73,7 @@ macro_rules! viewer_unary_methods_with_fallible_request {
 #[derive(Clone)]
 pub struct ViewerClient {
     client: ViewerServiceClient<tonic::transport::Channel>,
+    projects: ProjectServiceClient<tonic::transport::Channel>,
     server_instance_id: String,
     protocol_version: u32,
     row_sessions: std::sync::Arc<tokio::sync::Mutex<row_sessions::RowSessions>>,
@@ -272,6 +276,28 @@ impl ViewerClient {
         Ok(())
     }
 
+    pub async fn set_project_status(
+        &mut self,
+        request: SetViewerProjectStatus,
+    ) -> Result<(), ViewerClientError> {
+        use gtl_models::projects::catalogue::ProjectStatus;
+        let project_id = request.project_id.into_inner();
+        let mode = v1::ProjectOperationMode::Apply.into();
+        match request.status {
+            ProjectStatus::Paused => self
+                .projects
+                .pause_project(v1::PauseProjectRequest { project_id, mode })
+                .await
+                .map(drop),
+            ProjectStatus::Active => self
+                .projects
+                .resume_project(v1::ResumeProjectRequest { project_id, mode })
+                .await
+                .map(drop),
+        }
+        .map_err(|status| decode_status(&status))
+    }
+
     pub async fn open_project(
         &mut self,
         request: OpenViewerProject,
@@ -316,10 +342,12 @@ impl ViewerClient {
             .await
             .map_err(|_| ViewerClientError::Disconnected)?;
         validate_viewer_protocol(server_info.protocol_version())?;
+        let projects = ProjectServiceClient::new(native.channel.clone());
         let client = ViewerServiceClient::new(native.channel)
             .max_decoding_message_size(VIEWER_RESPONSE_MAX_BYTES);
         Ok(Self {
             client,
+            projects,
             server_instance_id: server_info.server_instance_id().to_owned(),
             protocol_version: server_info.protocol_version(),
             row_sessions: std::sync::Arc::default(),

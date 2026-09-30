@@ -993,6 +993,7 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
         id: "ALP".try_into().unwrap(),
         path: RepositoryRoot::try_new("//fixture.invalid/repositories/repos/alpha".into()).unwrap(),
         name: ProjectName::try_new("Alpha").unwrap(),
+        status: gtl_models::projects::catalogue::ProjectStatus::Paused,
     };
     let response = v1::ListViewerProjectsResponse {
         projects: vec![projects::encode_project(&project)],
@@ -1023,6 +1024,7 @@ fn project_contracts_preserve_status_and_reject_invalid_open_requests() {
                 id: "invalid".into(),
                 name: "Alpha".into(),
                 path: "//fixture.invalid/repositories/repos/alpha".into(),
+                project_status: v1::ProjectStatus::Active.into(),
             }],
             total: 1,
             count_before: 0,
@@ -1090,22 +1092,30 @@ fn project_statuses_round_trip_through_grpc_and_desktop_json() {
 
 #[test]
 fn project_page_bounds_survive_grpc_and_desktop_json() {
+    use gtl_models::projects::catalogue::ProjectStatusFilter;
     use gtl_wire::{
         proto::viewer::projects,
         viewer::projects::{
             ListViewerProjects, ViewerProjectPage, ViewerProjectsCursor, ViewerProjectsPageSize,
         },
     };
-    for cursor in [
-        ViewerProjectsCursor::First,
-        ViewerProjectsCursor::After("GTL".try_into().unwrap()),
-        ViewerProjectsCursor::Before("GTL".try_into().unwrap()),
-        ViewerProjectsCursor::Last,
+    for (cursor, status) in [
+        (ViewerProjectsCursor::First, ProjectStatusFilter::Active),
+        (
+            ViewerProjectsCursor::After("GTL".try_into().unwrap()),
+            ProjectStatusFilter::Paused,
+        ),
+        (
+            ViewerProjectsCursor::Before("GTL".try_into().unwrap()),
+            ProjectStatusFilter::All,
+        ),
+        (ViewerProjectsCursor::Last, ProjectStatusFilter::Active),
     ] {
         let request = ListViewerProjects {
             sort: Some(gtl_models::settings::ProjectsSort::ChangesAscending),
             cursor,
             page_size: ViewerProjectsPageSize::try_new(100).unwrap(),
+            status,
         };
         assert_eq!(
             projects::decode_list(projects::encode_list(request.clone())).unwrap(),
@@ -1117,6 +1127,9 @@ fn project_page_bounds_survive_grpc_and_desktop_json() {
             request
         );
     }
+    let mut unfiltered = projects::encode_list(ListViewerProjects::default());
+    unfiltered.status = v1::ProjectStatusFilter::Unspecified.into();
+    assert!(projects::decode_list(unfiltered).is_err());
     for size in [0, 101, u32::MAX] {
         assert!(ViewerProjectsPageSize::try_new(size).is_err());
         assert!(serde_json::from_value::<ViewerProjectsPageSize>(serde_json::json!(size)).is_err());

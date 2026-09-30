@@ -1,11 +1,10 @@
 use dioxus::prelude::*;
-use gtl_models::settings::ProjectsSort;
+use gtl_models::{projects::catalogue::ProjectStatus, settings::ProjectsSort};
 use gtl_wire::viewer::projects::ViewerProject;
-use lucide_dioxus::{ArrowUp, Check, FilePenLine, FilePlus, GitBranch, TriangleAlert};
+use lucide_dioxus::{ArrowUp, Check, CirclePause, FilePenLine, FilePlus, GitBranch, TriangleAlert};
 
 use super::{
-    comparison_action::ProjectComparisonAction,
-    comparison_editor::ProjectComparisonEditor,
+    pause_toggle::ProjectPauseToggle,
     presentation::{
         ProjectPresentation, ProjectStatusSpinner, ReviewStatusDot, project_presentation,
     },
@@ -104,10 +103,12 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
     } = project_presentation(result, language);
     let destination =
         (!disabled && local.is_available()).then(|| Route::project_diff(&project.path));
+    let paused = project.status == ProjectStatus::Paused;
     rsx! {
         DataTableRow {
             "data-testid": "project-table-row",
             "data-project-row": "{project.path}",
+            "data-paused": paused.to_string(),
             aria_label: "{project.name}",
             aria_busy: loading.to_string(),
             TableColumn { class: "w-8",
@@ -122,10 +123,21 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                     destination: destination.clone(),
                     tabindex: "0",
                     test_id: "project-table-name",
-                    span {
-                        class: "block max-w-64 min-w-36 truncate font-semibold text-ink",
-                        title: "{project.path}",
-                        "{project.name}"
+                    span { class: "flex max-w-80 min-w-36 items-center gap-2",
+                        span {
+                            class: "project-name min-w-0 truncate",
+                            title: "{project.path}",
+                            "{project.name}"
+                        }
+                        if paused {
+                            span {
+                                class: "project-paused-indicator",
+                                role: "img",
+                                aria_label: t!(language, "projects-paused-status"),
+                                title: t!(language, "projects-paused-status"),
+                                CirclePause { size: 14 }
+                            }
+                        }
                     }
                 }
             }
@@ -161,12 +173,8 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
             TableColumn { class: "text-right",
                 DataTableActions {
                     super::CommitSearchButton { project: project.clone(), disabled }
-                    ProjectComparisonAction {
-                        path: project.path.clone(),
-                        disabled: disabled || !local.is_available(),
-                    }
-                    super::SnapshotHistoryButton { project: project.name.clone() }
-                    ProjectComparisonEditor { project: project.clone(), disabled }
+                    ProjectPauseToggle { project: project.clone(), disabled }
+                    super::ProjectEditButton { project: project.clone(), disabled }
                     if failed {
                         crate::shared::ui::Button {
                             variant: crate::shared::ui::ButtonVariant::Ghost,

@@ -6,7 +6,7 @@ pub mod text;
 use std::path::PathBuf;
 
 use gtl_models::{
-    diffs::{CommitId, DiffLineCount, DiffViewTitle},
+    diffs::{CommitId, CommitTimeRange, DiffLineCount, DiffViewTitle},
     failure::Failure,
     git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
@@ -2361,6 +2361,8 @@ pub fn encode_search_viewer_commits_request(
             }
         }),
         query: request.query,
+        time_from: request.time_range.from().map(ToString::to_string),
+        time_until: request.time_range.until().map(ToString::to_string),
     }
 }
 
@@ -2388,6 +2390,23 @@ pub fn decode_search_viewer_commits_request(
     Ok(SearchViewerCommits {
         scope,
         query: request.query,
+        time_range: CommitTimeRange::new(
+            request
+                .time_from
+                .map(MachineTimestamp::try_from)
+                .transpose()
+                .map_err(|_| ViewerCodecError::InvalidField { field: "time_from" })?,
+            request
+                .time_until
+                .map(MachineTimestamp::try_from)
+                .transpose()
+                .map_err(|_| ViewerCodecError::InvalidField {
+                    field: "time_until",
+                })?,
+        )
+        .map_err(|_| ViewerCodecError::InvalidField {
+            field: "time_range",
+        })?,
     })
 }
 
@@ -2525,6 +2544,11 @@ mod commit_search_tests {
             let request = SearchViewerCommits {
                 scope: scope.clone(),
                 query: "ação".into(),
+                time_range: CommitTimeRange::new(
+                    Some("2026-09-29T09:00:00-03:00".try_into().unwrap()),
+                    Some("2026-09-30T12:00:00Z".try_into().unwrap()),
+                )
+                .unwrap(),
             };
             assert_eq!(
                 decode_search_viewer_commits_request(encode_search_viewer_commits_request(
@@ -2558,5 +2582,47 @@ mod commit_search_tests {
             .unwrap_err(),
             ViewerCodecError::InvalidField { field: "query" }
         );
+    }
+
+    #[test]
+    fn time_bounds_allow_missing_values_and_reject_invalid_or_reversed_instants() {
+        let request = || v1::SearchViewerCommitsRequest {
+            scope: Some(v1::search_viewer_commits_request::Scope::ActiveBranchPath(
+                "//fixture.invalid/repositories/repo".into(),
+            )),
+            ..Default::default()
+        };
+        for (from, until) in [
+            (None, None),
+            (Some("2026-09-29T12:00:00Z"), None),
+            (None, Some("2026-09-30T12:00:00Z")),
+        ] {
+            let raw = v1::SearchViewerCommitsRequest {
+                time_from: from.map(str::to_owned),
+                time_until: until.map(str::to_owned),
+                ..request()
+            };
+            assert_eq!(
+                encode_search_viewer_commits_request(
+                    decode_search_viewer_commits_request(raw.clone()).unwrap()
+                ),
+                raw
+            );
+        }
+        for (from, until, field) in [
+            ("2026-09-29T12:00:00", "2026-09-30T12:00:00Z", "time_from"),
+            ("2026-09-29T12:00:00Z", "tomorrow", "time_until"),
+            ("2026-09-30T12:00:00Z", "2026-09-29T12:00:00Z", "time_range"),
+        ] {
+            assert_eq!(
+                decode_search_viewer_commits_request(v1::SearchViewerCommitsRequest {
+                    time_from: Some(from.into()),
+                    time_until: Some(until.into()),
+                    ..request()
+                })
+                .unwrap_err(),
+                ViewerCodecError::InvalidField { field }
+            );
+        }
     }
 }

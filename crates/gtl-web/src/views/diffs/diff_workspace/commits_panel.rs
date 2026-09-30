@@ -5,15 +5,18 @@ use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::{Check, Search, X};
 
-use crate::shared::{
-    browser,
-    date_display::DateDisplayTime,
-    failure_message::failure_message,
-    i18n::{t, use_language},
-    ui::{
-        Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
-        EmptyNotice, HoverPopover, ScrollArea, use_hover_popover,
+use crate::{
+    shared::{
+        browser,
+        date_display::DateDisplayTime,
+        failure_message::failure_message,
+        i18n::{t, use_language},
+        ui::{
+            Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
+            EmptyNotice, HoverPopover, ScrollArea, use_hover_popover,
+        },
     },
+    views::commit_search::time::CommitSearchTimeInput,
 };
 
 #[component]
@@ -61,8 +64,12 @@ pub(super) fn WorkspaceCommitsPanel(
     let mut search_visible = use_signal(|| false);
     let mut query = use_signal(String::new);
     let mut active_branch = use_signal(|| false);
+    let mut time = use_signal(CommitSearchTimeInput::default);
+    let time_range = use_memo(move || time().parse(browser::local_offset_at));
     let request = use_memo(move || {
-        if !search_visible() || (!active_branch() && query().trim().is_empty()) {
+        if !search_visible()
+            || (!active_branch() && query().trim().is_empty() && !time().has_bounds())
+        {
             return None;
         }
         let view = workspace.view.read();
@@ -75,6 +82,7 @@ pub(super) fn WorkspaceCommitsPanel(
                 gtl_wire::viewer::commit_search::ViewerCommitSearchScope::Snapshot(view.identity)
             },
             query: query(),
+            time_range: time_range().ok()?,
         })
     });
     let mut search = crate::views::commit_search::use_commit_search(request);
@@ -104,7 +112,8 @@ pub(super) fn WorkspaceCommitsPanel(
             onselect.call(id);
         }
     });
-    let searching = request().is_some();
+    let searching =
+        search_visible() && (active_branch() || !query().trim().is_empty() || time().has_bounds());
     let search_id = format!("{details_popover_id_prefix}-search");
     let search_region_id = format!("{search_id}-region");
     let search_trigger_id = format!("{search_id}-trigger");
@@ -112,6 +121,7 @@ pub(super) fn WorkspaceCommitsPanel(
     let dismiss_focus_id = search_trigger_id.clone();
     let dismiss = use_callback(move |()| {
         query.set(String::new());
+        time.set(CommitSearchTimeInput::default());
         active_branch.set(false);
         search_visible.set(false);
         browser::focus_element(dismiss_focus_id.clone());
@@ -168,9 +178,12 @@ pub(super) fn WorkspaceCommitsPanel(
                     crate::views::commit_search::CommitSearchInput {
                         id: search_id.clone(),
                         query: query(),
+                        time: time(),
+                        time_error: time_range().err(),
                         snapshot: true,
                         active_branch: active_branch(),
                         onchange: move |value| query.set(value),
+                        ontime: move |value| time.set(value),
                         onscope: move |value| active_branch.set(value),
                         ondismiss: dismiss,
                         onfirst: move |()| browser::focus_element(first_id.clone()),
@@ -204,9 +217,9 @@ pub(super) fn WorkspaceCommitsPanel(
                 if searching {
                     crate::views::commit_search::CommitSearchResults {
                         id: search_id,
-                        result: search_result,
+                        result: request().and(search_result),
                         selected: (!active_branch()).then(|| selected_id.cloned()).flatten(),
-                        loading: !current,
+                        loading: request().is_some() && !current,
                         disabled: selection_pending || (opening.pending)(),
                         onselect: search_select,
                         onretry: move |()| search.restart(),

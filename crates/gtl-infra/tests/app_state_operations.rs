@@ -20,6 +20,7 @@ use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
 use gtl_models::{
     git::CommitCount,
     paths::{ProjectName, RepositoryRoot},
+    projects::catalogue::ProjectStatusFilter,
     timestamps::MachineTimestamp,
 };
 
@@ -334,6 +335,7 @@ fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyho
         sort: None,
         page_size: ViewerProjectsPageSize::try_new(2)?,
         cursor: ViewerProjectsCursor::First,
+        status: ProjectStatusFilter::Active,
     };
     let page = list_viewer_projects::execute(&request, &connection)?;
     assert_eq!(
@@ -355,6 +357,88 @@ fn viewer_projects_page_stored_sources_without_git_or_status_ordering() -> anyho
     assert_eq!(page.projects()[0].id.as_ref(), "GAM");
     assert_eq!(page.count_before(), 2);
     assert!(!page.projects()[0].path.as_ref().exists());
+    Ok(())
+}
+
+#[test]
+fn viewer_projects_select_paused_projects_by_status() -> anyhow::Result<()> {
+    use gtl_application::projects::list_viewer_projects;
+    use gtl_models::{projects::catalogue::ProjectStatus, settings::ProjectsSort};
+    use gtl_wire::viewer::projects::{
+        ListViewerProjects, ViewerProjectsCursor, ViewerProjectsPageSize,
+    };
+
+    let directory = tempfile::tempdir()?;
+    let state = SqliteAppState::open(directory.path())?;
+    let connection = state.connection_lock()?;
+    for id in ["ACT", "PAU", "UNM"] {
+        register_viewer_project(
+            &connection,
+            id,
+            id,
+            &format!("//fixture.invalid/repositories/repos/{id}"),
+        )?;
+    }
+    connection.execute(
+        "UPDATE projects SET paused_at = '2026-01-01T00:00:00.000Z' WHERE id IN ('PAU', 'UNM')",
+        [],
+    )?;
+    connection.execute(
+        "UPDATE projects SET unmanaged_at = '2026-01-01T00:00:00.000Z' WHERE id = 'UNM'",
+        [],
+    )?;
+    for sort in [None, Some(ProjectsSort::Changes)] {
+        for (status, expected) in [
+            (
+                ProjectStatusFilter::Active,
+                &[("ACT", ProjectStatus::Active)][..],
+            ),
+            (
+                ProjectStatusFilter::Paused,
+                &[("PAU", ProjectStatus::Paused)],
+            ),
+            (
+                ProjectStatusFilter::All,
+                &[
+                    ("ACT", ProjectStatus::Active),
+                    ("PAU", ProjectStatus::Paused),
+                ],
+            ),
+        ] {
+            let page = list_viewer_projects::execute(
+                &ListViewerProjects {
+                    sort,
+                    page_size: ViewerProjectsPageSize::try_new(10)?,
+                    cursor: ViewerProjectsCursor::First,
+                    status,
+                },
+                &connection,
+            )?;
+            assert_eq!(
+                page.projects()
+                    .iter()
+                    .map(|project| (project.id.as_ref(), project.status))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{sort:?} {status:?}"
+            );
+            assert_eq!(page.total() as usize, expected.len());
+            let candidates = list_viewer_projects::status_refresh_candidates(status, &connection)?;
+            assert_eq!(
+                candidates
+                    .iter()
+                    .map(|project| project.id.as_ref())
+                    .collect::<Vec<_>>(),
+                expected.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+            );
+        }
+    }
+    assert_eq!(
+        list_viewer_projects::get_project(&"PAU".try_into()?, &connection)?
+            .map(|project| project.status),
+        Some(ProjectStatus::Paused)
+    );
+    assert!(list_viewer_projects::get_project(&"UNM".try_into()?, &connection)?.is_none());
     Ok(())
 }
 
@@ -389,6 +473,7 @@ fn sqlite_sorts_every_change_combination_before_project_pagination() -> anyhow::
             cursor,
             page_size: ViewerProjectsPageSize::try_new(3)?,
             sort: Some(sort),
+            status: ProjectStatusFilter::Active,
         };
         let page = list_viewer_projects::execute(&request, &connection)?;
         assert_eq!(
@@ -431,7 +516,8 @@ fn sqlite_sorts_every_change_combination_before_project_pagination() -> anyhow::
     )?;
     assert_page(BranchDescending, First, &["II", "HH", "GG"], 0)?;
     assert_page(BranchDescending, Last, &["ZZ"], 9)?;
-    let candidates = list_viewer_projects::status_refresh_candidates(&connection)?;
+    let candidates =
+        list_viewer_projects::status_refresh_candidates(ProjectStatusFilter::Active, &connection)?;
     assert_eq!(
         candidates
             .iter()

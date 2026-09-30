@@ -9,7 +9,6 @@ members = [
   "crates/gtl-wire",
   "crates/gtl-server",
   "crates/gtl-desktop",
-  "crates/gtl-macros",
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
@@ -28,7 +27,6 @@ default-members = [
   "crates/gtl-local-transport",
   "crates/gtl-wire",
   "crates/gtl-server",
-  "crates/gtl-macros",
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
@@ -48,7 +46,6 @@ gtl-local-transport = { path = "crates/gtl-local-transport" }
 gtl-wire = { path = "crates/gtl-wire", default-features = false }
 gtl-desktop = { path = "crates/gtl-desktop" }
 gtl-artifacts = { path = "crates/gtl-artifacts" }
-gtl-macros = { path = "crates/gtl-macros" }
 gtl-models = { path = "crates/gtl-models" }
 gtl-parser = { path = "crates/gtl-parser", default-features = false }
 gtl-server = { path = "crates/gtl-server" }
@@ -56,6 +53,7 @@ gtl-infra = { path = "crates/gtl-infra" }
 gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 dx-story = "0.1.0"
+error-meta = { path = "../../shared-libs/error-meta" }
 
 anyhow = "1"
 assert_cmd = "2"

@@ -32,10 +32,10 @@ use viewer_ipc::{
     viewer_open_unpushed_project_diffs, viewer_read_diff_text, viewer_read_settings_file,
     viewer_refresh_tab, viewer_rename_snapshot, viewer_reset_settings, viewer_search_commits,
     viewer_search_files, viewer_select_commit, viewer_set_changes_since, viewer_set_modified_files,
-    viewer_set_preference, viewer_set_tab_live, viewer_set_tab_pinned, viewer_start_push,
-    viewer_stream_rows_cancel, viewer_stream_rows_next_batch, viewer_stream_rows_start,
-    viewer_update_project, viewer_update_tab, viewer_watch_cancel, viewer_watch_next_batch,
-    viewer_watch_start,
+    viewer_set_preference, viewer_set_project_status, viewer_set_tab_live, viewer_set_tab_pinned,
+    viewer_start_push, viewer_stream_rows_cancel, viewer_stream_rows_next_batch,
+    viewer_stream_rows_start, viewer_update_project, viewer_update_tab, viewer_watch_cancel,
+    viewer_watch_next_batch, viewer_watch_start,
 };
 use window_launch::WindowLaunch;
 
@@ -264,6 +264,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_open_project,
             viewer_open_unpushed_project_diffs,
             viewer_update_project,
+            viewer_set_project_status,
             viewer_activate_tab,
             viewer_move_tab,
             viewer_close_tab,

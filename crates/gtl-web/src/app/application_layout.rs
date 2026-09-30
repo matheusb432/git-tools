@@ -580,6 +580,7 @@ fn ApplicationLayoutContent() -> Element {
     crate::views::push::use_push_provider();
     use_viewer_routes(context);
     super::application_router::use_settings_navigation_provider();
+    super::application_navigation::use_viewer_tab_navigation_provider();
 
     let visible = browser::use_document_visible();
     let route = use_route::<Route>();

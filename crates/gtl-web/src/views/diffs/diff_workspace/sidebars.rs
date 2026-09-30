@@ -3,7 +3,6 @@ use gtl_models::{
     settings::ViewerLanguage,
     viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerSidebarVisibility},
 };
-use lucide_dioxus::{PanelLeft, PanelRight};
 
 use crate::shared::{
     i18n::{t, use_language},
@@ -39,6 +38,14 @@ impl Sidebar {
         match self {
             Self::Files => t!(language, "sidebar-toggle-files"),
             Self::Commits => t!(language, "sidebar-toggle-commits"),
+        }
+    }
+
+    /// Returns the panel fill and divider paths inside the 24px sidebar icon frame.
+    const fn icon_paths(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Files => ("M5 3h4v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 3v18"),
+            Self::Commits => ("M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4z", "M15 3v18"),
         }
     }
 
@@ -177,7 +184,7 @@ pub(super) fn SidebarButtons(
     let language = use_language();
     rsx! {
         div {
-            class: "hidden items-center workspace:flex",
+            class: "hidden items-center gap-0.5 workspace:flex",
             role: "group",
             aria_label: t!(language, "sidebar-visibility"),
             for (sidebar, visible) in [(Sidebar::Files, visibility.files), (Sidebar::Commits, visibility.commits)] {
@@ -207,10 +214,12 @@ fn SidebarButton(
         .join("+");
     let label = sidebar.toggle_label(use_language());
     let title = format!("{label} ({shortcut})");
+    let (panel, divider) = sidebar.icon_paths();
     rsx! {
         Button {
             size: ButtonSize::IconSmall,
-            variant: ButtonVariant::Accent,
+            variant: ButtonVariant::Ghost,
+            class: "sidebar-toggle",
             id: format!("{}-sidebar-toggle", sidebar.name()),
             aria_label: label,
             title,
@@ -222,15 +231,31 @@ fn SidebarButton(
                     ontoggle.call(sidebar);
                 }
             },
-            span { class: "sidebar-icon", aria_hidden: "true",
-                match sidebar {
-                    Sidebar::Files => rsx! {
-                        PanelLeft { size: 16 }
-                    },
-                    Sidebar::Commits => rsx! {
-                        PanelRight { size: 16 }
-                    },
+            svg {
+                class: "sidebar-icon",
+                "aria-hidden": "true",
+                width: "16",
+                height: "16",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path {
+                    class: "sidebar-icon-panel",
+                    d: panel,
+                    fill: "currentColor",
+                    stroke: "none",
                 }
+                rect {
+                    width: "18",
+                    height: "18",
+                    x: "3",
+                    y: "3",
+                    rx: "2",
+                }
+                path { d: divider }
             }
         }
     }

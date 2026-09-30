@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use gtl_models::settings::{ProjectsPageSize, ProjectsSort};
+use gtl_models::{
+    projects::catalogue::ProjectStatusFilter,
+    settings::{ProjectsPageSize, ProjectsSort},
+};
 use gtl_wire::viewer::projects::{
     ListViewerProjects, ViewerProject, ViewerProjectPage, ViewerProjectSelection,
     ViewerProjectStatusUpdate, ViewerProjectsCursor, ViewerProjectsPageSize,
@@ -17,6 +20,7 @@ pub(super) struct ProjectPageLoad {
     cursor: ViewerProjectsCursor,
     page_size: ProjectsPageSize,
     sort: ProjectsSort,
+    status: ProjectStatusFilter,
     pub(super) instance_id: Option<String>,
     pub(super) result: Result<ViewerProjectPage, ViewerClientError>,
 }
@@ -25,7 +29,7 @@ pub(super) struct ProjectPageLoad {
 pub(super) struct Projects {
     pub(super) page: Memo<Option<ProjectPageLoad>>,
     pub(super) loading_page: Memo<bool>,
-    pub(super) active: Memo<bool>,
+    pub(super) status: ReadSignal<ProjectStatusFilter>,
     pub(super) refresh: Callback<()>,
     reload: Callback<()>,
     revision: ReadSignal<u64>,
@@ -35,6 +39,7 @@ pub(super) fn use_projects(
     cursor: Memo<ViewerProjectsCursor>,
     page_size: Memo<ProjectsPageSize>,
     sort: Memo<ProjectsSort>,
+    status: ReadSignal<ProjectStatusFilter>,
     active: Memo<bool>,
     ready: Memo<bool>,
 ) -> Projects {
@@ -44,7 +49,14 @@ pub(super) fn use_projects(
     let mut resource = use_resource(move || {
         let _ = revision();
         let _ = (push.refresh_epoch)();
-        load_page(cursor(), page_size(), sort(), viewer, active() && ready())
+        load_page(
+            cursor(),
+            page_size(),
+            sort(),
+            status(),
+            viewer,
+            active() && ready(),
+        )
     });
     let page = use_memo(move || resource.read().clone());
     let loading_page = use_memo(move || {
@@ -53,6 +65,7 @@ pub(super) fn use_projects(
                 loaded.cursor != cursor()
                     || loaded.page_size != page_size()
                     || loaded.sort != sort()
+                    || loaded.status != status()
             })
     });
     let refresh = use_callback(move |()| {
@@ -69,7 +82,7 @@ pub(super) fn use_projects(
     Projects {
         page,
         loading_page,
-        active,
+        status,
         refresh,
         reload,
         revision: revision.into(),
@@ -216,6 +229,7 @@ async fn load_page(
     cursor: ViewerProjectsCursor,
     page_size: ProjectsPageSize,
     sort: ProjectsSort,
+    status: ProjectStatusFilter,
     viewer: ViewerContext,
     active: bool,
 ) -> ProjectPageLoad {
@@ -223,11 +237,12 @@ async fn load_page(
     if !active || !viewer.actions_enabled() {
         std::future::pending::<()>().await;
     }
-    let result = query_page(cursor.clone(), page_size, sort).await;
+    let result = query_page(cursor.clone(), page_size, sort, status).await;
     ProjectPageLoad {
         cursor,
         page_size,
         sort,
+        status,
         instance_id,
         result,
     }
@@ -237,10 +252,12 @@ async fn query_page(
     cursor: ViewerProjectsCursor,
     page_size: ProjectsPageSize,
     sort: ProjectsSort,
+    status: ProjectStatusFilter,
 ) -> Result<ViewerProjectPage, ViewerClientError> {
     let request = ListViewerProjects {
         cursor,
         sort: Some(sort),
+        status,
         page_size: ViewerProjectsPageSize::try_new(page_size.into_inner())
             .map_err(|_| ViewerClientError::InvalidMessage)?,
     };

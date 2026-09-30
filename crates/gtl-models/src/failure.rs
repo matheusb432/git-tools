@@ -15,7 +15,7 @@ mod viewer;
 use std::fmt;
 
 pub use diagnostic::ExternalDiagnostic;
-pub use gtl_macros::ErrorMeta;
+pub use error_meta::ErrorMeta;
 pub use project::{ProjectFailure, ScanFolderProblem};
 pub use push::{PushFailure, PushRefRejection, RejectedPushRef};
 pub use repository::RepositoryFailure;

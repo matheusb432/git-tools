@@ -1,7 +1,11 @@
 use anyhow::{Context as _, Result, ensure};
 use thirtyfour::{By, WebDriver};
 
-use crate::support::{self, fixture::ProjectsFixture, wait};
+use crate::support::{
+    self,
+    fixture::{OneShotFixture, ProjectsFixture},
+    wait,
+};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()> {
@@ -14,8 +18,10 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
             let driver = session.driver();
             import_projects(driver, &fixture.root).await?;
             support::evidence::capture(driver, "projects-dashboard", true).await?;
+            pause_and_resume_project(driver, "projects-beta").await?;
+            discard_unsaved_edit(driver, "projects-alpha", session.data_root()).await?;
 
-            support::click(driver, action("projects-alpha", "Open diff")).await?;
+            support::click(driver, project_link("projects-alpha")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await?;
             support::click(driver, By::Css("button[aria-label='Modified files']")).await?;
@@ -30,7 +36,7 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
                 "the snapshot included uncommitted work"
             );
             support::click(driver, By::Css("a[aria-label='Projects']")).await?;
-            support::click(driver, action("projects-alpha", "Open diff")).await?;
+            support::click(driver, project_link("projects-alpha")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker")
                 .await?;
             let snapshot =
@@ -105,9 +111,96 @@ async fn import_projects(driver: &WebDriver, root: &std::path::Path) -> Result<(
     Ok(())
 }
 
+async fn pause_and_resume_project(driver: &WebDriver, name: &str) -> Result<()> {
+    let row = By::Css(format!("tr[aria-label='{name}']"));
+    support::click(driver, action(name, &format!("Pause {name}"))).await?;
+    support::dismiss_toast(driver, &format!("Paused {name}.")).await?;
+    wait_until_absent(driver, row.clone()).await?;
+    super::settings::select_value(driver, "projects-status-filter", "paused").await?;
+    support::click(driver, action(name, &format!("Resume {name}"))).await?;
+    support::dismiss_toast(driver, &format!("Resumed {name}.")).await?;
+    wait_until_absent(driver, row.clone()).await?;
+    super::settings::select_value(driver, "projects-status-filter", "active").await?;
+    support::visible(driver, row).await?;
+    Ok(())
+}
+
+async fn discard_unsaved_edit(
+    driver: &WebDriver,
+    name: &str,
+    data_root: &std::path::Path,
+) -> Result<()> {
+    let discard_prompt = By::Css("#project-edit-discard-dialog[open]");
+    support::click(driver, action(name, &format!("Edit {name}"))).await?;
+    support::visible(driver, By::Id("project-edit-branch"))
+        .await?
+        .send_keys("-draft")
+        .await?;
+    let snapshot = OneShotFixture::create_named(data_root, "edit-navigation")?;
+    snapshot.forward()?;
+    support::wait_for_active_diff(driver, "edit-navigation", "alpha-one-shot-marker").await?;
+    support::click(driver, By::Css("a[aria-label='Projects']")).await?;
+    let branch = support::visible(driver, By::Id("project-edit-branch"))
+        .await?
+        .value()
+        .await?;
+    ensure!(
+        branch.is_some_and(|branch| branch.ends_with("-draft")),
+        "returning to Projects lost the draft"
+    );
+    support::click(driver, dialog_action("project-edit-dialog", "Cancel")).await?;
+    support::visible(driver, discard_prompt.clone()).await?;
+    support::click(
+        driver,
+        dialog_action("project-edit-discard-dialog", "Cancel"),
+    )
+    .await?;
+    wait_until_absent(driver, discard_prompt.clone()).await?;
+    let branch = support::visible(driver, By::Id("project-edit-branch"))
+        .await?
+        .value()
+        .await?;
+    ensure!(
+        branch.is_some_and(|branch| branch.ends_with("-draft")),
+        "keeping the edit lost the draft"
+    );
+    support::click(
+        driver,
+        By::Css(format!("button[aria-label='Close Edit {name}']")),
+    )
+    .await?;
+    support::click(
+        driver,
+        dialog_action("project-edit-discard-dialog", "Discard changes"),
+    )
+    .await?;
+    wait_until_absent(driver, By::Id("project-edit-dialog")).await
+}
+
+async fn wait_until_absent(driver: &WebDriver, locator: By) -> Result<()> {
+    wait::until("element removal", wait::ASSERTION_TIMEOUT, || async {
+        Ok(driver
+            .find_all(locator.clone())
+            .await?
+            .is_empty()
+            .then_some(()))
+    })
+    .await
+}
+
 fn dialog_button(label: &str) -> By {
+    dialog_action("project-import-dialog", label)
+}
+
+fn dialog_action(dialog: &str, label: &str) -> By {
     By::XPath(format!(
-        "//dialog[@id='project-import-dialog']//button[normalize-space()='{label}']"
+        "//dialog[@id='{dialog}']//button[normalize-space()='{label}']"
+    ))
+}
+
+fn project_link(project: &str) -> By {
+    By::Css(format!(
+        "tr[aria-label='{project}'][aria-busy='false'] a[data-testid='project-table-name']"
     ))
 }
 
@@ -136,6 +229,10 @@ async fn user_finds_branch_commits_and_filters_a_snapshot() -> Result<()> {
             import_projects(driver, &fixture.root).await?;
             support::click(driver, action("projects-alpha", "Find commits")).await?;
             let search = support::visible(driver, By::Id("project-commit-search-input")).await?;
+            set_commit_search_time(driver, By::Id("project-commit-search-input-from"), "2099-01-01T00:00:00").await?;
+            search.click().await?;
+            support::visible(driver, By::XPath("//*[@id='project-commit-search-dialog']//*[contains(text(), 'No matching commits')]")).await?;
+            support::click(driver, By::Css("#project-commit-search-dialog button[aria-label='Clear time filter']")).await?;
             search.send_keys("cmt prj wrk").await?;
             support::visible(driver, By::Css("#project-commit-search-dialog button[aria-label^='Open commit'][title^='committed project work']:enabled")).await?;
             support::evidence::capture(driver, "project-commit-finder", true).await?;
@@ -143,13 +240,18 @@ async fn user_finds_branch_commits_and_filters_a_snapshot() -> Result<()> {
             driver.action_chain().send_keys(thirtyfour::Key::Enter).perform().await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker").await?;
             support::click(driver, By::Css("a[aria-label='Projects']")).await?;
-            support::click(driver, action("projects-alpha", "Open diff")).await?;
+            support::click(driver, project_link("projects-alpha")).await?;
             support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker").await?;
             support::evidence::capture(driver, "snapshot-commit-search-collapsed", true).await?;
             support::click(driver, By::Css("aside[aria-label='Commits'] button[aria-label='Find commits']")).await?;
             let input = support::visible(driver, By::Css("aside[aria-label='Commits'] input[type='search']")).await?;
             support::evidence::capture(driver, "snapshot-commit-search-expanded", true).await?;
             driver.action_chain().send_keys("cmt prj wrk").perform().await?;
+            support::visible(driver, By::Css("aside[aria-label='Commits'] button[aria-label^='Open commit'][title^='committed project work']:enabled")).await?;
+            set_commit_search_time(driver, By::Css("aside[aria-label='Commits'] input[id$='-until']"), "2000-01-01T00:00:00").await?;
+            input.click().await?;
+            support::visible(driver, By::XPath("//aside[@aria-label='Commits']//*[contains(text(), 'No matching commits')]")).await?;
+            support::click(driver, By::Css("aside[aria-label='Commits'] button[aria-label='Clear time filter']")).await?;
             support::visible(driver, By::Css("aside[aria-label='Commits'] button[aria-label^='Open commit'][title^='committed project work']:enabled")).await?;
             support::evidence::capture(driver, "snapshot-commit-search-matches", true).await?;
             input.send_keys(thirtyfour::Key::Escape).await?;
@@ -167,4 +269,14 @@ async fn user_finds_branch_commits_and_filters_a_snapshot() -> Result<()> {
             support::wait_for_active_diff(driver, "projects-alpha", "base").await
         })
     }).await
+}
+
+async fn set_commit_search_time(driver: &WebDriver, locator: By, value: &str) -> Result<()> {
+    let input = support::visible(driver, locator).await?;
+    // WebKit types datetime-local segments rather than accepting an ISO value through send_keys.
+    driver.execute(
+        "const input = arguments[0]; input.value = arguments[1]; input.dispatchEvent(new Event('change', { bubbles: true }));",
+        vec![input.to_json()?, serde_json::json!(value)],
+    ).await?;
+    Ok(())
 }

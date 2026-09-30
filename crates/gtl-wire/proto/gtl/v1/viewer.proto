@@ -4,6 +4,7 @@ package gtl.v1;
 
 import "gtl/v1/common.proto";
 import "gtl/v1/failure.proto";
+import "gtl/v1/project.proto";
 import "gtl/v1/repository_status.proto";
 import "gtl/v1/viewer_theme.proto";
 
@@ -978,8 +979,15 @@ message OpenViewerDiffFileRequest {
 
 message OpenViewerDiffFileResponse {}
 
+enum ProjectStatusFilter {
+  PROJECT_STATUS_FILTER_UNSPECIFIED = 0;
+  PROJECT_STATUS_FILTER_ACTIVE = 1;
+  PROJECT_STATUS_FILTER_PAUSED = 2;
+  PROJECT_STATUS_FILTER_ALL = 3;
+}
 message ListViewerProjectsRequest {
   optional ProjectsSort sort = 6;
+  ProjectStatusFilter status = 7;
   uint32 page_size = 1;
   oneof cursor {
     Empty first = 2;
@@ -1000,6 +1008,7 @@ message ViewerProject {
   string comparison_branch = 4;
   string id = 6;
   string name = 7;
+  ProjectStatus project_status = 8;
 }
 message GetViewerProjectStatusRequest {
   string project_id = 1;
@@ -1190,6 +1199,9 @@ message SearchViewerCommitsRequest {
     ViewerViewIdentity active_branch_snapshot = 4;
   }
   string query = 3;
+  // Inclusive offset-qualified timestamps; absent bounds are unrestricted.
+  optional string time_from = 5;
+  optional string time_until = 6;
 }
 
 message SearchViewerCommitsResponse {

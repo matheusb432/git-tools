@@ -19,9 +19,10 @@ struct DialogState {
     id: String,
     trigger_id: String,
     open: bool,
-    restore_focus: bool,
+    closing: bool,
     close_duration_fallback: Duration,
     placement: DialogPlacement,
+    onclosed: Option<EventHandler<()>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,12 +42,16 @@ impl DialogPhase {
     }
 }
 
+/// Opens `id` as a modal while `open` holds and returns its animation phase.
+///
+/// After a closing animation, focus returns to `trigger_id` and `onclosed` runs.
 pub(crate) fn use_dialog(
     id: &String,
     trigger_id: &String,
     open: bool,
     close_duration_fallback: Duration,
     placement: DialogPlacement,
+    onclosed: Option<EventHandler<()>>,
 ) -> Signal<DialogPhase> {
     let phase = use_signal(|| DialogPhase::Closed);
     let mut was_open = use_signal(|| false);
@@ -57,15 +62,16 @@ pub(crate) fn use_dialog(
     use_effect(use_reactive(
         (id, trigger_id, &open, &placement),
         move |(id, trigger_id, open, placement)| {
-            let restore_focus = *was_open.peek() && !open;
+            let closing = *was_open.peek() && !open;
             was_open.set(open);
             sync.call(DialogState {
                 id,
                 trigger_id,
                 open,
-                restore_focus,
+                closing,
                 close_duration_fallback,
                 placement,
+                onclosed,
             });
         },
     ));
@@ -113,8 +119,11 @@ async fn sync_dialog_state(state: DialogState, mut phase: Signal<DialogPhase>) {
         dialog.close();
     }
     phase.set(DialogPhase::Closed);
-    if state.restore_focus {
+    if state.closing {
         restore_trigger_focus(&document, &state.trigger_id).await;
+        if let Some(onclosed) = state.onclosed {
+            onclosed.call(());
+        }
     }
 }
 
@@ -188,6 +197,9 @@ async fn dialog_close_duration(
     }
 
     dioxus_sdk_time::sleep(Duration::ZERO).await;
+    if dialog.matches(DIALOG_SURFACE_SELECTOR).unwrap_or(false) {
+        return computed_animation_duration(dialog).unwrap_or(close_duration_fallback);
+    }
     dialog
         .query_selector(DIALOG_SURFACE_SELECTOR)
         .ok()
@@ -223,5 +235,54 @@ async fn restore_trigger_focus(document: &web_sys::Document, trigger_id: &str) {
 fn focus_element(element: Option<HtmlElement>) {
     if let Some(element) = element {
         let _ = element.focus();
+    }
+}
+
+/// Holds a dialog's subject from opening until its closing animation ends.
+pub(crate) struct DialogSlot<T: 'static> {
+    subject: Signal<Option<T>>,
+    open: Signal<bool>,
+}
+
+impl<T: 'static> Clone for DialogSlot<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for DialogSlot<T> {}
+
+impl<T: Clone + 'static> DialogSlot<T> {
+    pub(crate) fn subject(self) -> Option<T> {
+        (self.subject)()
+    }
+
+    pub(crate) fn is_open(self) -> bool {
+        (self.open)()
+    }
+
+    pub(crate) fn open(mut self, subject: T) {
+        self.subject.set(Some(subject));
+        self.open.set(true);
+    }
+
+    pub(crate) fn close(mut self) {
+        if *self.open.peek() {
+            self.open.set(false);
+        }
+    }
+
+    /// Drops the subject after its dialog closes, unless the slot reopened meanwhile.
+    pub(crate) fn release(mut self) {
+        if !*self.open.peek() {
+            self.subject.set(None);
+        }
+    }
+}
+
+pub(crate) fn use_dialog_slot<T: 'static>() -> DialogSlot<T> {
+    DialogSlot {
+        subject: use_signal(|| None),
+        open: use_signal(|| false),
     }
 }

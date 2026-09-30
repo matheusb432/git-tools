@@ -163,8 +163,15 @@ pub(crate) fn parse_local_input(
     offset_at: impl Fn(Timestamp) -> Offset,
 ) -> Option<Timestamp> {
     let local = value.parse::<DateTime>().ok()?;
-    let offset = offset_at(Offset::UTC.to_timestamp(local).ok()?);
-    offset.to_timestamp(local).ok()
+    let mut instant = Offset::UTC.to_timestamp(local).ok()?;
+    for _ in 0..3 {
+        let candidate = offset_at(instant).to_timestamp(local).ok()?;
+        if offset_at(candidate).to_datetime(candidate) == local {
+            return Some(candidate);
+        }
+        instant = candidate;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -258,5 +265,20 @@ mod tests {
             Some(timestamp.instant())
         );
         assert_eq!(parse_local_input("yesterday", |_| offset), None);
+    }
+
+    #[test]
+    fn local_input_uses_the_offset_at_the_resolved_instant_and_rejects_dst_gaps() {
+        let transition = instant("2026-03-08T07:00:00Z");
+        let offset_at = |time| Offset::from_hours(if time < transition { -5 } else { -4 }).unwrap();
+        assert_eq!(
+            parse_local_input("2026-03-08T03:30", offset_at),
+            Some(instant("2026-03-08T07:30:00Z"))
+        );
+        assert_eq!(
+            parse_local_input("2026-03-08T01:30", offset_at),
+            Some(instant("2026-03-08T06:30:00Z"))
+        );
+        assert_eq!(parse_local_input("2026-03-08T02:30", offset_at), None);
     }
 }

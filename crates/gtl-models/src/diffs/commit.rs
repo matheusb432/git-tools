@@ -1,6 +1,8 @@
 mod commit_id;
+mod time_range;
 
 pub use commit_id::{CommitId, CommitIdAbbreviation, CommitIdError};
+pub use time_range::{CommitTimeRange, CommitTimeRangeError};
 
 use crate::{
     git::{GitRange, GitRevision},

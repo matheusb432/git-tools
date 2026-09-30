@@ -1,13 +1,32 @@
 use anyhow::Context as _;
-use gtl_models::projects::catalogue::{ProjectDirectorySource, ProjectId};
+use gtl_models::projects::catalogue::{
+    ProjectDirectorySource, ProjectId, ProjectStatus, ProjectStatusFilter,
+};
 use gtl_wire::viewer::projects::{
     ListViewerProjects, ViewerProject, ViewerProjectPage, ViewerProjectsCursor,
 };
 use rusqlite::{Connection, Row, params};
 
-const PROJECT_SELECT: &str = "SELECT p.id, p.title, s.source_value, p.comparison_branch
+const PROJECT_SELECT: &str = "SELECT p.id, p.title, s.source_value, p.comparison_branch,
+    p.paused_at IS NOT NULL
     FROM projects p JOIN project_sources s USING (source_id)
-    WHERE p.unmanaged_at IS NULL AND p.paused_at IS NULL AND s.source_kind = 'directory'";
+    WHERE p.unmanaged_at IS NULL AND s.source_kind = 'directory'";
+
+const fn status_predicate(filter: ProjectStatusFilter) -> &'static str {
+    match filter {
+        ProjectStatusFilter::Active => "p.paused_at IS NULL",
+        ProjectStatusFilter::Paused => "p.paused_at IS NOT NULL",
+        ProjectStatusFilter::All => "TRUE",
+    }
+}
+
+fn count_projects(filter: ProjectStatusFilter, connection: &Connection) -> anyhow::Result<u32> {
+    let sql = format!(
+        "SELECT count(*) FROM projects p WHERE p.unmanaged_at IS NULL AND {}",
+        status_predicate(filter)
+    );
+    Ok(connection.query_row(&sql, [], |row| row.get(0))?)
+}
 
 #[cqrsy::query]
 pub fn execute(
@@ -19,11 +38,8 @@ pub fn execute(
     }
     let transaction = connection.unchecked_transaction()?;
     let connection = &transaction;
-    let total: u32 = connection.query_row(
-        "SELECT count(*) FROM projects WHERE unmanaged_at IS NULL AND paused_at IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
+    let status = status_predicate(request.status);
+    let total = count_projects(request.status, connection)?;
     let page_size = request.page_size.into_inner();
     let (predicate, cursor, reverse, limit) = match &request.cursor {
         ViewerProjectsCursor::First => ("", None, false, page_size),
@@ -32,7 +48,7 @@ pub fn execute(
         ViewerProjectsCursor::Last => ("", None, true, (total.saturating_sub(1) % page_size) + 1),
     };
     let order = if reverse { "DESC" } else { "ASC" };
-    let sql = format!("{PROJECT_SELECT} {predicate} ORDER BY p.id {order} LIMIT ?1");
+    let sql = format!("{PROJECT_SELECT} AND {status} {predicate} ORDER BY p.id {order} LIMIT ?1");
     let mut statement = connection.prepare_cached(&sql)?;
     let mut rows = match cursor {
         Some(cursor) => statement.query(params![limit, cursor])?,
@@ -47,8 +63,11 @@ pub fn execute(
     }
     let count_before = if let Some(project) = projects.first() {
         connection.query_row(
-            "SELECT count(*) FROM projects WHERE unmanaged_at IS NULL AND paused_at IS NULL AND id < ?1",
-            [project.id.as_ref()], |row| row.get(0),
+            &format!(
+                "SELECT count(*) FROM projects p WHERE p.unmanaged_at IS NULL AND {status} AND p.id < ?1"
+            ),
+            [project.id.as_ref()],
+            |row| row.get(0),
         )?
     } else if reverse {
         0
@@ -58,16 +77,20 @@ pub fn execute(
     ViewerProjectPage::try_new(projects, total, count_before).context("invalid stored project page")
 }
 
-pub fn status_refresh_candidates(connection: &Connection) -> anyhow::Result<Vec<ViewerProject>> {
-    let mut statement = connection.prepare_cached(
-        "SELECT p.id, p.title, s.source_value, p.comparison_branch
+pub fn status_refresh_candidates(
+    filter: ProjectStatusFilter,
+    connection: &Connection,
+) -> anyhow::Result<Vec<ViewerProject>> {
+    let mut statement = connection.prepare_cached(&format!(
+        "SELECT p.id, p.title, s.source_value, p.comparison_branch, p.paused_at IS NOT NULL
          FROM projects p JOIN project_sources s USING (source_id)
          LEFT JOIN project_status_index i ON i.project_id = p.id
-         WHERE p.unmanaged_at IS NULL AND p.paused_at IS NULL
+         WHERE p.unmanaged_at IS NULL AND {}
            AND (i.project_id IS NULL OR i.source_id != p.source_id
                 OR i.comparison_branch != p.comparison_branch OR i.checked_at < unixepoch() - 60)
          ORDER BY i.checked_at, p.id LIMIT ?1",
-    )?;
+        status_predicate(filter)
+    ))?;
     let mut rows = statement.query([gtl_models::projects::catalogue::PROJECTS_MAX])?;
     let mut projects = Vec::new();
     while let Some(row) = rows.next()? {
@@ -84,11 +107,7 @@ fn sorted_page(
     use gtl_models::settings::ProjectsSort;
     let transaction = connection.unchecked_transaction()?;
     let connection = &transaction;
-    let total: u32 = connection.query_row(
-        "SELECT count(*) FROM projects WHERE unmanaged_at IS NULL AND paused_at IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
+    let total = count_projects(request.status, connection)?;
     let order = match sort {
         ProjectsSort::Changes => {
             "changes_priority DESC, commits_ahead DESC, title COLLATE NOCASE, id"
@@ -123,7 +142,8 @@ fn sorted_page(
     let direction = if reverse { "DESC" } else { "ASC" };
     let sql = format!(
         "WITH indexed AS (
-            SELECT p.id, p.title, s.source_value, p.comparison_branch, i.branch, i.commits_ahead,
+            SELECT p.id, p.title, s.source_value, p.comparison_branch,
+                p.paused_at IS NOT NULL AS paused, i.branch, i.commits_ahead,
                 CASE WHEN i.commits_ahead > 0 OR i.tracked_changes = 1 OR i.untracked_changes = 1
                      THEN 4 * coalesce(i.commits_ahead > 0, 0) + 2 * coalesce(i.tracked_changes, 0) + coalesce(i.untracked_changes, 0)
                      WHEN i.commits_ahead IS NOT NULL AND i.tracked_changes IS NOT NULL THEN 0
@@ -131,10 +151,11 @@ fn sorted_page(
             FROM projects p JOIN project_sources s USING (source_id)
             LEFT JOIN project_status_index i ON i.project_id = p.id AND i.source_id = p.source_id
                 AND i.comparison_branch = p.comparison_branch
-            WHERE p.unmanaged_at IS NULL AND p.paused_at IS NULL
+            WHERE p.unmanaged_at IS NULL AND {status}
          ), ordered AS (SELECT *, row_number() OVER (ORDER BY {order}) AS position FROM indexed)
-         SELECT id, title, source_value, comparison_branch, position FROM ordered
-         {predicate} ORDER BY position {direction} LIMIT ?1"
+         SELECT id, title, source_value, comparison_branch, paused, position FROM ordered
+         {predicate} ORDER BY position {direction} LIMIT ?1",
+        status = status_predicate(request.status),
     );
     let mut statement = connection.prepare_cached(&sql)?;
     let mut rows = match cursor {
@@ -144,7 +165,7 @@ fn sorted_page(
     let mut projects = Vec::new();
     let mut count_before = total;
     while let Some(row) = rows.next()? {
-        let position: u32 = row.get(4)?;
+        let position: u32 = row.get(5)?;
         count_before = count_before.min(position - 1);
         projects.push(read_project(row)?);
     }
@@ -171,5 +192,10 @@ fn read_project(row: &Row<'_>) -> anyhow::Result<ViewerProject> {
         name: row.get::<_, String>(1)?.try_into()?,
         path,
         comparison_branch: row.get::<_, String>(3)?.try_into()?,
+        status: if row.get(4)? {
+            ProjectStatus::Paused
+        } else {
+            ProjectStatus::Active
+        },
     })
 }

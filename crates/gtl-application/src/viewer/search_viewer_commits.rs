@@ -1,7 +1,7 @@
 use std::{cmp::Reverse, time::Instant};
 
 use gtl_models::{
-    diffs::Commit,
+    diffs::{Commit, CommitTimeRange},
     failure::{ErrorMeta, Failure, ViewerFailure},
     git::GitHead,
     paths::RepositoryRoot,
@@ -58,7 +58,7 @@ pub fn execute(
         return Err(SearchViewerCommitsError::QueryTooLong);
     }
     let deadline = Instant::now() + std::time::Duration::from_secs(10);
-    let mut matches = CommitMatches::new(&request.query);
+    let mut matches = CommitMatches::new(&request.query, request.time_range.clone());
     let branch = match &request.scope {
         ViewerCommitSearchScope::Snapshot(identity) => {
             let snapshot = commit_source(*identity, state, settings)?;
@@ -96,24 +96,29 @@ pub fn execute(
 
 struct CommitMatches {
     terms: Vec<String>,
+    time_range: CommitTimeRange,
     matches: Vec<(u64, ViewerCommitSummary)>,
     total: u64,
 }
 
 impl CommitMatches {
-    fn new(query: &str) -> Self {
+    fn new(query: &str, time_range: CommitTimeRange) -> Self {
         Self {
             terms: query
                 .to_lowercase()
                 .split_whitespace()
                 .map(str::to_owned)
                 .collect(),
+            time_range,
             matches: Vec::new(),
             total: 0,
         }
     }
 
     fn visit(&mut self, commit: &Commit) {
+        if !self.time_range.contains(&commit.committed_at) {
+            return;
+        }
         let subject = commit.subject.to_lowercase();
         let body = commit.body.to_lowercase();
         let id = commit.id.as_ref();
@@ -214,14 +219,14 @@ mod tests {
 
     #[test]
     fn fuzzy_search_ranks_contiguous_matches_and_combines_message_and_hash_terms() {
-        let mut matches = CommitMatches::new("FIX auth");
+        let mut matches = CommitMatches::new("FIX auth", CommitTimeRange::default());
         matches.visit(&commit('a', "Fix authorization", ""));
         matches.visit(&commit('b', "Finally index x", "authentication"));
         matches.visit(&commit('c', "unrelated", ""));
         let result = matches.finish(None);
         assert_eq!(result.total_matches, 2);
         assert_eq!(result.commits[0].subject, "Fix authorization");
-        let mut matches = CommitMatches::new("bbbb auth");
+        let mut matches = CommitMatches::new("bbbb auth", CommitTimeRange::default());
         matches.visit(&commit('a', "Fix authorization", ""));
         matches.visit(&commit('b', "Fix authorization", ""));
         assert_eq!(matches.finish(None).commits[0].id.as_ref(), "b".repeat(40));
@@ -229,7 +234,7 @@ mod tests {
 
     #[test]
     fn result_limit_keeps_best_matches_after_the_first_page() {
-        let mut matches = CommitMatches::new("fx");
+        let mut matches = CommitMatches::new("fx", CommitTimeRange::default());
         for _ in 0..150 {
             matches.visit(&commit('a', "Finally index", ""));
         }
@@ -238,6 +243,28 @@ mod tests {
         assert_eq!(result.total_matches, 151);
         assert_eq!(result.commits.len(), VIEWER_COMMIT_SEARCH_RESULTS_MAX);
         assert_eq!(result.commits[0].subject, "fx");
+    }
+
+    #[test]
+    fn time_filter_combines_with_text_before_ranking_counting_and_limiting() {
+        let from = "2026-09-29T12:00:00Z".try_into().unwrap();
+        let range = CommitTimeRange::new(Some(from), None).unwrap();
+        let mut matches = CommitMatches::new("fix", range.clone());
+        for _ in 0..150 {
+            let mut excluded = commit('a', "fix", "");
+            excluded.committed_at = "2026-09-29T11:59:59Z".try_into().unwrap();
+            matches.visit(&excluded);
+        }
+        matches.visit(&commit('b', "Fix authorization", ""));
+        matches.visit(&commit('c', "unrelated", ""));
+        let result = matches.finish(None);
+        assert_eq!(result.total_matches, 1);
+        assert_eq!(result.commits[0].subject, "Fix authorization");
+
+        let mut matches = CommitMatches::new("", range);
+        matches.visit(&commit('b', "Fix authorization", ""));
+        matches.visit(&commit('c', "unrelated", ""));
+        assert_eq!(matches.finish(None).total_matches, 2);
     }
 
     #[test]

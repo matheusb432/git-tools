@@ -1,3 +1,5 @@
+pub(crate) mod time;
+
 use std::time::Duration;
 
 use dioxus::prelude::*;
@@ -10,6 +12,7 @@ use gtl_wire::viewer::commit_search::{
 };
 use lucide_dioxus::{GitBranch, Layers, Search, X};
 
+use self::time::{CommitSearchTimeError, CommitSearchTimeInput};
 use crate::{
     app::{application_layout::ViewerContext, application_router::Route},
     entities::diffs::viewer_server,
@@ -51,9 +54,12 @@ pub(super) fn use_commit_search(
 pub(crate) fn CommitSearchInput(
     id: String,
     query: String,
+    #[props(default)] time: CommitSearchTimeInput,
+    time_error: Option<CommitSearchTimeError>,
     #[props(default)] snapshot: bool,
     #[props(default)] active_branch: bool,
     onchange: EventHandler<String>,
+    ontime: EventHandler<CommitSearchTimeInput>,
     onscope: Option<EventHandler<bool>>,
     onfirst: Option<EventHandler<()>>,
     onopenfirst: Option<EventHandler<()>>,
@@ -64,6 +70,7 @@ pub(crate) fn CommitSearchInput(
     let clear_id = id.clone();
     let scope_id = format!("{id}-scope");
     let scope_input_id = id.clone();
+    let time_id = id.clone();
     let hint = if snapshot && !active_branch {
         t!(language, "commit-search-snapshot-hint")
     } else {
@@ -159,6 +166,79 @@ pub(crate) fn CommitSearchInput(
                         }
                     }
                 }
+            }
+            CommitSearchTimeFields {
+                id: time_id,
+                input: time,
+                error: time_error,
+                onchange: ontime,
+            }
+        }
+    }
+}
+
+#[component]
+fn CommitSearchTimeFields(
+    id: String,
+    input: CommitSearchTimeInput,
+    error: Option<CommitSearchTimeError>,
+    onchange: EventHandler<CommitSearchTimeInput>,
+) -> Element {
+    let language = use_language();
+    let from_input = input.clone();
+    let until_input = input.clone();
+    rsx! {
+        div { class: "commit-search-time",
+            TextInput {
+                id: format!("{id}-from"),
+                label: t!(language, "commit-search-time-from"),
+                r#type: "datetime-local",
+                step: "1",
+                value: input.from.clone(),
+                error: (error == Some(CommitSearchTimeError::From))
+                    .then(|| t!(language, "commit-search-time-invalid")),
+                onchange: move |event: FormEvent| {
+                    onchange
+                        .call(CommitSearchTimeInput {
+                            from: event.value(),
+                            ..from_input.clone()
+                        });
+                },
+            }
+            TextInput {
+                id: format!("{id}-until"),
+                label: t!(language, "commit-search-time-until"),
+                r#type: "datetime-local",
+                step: "1",
+                value: input.until.clone(),
+                error: match error {
+                    Some(CommitSearchTimeError::Until) => {
+                        Some(t!(language, "commit-search-time-invalid"))
+                    }
+                    Some(CommitSearchTimeError::Reversed) => {
+                        Some(t!(language, "commit-search-time-reversed"))
+                    }
+                    _ => None,
+                },
+                onchange: move |event: FormEvent| {
+                    onchange
+                        .call(CommitSearchTimeInput {
+                            until: event.value(),
+                            ..until_input.clone()
+                        });
+                },
+            }
+        }
+        div { class: "commit-search-hint",
+            span { {t!(language, "commit-search-time-hint")} }
+            Button {
+                variant: ButtonVariant::Ghost,
+                size: ButtonSize::IconCompact,
+                state: if input.has_bounds() { ButtonState::Enabled } else { ButtonState::Disabled },
+                aria_label: t!(language, "commit-search-time-clear"),
+                title: t!(language, "commit-search-time-clear"),
+                onclick: move |_| onchange.call(CommitSearchTimeInput::default()),
+                X { size: 14 }
             }
         }
     }
@@ -428,11 +508,14 @@ pub(super) fn use_open_commit(scope: ViewerCommitSearchScope) -> CommitOpen {
 pub(super) fn CommitFinder(path: RepositoryRoot) -> Element {
     let language = use_language();
     let mut query = use_signal(String::new);
+    let mut time = use_signal(CommitSearchTimeInput::default);
+    let time_range = use_memo(move || time().parse(browser::local_offset_at));
     let search_path = path.clone();
     let request = use_memo(move || {
         Some(SearchViewerCommits {
             scope: ViewerCommitSearchScope::ActiveBranch(search_path.clone()),
             query: query(),
+            time_range: time_range().ok()?,
         })
     });
     let mut search = use_commit_search(request);
@@ -456,7 +539,10 @@ pub(super) fn CommitFinder(path: RepositoryRoot) -> Element {
             CommitSearchInput {
                 id: "project-commit-search-input",
                 query: query(),
+                time: time(),
+                time_error: time_range().err(),
                 onchange: move |value| query.set(value),
+                ontime: move |value| time.set(value),
                 onfirst: move |()| browser::focus_element("project-commit-search-input-result-0".into()),
                 onopenfirst: move |()| {
                     if let Some(id) = first.clone() {
@@ -472,8 +558,8 @@ pub(super) fn CommitFinder(path: RepositoryRoot) -> Element {
             crate::shared::ui::ScrollArea { class: "min-h-0",
                 CommitSearchResults {
                     id: "project-commit-search-input",
-                    result,
-                    loading: !current,
+                    result: request().and(result),
+                    loading: request().is_some() && !current,
                     disabled: (opening.pending)(),
                     onselect: opening.open,
                     onretry: move |()| search.restart(),

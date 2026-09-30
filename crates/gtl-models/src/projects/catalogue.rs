@@ -99,10 +99,30 @@ pub enum ProjectCollectionError {
     TooMany,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProjectStatus {
     Active,
     Paused,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ProjectStatusFilter {
+    #[default]
+    Active,
+    Paused,
+    All,
+}
+
+impl ProjectStatusFilter {
+    #[must_use]
+    pub const fn includes(self, status: ProjectStatus) -> bool {
+        matches!(
+            (self, status),
+            (Self::All, _)
+                | (Self::Active, ProjectStatus::Active)
+                | (Self::Paused, ProjectStatus::Paused)
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

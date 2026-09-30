@@ -21,7 +21,7 @@ pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 57;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 59;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;

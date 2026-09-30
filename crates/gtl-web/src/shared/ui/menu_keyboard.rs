@@ -12,6 +12,7 @@ enum MenuKeyboardFocus {
 struct MenuKeyboardItem {
     label: String,
     disabled: bool,
+    selected: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -40,7 +41,9 @@ pub(crate) fn keydown(id: &str, trigger_id: &str, event: &KeyboardEvent) {
     else {
         return;
     };
-    let Ok(nodes) = menu.query_selector_all("[role='menuitem'], [role='menuitemcheckbox']") else {
+    let Ok(nodes) =
+        menu.query_selector_all("[role='menuitem'], [role='menuitemcheckbox'], [role='option']")
+    else {
         return;
     };
     let elements = (0..nodes.length())
@@ -51,6 +54,7 @@ pub(crate) fn keydown(id: &str, trigger_id: &str, event: &KeyboardEvent) {
         .map(|element| MenuKeyboardItem {
             label: element.text_content().unwrap_or_default(),
             disabled: element.matches(":disabled").unwrap_or(false),
+            selected: element.get_attribute("aria-selected").as_deref() == Some("true"),
         })
         .collect::<Vec<_>>();
     let active = document.active_element();
@@ -113,7 +117,9 @@ fn menu_keyboard_action(
         MenuKeyboardFocus::Trigger | MenuKeyboardFocus::Elsewhere => None,
     };
     let last = enabled.len().saturating_sub(1);
+    let selected = enabled.iter().position(|index| items[*index].selected);
     let target = match key {
+        Key::ArrowDown | Key::ArrowUp if from_trigger && selected.is_some() => selected,
         Key::ArrowDown => Some(current.map_or(0, |current| (current + 1) % enabled.len())),
         Key::ArrowUp => Some(
             current
@@ -156,13 +162,21 @@ mod tests {
         MenuKeyboardItem {
             label: label.to_owned(),
             disabled: false,
+            selected: false,
         }
     }
 
     fn disabled_item(label: &str) -> MenuKeyboardItem {
         MenuKeyboardItem {
-            label: label.to_owned(),
             disabled: true,
+            ..item(label)
+        }
+    }
+
+    fn selected_item(label: &str) -> MenuKeyboardItem {
+        MenuKeyboardItem {
+            selected: true,
+            ..item(label)
         }
     }
 
@@ -204,6 +218,24 @@ mod tests {
         );
         assert_eq!(
             press(&Key::ArrowUp, MenuKeyboardFocus::Trigger, &items),
+            Some(MenuKeyboardAction::FocusItem(2))
+        );
+    }
+
+    #[test]
+    fn trigger_arrows_open_a_listbox_at_its_selected_option() {
+        let items = [item("Active"), selected_item("Paused"), item("All")];
+
+        assert_eq!(
+            press(&Key::ArrowDown, MenuKeyboardFocus::Trigger, &items),
+            Some(MenuKeyboardAction::FocusItem(1))
+        );
+        assert_eq!(
+            press(&Key::ArrowUp, MenuKeyboardFocus::Trigger, &items),
+            Some(MenuKeyboardAction::FocusItem(1))
+        );
+        assert_eq!(
+            press(&Key::ArrowDown, MenuKeyboardFocus::Item(1), &items),
             Some(MenuKeyboardAction::FocusItem(2))
         );
     }

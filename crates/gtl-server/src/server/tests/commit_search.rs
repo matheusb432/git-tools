@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
+use gtl_models::{diffs::CommitTimeRange, timestamps::MachineTimestamp};
 use gtl_wire::{
     proto, v1,
     viewer::{
@@ -18,6 +19,7 @@ async fn search_keeps_the_full_pinned_commit_list_and_isolates_the_active_branch
         proto::viewer::encode_search_viewer_commits_request(SearchViewerCommits {
             scope,
             query: query.into(),
+            time_range: CommitTimeRange::default(),
         })
     };
     let found = client
@@ -109,6 +111,7 @@ async fn opening_branch_matches_preserves_the_snapshot_and_supports_root_commits
         proto::viewer::encode_search_viewer_commits_request(SearchViewerCommits {
             scope,
             query: query.into(),
+            time_range: CommitTimeRange::default(),
         })
     };
     let oldest = repository.git(&["rev-parse", "HEAD~1"]);
@@ -178,6 +181,65 @@ async fn opening_branch_matches_preserves_the_snapshot_and_supports_root_commits
 
 type Client = v1::viewer_service_client::ViewerServiceClient<tonic::transport::Channel>;
 
+#[tokio::test]
+async fn time_search_filters_all_scopes_before_the_result_limit() -> TestResult {
+    let (_directory, repository, server, mut client, identity) = search_fixture(102).await?;
+    for scope in [
+        ViewerCommitSearchScope::Snapshot(identity),
+        ViewerCommitSearchScope::ActiveBranchSnapshot(identity),
+        ViewerCommitSearchScope::ActiveBranch(repository.root()),
+    ] {
+        let request = SearchViewerCommits {
+            scope,
+            query: String::new(),
+            time_range: CommitTimeRange::new(
+                Some("2026-09-29T09:00:00-03:00".try_into()?),
+                Some("2026-09-29T12:01:00Z".try_into()?),
+            )?,
+        };
+        let found = client
+            .search_viewer_commits(proto::viewer::encode_search_viewer_commits_request(
+                request.clone(),
+            ))
+            .await?
+            .into_inner();
+        assert_eq!(found.total_matches, 2);
+        assert_eq!(
+            found
+                .commits
+                .iter()
+                .map(|commit| commit.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["checkpoint 1", "checkpoint 0"]
+        );
+        let found = client
+            .search_viewer_commits(proto::viewer::encode_search_viewer_commits_request(
+                SearchViewerCommits {
+                    query: "checkpoint 0".into(),
+                    ..request
+                },
+            ))
+            .await?
+            .into_inner();
+        assert_eq!(found.total_matches, 1);
+        assert_eq!(found.commits[0].subject, "checkpoint 0");
+    }
+    let error = client
+        .search_viewer_commits(v1::SearchViewerCommitsRequest {
+            scope: Some(v1::search_viewer_commits_request::Scope::ActiveBranchPath(
+                repository.root().to_string(),
+            )),
+            time_from: Some("2026-09-30T12:00:00Z".into()),
+            time_until: Some("2026-09-29T12:00:00Z".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    server.stop().await?;
+    Ok(())
+}
+
 async fn search_fixture(
     count: u32,
 ) -> TestResult<(
@@ -195,7 +257,22 @@ async fn search_fixture(
     repository.git(&["branch", "--set-upstream-to", "main"]);
     for index in 0..count {
         repository.write("work.txt", format!("checkpoint {index}\n"));
-        repository.commit_all(&format!("checkpoint {index}"));
+        repository.git(&["add", "--all"]);
+        let date = MachineTimestamp::from_unix_seconds(
+            "2026-09-29T12:00:00Z"
+                .parse::<MachineTimestamp>()?
+                .instant()
+                .as_second()
+                + i64::from(index) * 60,
+        )?;
+        repository.git(&[
+            "commit",
+            "-q",
+            "--date",
+            date.as_ref(),
+            "-m",
+            &format!("checkpoint {index}"),
+        ]);
     }
     let database = SqliteAppState::open(directory.path())?;
     super::seed_live_tabs(&database, [super::unpushed_recipe(repository.root())])?;

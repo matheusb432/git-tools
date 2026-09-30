@@ -234,7 +234,7 @@ pub(crate) fn ViewerSettingsForm(
                 }
             }
             ScrollArea { class: "settings-content overflow-auto",
-                div { class: "settings-content-inner",
+                div { key: "{section.name()}", class: "settings-content-inner",
                     div { class: "settings-section-heading",
                         h2 { class: "text-base font-semibold text-ink", {section.label(language)} }
                         p { class: "settings-save-status", {t!(language, "settings-autosave")} }
@@ -262,8 +262,7 @@ pub(crate) fn ViewerSettingsForm(
                                     value: selected.theme.map_or("", ViewerTheme::as_str),
                                     options: theme_options(language),
                                     error: field_errors.message(SettingsField::Theme, language),
-                                    onchange: move |event: FormEvent| {
-                                        let value = event.value();
+                                    onchange: move |value: String| {
                                         let theme = if value.is_empty() {
                                             None
                                         } else {
@@ -286,9 +285,8 @@ pub(crate) fn ViewerSettingsForm(
                                         .map(|value| SelectOption::new(value.to_string(), format!("{value}%")))
                                         .collect(),
                                     error: field_errors.message(SettingsField::UiScalePercent, language),
-                                    onchange: move |event: FormEvent| {
-                                        if let Some(scale) = event
-                                            .value()
+                                    onchange: move |value: String| {
+                                        if let Some(scale) = value
                                             .parse()
                                             .ok()
                                             .and_then(|value| ViewerScalePercent::try_new(value).ok())

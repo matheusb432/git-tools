@@ -1,4 +1,8 @@
-use gtl_models::{diffs::CommitId, git::GitHead, paths::RepositoryRoot};
+use gtl_models::{
+    diffs::{CommitId, CommitTimeRange},
+    git::GitHead,
+    paths::RepositoryRoot,
+};
 use serde::{Deserialize, Serialize};
 
 use super::{ViewerCommitSummary, ViewerViewIdentity};
@@ -17,6 +21,8 @@ pub enum ViewerCommitSearchScope {
 pub struct SearchViewerCommits {
     pub scope: ViewerCommitSearchScope,
     pub query: String,
+    #[serde(default)]
+    pub time_range: CommitTimeRange,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

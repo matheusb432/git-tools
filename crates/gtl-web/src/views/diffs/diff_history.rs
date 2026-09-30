@@ -138,8 +138,7 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
                         aria_label: t!(language, "history-project-label"),
                         value: selected,
                         options,
-                        onchange: move |event: FormEvent| {
-                            let value = event.value();
+                        onchange: move |value: String| {
                             let next = match value.as_str() {
                                 "all" => ViewerHistoryFilter::All,
                                 "unassociated" => ViewerHistoryFilter::Unassociated,

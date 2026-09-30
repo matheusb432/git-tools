@@ -7,7 +7,7 @@ use rusqlite::{Connection, Row};
 
 pub mod create_project;
 pub mod get_project;
-pub mod list_active_projects;
+pub mod list_projects;
 pub mod set_project_membership;
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]

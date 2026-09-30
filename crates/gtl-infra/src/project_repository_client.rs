@@ -4,14 +4,14 @@ use gtl_application::{
         ProjectClientError,
     },
     projects::{
-        catalogue::{ProjectCatalogueError, list_active_projects},
+        catalogue::{ProjectCatalogueError, list_projects},
         find_project_by_repository,
     },
     viewer::push::ViewerPushProject,
 };
 use gtl_models::{
     paths::{ProjectName, RepositoryRoot},
-    projects::ProjectRepository,
+    projects::{ProjectRepository, catalogue::ProjectStatusFilter},
 };
 
 use crate::app_state::SqliteAppState;
@@ -28,19 +28,36 @@ impl ProjectRepositoryClient {
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
+        self.list_repositories(ProjectStatusFilter::Active).await
+    }
+
+    /// Lists active and paused projects for operations that name one project explicitly.
+    pub async fn list_managed_projects(
+        &self,
+    ) -> Result<Vec<ProjectRepository>, ProjectClientError> {
+        self.list_repositories(ProjectStatusFilter::All).await
+    }
+
+    async fn list_repositories(
+        &self,
+        filter: ProjectStatusFilter,
+    ) -> Result<Vec<ProjectRepository>, ProjectClientError> {
         let client = self.clone();
-        tokio::task::spawn_blocking(move || client.list_repositories())
+        tokio::task::spawn_blocking(move || client.read_repositories(filter))
             .await
             .map_err(|error| ProjectCatalogueUnavailableError::Dependency(error.into()))?
     }
 
-    fn list_repositories(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
+    fn read_repositories(
+        &self,
+        filter: ProjectStatusFilter,
+    ) -> Result<Vec<ProjectRepository>, ProjectClientError> {
         let connection = self
             .database
             .connection_lock()
             .map_err(ProjectCatalogueUnavailableError::Dependency)?;
         let projects =
-            list_active_projects::execute((), &connection).map_err(|error| match error {
+            list_projects::execute(filter, &connection).map_err(|error| match error {
                 error @ ProjectCatalogueError::InvalidData(_) => ProjectClientError::InvalidData(
                     ProjectCatalogueDataError::Dependency(error.into()),
                 ),

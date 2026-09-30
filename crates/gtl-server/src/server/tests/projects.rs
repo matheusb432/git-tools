@@ -729,6 +729,7 @@ fn page_request(
 ) -> v1::ListViewerProjectsRequest {
     v1::ListViewerProjectsRequest {
         sort: None,
+        status: v1::ProjectStatusFilter::Active.into(),
         page_size,
         cursor: Some(cursor),
     }
@@ -820,8 +821,13 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
         page_request(2, Cursor::BeforeProjectId("invalid".into())),
         v1::ListViewerProjectsRequest {
             sort: None,
+            status: v1::ProjectStatusFilter::Active.into(),
             page_size: 2,
             cursor: None,
+        },
+        v1::ListViewerProjectsRequest {
+            status: v1::ProjectStatusFilter::Unspecified.into(),
+            ..first()
         },
     ] {
         assert_eq!(
@@ -903,18 +909,62 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
         .into_inner();
     assert_eq!(ids(&page), ["DD", "EE"]);
     assert_eq!(page.total, 3);
-    for id in ["BB", "CC"] {
-        assert_eq!(
-            viewer
-                .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
-                    project_id: id.into()
+    for (status, expected) in [
+        (v1::ProjectStatusFilter::Paused, &["CC"][..]),
+        (v1::ProjectStatusFilter::All, &["AA", "CC", "DD", "EE"]),
+    ] {
+        for sort in [None, Some(v1::ProjectsSort::Changes as i32)] {
+            let page = viewer
+                .list_viewer_projects(v1::ListViewerProjectsRequest {
+                    sort,
+                    status: status.into(),
+                    ..page_request(10, Cursor::First(v1::Empty {}))
                 })
-                .await
-                .unwrap_err()
-                .code(),
-            tonic::Code::NotFound
-        );
+                .await?
+                .into_inner();
+            let mut listed = ids(&page);
+            listed.sort();
+            assert_eq!(listed, expected);
+            assert_eq!(
+                page.projects
+                    .iter()
+                    .find(|project| project.id == "CC")
+                    .map(v1::ViewerProject::project_status),
+                Some(v1::ProjectStatus::Paused)
+            );
+        }
     }
+    let paused = viewer
+        .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+            project_id: "CC".into(),
+        })
+        .await?
+        .into_inner();
+    viewer
+        .update_viewer_project(v1::UpdateViewerProjectRequest {
+            path: std::env::temp_dir()
+                .join("tools")
+                .join("CC")
+                .to_string_lossy()
+                .into_owned(),
+            comparison_branch: Some(v1::ComparisonBranchFieldUpdate {
+                operation: Some(v1::comparison_branch_field_update::Operation::Update(
+                    "release".into(),
+                )),
+            }),
+            expected_comparison_branch: paused.comparison_branch,
+        })
+        .await?;
+    assert_eq!(
+        viewer
+            .get_viewer_project_status(v1::GetViewerProjectStatusRequest {
+                project_id: "BB".into()
+            })
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
     server.stop().await?;
     Ok(())
 }

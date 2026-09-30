@@ -10,8 +10,8 @@ use gtl_wire::viewer::{
     projects::{
         DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
         ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
-        ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
-        ViewerProjectStatus,
+        ProjectDiscovery, ProjectImportResult, SetViewerProjectStatus, UpdateViewerProject,
+        ViewerProjectPage, ViewerProjectStatus,
     },
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -132,6 +132,7 @@ impl ViewerClient {
         list_projects(ListViewerProjects) -> ViewerProjectPage => "viewer_list_projects";
         get_project_status(GetViewerProjectStatus) -> ViewerProjectStatus => "viewer_get_project_status";
         update_project(UpdateViewerProject) -> () => "viewer_update_project";
+        set_project_status(SetViewerProjectStatus) -> () => "viewer_set_project_status";
         open_project(OpenViewerProject) -> OpenViewerProjectOk => "viewer_open_project";
         activate_tab(ViewerTabRequest) -> ViewerShell => "viewer_activate_tab";
         move_tab(MoveViewerTab) -> ViewerShell => "viewer_move_tab";

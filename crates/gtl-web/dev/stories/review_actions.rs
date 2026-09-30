@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dx_story::{stories, story};
 
 use crate::{
+    app::application_navigation::ViewerTabDirection,
     shared::ui::{Button, ButtonSize, ButtonVariant, Checkbox},
     views::diffs::diff_workspace::review_actions::ReviewActionDock,
 };
@@ -23,6 +24,7 @@ fn interactive() -> Element {
 #[component]
 fn ReviewActionsDemo() -> Element {
     let mut unpushed = use_signal(|| true);
+    let mut collapsed = use_signal(|| false);
     let mut outcome = use_signal(|| "Review in progress");
     rsx! {
         div { class: "grid gap-4",
@@ -36,7 +38,19 @@ fn ReviewActionsDemo() -> Element {
                 ReviewActionDock {
                     unpushed: Some(unpushed()),
                     close_disabled: false,
+                    tab_navigation_disabled: false,
+                    collapsed: collapsed(),
                     onclose: move |_| outcome.set("Diff closed"),
+                    onstep: move |direction| {
+                        outcome
+                            .set(
+                                match direction {
+                                    ViewerTabDirection::Next => "Next diff",
+                                    ViewerTabDirection::Previous => "Previous diff",
+                                },
+                            );
+                    },
+                    oncollapsedchange: move |value| collapsed.set(value),
                     push: rsx! {
                         Button {
                             id: "review-push-trigger",

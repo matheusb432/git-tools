@@ -123,7 +123,11 @@ fn push_confirmation() -> Element {
                 crate::views::diffs::diff_workspace::review_actions::ReviewActionDock {
                     unpushed: Some(true),
                     close_disabled: false,
+                    tab_navigation_disabled: true,
+                    collapsed: false,
                     onclose: move |_| {},
+                    onstep: move |_| {},
+                    oncollapsedchange: move |_| {},
                     push: rsx! {
                         Button {
                             id: "preview-push-trigger",

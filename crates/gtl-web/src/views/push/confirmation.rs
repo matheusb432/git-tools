@@ -34,6 +34,7 @@ pub(crate) fn PushConfirmationDialog(
         open,
         Duration::ZERO,
         DialogPlacement::NearTrigger,
+        None,
     );
     let title_id = format!("{id}-title");
     let description_id = format!("{id}-description");

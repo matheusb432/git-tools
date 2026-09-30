@@ -15,7 +15,10 @@ use crate::{
         failure_notice::{client_error_message, is_invalid_settings},
         field_errors::FieldErrors,
         i18n::{t, use_language},
-        ui::{Button, ButtonSize, ButtonVariant, PageNotice, PanelDialog, ScrollArea},
+        ui::{
+            Button, ButtonSize, ButtonVariant, PageNotice, PanelDialog, ScrollArea,
+            dialog::use_dialog_slot,
+        },
         viewer_client::ViewerClientError,
     },
     views::viewer_settings_form::{SettingsField, SettingsSection, ViewerSettingsForm},
@@ -26,7 +29,7 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
     let language = use_language();
     let settings = use_context::<UserSettings>();
     let navigator = use_navigator();
-    let mut source_open = use_signal(|| false);
+    let source = use_dialog_slot::<()>();
     let path = (settings.path)();
     let selection = (settings.selection)();
     let error = (settings.error)();
@@ -62,7 +65,7 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
                         id: "settings-source-link",
                         r#type: "button",
                         class: "settings-source-link",
-                        onclick: move |_| source_open.set(true),
+                        onclick: move |_| source.open(()),
                         FileCode { size: 14 }
                         "config.toml"
                     }
@@ -96,10 +99,12 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
                     None => rsx! {},
                 }
             }
-            if source_open() {
+            if source.subject().is_some() {
                 SettingsSource {
                     path: path.unwrap_or_default(),
-                    onclose: move |()| source_open.set(false),
+                    open: source.is_open(),
+                    onclose: move |()| source.close(),
+                    onclosed: move |()| source.release(),
                 }
             }
         }
@@ -107,16 +112,22 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
 }
 
 #[component]
-fn SettingsSource(path: String, onclose: EventHandler<()>) -> Element {
+fn SettingsSource(
+    path: String,
+    open: bool,
+    onclose: EventHandler<()>,
+    onclosed: EventHandler<()>,
+) -> Element {
     let language = use_language();
     let source = use_resource(gtl_client::window::read_settings_file);
     rsx! {
         PanelDialog {
             id: "settings-source",
             trigger_id: "settings-source-link",
-            open: true,
+            open,
             title: t!(language, "settings-configuration-file"),
             onclose,
+            onclosed,
             p { class: "break-all px-4 py-3 text-xs text-ink-2", "{path}" }
             ScrollArea { class: "h-[65vh] overflow-auto border-t border-line p-4",
                 match &*source.read() {

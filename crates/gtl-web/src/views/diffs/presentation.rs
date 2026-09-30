@@ -40,12 +40,19 @@ struct RetainedGeometry {
 pub(crate) struct DiffPresentation {
     tabs: Signal<HashMap<ViewerTabId, TabPresentation>>,
     pub(crate) fold_command: Signal<Option<FileFoldCommand>>,
+    /// Collapses the floating review dock to its reveal handle in every tab.
+    pub(crate) review_dock_collapsed: Signal<bool>,
 }
 
 pub(crate) fn use_diff_presentation_provider() {
     let mut tabs = use_signal(HashMap::<ViewerTabId, TabPresentation>::new);
     let fold_command = use_signal(|| None);
-    use_context_provider(|| DiffPresentation { tabs, fold_command });
+    let review_dock_collapsed = use_signal(|| false);
+    use_context_provider(|| DiffPresentation {
+        tabs,
+        fold_command,
+        review_dock_collapsed,
+    });
     let viewer = use_context::<crate::app::application_layout::ViewerContext>();
     use_effect(move || {
         let shell = viewer.shell();
@@ -66,6 +73,7 @@ impl DiffPresentation {
         Self {
             tabs: Signal::new(HashMap::new()),
             fold_command: Signal::new(None),
+            review_dock_collapsed: Signal::new(false),
         }
     }
 

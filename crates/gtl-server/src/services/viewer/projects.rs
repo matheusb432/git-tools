@@ -16,6 +16,7 @@ pub(super) async fn list_viewer_projects(
 ) -> Result<Response<v1::ListViewerProjectsResponse>, Status> {
     let request = proto::viewer::projects::decode_list(request.into_inner())
         .map_err(|_| invalid_request("page"))?;
+    let status = request.status;
     if matches!(
         request.sort,
         Some(
@@ -25,7 +26,7 @@ pub(super) async fn list_viewer_projects(
                 | gtl_models::settings::ProjectsSort::BranchDescending
         )
     ) {
-        refresh_status_index(state).await?;
+        refresh_status_index(state, status).await?;
     }
     let state = state.clone();
     let page = run_blocking(move || {
@@ -37,7 +38,10 @@ pub(super) async fn list_viewer_projects(
     Ok(Response::new(proto::viewer::projects::encode_page(&page)))
 }
 
-async fn refresh_status_index(state: &AppState) -> Result<(), Status> {
+async fn refresh_status_index(
+    state: &AppState,
+    status: gtl_models::projects::catalogue::ProjectStatusFilter,
+) -> Result<(), Status> {
     use std::sync::{Arc, atomic::AtomicBool};
     let cancellation = Arc::new(AtomicBool::new(false));
     let _cancel = CancelStatusIndex(cancellation.clone());
@@ -61,7 +65,7 @@ async fn refresh_status_index(state: &AppState) -> Result<(), Status> {
             let _scope = gtl_infra::git_client::status_context::StatusContextScope::new(
                 cancellation.clone(),
             );
-            refresh_status_index_blocking(&state, &cancellation)
+            refresh_status_index_blocking(&state, status, &cancellation)
         })
         .await?
         .map_err(|error| project_catalogue_error(&error))
@@ -72,11 +76,12 @@ async fn refresh_status_index(state: &AppState) -> Result<(), Status> {
 
 fn refresh_status_index_blocking(
     state: &AppState,
+    status: gtl_models::projects::catalogue::ProjectStatusFilter,
     cancellation: &std::sync::atomic::AtomicBool,
 ) -> anyhow::Result<()> {
     let projects = {
         let connection = state.database.connection_lock()?;
-        list_viewer_projects::status_refresh_candidates(&connection)?
+        list_viewer_projects::status_refresh_candidates(status, &connection)?
     };
     for project in projects {
         anyhow::ensure!(
@@ -174,7 +179,7 @@ pub(super) async fn open_viewer_project(
         .map_err(|_| invalid_request("comparison"))?;
     let repositories = state
         .projects
-        .list_projects()
+        .list_managed_projects()
         .await
         .map_err(|error| project_catalogue_error(&error))?;
     let state = state.clone();
@@ -248,7 +253,7 @@ pub(super) async fn update_viewer_project(
         .map_err(|error| invalid_request(error.field().unwrap_or("project")))?;
     let repositories = state
         .projects
-        .list_projects()
+        .list_managed_projects()
         .await
         .map_err(|error| project_catalogue_error(&error))?;
     let state = state.clone();

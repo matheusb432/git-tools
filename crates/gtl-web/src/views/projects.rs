@@ -1,20 +1,28 @@
 pub(crate) mod cache;
-mod comparison_action;
 mod comparison_editor;
+mod edit_dialog;
 mod import_dialog;
 mod loading;
+mod pause_toggle;
 mod preferences;
 mod presentation;
 mod status;
 mod table;
 
-pub(crate) use comparison_editor::{ComparisonBranchEditor, ComparisonEditorTrigger};
+pub(crate) use comparison_editor::ComparisonBranchEditor;
 use dioxus::prelude::*;
-use gtl_models::settings::{ProjectsPageSize, ProjectsSort};
-use gtl_wire::viewer::{ViewerHistoryFilter, projects::ViewerProjectsCursor};
-use lucide_dioxus::{GitCompareArrows, History};
+use gtl_models::{
+    projects::catalogue::ProjectStatusFilter,
+    settings::{ProjectsPageSize, ProjectsSort},
+};
+use gtl_wire::viewer::{
+    ViewerHistoryFilter,
+    projects::{ViewerProject, ViewerProjectsCursor},
+};
+use lucide_dioxus::{GitCompareArrows, History, ListFilter, Pencil};
 
 use self::{
+    edit_dialog::ProjectEditDialog,
     import_dialog::ImportProjectsDialog,
     loading::{ProjectsActivity, use_projects, use_projects_active},
     preferences::use_projects_presentation,
@@ -30,6 +38,7 @@ use crate::{
         ui::{
             Button, ButtonSize, ButtonState, ButtonVariant, LoadingSpinner, PageNotice,
             PanelDialog, ScrollArea, Select, SelectOption,
+            dialog::use_dialog_slot,
             pagination::{PageNavigation, PagePosition, Pagination},
             select::SelectVariant,
             use_toast,
@@ -40,28 +49,40 @@ use crate::{
 #[component]
 pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
     let language = use_language();
-    let mut selection =
-        use_signal(|| None::<(ProjectsPageSize, ProjectsSort, ViewerProjectsCursor)>);
-    let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
-    let mut importing = use_signal(|| false);
-    let mut searching = use_signal(|| None::<gtl_wire::viewer::projects::ViewerProject>);
-    let open_commits = use_callback(move |project| searching.set(Some(project)));
+    let mut selection = use_signal(|| {
+        None::<(
+            ProjectsPageSize,
+            ProjectsSort,
+            ProjectStatusFilter,
+            ViewerProjectsCursor,
+        )>
+    });
+    let mut status_filter = use_signal(ProjectStatusFilter::default);
+    let snapshots = use_dialog_slot::<(ViewerHistoryFilter, String)>();
+    let importing = use_dialog_slot::<()>();
+    let searching = use_dialog_slot::<ViewerProject>();
+    let editing = use_dialog_slot::<ViewerProject>();
+    let open_commits = use_callback(move |project| searching.open(project));
     use_context_provider(|| OpenCommits(open_commits));
-    let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
-    use_context_provider(|| OpenSnapshots(open_snapshots));
+    let open_editor = use_callback(move |project| editing.open(project));
+    use_context_provider(|| OpenProjectEditor(open_editor));
     let active = use_projects_active(route_active);
     let presentation = use_projects_presentation(active);
+    let status: ReadSignal<ProjectStatusFilter> = status_filter.into();
     let cursor = use_memo(move || {
         selection()
-            .filter(|(size, sort, _)| {
-                *size == (presentation.page_size)() && *sort == (presentation.sort)()
+            .filter(|(size, sort, filter, _)| {
+                *size == (presentation.page_size)()
+                    && *sort == (presentation.sort)()
+                    && *filter == status()
             })
-            .map_or(ViewerProjectsCursor::First, |(_, _, cursor)| cursor)
+            .map_or(ViewerProjectsCursor::First, |(_, _, _, cursor)| cursor)
     });
     let projects = use_projects(
         cursor,
         presentation.page_size,
         presentation.sort,
+        status,
         active,
         presentation.ready,
     );
@@ -79,10 +100,19 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
         (presentation.select_sort)(sort);
         browser::scroll_element_to_start("projects-content");
     });
+    let close_editor = use_callback(move |()| {
+        editing.close();
+        (projects.refresh)(());
+    });
+    let filter_projects = use_callback(move |filter| {
+        selection.set(None);
+        status_filter.set(filter);
+        browser::scroll_element_to_start("projects-content");
+    });
     use_effect(move || {
-        if !route_active() && (snapshots.peek().is_some() || searching.peek().is_some()) {
-            snapshots.set(None);
-            searching.set(None);
+        if !route_active() {
+            snapshots.close();
+            searching.close();
         }
     });
     let page = projects.page.read();
@@ -96,6 +126,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
     let disabled = !viewer.actions_enabled();
     let page_size = (presentation.page_size)();
     let sort = (presentation.sort)();
+    let status = status();
     let total = items.map_or(0, |page| page.total() as usize);
     let position = PagePosition::new(
         items.map_or(1, |page| {
@@ -130,42 +161,64 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         variant: ButtonVariant::Outline,
                         size: ButtonSize::Small,
                         state: if disabled { crate::shared::ui::ButtonState::Disabled } else { crate::shared::ui::ButtonState::Enabled },
-                        onclick: move |_| importing.set(true),
+                        onclick: move |_| importing.open(()),
                         {t!(language, "projects-add")}
                     }
                     ProjectDiffAllButton { disabled }
-                    SnapshotHistoryButton {}
+                    AllSnapshotsButton { onopen: move |trigger| snapshots.open((ViewerHistoryFilter::All, trigger)) }
                 }
             }
-            if let Some((filter, trigger)) = snapshots() {
+            if let Some(project) = editing.subject() {
+                ProjectEditDialog {
+                    key: "{project.id}",
+                    project: project.clone(),
+                    open: editing.is_open() && route_active(),
+                    onclose: close_editor,
+                    onclosed: move |()| editing.release(),
+                    onsnapshots: move |()| {
+                        editing.close();
+                        snapshots
+                            .open((
+                                ViewerHistoryFilter::Project {
+                                    name: project.name.clone(),
+                                },
+                                project_edit_trigger_id(&project),
+                            ));
+                    },
+                }
+            }
+            if let Some((filter, trigger)) = snapshots.subject() {
                 PanelDialog {
                     id: "project-snapshots-dialog",
                     trigger_id: trigger,
                     title: t!(language, "projects-snapshots-title"),
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
-                    open: true,
-                    onclose: move |()| snapshots.set(None),
+                    open: snapshots.is_open(),
+                    onclose: move |()| snapshots.close(),
+                    onclosed: move |()| snapshots.release(),
                     crate::views::SnapshotHistory { initial_filter: filter }
                 }
             }
-            if let Some(project) = searching() {
+            if let Some(project) = searching.subject() {
                 PanelDialog {
                     id: "project-commit-search-dialog",
                     trigger_id: format!("project-commit-search-{}", project.id),
                     title: t!(language, "commit-search-project-title", project = project.name.to_string()),
-                    open: true,
-                    onclose: move |()| searching.set(None),
+                    open: searching.is_open(),
+                    onclose: move |()| searching.close(),
+                    onclosed: move |()| searching.release(),
                     crate::views::commit_search::CommitFinder { path: project.path }
                 }
             }
-            if importing() {
+            if importing.subject().is_some() {
                 PanelDialog {
                     id: "project-import-dialog",
                     trigger_id: "project-import-trigger",
                     title: t!(language, "projects-add"),
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
-                    open: true,
-                    onclose: move |()| importing.set(false),
+                    open: importing.is_open(),
+                    onclose: move |()| importing.close(),
+                    onclosed: move |()| importing.release(),
                     ImportProjectsDialog {}
                 }
             }
@@ -174,6 +227,14 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                 "data-testid": "projects-content",
                 id: "projects-content",
                 div { class: "mx-auto max-w-7xl",
+                    div { class: "projects-toolbar mb-3 gap-3",
+                        ProjectStatusFilterSelect { status, onchange: filter_projects }
+                        if items.is_some() {
+                            p { class: "projects-count",
+                                {t!(language, "projects-count", count = total)}
+                            }
+                        }
+                    }
                     if let Some(error) = error.clone().or((presentation.error)()) {
                         div {
                             class: "projects-error mb-4 gap-3 px-3 py-2",
@@ -207,8 +268,16 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         Some([]) => rsx! {
                             PageNotice {
                                 class: "min-h-64",
-                                title: t!(language, "projects-empty"),
-                                message: t!(language, "projects-empty-message"),
+                                title: match status {
+                                    ProjectStatusFilter::Active => t!(language, "projects-empty-active"),
+                                    ProjectStatusFilter::Paused => t!(language, "projects-empty-paused"),
+                                    ProjectStatusFilter::All => t!(language, "projects-empty"),
+                                },
+                                message: match status {
+                                    ProjectStatusFilter::Active => t!(language, "projects-empty-active-message"),
+                                    ProjectStatusFilter::Paused => t!(language, "projects-empty-paused-message"),
+                                    ProjectStatusFilter::All => t!(language, "projects-empty-message"),
+                                },
                             }
                         },
                         Some(items) => rsx! {
@@ -245,7 +314,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                             }
                             PageNavigation::Last => ViewerProjectsCursor::Last,
                         };
-                        selection.set(Some((page_size, sort, cursor)));
+                        selection.set(Some((page_size, sort, status, cursor)));
                         browser::scroll_element_to_start("projects-content");
                     },
                     div { class: "flex items-center gap-2",
@@ -262,9 +331,8 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                                     .map(|size| SelectOption::new(size.to_string(), size.to_string()))
                                     .to_vec(),
                                 disabled: (presentation.pending)(),
-                                onchange: move |event: FormEvent| {
-                                    if let Some(size) = event
-                                        .value()
+                                onchange: move |value: String| {
+                                    if let Some(size) = value
                                         .parse::<u32>()
                                         .ok()
                                         .and_then(|size| ProjectsPageSize::try_new(size).ok())
@@ -282,8 +350,54 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
     }
 }
 
-#[derive(Clone, Copy)]
-struct OpenSnapshots(Callback<(ViewerHistoryFilter, String)>);
+#[component]
+fn ProjectStatusFilterSelect(
+    status: ProjectStatusFilter,
+    onchange: EventHandler<ProjectStatusFilter>,
+) -> Element {
+    let language = use_language();
+    let options = [
+        ProjectStatusFilter::Active,
+        ProjectStatusFilter::Paused,
+        ProjectStatusFilter::All,
+    ];
+    let value = |filter| match filter {
+        ProjectStatusFilter::Active => "active",
+        ProjectStatusFilter::Paused => "paused",
+        ProjectStatusFilter::All => "all",
+    };
+    rsx! {
+        div { class: "w-40",
+            Select {
+                id: "projects-status-filter",
+                aria_label: t!(language, "projects-status-filter-label"),
+                variant: SelectVariant::Toolbar,
+                icon: rsx! {
+                    ListFilter { size: 15 }
+                },
+                value: value(status),
+                options: options
+                    .map(|filter| SelectOption::new(
+                        value(filter),
+                        match filter {
+                            ProjectStatusFilter::Active => t!(language, "projects-status-active"),
+                            ProjectStatusFilter::Paused => t!(language, "projects-status-paused"),
+                            ProjectStatusFilter::All => t!(language, "projects-status-all"),
+                        },
+                    ))
+                    .to_vec(),
+                onchange: move |selected: String| {
+                    if let Some(filter) = options
+                        .into_iter()
+                        .find(|filter| value(*filter) == selected)
+                    {
+                        onchange.call(filter);
+                    }
+                },
+            }
+        }
+    }
+}
 
 /// Generates diff snapshots for every managed project with commits ahead of its comparison.
 #[component]
@@ -334,62 +448,61 @@ fn ProjectDiffAllButton(disabled: bool) -> Element {
 }
 
 #[component]
-fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Element {
+fn AllSnapshotsButton(onopen: EventHandler<String>) -> Element {
     let language = use_language();
-    let open = use_context::<OpenSnapshots>();
-    let id = project.as_ref().map_or_else(
-        || "all-snapshots".to_owned(),
-        |name| {
-            format!(
-                "project-snapshots-{}",
-                name.as_str().bytes().fold(String::new(), |mut text, byte| {
-                    use std::fmt::Write as _;
-                    let _ = write!(text, "{byte:02x}");
-                    text
-                })
-            )
-        },
-    );
-    let label = project.as_ref().map_or_else(
-        || t!(language, "projects-all-snapshots"),
-        |name| {
-            t!(
-                language,
-                "projects-snapshots-for",
-                project = name.to_string()
-            )
-        },
-    );
-    let filter = project.map_or(ViewerHistoryFilter::All, |name| {
-        ViewerHistoryFilter::Project { name }
-    });
-    let trigger = id.clone();
+    let id = "all-snapshots";
+    let label = t!(language, "projects-all-snapshots");
     rsx! {
         Button {
-            "data-testid": (filter == ViewerHistoryFilter::All)
-                .then_some(gtl_web_contracts::test_ids::VIEWER_HISTORY_OPEN.value()),
+            "data-testid": gtl_web_contracts::test_ids::VIEWER_HISTORY_OPEN.value(),
             id,
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,
             aria_label: label.clone(),
             title: label,
             aria_haspopup: "dialog",
-            onclick: move |_| open.0.call((filter.clone(), trigger.clone())),
+            onclick: move |_| onopen.call(id.to_owned()),
             History { size: 15 }
         }
     }
 }
 
-mod push_confirmation_setting;
+#[derive(Clone, Copy)]
+struct OpenCommits(Callback<ViewerProject>);
 
 #[derive(Clone, Copy)]
-struct OpenCommits(Callback<gtl_wire::viewer::projects::ViewerProject>);
+struct OpenProjectEditor(Callback<ViewerProject>);
+
+fn project_edit_trigger_id(project: &ViewerProject) -> String {
+    format!("project-edit-{}", project.id)
+}
 
 #[component]
-fn CommitSearchButton(
-    project: gtl_wire::viewer::projects::ViewerProject,
-    disabled: bool,
-) -> Element {
+fn ProjectEditButton(project: ViewerProject, disabled: bool) -> Element {
+    let language = use_language();
+    let open = use_context::<OpenProjectEditor>().0;
+    let label = t!(
+        language,
+        "projects-edit",
+        project = project.name.to_string()
+    );
+    rsx! {
+        Button {
+            id: project_edit_trigger_id(&project),
+            variant: ButtonVariant::Ghost,
+            size: ButtonSize::IconSmall,
+            state: if disabled { ButtonState::Disabled } else { ButtonState::Enabled },
+            aria_label: label.clone(),
+            aria_haspopup: "dialog",
+            title: t!(language, "projects-edit-short"),
+            onclick: move |_| open.call(project.clone()),
+            Pencil { size: 15 }
+        }
+    }
+}
+
+#[component]
+fn CommitSearchButton(project: ViewerProject, disabled: bool) -> Element {
     let language = use_language();
     let open = use_context::<OpenCommits>().0;
     rsx! {

@@ -2,7 +2,9 @@ use dioxus::prelude::*;
 use dx_story::{stories, story};
 use gtl_wire::viewer::{ViewerCommitSummary, commit_search::ViewerCommitSearchResult};
 
-use crate::views::commit_search::{CommitSearchInput, CommitSearchResults};
+use crate::views::commit_search::{
+    CommitSearchInput, CommitSearchResults, time::CommitSearchTimeInput,
+};
 
 #[story(name = "Catalog thumbnail")]
 fn thumbnail() -> Element {
@@ -13,6 +15,7 @@ fn thumbnail() -> Element {
                 query: "fx auth",
                 snapshot: true,
                 onchange: |_| {},
+                ontime: |_| {},
             }
         }
     }
@@ -22,6 +25,8 @@ fn thumbnail() -> Element {
 fn snapshot() -> Element {
     let mut query = use_signal(|| "fx auth".to_owned());
     let mut branch = use_signal(|| false);
+    let mut time = use_signal(CommitSearchTimeInput::default);
+    let time_range = use_memo(move || time().parse(crate::shared::browser::local_offset_at));
     rsx! {
         div { class: "w-52 bg-surface",
             CommitSearchInput {
@@ -29,7 +34,10 @@ fn snapshot() -> Element {
                 query: query(),
                 snapshot: true,
                 active_branch: branch(),
+                time: time(),
+                time_error: time_range().err(),
                 onchange: move |value| query.set(value),
+                ontime: move |value| time.set(value),
                 onscope: move |value| branch.set(value),
             }
             CommitSearchResults {
@@ -51,6 +59,7 @@ fn pending() -> Element {
                 query: "fx auth",
                 snapshot: true,
                 onchange: |_| {},
+                ontime: |_| {},
             }
             CommitSearchResults {
                 id: "commit-search-pending",
@@ -72,6 +81,7 @@ fn empty() -> Element {
                 query: "unknown",
                 snapshot: true,
                 onchange: |_| {},
+                ontime: |_| {},
             }
             CommitSearchResults {
                 id: "commit-search-empty",
@@ -92,12 +102,17 @@ fn empty() -> Element {
 #[story(name = "Project search")]
 fn project() -> Element {
     let mut query = use_signal(String::new);
+    let mut time = use_signal(CommitSearchTimeInput::default);
+    let time_range = use_memo(move || time().parse(crate::shared::browser::local_offset_at));
     rsx! {
         div { class: "w-96 bg-surface",
             CommitSearchInput {
                 id: "commit-search-project-story",
                 query: query(),
+                time: time(),
+                time_error: time_range().err(),
                 onchange: move |value| query.set(value),
+                ontime: move |value| time.set(value),
             }
         }
     }

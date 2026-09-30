@@ -26,6 +26,7 @@ lucide-dioxus = { version = "3.26.0", features = [
   "devices",
   "files",
   "layout",
+  "multimedia",
   "notifications",
   "text",
   "time",

@@ -31,11 +31,74 @@ struct ViewerTabActivation {
     focus: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ViewerTabDirection {
+    Next,
+    Previous,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ViewerTabStep {
+    pub(crate) direction: ViewerTabDirection,
+    pub(crate) focus_tab: bool,
+}
+
+/// Displayed diff-tab order and selection, shared by the tab rail and the review dock.
+#[derive(Clone, Copy)]
+pub(crate) struct ViewerTabNavigation {
+    pending_order: Signal<Option<Vec<ViewerTabId>>>,
+    activate: Callback<ViewerTabActivation>,
+    /// Selects the adjacent diff in displayed order, wrapping at either end.
+    pub(crate) step: Callback<ViewerTabStep>,
+}
+
+pub(crate) fn use_viewer_tab_navigation_provider() {
+    let viewer = use_context::<ViewerContext>();
+    let navigator = use_navigator();
+    let route = use_route::<Route>();
+    let shell = viewer.shell();
+    let pending_order = use_signal(|| None::<Vec<ViewerTabId>>);
+    let active_tab_id = route.tab_id();
+    let activate = use_callback(move |activation: ViewerTabActivation| {
+        let target = Route::Diff {
+            tab_id: activation.tab_id,
+        };
+        if route != target {
+            navigator.push(target);
+        }
+        if activation.focus {
+            browser::focus_element(viewer_tab_element_id(activation.tab_id));
+        }
+    });
+    let step = use_callback(move |step: ViewerTabStep| {
+        let target = shell.with(|shell| match shell {
+            ViewerShellLoad::Ready(shell) => adjacent_tab_id(
+                &shell.tabs,
+                pending_order.peek().as_deref(),
+                active_tab_id,
+                step.direction,
+            ),
+            ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
+        });
+        if let Some(tab_id) = target {
+            activate.call(ViewerTabActivation {
+                tab_id,
+                focus: step.focus_tab,
+            });
+        }
+    });
+    use_context_provider(|| ViewerTabNavigation {
+        pending_order,
+        activate,
+        step,
+    });
+}
+
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
     let language = use_language();
     let viewer = use_context::<ViewerContext>();
-    let navigator = use_navigator();
+    let navigation = use_context::<ViewerTabNavigation>();
     let route = use_route::<Route>();
     let toast = use_toast();
     let shell = viewer.shell();
@@ -60,7 +123,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
             })
             .collect::<std::collections::HashMap<_, _>>()
     });
-    let mut pending_tab_order = use_signal(|| None::<Vec<ViewerTabId>>);
+    let mut pending_tab_order = navigation.pending_order;
     let mut move_tab = use_action(move |request: MoveViewerTab| async move {
         match viewer_server::move_tab(request).await {
             Ok(shell) => viewer.replace_shell(shell),
@@ -134,46 +197,20 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let close_tab = use_callback(move |(tab_id, focus)| viewer.close_tab(tab_id, focus));
     let active_tab_id = route.tab_id();
     let projects_active = matches!(route, Route::Projects {});
-    let activate_viewer_tab = use_callback(move |activation: ViewerTabActivation| {
-        let target = Route::Diff {
-            tab_id: activation.tab_id,
-        };
-        if route != target {
-            navigator.push(target);
-        }
-        if activation.focus {
-            browser::focus_element(viewer_tab_element_id(activation.tab_id));
-        }
-    });
+    let activate_viewer_tab = navigation.activate;
     let tab_shortcut = use_callback(move |shortcut: ViewerTabShortcut| {
-        if let ViewerTabShortcut::Next | ViewerTabShortcut::Previous = shortcut {
-            let target = shell.with(|shell| {
-                let ViewerShellLoad::Ready(shell) = shell else {
-                    return None;
-                };
-                let order = pending_tab_order.peek();
-                let ids = tabs_in_order(&shell.tabs, order.as_deref())
-                    .into_iter()
-                    .map(|tab| tab.id)
-                    .collect::<Vec<_>>();
-                let movement = if matches!(shortcut, ViewerTabShortcut::Next) {
-                    TabMovement::Next
-                } else {
-                    TabMovement::Previous
-                };
-                active_tab_id
-                    .and_then(|current| tab_focus_target(&ids, current, movement))
-                    .or_else(|| match movement {
-                        TabMovement::Previous => ids.last().copied(),
-                        _ => ids.first().copied(),
-                    })
-            });
-            if let Some(tab_id) = target {
-                activate_viewer_tab.call(ViewerTabActivation {
-                    tab_id,
-                    focus: true,
-                });
+        let direction = match shortcut {
+            ViewerTabShortcut::Next => Some(ViewerTabDirection::Next),
+            ViewerTabShortcut::Previous => Some(ViewerTabDirection::Previous),
+            ViewerTabShortcut::Close | ViewerTabShortcut::Pin | ViewerTabShortcut::CloseOthers => {
+                None
             }
+        };
+        if let Some(direction) = direction {
+            navigation.step.call(ViewerTabStep {
+                direction,
+                focus_tab: true,
+            });
             return;
         }
         let tab = shell.with(|shell| match shell {
@@ -495,6 +532,28 @@ fn moved_tab_ids(ids: &[ViewerTabId], request: MoveViewerTab) -> Option<Vec<View
     let id = moved.remove(from);
     moved.insert(insertion_index, id);
     Some(moved)
+}
+
+fn adjacent_tab_id(
+    tabs: &[ViewerTab],
+    order: Option<&[ViewerTabId]>,
+    active_tab_id: Option<ViewerTabId>,
+    direction: ViewerTabDirection,
+) -> Option<ViewerTabId> {
+    let ids = tabs_in_order(tabs, order)
+        .into_iter()
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
+    let movement = match direction {
+        ViewerTabDirection::Next => TabMovement::Next,
+        ViewerTabDirection::Previous => TabMovement::Previous,
+    };
+    active_tab_id
+        .and_then(|current| tab_focus_target(&ids, current, movement))
+        .or_else(|| match direction {
+            ViewerTabDirection::Next => ids.first().copied(),
+            ViewerTabDirection::Previous => ids.last().copied(),
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

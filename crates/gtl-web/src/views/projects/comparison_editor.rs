@@ -2,13 +2,9 @@ use std::fmt::Write as _;
 
 use dioxus::prelude::*;
 use gtl_models::{paths::RepositoryRoot, projects::comparison::ComparisonBranch};
-use gtl_wire::viewer::{
-    FieldUpdate,
-    projects::{UpdateViewerProject, ViewerProject},
-};
-use lucide_dioxus::{GitCompare, Settings2};
+use gtl_wire::viewer::{FieldUpdate, projects::UpdateViewerProject};
+use lucide_dioxus::GitCompare;
 
-use super::loading::Projects;
 use crate::{
     entities::diffs::viewer_server,
     shared::{
@@ -17,7 +13,7 @@ use crate::{
         field_errors::{FieldErrors, FormField},
         i18n::{t, use_language},
         ui::{
-            Button, ButtonSize, ButtonState, ButtonType, ButtonVariant, IconPopover, TextInput,
+            Button, ButtonSize, ButtonState, ButtonType, ButtonVariant, TextInput,
             popover::{PopoverPlacement, PopoverSurface},
         },
         viewer_client::{ViewerClientError, captured_client_error},
@@ -54,17 +50,7 @@ impl FormField for ComparisonField {
     }
 }
 
-/// Opens the comparison branch editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ComparisonEditorTrigger {
-    /// A settings icon among a project's actions.
-    #[default]
-    Icon,
-    /// A labeled action beside a failure that a different branch resolves.
-    Labeled,
-}
-
-/// Edits the comparison branch of the catalogued project at `project`.
+/// Edits the comparison branch of the catalogued project at `project` from a labeled action.
 ///
 /// While `active` is false the editor stays closed and discards its draft. `onsaved` runs after
 /// the server stores the new branch.
@@ -72,91 +58,45 @@ pub(crate) enum ComparisonEditorTrigger {
 pub(crate) fn ComparisonBranchEditor(
     project: RepositoryRoot,
     branch: ComparisonBranch,
-    project_name: Option<gtl_models::paths::ProjectName>,
-    #[props(default)] trigger: ComparisonEditorTrigger,
     #[props(default)] disabled: bool,
     #[props(default = true)] active: bool,
     onsaved: EventHandler<()>,
 ) -> Element {
-    let popover_id = match trigger {
-        ComparisonEditorTrigger::Icon => comparison_popover_id(&project),
-        ComparisonEditorTrigger::Labeled => format!("{}-action", comparison_popover_id(&project)),
-    };
+    let popover_id = format!("{}-action", comparison_popover_id(&project));
     let language = use_language();
-    let label = if project_name.is_some() {
-        t!(
-            language,
-            "projects-settings-label",
-            branch = branch.to_string()
-        )
-    } else {
-        t!(
-            language,
-            "projects-comparison-branch-value",
-            branch = branch.to_string()
-        )
-    };
-    let form = rsx! {
-        ComparisonBranchForm {
-            project,
-            branch,
-            project_name,
-            popover_id: popover_id.clone(),
-            disabled,
-            active,
-            onsaved,
-        }
-    };
-    match trigger {
-        ComparisonEditorTrigger::Icon => rsx! {
-            IconPopover {
-                id: popover_id,
-                aria_label: label,
-                placement: PopoverPlacement::TriggerEnd,
-                icon: rsx! {
-                    Settings2 { size: 15 }
-                },
-                {form}
-            }
-        },
-        ComparisonEditorTrigger::Labeled => rsx! {
-            span { class: "inline-flex",
-                Button {
-                    id: "{popover_id}-trigger",
-                    variant: ButtonVariant::Outline,
-                    popovertarget: popover_id.clone(),
-                    popovertargetaction: "toggle",
-                    aria_controls: popover_id.clone(),
-                    disabled,
-                    icon: rsx! {
-                        GitCompare { size: 15 }
-                    },
-                    {t!(use_language(), "projects-change-comparison-branch")}
-                }
-                PopoverSurface {
-                    id: popover_id,
-                    placement: PopoverPlacement::TriggerEnd,
-                    role: "group",
-                    aria_label: label,
-                    {form}
-                }
-            }
-        },
-    }
-}
-
-/// The comparison editor for a project row, closed while Projects is inactive.
-#[component]
-pub(super) fn ProjectComparisonEditor(project: ViewerProject, disabled: bool) -> Element {
-    let projects = use_context::<Projects>();
+    let label = t!(
+        language,
+        "projects-comparison-branch-value",
+        branch = branch.to_string()
+    );
     rsx! {
-        ComparisonBranchEditor {
-            project: project.path,
-            project_name: project.name,
-            branch: project.comparison_branch,
-            disabled,
-            active: (projects.active)(),
-            onsaved: move |()| (projects.refresh)(()),
+        span { class: "inline-flex",
+            Button {
+                id: "{popover_id}-trigger",
+                variant: ButtonVariant::Outline,
+                popovertarget: popover_id.clone(),
+                popovertargetaction: "toggle",
+                aria_controls: popover_id.clone(),
+                disabled,
+                icon: rsx! {
+                    GitCompare { size: 15 }
+                },
+                {t!(language, "projects-change-comparison-branch")}
+            }
+            PopoverSurface {
+                id: popover_id.clone(),
+                placement: PopoverPlacement::TriggerEnd,
+                role: "group",
+                aria_label: label,
+                ComparisonBranchForm {
+                    project,
+                    branch,
+                    popover_id,
+                    disabled,
+                    active,
+                    onsaved,
+                }
+            }
         }
     }
 }
@@ -259,7 +199,6 @@ fn use_comparison_branch_edit(
 fn ComparisonBranchForm(
     project: RepositoryRoot,
     branch: ComparisonBranch,
-    project_name: Option<gtl_models::paths::ProjectName>,
     popover_id: String,
     disabled: bool,
     active: bool,
@@ -303,9 +242,6 @@ fn ComparisonBranchForm(
                     state: if pending { ButtonState::Loading } else if disabled || (edit.draft)().is_none() { ButtonState::Disabled } else { ButtonState::Enabled },
                     {t!(language, "projects-comparison-save")}
                 }
-            }
-            if let Some(project) = project_name {
-                super::push_confirmation_setting::ProjectPushConfirmationSetting { project, id: "{popover_id}-push-no-confirmation" }
             }
         }
     }

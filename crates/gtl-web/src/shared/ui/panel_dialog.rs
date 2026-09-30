@@ -5,15 +5,19 @@ use lucide_dioxus::X;
 
 use super::{
     Button, ButtonSize, ButtonVariant, ScrollArea,
-    dialog::{DialogPlacement, use_dialog},
+    dialog::{DialogPhase, DialogPlacement, use_dialog},
 };
 use crate::shared::i18n::{t, use_language};
+
+const PANEL_DIALOG_CLOSE_DURATION: Duration = Duration::from_millis(120);
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub(crate) enum PanelDialogVariant {
     #[default]
     Panel,
     Table,
+    /// Fits a short form instead of filling the panel height.
+    Form,
 }
 
 #[component]
@@ -24,21 +28,24 @@ pub(crate) fn PanelDialog(
     title: String,
     #[props(default)] variant: PanelDialogVariant,
     onclose: EventHandler<()>,
-
+    onclosed: Option<EventHandler<()>>,
     children: Element,
 ) -> Element {
     let language = use_language();
-    use_dialog(
+    let phase = use_dialog(
         &id,
         &trigger_id,
         open,
-        Duration::ZERO,
+        PANEL_DIALOG_CLOSE_DURATION,
         DialogPlacement::Center,
+        onclosed,
     );
+    let rendered = open || phase() != DialogPhase::Closed;
     let title_id = format!("{id}-title");
     let class = match variant {
         PanelDialogVariant::Panel => "dialog-surface m-auto p-0",
         PanelDialogVariant::Table => "dialog-surface m-auto w-[min(72rem,calc(100vw-2rem))] p-0",
+        PanelDialogVariant::Form => "dialog-surface dialog-surface-fit m-auto p-0",
     };
 
     rsx! {
@@ -47,7 +54,8 @@ pub(crate) fn PanelDialog(
             class,
             aria_modal: "true",
             aria_labelledby: title_id.clone(),
-
+            "data-state": phase().value(),
+            "data-dialog-surface": "true",
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
                     event.prevent_default();
@@ -71,16 +79,16 @@ pub(crate) fn PanelDialog(
                     }
                 }
                 match variant {
-                    PanelDialogVariant::Panel => rsx! {
+                    PanelDialogVariant::Panel | PanelDialogVariant::Form => rsx! {
                         ScrollArea { class: "min-h-0 overflow-auto p-4",
-                            if open {
+                            if rendered {
                                 {children}
                             }
                         }
                     },
                     PanelDialogVariant::Table => rsx! {
                         div { class: "min-h-0 overflow-hidden p-4",
-                            if open {
+                            if rendered {
                                 {children}
                             }
                         }

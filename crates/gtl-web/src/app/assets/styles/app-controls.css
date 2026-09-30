@@ -9,7 +9,7 @@
   .control-table-sort:enabled svg { @apply text-acc; }
   th[aria-sort] .control-table-sort { @apply text-acc; }
   .control-table-column { @apply align-middle whitespace-nowrap; }
-  .control-data-table-row { @apply border-b border-line text-ink-2 last:border-b-0 even:bg-sunk/30 hover:bg-surface-2 focus-within:bg-surface-2; }
+  .control-data-table-row { @apply border-b border-line text-ink-2 transition-colors duration-150 last:border-b-0 even:bg-sunk/30 hover:bg-surface-2 focus-within:bg-surface-2; animation: fade-in 200ms ease-out both; }
   .control-field-error { @apply mt-1 min-h-4 px-3 text-xs font-medium text-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none; }
   .control-field-error[data-visible="true"] { @apply opacity-100; }
   .control-field-label { @apply flex flex-1 flex-col text-ink; }
@@ -18,14 +18,26 @@
   .control-navigation-bar-leading { @apply flex shrink-0 items-stretch; }
   .control-navigation-bar-rail { @apply relative flex flex-1 items-end; }
   .control-navigation-bar-trailing { @apply flex shrink-0 items-center; }
-  .control-select { @apply block cursor-pointer appearance-none rounded-sm border border-line-2 bg-surface-2 text-ink outline-none hover:border-ink-3 focus-visible:focus-outline focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50; }
-  .control-select-error-overlay { @apply pointer-events-none absolute inset-0 rounded-sm border border-del opacity-0 duration-150 motion-safe:transition-opacity motion-reduce:transition-none peer-focus-visible:ring-2 peer-focus-visible:ring-del-bg; }
-  .peer[aria-invalid="true"] + .control-select-error-overlay { @apply opacity-100; }
-  .control-select-chevron { @apply pointer-events-none absolute top-1/2 right-3 grid -translate-y-1/2 place-items-center text-ink-3 peer-focus:text-ink peer-disabled:opacity-50; }
+  .control-select { @apply flex cursor-pointer items-center rounded-sm border border-line-2 bg-surface-2 text-left text-ink outline-none transition-colors duration-150 hover:border-ink-3 focus-visible:focus-outline focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 aria-expanded:border-ink-3 aria-invalid:border-del; }
+  .control-select-icon { @apply inline-flex shrink-0 text-ink-3; }
+  .control-select-chevron { @apply inline-flex shrink-0 text-ink-3 transition-transform duration-150 ease-out; }
+  .control-select[aria-expanded="true"] .control-select-chevron { @apply rotate-180 text-ink; }
+  .control-select-listbox {
+    @apply fixed inset-auto mx-0 my-1 max-h-72 overflow-y-auto rounded-panel border border-line-2 bg-surface p-1 text-ink shadow-floating;
+    min-width: anchor-size(width);
+    position-area: bottom span-right;
+    position-try-fallbacks: flip-block;
+    transition: opacity 120ms ease-out, translate 160ms cubic-bezier(0.16, 1, 0.3, 1), overlay 160ms allow-discrete, display 160ms allow-discrete;
+  }
+  .control-select-listbox:not(:popover-open) { opacity: 0; translate: 0 -4px; }
+  @starting-style {
+    .control-select-listbox:popover-open { opacity: 0; translate: 0 -4px; }
+  }
+  .control-select-option { @apply flex min-h-8 w-full cursor-pointer items-center gap-3 rounded-sm px-2.5 py-1 text-left whitespace-nowrap text-ink-2 outline-none hover:bg-surface-2 hover:text-ink focus-visible:bg-surface-2 focus-visible:text-ink focus-visible:focus-outline focus-visible:-outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 aria-selected:text-acc; }
+  .control-select-check { @apply inline-flex shrink-0 opacity-0; }
+  .control-select-option[aria-selected="true"] .control-select-check { @apply opacity-100; }
   .control-skeleton { @apply animate-pulse rounded-sm bg-line-2 motion-reduce:animate-none; }
   .control-page-notice { @apply grid place-content-center text-center; }
-  .control-viewer-theme-picker { @apply flex flex-none items-center rounded-sm border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-ink-3 has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50; }
-  .control-viewer-theme-select { @apply cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed; }
   .alert-dialog { @apply fixed inset-0 m-0 h-dvh max-h-dvh w-full max-w-none overflow-hidden border-0 bg-transparent p-3 text-ink; }
   .alert-dialog[open] { @apply flex items-center justify-center; }
   .alert-dialog::backdrop { @apply bg-bg/60; }
@@ -45,9 +57,9 @@
   .alert-dialog-content { @apply mt-3; }
   .alert-dialog-actions { @apply flex min-h-14 min-w-0 shrink-0 items-center justify-end gap-3 px-4 py-1.5; }
   .alert-dialog[data-state="open"] .alert-dialog-surface { animation: alert-dialog-enter 160ms ease-out both; }
-  .alert-dialog[data-state="open"]::backdrop { animation: alert-dialog-scrim-in 160ms ease-out both; }
+  .alert-dialog[data-state="open"]::backdrop { animation: dialog-scrim-in 160ms ease-out both; }
   .alert-dialog[data-state="closing"] .alert-dialog-surface { animation: alert-dialog-exit 120ms ease-in both; }
-  .alert-dialog[data-state="closing"]::backdrop { animation: alert-dialog-scrim-out 120ms ease-in both; }
+  .alert-dialog[data-state="closing"]::backdrop { animation: dialog-scrim-out 120ms ease-in both; }
 
   @media (width < 40rem) {
     .alert-dialog-body { @apply p-3; }
@@ -94,12 +106,12 @@
   to { opacity: 0; transform: translateY(8px) scale(0.99); }
 }
 
-@keyframes alert-dialog-scrim-in {
+@keyframes dialog-scrim-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-@keyframes alert-dialog-scrim-out {
+@keyframes dialog-scrim-out {
   from { opacity: 1; }
   to { opacity: 0; }
 }

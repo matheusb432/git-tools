@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use thirtyfour::{By, WebDriver, components::SelectElement};
+use thirtyfour::{By, WebDriver};
 
 use crate::support::{self, fixture::OneShotFixture};
 
@@ -81,11 +81,15 @@ pub(super) async fn open_settings(driver: &WebDriver) -> Result<()> {
 }
 
 pub(super) async fn select_value(driver: &WebDriver, id: &str, value: &str) -> Result<()> {
-    let select = driver.find(By::Id(id)).await?;
-    SelectElement::new(&select)
-        .await?
-        .select_by_value(value)
-        .await?;
+    support::click(driver, By::Id(id)).await?;
+    support::click(
+        driver,
+        By::Css(format!(
+            "#{id}-listbox [role='option'][data-value='{value}']"
+        )),
+    )
+    .await?;
+    support::visible(driver, By::Css(format!("#{id}[value='{value}']"))).await?;
     Ok(())
 }
 
@@ -104,10 +108,7 @@ async fn observe_input_stability(driver: &WebDriver) -> Result<()> {
     driver.execute(r#"
         const observation = { expected: new Map(), regressions: [], layout: null, frame: null };
         window.settingsObservation = observation;
-        document.addEventListener('change', event => {
-            const input = event.target;
-            if (!input.closest('.settings-page-shell')) return;
-            const key = input.type === 'radio' ? input.name : input.id;
+        function expect(input, key, value) {
             observation.layout = input.name === 'settings-language' ? null : {
                 route: location.pathname,
                 hint: document.querySelector('.settings-save-status')?.textContent,
@@ -116,8 +117,21 @@ async fn observe_input_stability(driver: &WebDriver) -> Result<()> {
             observation.expected.set(key, {
                 radio: input.type === 'radio',
                 checkbox: input.type === 'checkbox',
-                value: input.type === 'checkbox' ? input.checked : input.value,
+                value,
             });
+        }
+        document.addEventListener('change', event => {
+            const input = event.target;
+            if (!input.closest('.settings-page-shell')) return;
+            const key = input.type === 'radio' ? input.name : input.id;
+            expect(input, key, input.type === 'checkbox' ? input.checked : input.value);
+        }, true);
+        document.addEventListener('click', event => {
+            const option = event.target.closest?.('[role="option"][data-value]');
+            const listbox = option?.closest('[role="listbox"]');
+            if (!listbox?.closest('.settings-page-shell')) return;
+            const trigger = document.querySelector(`[aria-controls="${listbox.id}"]`);
+            if (trigger) expect(trigger, trigger.id, option.dataset.value);
         }, true);
         function sample() {
             for (const [key, expected] of observation.expected) {

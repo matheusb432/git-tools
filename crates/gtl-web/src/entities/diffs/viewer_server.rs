@@ -8,7 +8,7 @@ use gtl_wire::viewer::{
     projects::{
         DiscoverProjectRepositories, ImportProjectRepositories, ListViewerProjects,
         OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
-        ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
+        ProjectImportResult, SetViewerProjectStatus, UpdateViewerProject, ViewerProjectPage,
     },
 };
 
@@ -191,6 +191,12 @@ where
 }
 
 viewer_request!(update_project, UpdateViewerProject, (), update_project);
+viewer_request!(
+    set_project_status,
+    SetViewerProjectStatus,
+    (),
+    set_project_status
+);
 
 viewer_request!(
     set_modified_files,

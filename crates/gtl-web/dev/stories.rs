@@ -9,6 +9,7 @@ mod icon_popover;
 mod loading_spinner;
 mod page_notice;
 mod review_actions;
+mod select;
 mod skeleton;
 mod text_input;
 mod toast;

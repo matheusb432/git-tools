@@ -593,7 +593,8 @@ mod tests {
         assert!(html.contains(r#"aria-label="Theme""#));
         assert!(html.contains("Built-in default (Dark)"));
         assert!(html.contains(r#"value="mirage""#));
-        assert!(html.contains(">Mirage</option>"));
+        assert!(html.contains(r#"data-value="mirage""#));
+        assert!(html.contains(">Mirage<"));
     }
 
     #[test]

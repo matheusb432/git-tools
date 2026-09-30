@@ -8,7 +8,8 @@ use gtl_wire::viewer::ViewerTheme;
 use crate::shared::{
     browser,
     i18n::{language_endonym, t, use_language, use_language_provider},
-    ui::{Select, SelectOption, ViewerThemePicker},
+    ui::{Select, SelectOption, select::SelectVariant},
+    viewer_theme::{VIEWER_THEME_OPTIONS, viewer_theme_from_value, viewer_theme_label},
 };
 
 const FAVICON: Asset = asset!("/src/app/assets/app-icon.svg");
@@ -48,10 +49,23 @@ fn SidebarPreferences() -> Element {
     let language = use_language();
 
     rsx! {
-        ViewerThemePicker {
-            theme: theme(),
-            disabled: false,
-            onthemechange: move |selected_theme| theme.set(selected_theme),
+        Select {
+            id: "component-preview-theme",
+            aria_label: t!(language, "settings-theme"),
+            variant: SelectVariant::Toolbar,
+            value: theme().as_str(),
+            options: VIEWER_THEME_OPTIONS
+                .map(|option| SelectOption::new(option.as_str(), viewer_theme_label(option)))
+                .to_vec(),
+            error: None,
+            icon: rsx! {
+                lucide_dioxus::CircleDot { size: 9, fill: "currentColor", class: "text-acc" }
+            },
+            onchange: move |value: String| {
+                if let Some(selected_theme) = viewer_theme_from_value(&value) {
+                    theme.set(selected_theme);
+                }
+            },
         }
         Select {
             id: "component-preview-language",
@@ -65,8 +79,8 @@ fn SidebarPreferences() -> Element {
                 ))
                 .collect(),
             error: None,
-            onchange: move |event: FormEvent| {
-                if let Ok(selected) = event.value().parse() {
+            onchange: move |value: String| {
+                if let Ok(selected) = value.parse() {
                     language_setting.set(selected);
                 }
             },

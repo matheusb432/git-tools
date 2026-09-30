@@ -33,7 +33,7 @@ pub fn execute(
         FieldUpdate::Unchanged => return Ok(()),
     };
     let changed = connection.execute(
-        "UPDATE projects SET comparison_branch = ?1 WHERE title = ?2 AND comparison_branch = ?3 AND paused_at IS NULL AND unmanaged_at IS NULL",
+        "UPDATE projects SET comparison_branch = ?1 WHERE title = ?2 AND comparison_branch = ?3 AND unmanaged_at IS NULL",
         params![branch.as_ref(), request.project_name.as_str(), request.expected_comparison_branch.as_ref()],
     )?;
     if changed == 0 {

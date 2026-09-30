@@ -233,8 +233,8 @@ fn ChangesSinceSection(
                 options,
                 variant: SelectVariant::Toolbar,
                 disabled: !available,
-                onchange: move |event: FormEvent| {
-                    onchange.call(ChangesSinceEdit::from_selection_value(&event.value()));
+                onchange: move |value: String| {
+                    onchange.call(ChangesSinceEdit::from_selection_value(&value));
                 },
             }
             if selection == ChangesSinceSelection::Custom {

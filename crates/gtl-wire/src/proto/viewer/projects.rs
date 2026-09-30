@@ -1,5 +1,6 @@
 use gtl_models::{
     git::CommitCount,
+    projects::catalogue::{ProjectStatus, ProjectStatusFilter},
     repository::{
         PathCount,
         status::{RepositoryStatus, StatusChanges, StatusHead, StatusResult, StatusUpstream},
@@ -215,6 +216,7 @@ pub fn encode_list(request: ListViewerProjects) -> v1::ListViewerProjectsRequest
         sort: request
             .sort
             .map(|sort| super::encode_projects_sort(sort) as i32),
+        status: encode_status_filter(request.status) as i32,
         page_size: request.page_size.into_inner(),
         cursor: Some(match request.cursor {
             ViewerProjectsCursor::First => Cursor::First(v1::Empty {}),
@@ -231,6 +233,7 @@ pub fn decode_list(
     use v1::list_viewer_projects_request::Cursor;
     Ok(ListViewerProjects {
         sort: request.sort.map(super::decode_projects_sort).transpose()?,
+        status: decode_status_filter(request.status)?,
         page_size: ViewerProjectsPageSize::try_new(request.page_size)
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         cursor: match required(request.cursor)? {
@@ -248,6 +251,38 @@ pub fn decode_list(
     })
 }
 
+const fn encode_status_filter(filter: ProjectStatusFilter) -> v1::ProjectStatusFilter {
+    match filter {
+        ProjectStatusFilter::Active => v1::ProjectStatusFilter::Active,
+        ProjectStatusFilter::Paused => v1::ProjectStatusFilter::Paused,
+        ProjectStatusFilter::All => v1::ProjectStatusFilter::All,
+    }
+}
+
+fn decode_status_filter(value: i32) -> Result<ProjectStatusFilter, ViewerCodecError> {
+    match v1::ProjectStatusFilter::try_from(value) {
+        Ok(v1::ProjectStatusFilter::Active) => Ok(ProjectStatusFilter::Active),
+        Ok(v1::ProjectStatusFilter::Paused) => Ok(ProjectStatusFilter::Paused),
+        Ok(v1::ProjectStatusFilter::All) => Ok(ProjectStatusFilter::All),
+        Ok(v1::ProjectStatusFilter::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+const fn encode_catalogue_status(status: ProjectStatus) -> v1::ProjectStatus {
+    match status {
+        ProjectStatus::Active => v1::ProjectStatus::Active,
+        ProjectStatus::Paused => v1::ProjectStatus::Paused,
+    }
+}
+
+fn decode_catalogue_status(value: i32) -> Result<ProjectStatus, ViewerCodecError> {
+    match v1::ProjectStatus::try_from(value) {
+        Ok(v1::ProjectStatus::Active) => Ok(ProjectStatus::Active),
+        Ok(v1::ProjectStatus::Paused) => Ok(ProjectStatus::Paused),
+        Ok(v1::ProjectStatus::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
 #[must_use]
 pub fn encode_project(project: &ViewerProject) -> v1::ViewerProject {
     v1::ViewerProject {
@@ -255,6 +290,7 @@ pub fn encode_project(project: &ViewerProject) -> v1::ViewerProject {
         name: project.name.to_string(),
         comparison_branch: project.comparison_branch.to_string(),
         path: project.path.to_string(),
+        project_status: encode_catalogue_status(project.status) as i32,
     }
 }
 
@@ -283,6 +319,7 @@ pub fn decode_projects(
                     name: project.name.try_into()?,
                     comparison_branch: project.comparison_branch.try_into()?,
                     path: gtl_models::paths::RepositoryRoot::try_new(project.path.into())?,
+                    status: decode_catalogue_status(project.project_status)?,
                 })
             };
             decode().map_err(|_| ViewerCodecError::InvalidMessage)

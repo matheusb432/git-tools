@@ -60,6 +60,7 @@ pub(crate) fn AlertDialog(
         open,
         ALERT_DIALOG_CLOSE_DURATION,
         DialogPlacement::Center,
+        None,
     );
 
     let title_id = format!("{id}-title");

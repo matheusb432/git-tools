@@ -31,10 +31,7 @@ use crate::{
             use_toast,
         },
     },
-    views::{
-        diffs::ClientDiffDocument,
-        projects::{ComparisonBranchEditor, ComparisonEditorTrigger},
-    },
+    views::{diffs::ClientDiffDocument, projects::ComparisonBranchEditor},
 };
 
 #[component]
@@ -528,7 +525,6 @@ fn WorkspaceError(tab_id: ViewerTabId, failure: Failure) -> Element {
                     ComparisonBranchEditor {
                         project,
                         branch,
-                        trigger: ComparisonEditorTrigger::Labeled,
                         onsaved: move |()| viewer.refresh_tab(tab_id),
                     }
                 }
