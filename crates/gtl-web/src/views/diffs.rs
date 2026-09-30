@@ -1,13 +1,17 @@
+pub(crate) mod changes_since;
 mod client_diff_document;
 mod diff_history;
 mod diff_rows;
 pub(crate) mod diff_workspace;
+pub(crate) mod displayed_files;
 pub(crate) mod file_filter_changes;
+pub(crate) mod file_filter_form;
 mod file_status;
 mod line_changes;
 pub(crate) mod presentation;
 pub(crate) use presentation::use_diff_presentation_provider;
 pub(crate) mod project_diff;
+pub(crate) mod text_filter;
 
 pub(crate) use client_diff_document::ClientDiffDocument;
 pub(crate) use diff_history::SnapshotHistory;

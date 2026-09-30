@@ -367,6 +367,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             command: "git diff HEAD".to_owned(),
         },
         extension_filter: None,
+        changes_since: None,
     })
 }
 

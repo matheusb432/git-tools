@@ -29,6 +29,7 @@ pub struct ReservedRecipeWork {
     pub history_id: Option<super::RenderHistoryId>,
     pub comparison_name: Option<gtl_models::git::GitRevision>,
     tab_filter: Option<gtl_models::diffs::ExtensionFilter>,
+    changes_since: Option<gtl_models::timestamps::MachineTimestamp>,
     /// The recipe to compute: pinned to reload the displayed commits, or unpinned to resolve
     /// the tab's revisions again.
     recipe: Recipe,
@@ -158,6 +159,7 @@ fn reserve_opened(
             history_id: None,
             comparison_name: None,
             tab_filter: session.tab_extension_filter(ticket.tab_id),
+            changes_since: session.tab_changes_since(ticket.tab_id),
             recipe,
             ticket,
             skip_empty,
@@ -197,6 +199,20 @@ pub fn reserve_refresh(
     tab_id: ViewerTabId,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     state.update(|session| reserve_refresh_in_session(session, tab_id))?
+}
+
+/// Narrows the tab to changes committed after `changes_since`, or restores its whole range.
+pub fn reserve_changes_since(
+    state: &ViewerState,
+    tab_id: ViewerTabId,
+    changes_since: Option<gtl_models::timestamps::MachineTimestamp>,
+) -> Result<ReservedRecipeWork, ReserveRecipeError> {
+    state.update(|session| {
+        if !session.set_changes_since(tab_id, changes_since) {
+            return Err(ReserveRecipeError::UnknownTab);
+        }
+        reserve_refresh_in_session(session, tab_id)
+    })?
 }
 
 /// Recomputes the tab from its recipe's revisions as they resolve now.
@@ -276,6 +292,7 @@ fn reserve_compute_in_session(
         history_id,
         comparison_name,
         tab_filter: session.tab_extension_filter(ticket.tab_id),
+        changes_since: session.tab_changes_since(ticket.tab_id),
         recipe,
         ticket,
         skip_empty: false,
@@ -293,6 +310,7 @@ pub fn compute_recipe(
         history_id: _,
         comparison_name,
         tab_filter,
+        changes_since,
         recipe,
         ticket,
         skip_empty,
@@ -306,6 +324,7 @@ pub fn compute_recipe(
         PrepareRecipe {
             comparison_name,
             recipe: recipe.clone(),
+            changes_since,
         },
         settings,
         git,
@@ -635,6 +654,36 @@ mod tests {
             .update(|session| session.set_live(tab_id, true))
             .unwrap();
         assert_eq!(reserve_refresh(&state, tab_id).unwrap().recipe(), &recipe());
+    }
+
+    #[test]
+    fn changes_since_recomputes_the_tab_and_reaches_its_shell() {
+        let state = ViewerState::new();
+        let opened = reserve_open(&state, recipe(), RecipeBatchId::generate()).unwrap();
+        let tab_id = opened.ticket().tab_id;
+        publish_recipe(&state, computed_empty(&opened)).unwrap();
+        let cutoff =
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-09-28T00:00:00Z").unwrap();
+
+        let narrowed = reserve_changes_since(&state, tab_id, Some(cutoff.clone())).unwrap();
+        publish_recipe(&state, computed_empty(&narrowed)).unwrap();
+        let shell = get_viewer_shell::execute(&state, &FixedUserSettingsStore::default())
+            .unwrap()
+            .shell;
+
+        assert_ne!(narrowed.ticket().generation, opened.ticket().generation);
+        assert_eq!(narrowed.changes_since, Some(cutoff.clone()));
+        assert!(matches!(
+            shell.active,
+            gtl_wire::viewer::ViewerActiveState::Ready { view }
+                if view.changes_since == Some(cutoff)
+        ));
+        assert_eq!(
+            reserve_changes_since(&state, tab_id, None)
+                .unwrap()
+                .changes_since,
+            None
+        );
     }
 
     #[test]

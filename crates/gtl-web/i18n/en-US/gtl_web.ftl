@@ -316,6 +316,18 @@ projects-changes-popover = Project changes
 ## Projects dashboard
 
 projects-add = Add projects
+projects-diff-all = Diff unpushed projects
+projects-diff-all-empty = No projects have unpushed commits.
+projects-diff-all-opened =
+    { $count ->
+        [one] Opened a diff snapshot for { $count } project.
+       *[other] Opened diff snapshots for { $count } projects.
+    }
+projects-diff-all-warning =
+    { $count ->
+        [one] { $count } project could not be compared: { $projects }.
+       *[other] { $count } projects could not be compared: { $projects }.
+    }
 projects-snapshots-title = Snapshots
 projects-unavailable = Projects unavailable
 projects-unavailable-message = Check the project catalogue and try again.
@@ -367,6 +379,7 @@ recipe-label-unpushed-commits =
        *[other] { $repository }: { $count } commits
     }
 recipe-label-working-tree = { $repository }: { $base }->working
+recipe-label-commit = { $repository }: { $rev }^!
 recipe-label-compared = { $repository } | { $base }->{ $head }
 recipe-label-working-tree-head = working
 recipe-label-range = { $repository }: { $range }
@@ -589,6 +602,14 @@ files-count =
         [one] { $count } file
        *[other] { $count } files
     }
+files-sort = Sort files
+files-sort-selected =
+    { $sort ->
+        [changes] Sort files: most changed
+       *[path] Sort files: path
+    }
+files-sort-path = Path
+files-sort-changes = Most changed
 sidebar-visibility = Sidebar visibility
 sidebar-toggle-files = Toggle Files sidebar
 sidebar-toggle-commits = Toggle Commits sidebar
@@ -600,23 +621,47 @@ path-filter-results = Matching files
 path-filter-empty = No files match
 path-filter-searching = Searching files...
 
-## Diff extension filters
+## Diff file filters
 
-extensions-filter-label = Filter by extension
-extensions-filter-label-hide = Filter by extension: hiding { $extensions }
-extensions-filter-label-only = Filter by extension: showing only { $extensions }
+file-filters-label = Filter files
+file-filters-label-hidden =
+    { $count ->
+        [one] Filter files: { $count } file hidden
+       *[other] Filter files: { $count } files hidden
+    }
+file-filters-text = Text in files
+file-filters-text-placeholder = Search code…
+file-filters-changes = Changes
+file-filters-change-added = Added
+file-filters-change-removed = Removed
+file-filters-change-modified = Modified
+file-filters-change-modified-hint = Includes renamed files
+file-filters-since = Changed since
+file-filters-since-notice = Since
+file-filters-since-any-time = Any time
+file-filters-since-last-hour = Last hour
+file-filters-since-today = Today
+file-filters-since-last-24-hours = Last 24 hours
+file-filters-since-last-7-days = Last 7 days
+file-filters-since-custom = Custom…
+file-filters-since-custom-label = Changed since date and time
+file-filters-since-description = Shows only changes committed after this time. Uncommitted changes stay visible.
+file-filters-since-unavailable = Modified files show only uncommitted changes.
+file-filters-extensions = Extensions
+file-filters-hidden-count =
+    { $count ->
+        [one] { $count } file hidden
+       *[other] { $count } files hidden
+    }
+file-filters-clear = Clear filters
+file-filters-no-matches = No files match the filters
+file-filters-no-matches-message = Change or clear the filters to show the hidden files.
 extensions-selected = Filtered extensions
 extensions-mode-label = Filter mode
 extensions-mode-only = Show only
 extensions-mode-hide = Hide
 extensions-mode-only-description = Show only changed files with these extensions.
 extensions-mode-hide-description = Hide changed files with these extensions.
-extensions-hidden-count =
-    { $count ->
-        [one] { $count } file hidden in this tab
-       *[other] { $count } files hidden in this tab
-    }
-extensions-clear = Clear filter
 extensions-too-many-changes = Too many pending filter changes. Try again shortly.
 
 ## Project comparisons
@@ -656,3 +701,29 @@ review-close-label = Close
 review-unpushed-hint = This snapshot contains commits that have not been pushed.
 review-close = Close diff
 review-close-pinned = Unpin this diff before closing it.
+
+commit-search-label = Find commits
+commit-search-placeholder = Search…
+commit-search-hint = Message or hash
+commit-search-snapshot = Snapshot
+commit-search-branch = Branch
+commit-search-scope = Search scope
+commit-search-snapshot-option = This snapshot
+commit-search-branch-option = Active branch
+commit-search-close = Close commit search
+commit-search-clear = Clear commit search
+commit-search-snapshot-hint = Only commits in this snapshot.
+commit-search-branch-hint = Local commits on the active branch.
+commit-search-project-title = Find commits · { $project }
+commit-search-loading = Searching commits…
+commit-search-count =
+    { $total ->
+        [0] No matching commits
+        [one] 1 match
+       *[other] { $total } matches
+    }
+commit-search-count-limited = { $shown } of { $total } matches
+commit-search-results = Matching commits
+commit-search-open = Open commit { $id }: { $subject }
+commit-search-empty = Try a shorter query or a commit hash.
+commit-search-detached = Check out a branch to search its commits.

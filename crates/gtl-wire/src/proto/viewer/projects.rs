@@ -12,10 +12,11 @@ use crate::{
     v1,
     viewer::projects::{
         DiscoverProjectRepositories, DiscoveredProjectRepository, GetViewerProjectStatus,
-        ImportProjectRepositories, ListViewerProjects, OpenViewerProject, OpenViewerProjectOk,
-        ProjectDiscovery, ProjectDiscoveryState, ProjectImportOutcome, ProjectImportResult,
-        ProjectImportSelection, UpdateViewerProject, ViewerProject, ViewerProjectBranchComparison,
-        ViewerProjectPage, ViewerProjectStatus, ViewerProjectsCursor, ViewerProjectsPageSize,
+        ImportProjectRepositories, ListViewerProjects, OpenUnpushedProjectDiffsOk,
+        OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery, ProjectDiscoveryState,
+        ProjectImportOutcome, ProjectImportResult, ProjectImportSelection, UpdateViewerProject,
+        ViewerProject, ViewerProjectBranchComparison, ViewerProjectPage, ViewerProjectStatus,
+        ViewerProjectsCursor, ViewerProjectsPageSize,
     },
 };
 
@@ -413,6 +414,16 @@ pub fn decode_open_response(
             .try_into()
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
     })
+}
+
+#[must_use]
+pub fn decode_open_unpushed_response(
+    response: v1::OpenUnpushedProjectDiffsResponse,
+) -> OpenUnpushedProjectDiffsOk {
+    OpenUnpushedProjectDiffsOk {
+        opened_count: response.opened_count,
+        warnings: response.warnings,
+    }
 }
 
 #[must_use]

@@ -114,12 +114,11 @@ fn use_workspace_file_search(
     use_resource(move || {
         let identity = identity();
         let query = file_filter.read().clone();
-        request_workspace_files(view, server_owned, identity, query)
+        request_workspace_files(server_owned, identity, query)
     })
 }
 
 async fn request_workspace_files(
-    view: ReadSignal<ViewerActiveView>,
     server_owned: bool,
     identity: ViewerViewIdentity,
     query: String,
@@ -133,7 +132,7 @@ async fn request_workspace_files(
         query: query.clone(),
     })
     .await
-    .and_then(|result| validate_file_search_result(&view.peek(), identity, result));
+    .and_then(|result| validate_file_search_result(identity, result));
     Some(WorkspaceFileSearchOutcome {
         identity,
         query,
@@ -142,7 +141,6 @@ async fn request_workspace_files(
 }
 
 fn validate_file_search_result(
-    view: &ViewerActiveView,
     identity: ViewerViewIdentity,
     result: ViewerFileSearchResult,
 ) -> Result<HashSet<ViewerDiffFileId>, ViewerClientError> {
@@ -151,11 +149,7 @@ fn validate_file_search_result(
     }
     let result_count = result.files.len();
     let files = result.files.into_iter().collect::<HashSet<_>>();
-    if files.len() != result_count
-        || files
-            .iter()
-            .any(|file_id| !view.files.iter().any(|file| &file.id == file_id))
-    {
+    if files.len() != result_count {
         return Err(ViewerClientError::InvalidMessage);
     }
     Ok(files)

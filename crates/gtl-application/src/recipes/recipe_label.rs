@@ -101,6 +101,12 @@ pub(crate) fn compared(
                 branch(),
             ),
             RecipeTarget::Base { rev } => (short_revision(rev), RecipeLabelHead::WorkingTree),
+            RecipeTarget::Commit { rev } => (
+                short_revision(&rev.first_parent()),
+                RecipeLabelHead::Revision {
+                    revision: short_revision(rev),
+                },
+            ),
             RecipeTarget::Range { range, .. } => range_endpoints(range).map_or_else(
                 || (GitRevision::from(range), branch()),
                 |(base, head)| (base, RecipeLabelHead::Revision { revision: head }),
@@ -181,6 +187,7 @@ fn diff_changes(target: &RecipeTarget, parts: RecipeLabelParts) -> RecipeLabelCh
             RecipeLabelParts::None | RecipeLabelParts::Merge { .. } => RecipeLabelChanges::Unpushed,
         },
         RecipeTarget::Base { rev } => RecipeLabelChanges::WorkingTree { base: rev.clone() },
+        RecipeTarget::Commit { rev } => RecipeLabelChanges::Commit { rev: rev.clone() },
         RecipeTarget::Range { range, .. } => RecipeLabelChanges::Range {
             range: range.clone(),
         },

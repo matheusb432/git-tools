@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
 use super::scroll_area::ScrollArea;
 
@@ -27,13 +28,15 @@ pub(crate) fn PopoverSurface(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
+    let base = attributes!(span {
+        id,
+        class: "popover-surface",
+        popover: "auto",
+        "data-placement": placement.as_str(),
+    });
+    let attributes = merge_attributes(vec![attributes, base]);
     rsx! {
-        span {
-            id,
-            class: "popover-surface",
-            popover: "auto",
-            "data-placement": placement.as_str(),
-            ..attributes,
+        span {..attributes,
             ScrollArea { class: "max-h-[inherit]", {children} }
         }
     }

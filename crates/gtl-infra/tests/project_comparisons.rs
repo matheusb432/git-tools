@@ -131,6 +131,7 @@ fn fallback_uses_the_common_ancestor_and_excludes_all_uncommitted_changes() {
         ComputeDiff {
             repo_root: repository.root(),
             target: DiffTarget::Unpushed { pinned: None },
+            changes_since: None,
         },
         &FixedUserSettingsStore::default(),
         &HybridGitClient,

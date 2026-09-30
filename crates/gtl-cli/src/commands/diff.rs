@@ -39,6 +39,9 @@ pub(crate) fn grpc_target(target: &DiffTarget) -> v1::DiffTarget {
         DiffTarget::Base(revision) => {
             v1::diff_target::Selection::BaseRevision(revision.to_string())
         }
+        DiffTarget::Commit(revision) => {
+            v1::diff_target::Selection::CommitRevision(revision.to_string())
+        }
         DiffTarget::Range { range, .. } => {
             v1::diff_target::Selection::RevisionRange(range.to_string())
         }

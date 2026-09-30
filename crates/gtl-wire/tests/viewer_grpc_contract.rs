@@ -19,11 +19,12 @@ use gtl_wire::{
         decode_find_viewer_diff_response, decode_get_viewer_settings_response,
         decode_get_viewer_shell_response, decode_list_viewer_history_response,
         decode_move_viewer_tab_request, decode_search_viewer_files_request,
-        decode_search_viewer_files_response, decode_stream_viewer_rows_response,
-        encode_edit_settings_request, encode_find_viewer_diff_request,
-        encode_find_viewer_diff_response, encode_get_viewer_settings_response,
-        encode_list_viewer_history_response, encode_move_viewer_tab_request,
-        encode_search_viewer_files_request, encode_search_viewer_files_response,
+        decode_search_viewer_files_response, decode_set_viewer_changes_since_request,
+        decode_stream_viewer_rows_response, encode_edit_settings_request,
+        encode_find_viewer_diff_request, encode_find_viewer_diff_response,
+        encode_get_viewer_settings_response, encode_list_viewer_history_response,
+        encode_move_viewer_tab_request, encode_search_viewer_files_request,
+        encode_search_viewer_files_response, encode_set_viewer_changes_since_request,
         encode_viewer_shell, encode_viewer_unified_row, encode_viewer_view_identity,
     },
     v1::{
@@ -32,11 +33,12 @@ use gtl_wire::{
     },
     viewer::{
         self, EditSettingsRequest, FieldUpdate, FindViewerDiff, MoveViewerTab, SearchViewerFiles,
-        ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout,
-        ViewerDiffSearchDirection, ViewerDiffSearchMatch, ViewerDiffSearchResult, ViewerFeedback,
-        ViewerFileSearchResult, ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences,
-        ViewerRecipeKind, ViewerRowEvent, ViewerShell, ViewerSyntaxClass, ViewerTab,
-        ViewerTabState, ViewerTheme, ViewerUnifiedSourceRow, ViewerUserSettings,
+        SetViewerChangesSince, ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity,
+        ViewerDiffFileId, ViewerDiffLayout, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
+        ViewerDiffSearchResult, ViewerFeedback, ViewerFileSearchResult, ViewerHistoryEntry,
+        ViewerHistoryPage, ViewerPreferences, ViewerRecipeKind, ViewerRowEvent, ViewerShell,
+        ViewerSyntaxClass, ViewerTab, ViewerTabState, ViewerTheme, ViewerUnifiedSourceRow,
+        ViewerUserSettings,
     },
 };
 
@@ -111,6 +113,9 @@ fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
         changes_label(RecipeLabelChanges::WorkingTree {
             base: GitRevision::try_new("HEAD~2")?,
         })?,
+        changes_label(RecipeLabelChanges::Commit {
+            rev: GitRevision::try_new("HEAD~2")?,
+        })?,
         changes_label(RecipeLabelChanges::Range {
             range: GitRange::try_new("v1..v2")?,
         })?,
@@ -173,6 +178,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             copy_with_line_context: true,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Changes,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::PtBr,
             date_format: gtl_models::settings::ViewerDateFormat::Relative,
@@ -222,6 +228,7 @@ fn encoded_pending_shell() -> TestResult<v1::ViewerShell> {
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             copy_with_line_context: false,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::default(),
             date_format: gtl_models::settings::ViewerDateFormat::default(),
@@ -391,6 +398,7 @@ fn encoded_ready_shell(active: v1::ViewerActiveView) -> TestResult<v1::ViewerShe
         active: ViewerActiveState::Empty,
         preferences: ViewerPreferences {
             copy_with_line_context: true,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Changes,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::PtBr,
             date_format: gtl_models::settings::ViewerDateFormat::Relative,
@@ -523,6 +531,7 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                 }),
                 preferences: Some(v1::ViewerPreferences {
                     copy_with_line_context: Some(true),
+                    diff_files_sort: v1::DiffFilesSort::Path as i32,
                     language: v1::ViewerLanguage::EnUs as i32,
                     date_format: v1::ViewerDateFormat::Iso as i32,
                     accessibility: Some(v1::ViewerAccessibility {
@@ -650,15 +659,20 @@ fn viewer_file_search_codec_round_trips_identity_query_and_matches()
 }
 
 #[test]
-fn viewer_diff_search_codec_round_trips_direction_anchor_and_result()
+fn viewer_diff_search_codec_round_trips_scope_direction_anchor_and_result()
 -> Result<(), Box<dyn std::error::Error>> {
     let identity = viewer_identity()?;
     let found = ViewerDiffSearchMatch {
         file: ViewerDiffFileId::for_index(3),
         row_index: 42,
     };
+    let files = vec![
+        ViewerDiffFileId::for_index(3),
+        ViewerDiffFileId::for_index(1),
+    ];
     let request = FindViewerDiff {
         identity,
+        files: files.clone(),
         query: "needle".into(),
         direction: ViewerDiffSearchDirection::Backward,
         anchor: Some(found.clone()),
@@ -668,6 +682,7 @@ fn viewer_diff_search_codec_round_trips_direction_anchor_and_result()
         total_matches: 9,
         active_match: Some(found),
         wrapped: true,
+        matched_files: files,
     };
 
     assert_eq!(
@@ -677,6 +692,37 @@ fn viewer_diff_search_codec_round_trips_direction_anchor_and_result()
     assert_eq!(
         decode_find_viewer_diff_response(encode_find_viewer_diff_response(&result)).unwrap(),
         result
+    );
+    Ok(())
+}
+
+#[test]
+fn changes_since_request_round_trips_and_names_malformed_times()
+-> Result<(), Box<dyn std::error::Error>> {
+    let request = SetViewerChangesSince {
+        tab_id: ViewerTabId::try_new(7)?,
+        changes_since: Some(MachineTimestamp::try_from("2026-09-27T17:00:00-03:00")?),
+    };
+    let cleared = SetViewerChangesSince {
+        changes_since: None,
+        ..request.clone()
+    };
+    for request in [request.clone(), cleared] {
+        assert_eq!(
+            decode_set_viewer_changes_since_request(encode_set_viewer_changes_since_request(
+                request.clone()
+            ))?,
+            request
+        );
+    }
+
+    let mut malformed = encode_set_viewer_changes_since_request(request);
+    malformed.changes_since = Some("yesterday".to_owned());
+    assert_eq!(
+        decode_set_viewer_changes_since_request(malformed)
+            .unwrap_err()
+            .field(),
+        Some("changes_since")
     );
     Ok(())
 }
@@ -803,6 +849,7 @@ fn settings_codec_round_trips_effective_values() {
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x22; 32]),
         focus_window_on_diff: true,
         copy_with_line_context: false,
+        diff_files_sort: gtl_models::settings::DiffFilesSort::Changes,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,
@@ -837,6 +884,10 @@ fn settings_codec_round_trips_effective_values() {
     missing_copy_setting.copy_with_line_context = None;
     assert!(decode_get_viewer_settings_response(missing_copy_setting).is_err());
 
+    let mut unspecified_files_sort = encode_get_viewer_settings_response(settings.clone());
+    unspecified_files_sort.diff_files_sort = v1::DiffFilesSort::Unspecified as i32;
+    assert!(decode_get_viewer_settings_response(unspecified_files_sort).is_err());
+
     let mut malformed_revision = encode_get_viewer_settings_response(settings);
     malformed_revision.revision = "AA".repeat(32);
     assert!(decode_get_viewer_settings_response(malformed_revision).is_err());
@@ -856,6 +907,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         )),
         focus_window_on_diff: FieldUpdate::Update(false),
         copy_with_line_context: FieldUpdate::Update(false),
+        diff_files_sort: FieldUpdate::Update(gtl_models::settings::DiffFilesSort::Changes),
         files_sidebar_visible: FieldUpdate::Update(false),
         commits_sidebar_visible: FieldUpdate::Clear,
         wrap_lines: FieldUpdate::Update(true),
@@ -883,6 +935,21 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             commits_sidebar_visible: wrap_lines.clone(),
             copy_with_line_context: wrap_lines.clone(),
             wrap_lines,
+            ..request.clone()
+        };
+        assert_eq!(
+            decode_edit_settings_request(encode_edit_settings_request(&request)).unwrap(),
+            request
+        );
+    }
+
+    for diff_files_sort in [
+        FieldUpdate::Unchanged,
+        FieldUpdate::Clear,
+        FieldUpdate::Update(gtl_models::settings::DiffFilesSort::Path),
+    ] {
+        let request = EditSettingsRequest {
+            diff_files_sort,
             ..request.clone()
         };
         assert_eq!(

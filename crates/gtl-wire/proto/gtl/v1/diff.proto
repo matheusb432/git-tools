@@ -23,6 +23,7 @@ message DiffTarget {
     string revision_range = 3;
     string merge_base = 4;
     uint32 last_commit_count = 5;
+    string commit_revision = 6;
   }
 }
 

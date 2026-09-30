@@ -10,3 +10,5 @@ pub(crate) use user_settings::UserSettingsView;
 pub(crate) mod projects;
 
 pub(crate) mod push;
+
+pub(crate) mod commit_search;

@@ -1,4 +1,4 @@
-use std::num::NonZeroU32;
+use std::{num::NonZeroU32, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use gtl_models::{
@@ -84,6 +84,8 @@ pub enum Command {
     Ls(LsArgs),
     /// Inspect the resident gtl-server.
     Server(ServerArgs),
+    #[command(about = "Export or import portable data for cross-machine handoff.")]
+    Data(DataArgs),
 }
 
 #[derive(Debug, Args)]
@@ -96,6 +98,42 @@ pub struct ServerArgs {
 pub enum ServerCommand {
     /// Check the private local gRPC health endpoint.
     Status,
+}
+
+#[derive(Debug, Args)]
+pub struct DataArgs {
+    #[command(subcommand)]
+    pub command: DataCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DataCommand {
+    #[command(about = "Write a consistent snapshot of gtl's database into a new directory.")]
+    Export(DataExportArgs),
+    #[command(
+        about = "Replace gtl's database with a snapshot, migrating an older snapshot forward."
+    )]
+    Import(DataImportArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct DataExportArgs {
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Snapshot directory to create; its parent must exist."
+    )]
+    pub to: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct DataImportArgs {
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Snapshot directory written by `gtl data export`."
+    )]
+    pub from: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -330,7 +368,8 @@ pub struct DiffTargetArgs {
     #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
     /// Base commit (including staged, unstaged, and untracked changes), a
-    /// `<start>..<end>` committed range, or omitted for unpushed work.
+    /// `<start>..<end>` committed range, `<rev>^!` for that single commit, or
+    /// omitted for unpushed work.
     #[arg(conflicts_with_all = ["last", "recursive"])]
     pub target: Option<String>,
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
@@ -438,6 +477,7 @@ pub enum DiffTarget {
         pinned: Option<PinnedRange>,
     },
     Base(GitRevision),
+    Commit(GitRevision),
     Range {
         range: GitRange,
         pinned: Option<PinnedRange>,

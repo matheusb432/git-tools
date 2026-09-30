@@ -17,10 +17,11 @@ use gtl_models::{
 use nutype::nutype;
 use serde::{Deserialize, Serialize};
 
+pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 53;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 57;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -325,6 +326,9 @@ pub struct ViewerActiveView {
     pub commit_selection: ViewerCommitSelection,
     pub footer: ViewerFooter,
     pub extension_filter: Option<ViewerAppliedExtensionFilter>,
+    /// The tab shows only changes committed after this time.
+    #[serde(default)]
+    pub changes_since: Option<MachineTimestamp>,
 }
 
 // TODO: move this logic to a client context once a context to manage ViewerActiveView state is
@@ -393,6 +397,7 @@ pub struct ViewerPreferences {
     pub theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
     pub copy_with_line_context: bool,
+    pub diff_files_sort: gtl_models::settings::DiffFilesSort,
     pub keybindings: ViewerKeybindings,
 }
 
@@ -485,6 +490,7 @@ pub struct ViewerUserSettings {
     pub revision: UserSettingsRevision,
     pub focus_window_on_diff: bool,
     pub copy_with_line_context: bool,
+    pub diff_files_sort: gtl_models::settings::DiffFilesSort,
     pub sidebars: gtl_models::viewer::ViewerSidebarVisibility,
     pub projects_sort: gtl_models::settings::ProjectsSort,
     pub projects_page_size: gtl_models::settings::ProjectsPageSize,
@@ -516,6 +522,7 @@ pub struct EditSettingsRequest {
     pub commits_sidebar_visible: FieldUpdate<bool>,
     pub wrap_lines: FieldUpdate<bool>,
     pub copy_with_line_context: FieldUpdate<bool>,
+    pub diff_files_sort: FieldUpdate<gtl_models::settings::DiffFilesSort>,
     pub projects_sort: FieldUpdate<gtl_models::settings::ProjectsSort>,
     pub projects_page_size: FieldUpdate<gtl_models::settings::ProjectsPageSize>,
     pub theme: FieldUpdate<ViewerTheme>,
@@ -785,6 +792,8 @@ pub struct ViewerDiffSearchMatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindViewerDiff {
     pub identity: ViewerViewIdentity,
+    /// Files to search, in navigation order.
+    pub files: Vec<ViewerDiffFileId>,
     pub query: String,
     pub direction: ViewerDiffSearchDirection,
     pub anchor: Option<ViewerDiffSearchMatch>,
@@ -810,6 +819,8 @@ pub struct ViewerDiffSearchResult {
     pub total_matches: u64,
     pub active_match: Option<ViewerDiffSearchMatch>,
     pub wrapped: bool,
+    /// Searched files with at least one match, in navigation order.
+    pub matched_files: Vec<ViewerDiffFileId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -867,6 +878,13 @@ pub struct SetViewerModifiedFiles {
 pub struct SetViewerTabPinned {
     pub tab_id: ViewerTabId,
     pub pinned: bool,
+}
+
+/// Narrows one tab to changes committed after `changes_since`, or restores its whole range.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetViewerChangesSince {
+    pub tab_id: ViewerTabId,
+    pub changes_since: Option<MachineTimestamp>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

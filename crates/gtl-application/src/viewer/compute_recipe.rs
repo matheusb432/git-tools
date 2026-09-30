@@ -1,4 +1,4 @@
-use gtl_models::failure::ErrorMeta;
+use gtl_models::{failure::ErrorMeta, timestamps::MachineTimestamp};
 
 #[cfg(test)]
 use crate::recipes;
@@ -22,14 +22,25 @@ pub enum ComputeRecipeError {
     MergeDiff(#[from] compute_merge_diff::ComputeMergeDiffError),
 }
 
+/// Requests one recipe's view, narrowed to changes committed after `changes_since`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComputeRecipe {
+    pub recipe: Recipe,
+    pub changes_since: Option<MachineTimestamp>,
+}
+
 #[cqrsy::query]
 pub fn execute(
-    recipe: Recipe,
+    request: ComputeRecipe,
     user_settings: &impl UserSettingsReader,
     git: &impl GitClient,
     filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<View, ComputeRecipeError> {
+    let ComputeRecipe {
+        recipe,
+        changes_since,
+    } = request;
     let cwd = recipe.cwd();
     let view = match recipe.op {
         RecipeOp::Diff { target } => {
@@ -37,6 +48,7 @@ pub fn execute(
                 ComputeDiff {
                     repo_root: cwd,
                     target: diff_target(target),
+                    changes_since,
                 },
                 user_settings,
                 git,
@@ -51,6 +63,7 @@ pub fn execute(
                     repo_root: cwd,
                     base,
                     pinned,
+                    changes_since,
                 },
                 user_settings,
                 git,
@@ -67,6 +80,7 @@ fn diff_target(target: RecipeTarget) -> DiffTarget {
     match target {
         RecipeTarget::Unpushed { pinned } => DiffTarget::Unpushed { pinned },
         RecipeTarget::Base { rev } => DiffTarget::Base(rev),
+        RecipeTarget::Commit { rev } => DiffTarget::Commit(rev),
         RecipeTarget::Range { range, pinned } => DiffTarget::Range { range, pinned },
         RecipeTarget::Merge { base, pinned } => DiffTarget::Merge { base, pinned },
         RecipeTarget::Last { count, pinned } => DiffTarget::Last { count, pinned },
@@ -111,9 +125,12 @@ mod tests {
         let source = source();
 
         let response = compute_recipe::execute(
-            recipe(RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
-            }),
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                }),
+                changes_since: None,
+            },
             &FixedUserSettingsStore::default(),
             &source,
             &crate::utils::SavedExtensionFilters::default(),
@@ -169,7 +186,10 @@ mod tests {
 
         for (target, title, range, upstream) in cases {
             let response = compute_recipe::execute(
-                recipe(RecipeOp::Diff { target }),
+                ComputeRecipe {
+                    recipe: recipe(RecipeOp::Diff { target }),
+                    changes_since: None,
+                },
                 &FixedUserSettingsStore::default(),
                 &source,
                 &crate::utils::SavedExtensionFilters::default(),
@@ -184,6 +204,40 @@ mod tests {
     }
 
     #[test]
+    fn commit_diff_recipe_compares_against_its_first_parent() {
+        let mut source = source();
+        source.commits = vec![crate::utils::diffs::commit_with(
+            "1111111111222222222233333333334444444444",
+            "selected",
+            &["aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd"],
+        )];
+        source.commit_ids.insert(
+            "v1".into(),
+            crate::utils::commit_id_fixture("1111111111222222222233333333334444444444"),
+        );
+
+        let response = compute_recipe::execute(
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::Diff {
+                    target: RecipeTarget::Commit {
+                        rev: crate::utils::git_revision("v1"),
+                    },
+                }),
+                changes_since: None,
+            },
+            &FixedUserSettingsStore::default(),
+            &source,
+            &crate::utils::SavedExtensionFilters::default(),
+            &crate::utils::ProjectComparisons::default(),
+        )
+        .unwrap();
+
+        assert_eq!(response.title, gtl_models::diffs::DiffViewTitle::Diff);
+        assert_eq!(response.cmd.range, "aaaaaaaaaa..1111111111");
+        assert_eq!(response.upstream.as_ref(), "aaaaaaaaaa..1111111111");
+    }
+
+    #[test]
     fn pinned_diff_recipe_maps_the_contract_pin() {
         let source = FakeGitClient {
             top_level: Some("/repos/project".into()),
@@ -192,12 +246,15 @@ mod tests {
         };
 
         let response = compute_recipe::execute(
-            recipe(RecipeOp::Diff {
-                target: RecipeTarget::Range {
-                    range: crate::utils::git_range("symbolic..range"),
-                    pinned: Some(pin()),
-                },
-            }),
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::Diff {
+                    target: RecipeTarget::Range {
+                        range: crate::utils::git_range("symbolic..range"),
+                        pinned: Some(pin()),
+                    },
+                }),
+                changes_since: None,
+            },
             &FixedUserSettingsStore::default(),
             &source,
             &crate::utils::SavedExtensionFilters::default(),
@@ -216,10 +273,13 @@ mod tests {
             ..Default::default()
         };
         let response = compute_recipe::execute(
-            recipe(RecipeOp::MergeDiff {
-                base: Some(crate::utils::git_revision("release")),
-                pinned: Some(pin()),
-            }),
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: Some(crate::utils::git_revision("release")),
+                    pinned: Some(pin()),
+                }),
+                changes_since: None,
+            },
             &FixedUserSettingsStore::default(),
             &source,
             &crate::utils::SavedExtensionFilters::default(),
@@ -239,11 +299,14 @@ mod tests {
         };
 
         let diff = compute_recipe::execute(
-            recipe(RecipeOp::Diff {
-                target: RecipeTarget::Base {
-                    rev: crate::utils::git_revision("unknown"),
-                },
-            }),
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::Diff {
+                    target: RecipeTarget::Base {
+                        rev: crate::utils::git_revision("unknown"),
+                    },
+                }),
+                changes_since: None,
+            },
             &FixedUserSettingsStore::default(),
             &source,
             &crate::utils::SavedExtensionFilters::default(),
@@ -251,10 +314,13 @@ mod tests {
         )
         .unwrap_err();
         let merge = compute_recipe::execute(
-            recipe(RecipeOp::MergeDiff {
-                base: Some(crate::utils::git_revision("unknown")),
-                pinned: None,
-            }),
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: Some(crate::utils::git_revision("unknown")),
+                    pinned: None,
+                }),
+                changes_since: None,
+            },
             &FixedUserSettingsStore::default(),
             &source,
             &crate::utils::SavedExtensionFilters::default(),

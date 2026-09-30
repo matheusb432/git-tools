@@ -7,8 +7,8 @@ use gtl_wire::viewer::{
     ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
         DiscoverProjectRepositories, ImportProjectRepositories, ListViewerProjects,
-        OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery, ProjectImportResult,
-        UpdateViewerProject, ViewerProjectPage,
+        OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
+        ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
     },
 };
 
@@ -75,6 +75,11 @@ viewer_request!(
     OpenViewerProjectOk,
     open_project
 );
+viewer_query!(
+    open_unpushed_project_diffs,
+    OpenUnpushedProjectDiffsOk,
+    open_unpushed_project_diffs
+);
 viewer_request!(
     stream_rows,
     StreamViewerRows,
@@ -117,6 +122,12 @@ viewer_request!(activate_tab, ViewerTabRequest, ViewerShell, activate_tab);
 viewer_request!(move_tab, MoveViewerTab, ViewerShell, move_tab);
 viewer_request!(close_tab, ViewerTabRequest, ViewerShell, close_tab);
 viewer_request!(refresh_tab, ViewerTabRequest, ViewerShell, refresh_tab);
+viewer_request!(
+    set_changes_since,
+    gtl_wire::viewer::SetViewerChangesSince,
+    ViewerShell,
+    set_changes_since
+);
 viewer_request!(update_tab, ViewerTabRequest, ViewerShell, update_tab);
 viewer_request!(set_tab_live, SetViewerTabLive, ViewerShell, set_tab_live);
 viewer_request!(
@@ -231,3 +242,16 @@ viewer_request!(
 );
 
 viewer_request!(rename_snapshot, RenameViewerSnapshot, (), rename_snapshot);
+
+viewer_request!(
+    search_commits,
+    gtl_wire::viewer::commit_search::SearchViewerCommits,
+    gtl_wire::viewer::commit_search::ViewerCommitSearchResult,
+    search_commits
+);
+viewer_request!(
+    open_commit,
+    gtl_wire::viewer::commit_search::OpenViewerCommit,
+    OpenViewerProjectOk,
+    open_commit
+);

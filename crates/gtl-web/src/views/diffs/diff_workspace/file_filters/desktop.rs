@@ -1,22 +1,29 @@
 use dioxus::prelude::*;
+use gtl_wire::viewer::VIEWER_SEARCH_QUERY_MAX_BYTES;
 
-use super::ExtensionFilterMenu;
+use super::{FileFiltersMenu, workspace::use_workspace_file_filters_context};
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
     entities::diffs::viewer_server,
     shared::{
+        browser,
         failure_notice::client_error_message,
         i18n::{t, use_language},
         ui::{Button, ButtonSize, ButtonVariant},
     },
-    views::diffs::file_filter_changes::FileFilterController,
+    views::diffs::{
+        changes_since::{ChangesSinceSelection, local_input_value},
+        file_filter_changes::FileFilterController,
+        file_filter_form::FileFilterEdit,
+    },
 };
 
-/// Loads the active tab's extension filter and submits edits through the shared controller.
+/// Binds the filter menu to the active tab: saved extension filters and its session filters.
 #[component]
-pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters(id: String) -> Element {
+pub(in crate::views::diffs::diff_workspace) fn WorkspaceFileFiltersMenu(id: String) -> Element {
     let language = use_language();
     let workspace = super::super::use_workspace_context();
+    let filters = use_workspace_file_filters_context();
     let context = use_context::<ViewerContext>();
     let controller = use_context::<FileFilterController>();
     let identity = use_memo(move || workspace.view.read().identity);
@@ -25,7 +32,7 @@ pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters(id: String) -> E
         ViewerShellLoad::Ready(shell) => Some(shell.version),
         _ => None,
     });
-    let mut filters = use_resource(move || {
+    let mut metadata = use_resource(move || {
         let tab_id = identity().tab_id;
         let epoch = refresh();
         let _ = version();
@@ -39,41 +46,58 @@ pub(in crate::views::diffs::diff_workspace) fn ExtensionFilters(id: String) -> E
         }
     });
     let tab_id = identity().tab_id;
-    let data = filters.read();
+    let data = metadata.read();
     let fetched = data.as_ref().filter(|(id, _, _)| *id == tab_id);
     let fetched_epoch = fetched.map_or(0, |(_, epoch, _)| *epoch);
-    let metadata = fetched.and_then(|(_, _, result)| result.as_ref().ok());
+    let loaded = fetched.and_then(|(_, _, result)| result.as_ref().ok());
     let view = workspace.view.read();
     let applied = view.extension_filter.as_ref();
-    let filter = controller
+    let extension_filter = controller
         .displayed(tab_id, fetched_epoch)
-        .or_else(|| metadata.map(|value| value.filter.clone()))
+        .or_else(|| loaded.map(|value| value.filter.clone()))
         .or_else(|| applied.map(|value| value.filter.clone()))
         .unwrap_or_default();
-    let available = metadata
+    let extensions = loaded
         .map(|value| value.extensions.clone())
         .unwrap_or_default();
-    let hidden_count = applied.map_or(0, |value| value.hidden_paths.len());
     let error = controller
         .error(tab_id)
         .or_else(|| fetched.and_then(|(_, _, result)| result.as_ref().err().cloned()));
+    let form = filters.form.read();
+    let changes_since = filters.changes_since.applied.read();
+    let changes_since_value = changes_since
+        .as_ref()
+        .map(|cutoff| local_input_value(cutoff, browser::local_offset_at(cutoff.instant())))
+        .unwrap_or_default();
     rsx! {
-        ExtensionFilterMenu {
+        FileFiltersMenu {
             key: "{tab_id}",
             id,
-            filter,
-            available,
-            hidden_count,
-            onchange: move |filter| controller.submit(tab_id, filter),
+            text: form.text.clone(),
+            text_status: filters.text.state.read().message(language),
+            text_maxlength: VIEWER_SEARCH_QUERY_MAX_BYTES.to_string(),
+            ontext: move |text| filters.text.set_query.call(text),
+            shown: form.shown,
+            ontoggle: move |kind| filters.edit.call(FileFilterEdit::Toggle(kind)),
+            changes_since: ChangesSinceSelection::new(changes_since.as_ref(), &form.changes_since),
+            changes_since_value,
+            changes_since_available: (filters.changes_since.available)(),
+            onchangessince: move |edit| filters.changes_since.edit.call(edit),
+            extension_filter,
+            extensions,
+            onextension: move |filter| controller.submit(tab_id, filter),
+            hidden_count: (filters.hidden_count)(),
+            active: (filters.active)(),
+            onclear: move |()| filters.clear.call(()),
             if let Some(error) = error {
-                div { class: "extension-filter-error", role: "alert",
+                div { class: "file-filters-error", role: "alert",
                     p { {client_error_message(&error, language)} }
                     Button {
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Ghost,
                         onclick: move |_| {
                             controller.retry(tab_id);
-                            filters.restart();
+                            metadata.restart();
                         },
                         {t!(language, "action-retry")}
                     }

@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-static MIGRATIONS_SLICE: LazyLock<[M<'static>; 20]> = LazyLock::new(|| {
+pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 21]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -264,10 +264,17 @@ static MIGRATIONS_SLICE: LazyLock<[M<'static>; 20]> = LazyLock::new(|| {
         M::up(include_str!(
             "../../db/migrations/0020_retire_project_render_recency.sql"
         )),
+        M::up(include_str!(
+            "../../db/migrations/0021_add_commit_render_target.sql"
+        )),
     ]
 });
-static MIGRATIONS: LazyLock<Migrations<'static>> =
+pub(super) static MIGRATIONS: LazyLock<Migrations<'static>> =
     LazyLock::new(|| Migrations::from_slice(&MIGRATIONS_SLICE[..]));
+
+pub(super) fn known_schema_version() -> usize {
+    MIGRATIONS_SLICE.len()
+}
 
 fn migrate_absolute_project_sources(
     tx: &rusqlite::Transaction<'_>,
@@ -333,10 +340,12 @@ const INIT_RETRY_ATTEMPTS: u32 = 8;
 /// ..., 350ms), for a worst-case total wait of ~1.4s.
 const INIT_RETRY_BACKOFF: Duration = Duration::from_millis(50);
 
+pub(super) const DATABASE_FILE_NAME: &str = "gtl.db";
+
 /// Opens one app-state connection under `data_root` and initializes its schema policy.
 pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     std::fs::create_dir_all(data_root)?;
-    let mut conn = Connection::open(data_root.join("gtl.db"))?;
+    let mut conn = Connection::open(data_root.join(DATABASE_FILE_NAME))?;
     // ! busy_timeout first: every subsequent locking step (the WAL switch,
     // ! the migration) must respect it from the start.
     conn.busy_timeout(Duration::from_secs(5))?;

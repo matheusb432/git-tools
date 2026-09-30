@@ -43,3 +43,6 @@ pub mod set_viewer_tab_pinned;
 pub mod file_filters;
 pub mod get_viewer_file_filters;
 pub mod set_viewer_file_filters;
+
+pub mod open_viewer_commit;
+pub mod search_viewer_commits;

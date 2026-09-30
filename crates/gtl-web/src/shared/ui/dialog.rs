@@ -120,9 +120,15 @@ async fn dialog_close_duration(
 async fn focus_initial_element(dialog: &HtmlDialogElement) {
     dioxus_sdk_time::sleep(Duration::ZERO).await;
     let initial_focus = dialog
-        .query_selector("[data-dialog-initial-focus]")
+        .query_selector("[data-dialog-content-initial-focus]")
         .ok()
         .flatten()
+        .or_else(|| {
+            dialog
+                .query_selector("[data-dialog-initial-focus]")
+                .ok()
+                .flatten()
+        })
         .and_then(|element| element.dyn_into::<HtmlElement>().ok());
     focus_element(initial_focus);
 }

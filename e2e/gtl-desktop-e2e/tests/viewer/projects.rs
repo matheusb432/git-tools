@@ -123,3 +123,48 @@ async fn main_text(driver: &WebDriver) -> Result<String> {
         .text()
         .await?)
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn user_finds_branch_commits_and_filters_a_snapshot() -> Result<()> {
+    support::run_test("projects-commit-search", |session| {
+        Box::pin(async move {
+            let fixture_root = tempfile::Builder::new().prefix(".gtl-projects-").tempdir_in(
+                std::env::var_os("HOME").context("fixture home")?,
+            )?;
+            let fixture = ProjectsFixture::create(fixture_root.path())?;
+            let driver = session.driver();
+            import_projects(driver, &fixture.root).await?;
+            support::click(driver, action("projects-alpha", "Find commits")).await?;
+            let search = support::visible(driver, By::Id("project-commit-search-input")).await?;
+            search.send_keys("cmt prj wrk").await?;
+            support::visible(driver, By::Css("#project-commit-search-dialog button[aria-label^='Open commit'][title^='committed project work']:enabled")).await?;
+            support::evidence::capture(driver, "project-commit-finder", true).await?;
+            search.send_keys(thirtyfour::Key::Down).await?;
+            driver.action_chain().send_keys(thirtyfour::Key::Enter).perform().await?;
+            support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker").await?;
+            support::click(driver, By::Css("a[aria-label='Projects']")).await?;
+            support::click(driver, action("projects-alpha", "Open diff")).await?;
+            support::wait_for_active_diff(driver, "projects-alpha", "committed-project-marker").await?;
+            support::evidence::capture(driver, "snapshot-commit-search-collapsed", true).await?;
+            support::click(driver, By::Css("aside[aria-label='Commits'] button[aria-label='Find commits']")).await?;
+            let input = support::visible(driver, By::Css("aside[aria-label='Commits'] input[type='search']")).await?;
+            support::evidence::capture(driver, "snapshot-commit-search-expanded", true).await?;
+            driver.action_chain().send_keys("cmt prj wrk").perform().await?;
+            support::visible(driver, By::Css("aside[aria-label='Commits'] button[aria-label^='Open commit'][title^='committed project work']:enabled")).await?;
+            support::evidence::capture(driver, "snapshot-commit-search-matches", true).await?;
+            input.send_keys(thirtyfour::Key::Escape).await?;
+            input.send_keys(thirtyfour::Key::Escape).await?;
+            support::click(driver, By::Css("aside[aria-label='Commits'] button[aria-label='Find commits']")).await?;
+            let input = support::visible(driver, By::Css("aside[aria-label='Commits'] input[type='search']")).await?;
+            input.send_keys("base").await?;
+            support::visible(driver, By::XPath("//aside[@aria-label='Commits']//*[contains(text(), 'No matching commits')]")).await?;
+            support::click(driver, By::Css("aside[aria-label='Commits'] button[aria-label='Search scope']")).await?;
+            support::evidence::capture(driver, "snapshot-commit-search-scope", true).await?;
+            support::click(driver, By::XPath("//aside[@aria-label='Commits']//*[@popover]//button[normalize-space()='Active branch']")).await?;
+            support::visible(driver, By::Css("aside[aria-label='Commits'] button[aria-label^='Open commit'][title^='base']:enabled")).await?;
+            support::evidence::capture(driver, "snapshot-commit-search-branch", true).await?;
+            input.send_keys(thirtyfour::Key::Enter).await?;
+            support::wait_for_active_diff(driver, "projects-alpha", "base").await
+        })
+    }).await
+}

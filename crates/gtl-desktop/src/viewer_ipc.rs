@@ -10,8 +10,9 @@ use gtl_wire::viewer::{
     ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
         DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
-        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
-        ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+        ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
+        ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
+        ViewerProjectStatus,
     },
 };
 use serde::Serialize;
@@ -177,6 +178,12 @@ viewer_request_command!(
     SetViewerTabLive,
     ViewerShell,
     set_tab_live
+);
+viewer_request_command!(
+    viewer_set_changes_since,
+    gtl_wire::viewer::SetViewerChangesSince,
+    ViewerShell,
+    set_changes_since
 );
 viewer_request_command!(
     viewer_select_commit,
@@ -768,6 +775,11 @@ viewer_request_command!(
     OpenViewerProjectOk,
     open_project
 );
+viewer_query_command!(
+    viewer_open_unpushed_project_diffs,
+    OpenUnpushedProjectDiffsOk,
+    open_unpushed_project_diffs
+);
 
 viewer_request_command!(
     viewer_update_project,
@@ -876,3 +888,16 @@ mod settings_source_command {
 }
 
 pub(crate) use settings_source_command::viewer_read_settings_file;
+
+viewer_request_command!(
+    viewer_search_commits,
+    gtl_wire::viewer::commit_search::SearchViewerCommits,
+    gtl_wire::viewer::commit_search::ViewerCommitSearchResult,
+    search_commits
+);
+viewer_request_command!(
+    viewer_open_commit,
+    gtl_wire::viewer::commit_search::OpenViewerCommit,
+    OpenViewerProjectOk,
+    open_commit
+);

@@ -169,6 +169,7 @@ mod tests {
             compute_diff::ComputeDiff {
                 repo_root: repository_root("/repos/project"),
                 target: DiffTarget::Unpushed { pinned: None },
+                changes_since: None,
             },
             &FixedUserSettingsStore::default(),
             git,

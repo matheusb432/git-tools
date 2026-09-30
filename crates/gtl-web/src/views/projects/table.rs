@@ -160,6 +160,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
             }
             TableColumn { class: "text-right",
                 DataTableActions {
+                    super::CommitSearchButton { project: project.clone(), disabled }
                     ProjectComparisonAction {
                         path: project.path.clone(),
                         disabled: disabled || !local.is_available(),

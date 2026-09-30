@@ -42,7 +42,7 @@ pub(crate) fn render_batch(
     let mut skipped = 0usize;
     for repo in repos {
         let filter = filters.extension_filter(&repo.top)?;
-        let built = diff_computation::build(git, &repo.top, target, &filter, comparisons);
+        let built = diff_computation::build(git, &repo.top, target, &filter, comparisons, None);
         if let Err(error) = &built
             && error.is_unavailable()
         {

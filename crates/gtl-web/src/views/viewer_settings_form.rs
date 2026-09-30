@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::settings::{
-    UserSettingsRevision, ViewerAccessibility, ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
+    DiffFilesSort, UserSettingsRevision, ViewerAccessibility, ViewerDateFormat, ViewerLanguage,
+    ViewerScalePercent,
 };
 use gtl_wire::viewer::{
     EditSettingsRequest, FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
@@ -75,6 +76,7 @@ pub(crate) struct ViewerSettingsSelection {
     pub(crate) accessibility: ViewerAccessibility,
     pub(crate) focus_window_on_diff: bool,
     pub(crate) copy_with_line_context: bool,
+    pub(crate) diff_files_sort: DiffFilesSort,
     pub(crate) push_confirmation_required: bool,
     pub(crate) theme: Option<ViewerTheme>,
     pub(crate) render_options: ViewerRenderOptions,
@@ -91,6 +93,7 @@ pub(crate) enum SettingsEdit {
     Density(ViewerDiffDensity),
     WrapLines(bool),
     CopyWithLineContext(bool),
+    DiffFilesSort(DiffFilesSort),
     FocusWindow(bool),
     ConfirmPush(bool),
 }
@@ -107,6 +110,7 @@ impl SettingsEdit {
             Self::Density(value) => selected.render_options.density = value,
             Self::WrapLines(value) => selected.render_options.wrap_lines = value,
             Self::CopyWithLineContext(value) => selected.copy_with_line_context = value,
+            Self::DiffFilesSort(value) => selected.diff_files_sort = value,
             Self::FocusWindow(value) => selected.focus_window_on_diff = value,
             Self::ConfirmPush(value) => selected.push_confirmation_required = value,
         }
@@ -121,6 +125,7 @@ impl From<&ViewerUserSettings> for ViewerSettingsSelection {
             accessibility: settings.accessibility,
             focus_window_on_diff: settings.focus_window_on_diff,
             copy_with_line_context: settings.copy_with_line_context,
+            diff_files_sort: settings.diff_files_sort,
             push_confirmation_required: settings.push_confirmation_required,
             theme: settings.configured_theme,
             render_options: settings.render_options,
@@ -513,6 +518,7 @@ pub(crate) fn viewer_settings_patch(
             &current.copy_with_line_context,
             selected.copy_with_line_context,
         ),
+        diff_files_sort: changed_field(&current.diff_files_sort, selected.diff_files_sort),
         theme: changed_optional_field(current.theme.as_ref(), selected.theme),
         layout: changed_field(
             &current.render_options.layout,
@@ -603,6 +609,7 @@ mod tests {
             },
             focus_window_on_diff: true,
             copy_with_line_context: true,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
             push_confirmation_required,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
         }

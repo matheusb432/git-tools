@@ -80,6 +80,7 @@ pub(super) struct LiveViewRefresh {
     pub(super) ticket: ComputeTicket,
     pub(super) recipe: Recipe,
     pub(super) head: Option<LiveViewState>,
+    pub(super) changes_since: Option<gtl_models::timestamps::MachineTimestamp>,
 }
 
 pub enum LiveViewCheck {
@@ -119,6 +120,7 @@ pub fn prepare(
         PrepareRecipe {
             comparison_name: None,
             recipe: request.recipe.clone(),
+            changes_since: request.changes_since.clone(),
         },
         settings,
         git,

@@ -4,6 +4,7 @@ use anyhow::Context as _;
 
 use crate::{commands::diff::DiffOutcome, server_client::ServerClient};
 
+pub mod data;
 pub mod diff;
 pub mod diff_subrepos;
 pub mod managed;

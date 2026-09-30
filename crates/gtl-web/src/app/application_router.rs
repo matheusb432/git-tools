@@ -334,6 +334,7 @@ mod tests {
             }),
             preferences: ViewerPreferences {
                 copy_with_line_context: true,
+                diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 language: gtl_models::settings::ViewerLanguage::default(),
                 date_format: gtl_models::settings::ViewerDateFormat::default(),

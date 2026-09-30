@@ -15,6 +15,8 @@ pub enum DiffTargetRequest {
     Unpushed,
     /// The working tree relative to one base revision.
     Base { rev: String },
+    /// One commit diffed against its first parent.
+    Commit { rev: String },
     /// An exact two-dot revision range.
     Range { range: String },
     /// A three-dot merge diff against the base revision.
@@ -57,6 +59,8 @@ pub enum DiffTarget {
     Unpushed { pinned: Option<PinnedRange> },
     /// A single base commit diffed against the working tree (never pinnable).
     Base(GitRevision),
+    /// One commit diffed against its first parent (never pinnable).
+    Commit(GitRevision),
     /// An exact `<start>..<end>` commit range.
     Range {
         range: GitRange,
@@ -83,6 +87,9 @@ impl TryFrom<DiffTargetRequest> for DiffTarget {
             DiffTargetRequest::Base { rev } => Self::Base(
                 GitRevision::try_new(rev).map_err(|_| DiffTargetRequestError::EmptyRevision)?,
             ),
+            DiffTargetRequest::Commit { rev } => Self::Commit(
+                GitRevision::try_new(rev).map_err(|_| DiffTargetRequestError::EmptyRevision)?,
+            ),
             DiffTargetRequest::Range { range } => Self::Range {
                 range: GitRange::try_new(range).map_err(|_| DiffTargetRequestError::EmptyRange)?,
                 pinned: None,
@@ -107,6 +114,9 @@ impl From<&DiffTarget> for DiffTargetRequest {
         match target {
             DiffTarget::Unpushed { .. } => Self::Unpushed,
             DiffTarget::Base(rev) => Self::Base {
+                rev: rev.to_string(),
+            },
+            DiffTarget::Commit(rev) => Self::Commit {
                 rev: rev.to_string(),
             },
             DiffTarget::Range { range, .. } => Self::Range {
@@ -157,6 +167,10 @@ mod tests {
             (
                 DiffTarget::Base(GitRevision::try_new("main").unwrap()),
                 DiffTargetRequest::Base { rev: "main".into() },
+            ),
+            (
+                DiffTarget::Commit(GitRevision::try_new("main").unwrap()),
+                DiffTargetRequest::Commit { rev: "main".into() },
             ),
             (
                 DiffTarget::Range {

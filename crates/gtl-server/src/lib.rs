@@ -3,6 +3,7 @@ use std::{future::Future, time::Duration};
 use anyhow::Context as _;
 use gtl_local_transport::{LocalEndpoint, LocalListener};
 
+pub mod data;
 #[cfg(any(test, feature = "benchmark-support"))]
 mod harness;
 mod observability;

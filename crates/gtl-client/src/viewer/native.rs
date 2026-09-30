@@ -1,4 +1,6 @@
-use gtl_wire::viewer::{SetViewerModifiedFiles, SetViewerTabLive, SetViewerTabPinned};
+use gtl_wire::viewer::{
+    SetViewerChangesSince, SetViewerModifiedFiles, SetViewerTabLive, SetViewerTabPinned,
+};
 mod row_sessions;
 
 use gtl_local_transport::LocalEndpoint;
@@ -14,8 +16,9 @@ use gtl_wire::{
         ViewerUserSettings,
         projects::{
             DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
-            ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
-            ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+            ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
+            ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
+            ViewerProjectStatus,
         },
     },
 };
@@ -282,6 +285,20 @@ impl ViewerClient {
         proto::viewer::projects::decode_open_response(response).map_err(Into::into)
     }
 
+    pub async fn open_unpushed_project_diffs(
+        &mut self,
+    ) -> Result<OpenUnpushedProjectDiffsOk, ViewerClientError> {
+        let response = self
+            .client
+            .open_unpushed_project_diffs(v1::OpenUnpushedProjectDiffsRequest {})
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(|status| decode_status(&status))?;
+        Ok(proto::viewer::projects::decode_open_unpushed_response(
+            response,
+        ))
+    }
+
     /// Resolves the local server and connects through its private native endpoint.
     pub async fn connect_local() -> Result<Self, ViewerClientError> {
         let endpoint =
@@ -342,12 +359,18 @@ impl ViewerClient {
             encode_update_viewer_tab_request, update_viewer_tab, decode_update_viewer_tab_response;
         set_tab_live(SetViewerTabLive) -> ViewerShell =>
             encode_set_viewer_tab_live_request, set_viewer_tab_live, decode_set_viewer_tab_live_response;
+        set_changes_since(SetViewerChangesSince) -> ViewerShell =>
+            encode_set_viewer_changes_since_request, set_viewer_changes_since, decode_set_viewer_changes_since_response;
         select_commit(SelectViewerCommit) -> ViewerShell =>
             encode_select_viewer_commit_request, select_viewer_commit, decode_select_viewer_commit_response;
         clear_commit_selection(ViewerTabRequest) -> ViewerShell =>
             encode_clear_viewer_commit_selection_request, clear_viewer_commit_selection, decode_clear_viewer_commit_selection_response;
         set_preference(SetViewerPreference) -> ViewerShell =>
             encode_set_viewer_preference_request, set_viewer_preference, decode_set_viewer_preference_response;
+        search_commits(gtl_wire::viewer::commit_search::SearchViewerCommits) -> gtl_wire::viewer::commit_search::ViewerCommitSearchResult =>
+            encode_search_viewer_commits_request, search_viewer_commits, decode_search_viewer_commits_response;
+        open_commit(gtl_wire::viewer::commit_search::OpenViewerCommit) -> OpenViewerProjectOk =>
+            encode_open_viewer_commit_request, open_viewer_commit, decode_open_viewer_commit_response;
         list_commits(ListViewerCommits) -> ViewerCommitPage =>
             encode_list_viewer_commits_request, list_viewer_commits, decode_list_viewer_commits_response;
         search_files(SearchViewerFiles) -> ViewerFileSearchResult =>

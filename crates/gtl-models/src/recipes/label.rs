@@ -48,6 +48,8 @@ pub enum RecipeLabelChanges {
     UnpushedCommits { count: CommitCount },
     /// The working tree compared with a base revision.
     WorkingTree { base: GitRevision },
+    /// One commit compared with its first parent.
+    Commit { rev: GitRevision },
     /// The endpoints of an explicit revision range.
     Range { range: GitRange },
     /// A merge into a base whose merged branch is not computed yet.

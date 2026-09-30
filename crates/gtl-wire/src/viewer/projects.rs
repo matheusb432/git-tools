@@ -190,6 +190,14 @@ pub struct OpenViewerProjectOk {
     pub tab_id: ViewerTabId,
 }
 
+/// Snapshot tabs opened for every managed project with commits ahead of its comparison.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenUnpushedProjectDiffsOk {
+    pub opened_count: u32,
+    /// One line per project whose comparison could not be resolved.
+    pub warnings: Vec<String>,
+}
+
 impl ViewerProjectStatus {
     #[must_use]
     pub fn review_class(&self) -> gtl_models::repository::status::StatusClass {

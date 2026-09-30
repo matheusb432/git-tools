@@ -11,8 +11,8 @@ use gtl_models::{
 };
 use gtl_wire::viewer::{
     ViewerActiveView, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine, ViewerCommitSelection,
-    ViewerFooter, ViewerRenderOptions, ViewerRowContentId, ViewerRowSourceState,
-    ViewerUnifiedSourceRow, ViewerViewIdentity,
+    ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerRenderOptions,
+    ViewerRowContentId, ViewerRowSourceState, ViewerUnifiedSourceRow, ViewerViewIdentity,
 };
 
 pub(crate) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -57,6 +57,29 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
             command: "git diff main..HEAD".to_owned(),
         },
         extension_filter: None,
+        changes_since: None,
+    })
+}
+
+pub(crate) fn viewer_file_summary(
+    index: usize,
+    path: &str,
+    status: ViewerFileStatus,
+    added: u64,
+    removed: u64,
+) -> TestResult<ViewerFileSummary> {
+    Ok(ViewerFileSummary {
+        source_id: None,
+        id: ViewerDiffFileId::for_index(index),
+        path: repository_relative_path(path)?,
+        absolute_path: absolute_file_path(format!("/repo/{path}"))?,
+        anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
+        added: gtl_models::diffs::DiffLineCount::new(added),
+        removed: gtl_models::diffs::DiffLineCount::new(removed),
+        status,
+        can_open_in_editor: status != ViewerFileStatus::Deleted,
+        initially_expanded: true,
+        row_count: 1,
     })
 }
 

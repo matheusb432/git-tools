@@ -240,14 +240,18 @@ fn ReadyWorkspace(
     let mut flashing_file = use_signal(|| None::<String>);
     let mut find_open = use_signal(|| false);
     let commit_pages = use_viewer_commit_pages(view);
+    let files_sort = crate::views::diffs::displayed_files::use_diff_files_sort();
+    let (displayed, file_filters) =
+        super::file_filters::workspace::use_workspace_file_filters(view, files_sort);
     let keybindings = shell.with(|shell| match shell {
         ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerKeybindings::default(),
     });
     let workspace = super::use_diff_workspace_context(
-        view,
+        displayed.into(),
         commit_pages.commits(),
         super::DiffWorkspaceSignals {
+            files_sort: files_sort.into(),
             file_filter,
             path_filter_open,
             files_folded,
@@ -420,7 +424,19 @@ fn ReadyWorkspace(
                 ontoggle_sidebar: sidebars.toggle,
                 diff_document: rsx! {
                     div { class: "relative h-full min-h-0 min-w-0",
-                        if file_count == 0 {
+                        if file_count == 0 && (file_filters.active)() {
+                            PageNotice {
+                                class: "h-full min-h-48 px-5",
+                                title: t!(language, "file-filters-no-matches"),
+                                message: t!(language, "file-filters-no-matches-message"),
+                                Button {
+                                    class: "mx-auto mt-4",
+                                    variant: ButtonVariant::Outline,
+                                    onclick: move |_| file_filters.clear.call(()),
+                                    {t!(language, "file-filters-clear")}
+                                }
+                            }
+                        } else if file_count == 0 {
                             PageNotice {
                                 class: "h-full min-h-48 px-5",
                                 title: t!(language, "workspace-no-changes"),
@@ -451,8 +467,11 @@ fn ReadyWorkspace(
             onclose: move |()| mobile_panel.set(None),
             FilesPanel {
                 onnavigate,
+                sort_control: rsx! {
+                    super::files_sort::SavedFilesSortMenu { id: "mobile-diff-files-sort" }
+                },
                 filter_control: rsx! {
-                    super::extension_filters::desktop::ExtensionFilters { id: "mobile-diff-extension-filters" }
+                    super::file_filters::desktop::WorkspaceFileFiltersMenu { id: "mobile-diff-file-filters" }
                 },
             }
         }
@@ -464,6 +483,7 @@ fn ReadyWorkspace(
             title: t!(language, "workspace-commits"),
             onclose: move |()| mobile_panel.set(None),
             WorkspaceCommitsPanel {
+                key: "{tab_id}",
                 details_popover_id_prefix: "mobile-commits-panel",
                 actions: rsx! {
                     crate::views::push::ViewPushButton { id: "mobile-viewer-push-trigger", identity, disabled: push_disabled }

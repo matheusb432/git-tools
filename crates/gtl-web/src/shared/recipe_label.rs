@@ -55,6 +55,12 @@ fn changes_text(
             repository = repository,
             base = base.as_ref(),
         ),
+        RecipeLabelChanges::Commit { rev } => t!(
+            language,
+            "recipe-label-commit",
+            repository = repository,
+            rev = rev.as_ref(),
+        ),
         RecipeLabelChanges::Range { range } => t!(
             language,
             "recipe-label-range",
@@ -126,6 +132,9 @@ mod tests {
             changes(RecipeLabelChanges::WorkingTree {
                 base: revision("v1"),
             }),
+            changes(RecipeLabelChanges::Commit {
+                rev: revision("v1"),
+            }),
             changes(RecipeLabelChanges::Range {
                 range: GitRange::try_new("v1..v2").unwrap(),
             }),
@@ -172,6 +181,7 @@ mod tests {
                 "git-tools: 1 commit",
                 "git-tools: 3 commits",
                 "git-tools: v1->working",
+                "git-tools: v1^!",
                 "git-tools: v1..v2",
                 "git-tools: merge ->main",
                 "git-tools: merge feature->origin/main",
@@ -195,6 +205,7 @@ mod tests {
                 "git-tools: 1 commit",
                 "git-tools: 3 commits",
                 "git-tools: v1->working tree",
+                "git-tools: v1^!",
                 "git-tools: v1..v2",
                 "git-tools: merge ->main",
                 "git-tools: merge feature->origin/main",

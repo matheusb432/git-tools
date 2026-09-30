@@ -12,7 +12,7 @@ pub(crate) use comparison_editor::{ComparisonBranchEditor, ComparisonEditorTrigg
 use dioxus::prelude::*;
 use gtl_models::settings::{ProjectsPageSize, ProjectsSort};
 use gtl_wire::viewer::{ViewerHistoryFilter, projects::ViewerProjectsCursor};
-use lucide_dioxus::History;
+use lucide_dioxus::{GitCompareArrows, History};
 
 use self::{
     import_dialog::ImportProjectsDialog,
@@ -22,15 +22,17 @@ use self::{
 };
 use crate::{
     app::application_layout::ViewerContext,
+    entities::diffs::viewer_server,
     shared::{
         browser,
         failure_notice::client_error_message,
         i18n::{t, use_language},
         ui::{
-            Button, ButtonSize, ButtonVariant, LoadingSpinner, PageNotice, PanelDialog, ScrollArea,
-            Select, SelectOption,
+            Button, ButtonSize, ButtonState, ButtonVariant, LoadingSpinner, PageNotice,
+            PanelDialog, ScrollArea, Select, SelectOption,
             pagination::{PageNavigation, PagePosition, Pagination},
             select::SelectVariant,
+            use_toast,
         },
     },
 };
@@ -42,6 +44,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
         use_signal(|| None::<(ProjectsPageSize, ProjectsSort, ViewerProjectsCursor)>);
     let mut snapshots = use_signal(|| None::<(ViewerHistoryFilter, String)>);
     let mut importing = use_signal(|| false);
+    let mut searching = use_signal(|| None::<gtl_wire::viewer::projects::ViewerProject>);
+    let open_commits = use_callback(move |project| searching.set(Some(project)));
+    use_context_provider(|| OpenCommits(open_commits));
     let open_snapshots = use_callback(move |selection| snapshots.set(Some(selection)));
     use_context_provider(|| OpenSnapshots(open_snapshots));
     let active = use_projects_active(route_active);
@@ -75,8 +80,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
         browser::scroll_element_to_start("projects-content");
     });
     use_effect(move || {
-        if !route_active() && snapshots.peek().is_some() {
+        if !route_active() && (snapshots.peek().is_some() || searching.peek().is_some()) {
             snapshots.set(None);
+            searching.set(None);
         }
     });
     let page = projects.page.read();
@@ -127,6 +133,7 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                         onclick: move |_| importing.set(true),
                         {t!(language, "projects-add")}
                     }
+                    ProjectDiffAllButton { disabled }
                     SnapshotHistoryButton {}
                 }
             }
@@ -139,6 +146,16 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     open: true,
                     onclose: move |()| snapshots.set(None),
                     crate::views::SnapshotHistory { initial_filter: filter }
+                }
+            }
+            if let Some(project) = searching() {
+                PanelDialog {
+                    id: "project-commit-search-dialog",
+                    trigger_id: format!("project-commit-search-{}", project.id),
+                    title: t!(language, "commit-search-project-title", project = project.name.to_string()),
+                    open: true,
+                    onclose: move |()| searching.set(None),
+                    crate::views::commit_search::CommitFinder { path: project.path }
                 }
             }
             if importing() {
@@ -268,6 +285,54 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
 #[derive(Clone, Copy)]
 struct OpenSnapshots(Callback<(ViewerHistoryFilter, String)>);
 
+/// Generates diff snapshots for every managed project with commits ahead of its comparison.
+#[component]
+fn ProjectDiffAllButton(disabled: bool) -> Element {
+    let language = use_language();
+    let toast = use_toast();
+    let mut generate = use_action(move |()| async move {
+        match viewer_server::open_unpushed_project_diffs().await {
+            Ok(result) => {
+                toast.ok(if result.opened_count == 0 {
+                    t!(language, "projects-diff-all-empty")
+                } else {
+                    t!(
+                        language,
+                        "projects-diff-all-opened",
+                        count = result.opened_count
+                    )
+                });
+                if !result.warnings.is_empty() {
+                    toast.warn(t!(
+                        language,
+                        "projects-diff-all-warning",
+                        count = result.warnings.len(),
+                        projects = result.warnings.join(", ")
+                    ));
+                }
+            }
+            Err(error) => toast.client_error(&error),
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
+    let pending = generate.pending();
+    let label = t!(language, "projects-diff-all");
+    rsx! {
+        Button {
+            id: "project-diff-all-trigger",
+            variant: ButtonVariant::Outline,
+            size: ButtonSize::Small,
+            state: if disabled { ButtonState::Disabled } else if pending { ButtonState::Loading } else { ButtonState::Enabled },
+            title: label.clone(),
+            onclick: move |_| generate.call(()),
+            icon: rsx! {
+                GitCompareArrows { size: 15 }
+            },
+            {label}
+        }
+    }
+}
+
 #[component]
 fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Element {
     let language = use_language();
@@ -316,3 +381,27 @@ fn SnapshotHistoryButton(project: Option<gtl_models::paths::ProjectName>) -> Ele
 }
 
 mod push_confirmation_setting;
+
+#[derive(Clone, Copy)]
+struct OpenCommits(Callback<gtl_wire::viewer::projects::ViewerProject>);
+
+#[component]
+fn CommitSearchButton(
+    project: gtl_wire::viewer::projects::ViewerProject,
+    disabled: bool,
+) -> Element {
+    let language = use_language();
+    let open = use_context::<OpenCommits>().0;
+    rsx! {
+        Button {
+            id: format!("project-commit-search-{}", project.id),
+            variant: ButtonVariant::Ghost,
+            size: ButtonSize::IconSmall,
+            state: if disabled { ButtonState::Disabled } else { ButtonState::Enabled },
+            aria_label: t!(language, "commit-search-label"),
+            title: t!(language, "commit-search-label"),
+            onclick: move |_| open.call(project.clone()),
+            lucide_dioxus::Search { size: 15 }
+        }
+    }
+}

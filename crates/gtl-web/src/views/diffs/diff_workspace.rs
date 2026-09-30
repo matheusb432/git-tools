@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 #[cfg(feature = "component-preview")]
 use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings};
-use gtl_models::{diffs::CommitId, viewer::ViewerTabId};
+use gtl_models::{diffs::CommitId, settings::DiffFilesSort, viewer::ViewerTabId};
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSummary};
 #[cfg(feature = "component-preview")]
@@ -28,9 +28,10 @@ use crate::{
 
 pub(crate) mod commits_panel;
 mod desktop;
-pub(crate) mod extension_filters;
+pub(crate) mod file_filters;
 mod file_search;
 mod files_panel;
+pub(crate) mod files_sort;
 pub(super) mod panel_scroll;
 mod path_filter;
 pub(crate) mod sidebars;
@@ -49,6 +50,7 @@ pub(super) struct DiffWorkspaceContext {
     pub(super) view: ReadSignal<ViewerActiveView>,
     commits: ReadStore<Vec<ViewerCommitSummary>>,
     files: Memo<WorkspaceFilesModel>,
+    files_sort: ReadSignal<DiffFilesSort>,
     file_filter: Signal<String>,
     path_filter_open: Signal<bool>,
     file_matches: Memo<WorkspaceFileMatches>,
@@ -60,6 +62,7 @@ pub(super) struct DiffWorkspaceContext {
 
 #[derive(Clone, Copy)]
 struct DiffWorkspaceSignals {
+    files_sort: ReadSignal<DiffFilesSort>,
     file_filter: Signal<String>,
     path_filter_open: Signal<bool>,
     files_folded: Signal<Option<bool>>,
@@ -74,6 +77,7 @@ fn use_diff_workspace_context(
     server_owned_file_search: bool,
 ) -> DiffWorkspaceContext {
     let DiffWorkspaceSignals {
+        files_sort,
         file_filter,
         path_filter_open,
         files_folded,
@@ -82,11 +86,12 @@ fn use_diff_workspace_context(
     } = signals;
     let file_matches =
         use_workspace_file_matches(view, file_filter.into(), server_owned_file_search);
-    let files = use_memo(move || WorkspaceFilesModel::new(&view.read()));
+    let files = use_memo(move || WorkspaceFilesModel::new(&view.read(), files_sort()));
     let context = DiffWorkspaceContext {
         view,
         commits,
         files,
+        files_sort,
         file_filter,
         path_filter_open,
         file_matches,
@@ -110,6 +115,7 @@ fn use_static_diff_workspace_context(
     path_filter_open_initial: bool,
 ) -> DiffWorkspaceContext {
     let signals = DiffWorkspaceSignals {
+        files_sort: use_signal(DiffFilesSort::default).into(),
         file_filter: use_signal(String::new),
         path_filter_open: use_signal(move || path_filter_open_initial),
         files_folded: use_signal(|| None::<bool>),
@@ -455,6 +461,7 @@ fn DiffWorkspaceDocument(
     onload_commits: Option<EventHandler<()>>,
 ) -> Element {
     let details_popover_id_prefix = "workspace-commits-panel".to_owned();
+    let tab_id = use_workspace_context().view.read().identity.tab_id;
     rsx! {
         div {
             class: "diff-workspace-grid h-full min-h-0",
@@ -480,8 +487,11 @@ fn DiffWorkspaceDocument(
                 FilesPanel {
                     test_id: Some(test_ids::CHANGED_FILES_PANEL.value().to_owned()),
                     onnavigate,
+                    sort_control: rsx! {
+                        files_sort::SavedFilesSortMenu { id: "diff-files-sort" }
+                    },
                     filter_control: rsx! {
-                        extension_filters::desktop::ExtensionFilters { id: "diff-extension-filters" }
+                        file_filters::desktop::WorkspaceFileFiltersMenu { id: "diff-file-filters" }
                     },
                 }
             }
@@ -490,6 +500,7 @@ fn DiffWorkspaceDocument(
                 sidebar: sidebars::Sidebar::Commits,
                 visible: sidebars.commits,
                 WorkspaceCommitsPanel {
+                    key: "{tab_id}",
                     details_popover_id_prefix,
                     actions: commits_actions,
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),

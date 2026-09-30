@@ -180,6 +180,7 @@ pub struct SessionTab {
     pub history_id: Option<super::RenderHistoryId>,
     pub comparison_name: Option<gtl_models::git::GitRevision>,
     extension_filter: Option<gtl_models::diffs::ExtensionFilter>,
+    changes_since: Option<gtl_models::timestamps::MachineTimestamp>,
     pub tab: ViewerTab,
     pub recipe: Recipe,
     pub batch_id: RecipeBatchId,
@@ -258,6 +259,40 @@ impl ViewerSession {
         batch_id: RecipeBatchId,
         label: RecipeLabel,
     ) -> Option<ViewerTabId> {
+        let index = self.grouped_insertion_index(&recipe);
+        self.open_labeled_at(index, recipe, batch_id, label)
+    }
+
+    /// Opens a tab restored from saved state at the front of the strip. Restore replays
+    /// saved tabs in reverse so repeated front-insertion reconstructs their saved order;
+    /// grouping by project here would scramble that order instead of restoring it.
+    pub(super) fn restore_labeled(
+        &mut self,
+        recipe: Recipe,
+        batch_id: RecipeBatchId,
+        label: RecipeLabel,
+    ) -> Option<ViewerTabId> {
+        self.open_labeled_at(0, recipe, batch_id, label)
+    }
+
+    /// The index a newly opened tab enters at: just ahead of the first unpinned tab already
+    /// showing the same repository, so tabs from one project stay adjacent; otherwise the
+    /// front of the strip, as for the first tab opened from a project.
+    fn grouped_insertion_index(&self, recipe: &Recipe) -> usize {
+        let repo = recipe.cwd();
+        self.tabs
+            .iter()
+            .position(|tab| !tab.pinned && tab.recipe.cwd() == repo)
+            .unwrap_or(0)
+    }
+
+    fn open_labeled_at(
+        &mut self,
+        index: usize,
+        recipe: Recipe,
+        batch_id: RecipeBatchId,
+        label: RecipeLabel,
+    ) -> Option<ViewerTabId> {
         let existing = self
             .tabs
             .iter()
@@ -277,11 +312,12 @@ impl ViewerSession {
             .and_then(|value| ViewerTabId::try_new(value).ok())?;
         self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.insert(
-            0,
+            index,
             SessionTab {
                 history_id: None,
                 comparison_name: None,
                 extension_filter: None,
+                changes_since: None,
                 tab: ViewerTab::new(id, label, false, ViewerTabState::Pending),
                 recipe,
                 batch_id,
@@ -405,6 +441,7 @@ impl ViewerSession {
             },
             recipe: tab.recipe.unpinned(),
             head: tab.live_head.clone(),
+            changes_since: tab.changes_since.clone(),
         })
     }
 
@@ -1275,7 +1312,8 @@ impl ViewerSession {
                 | crate::recipes::RecipeTarget::Range { pinned, .. }
                 | crate::recipes::RecipeTarget::Merge { pinned, .. }
                 | crate::recipes::RecipeTarget::Last { pinned, .. } => pinned.clone(),
-                crate::recipes::RecipeTarget::Base { .. } => None,
+                crate::recipes::RecipeTarget::Base { .. }
+                | crate::recipes::RecipeTarget::Commit { .. } => None,
             },
             crate::recipes::RecipeOp::MergeDiff { pinned, .. } => pinned.clone(),
         };
@@ -2154,6 +2192,36 @@ mod tests {
         assert_eq!(session.active(), Some(ids[1]));
         assert_eq!(session.close(ids[1]), Some(CloseOutcome::ActiveChanged));
         assert_eq!(session.active(), None);
+    }
+
+    #[test]
+    fn opening_a_new_tab_groups_it_next_to_its_project_siblings() {
+        let mut session = ViewerSession::new(cache_weight(1024));
+        let range_recipe = |repo: &str, range: &str| Recipe {
+            source: RecipeSource::LocalRepo(repository_root(repo)),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
+                    pinned: None,
+                },
+            },
+            name: None,
+        };
+        let a1 = session
+            .open(range_recipe("/a", "a1..a2"), batch_id(1))
+            .unwrap();
+        let b1 = session
+            .open(range_recipe("/b", "b1..b2"), batch_id(2))
+            .unwrap();
+        // /a already has a tab, so the new /a tab enters next to it rather than the front.
+        let a2 = session
+            .open(range_recipe("/a", "a3..a4"), batch_id(3))
+            .unwrap();
+
+        assert_eq!(
+            session.tabs().map(|tab| tab.tab.id()).collect::<Vec<_>>(),
+            [b1, a2, a1]
+        );
     }
 
     #[test]

@@ -24,10 +24,14 @@ fn single_commit_panel_is_read_only_but_keeps_copy_action() -> TestResult {
 
     let html = dioxus_ssr::render(&panel);
 
-    assert!(html.contains("<article"));
-    assert!(!html.contains("aria-pressed"));
-    assert_eq!(html.matches("<button").count(), 1);
-    assert!(html.contains("title=\"Copy commit ID\""));
+    let commit = html
+        .split_once("<article")
+        .and_then(|(_, article)| article.split_once("</article>"))
+        .map(|(article, _)| article)
+        .ok_or("missing commit row")?;
+    assert!(!commit.contains("aria-pressed"));
+    assert_eq!(commit.matches("<button").count(), 1);
+    assert!(commit.contains("title=\"Copy commit ID\""));
     assert!(!html.contains("data-testid=\"commit-details-trigger\""));
     assert!(html.contains("data-gtl-hover-popover-target=\"\""));
     assert!(html.contains("data-gtl-hover-popover-delay-ms=\"350\""));

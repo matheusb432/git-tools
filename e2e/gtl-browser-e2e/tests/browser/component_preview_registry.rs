@@ -223,10 +223,6 @@ async fn assert_commits_panel_preview(page: &Page, base_url: &str) -> anyhow::Re
         .to_have_count(0)
         .await
         .context("return to the full comparison without a range button")?;
-    expect(commits_panel.locator("svg"))
-        .to_have_count(0)
-        .await
-        .context("omit decorative timeline markers from the commit stack")?;
 
     let copy_button = commits_panel
         .get_by_role(

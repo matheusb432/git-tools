@@ -5,6 +5,7 @@ use gtl_models::{
     failure::ErrorMeta,
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
+    timestamps::MachineTimestamp,
     viewer::Theme,
 };
 
@@ -20,6 +21,8 @@ pub struct ComputeMergeDiff {
     pub repo_root: RepositoryRoot,
     pub base: Option<GitRevision>,
     pub pinned: Option<PinnedRange>,
+    /// Narrows the diff to changes committed after this time.
+    pub changes_since: Option<MachineTimestamp>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +59,7 @@ pub fn execute(
         repo_root,
         base,
         pinned,
+        changes_since,
     } = req;
     let extension_filter = filters.extension_filter(&repo_root)?;
     let mut built = view::build(
@@ -64,6 +68,7 @@ pub fn execute(
         base.as_ref(),
         pinned.as_ref(),
         &extension_filter,
+        changes_since.as_ref(),
     )?;
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &built.view.full_context
@@ -143,6 +148,7 @@ index 333..444 100644\n\
             repo_root: repository_root("/repo"),
             base: None,
             pinned: None,
+            changes_since: None,
         };
 
         let response = execute_default_settings(request, &source).unwrap();
@@ -177,6 +183,7 @@ index 333..444 100644\n\
                 repo_root: repository_root("/repo"),
                 base: None,
                 pinned: None,
+                changes_since: None,
             },
             &FixedUserSettingsStore::default(),
             &source,
@@ -216,6 +223,7 @@ index 333..444 100644\n\
                 repo_root: repository_root("/repo"),
                 base: None,
                 pinned: None,
+                changes_since: None,
             },
             &source,
         )
@@ -245,6 +253,7 @@ index 333..444 100644\n\
                     "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
                     "1111111111222222222233333333334444444444",
                 )),
+                changes_since: None,
             },
             &source,
         )
@@ -271,6 +280,7 @@ index 333..444 100644\n\
                 repo_root: repository_root("/repo"),
                 base: Some(crate::utils::git_revision("nope")),
                 pinned: None,
+                changes_since: None,
             },
             &source,
         )

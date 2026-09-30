@@ -575,6 +575,7 @@ fn ApplicationLayoutContent() -> Element {
     crate::shared::date_display::use_date_display_provider(date_format.into());
     crate::views::diffs::use_diff_presentation_provider();
     crate::views::diffs::file_filter_changes::use_file_filter_changes_provider();
+    crate::views::diffs::file_filter_form::use_file_filter_forms_provider();
     crate::views::projects::cache::use_status_cache_provider();
     crate::views::push::use_push_provider();
     use_viewer_routes(context);
@@ -888,6 +889,7 @@ mod tests {
             },
             preferences: ViewerPreferences {
                 copy_with_line_context: true,
+                diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
                 accessibility: gtl_models::settings::ViewerAccessibility::default(),
                 language: gtl_models::settings::ViewerLanguage::default(),
                 date_format: gtl_models::settings::ViewerDateFormat::default(),

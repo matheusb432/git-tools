@@ -64,14 +64,14 @@ pub async fn copy_selected_diff_line(
     path: &str,
     marker: &str,
 ) -> Result<String> {
-    let result = driver
-        .execute(
-            r#"
+    let script = r#"
                 const [path, marker] = arguments;
                 const file = [...document.querySelectorAll('[data-gtl-diff-file]')]
                     .find(element => element.dataset.path === path);
+                if (!file) return null;
                 const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
                     .find((element) => element.textContent.includes(marker));
+                if (!source) return null;
                 const range = document.createRange();
                 range.selectNodeContents(source);
                 const selection = window.getSelection();
@@ -95,14 +95,20 @@ pub async fn copy_selected_diff_line(
                     text: clipboard.getData("text/plain"),
                     prevented: event.defaultPrevented,
                 };
-            "#,
-            vec![json!(path), json!(marker)],
-        )
-        .await
-        .context("copy a selected desktop diff line")?;
-    let observation: CopyObservation = result
-        .convert()
-        .context("decode the desktop copy observation")?;
+            "#;
+    let observation = wait::until(
+        &format!("selectable diff source in {path}"),
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            driver
+                .execute(script, vec![json!(path), json!(marker)])
+                .await
+                .context("copy a selected desktop diff line")?
+                .convert::<Option<CopyObservation>>()
+                .context("decode the desktop copy observation")
+        },
+    )
+    .await?;
 
     ensure!(
         observation.prevented,

@@ -267,6 +267,7 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
             command: "gtl diff main".to_owned(),
         },
         extension_filter: None,
+        changes_since: None,
     };
     let tabs = vec![
         ViewerTab {
@@ -520,6 +521,7 @@ fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
         },
         focus_window_on_diff: true,
         copy_with_line_context: true,
+        diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
         push_confirmation_required: true,
         accessibility: gtl_models::settings::ViewerAccessibility::default(),
     };

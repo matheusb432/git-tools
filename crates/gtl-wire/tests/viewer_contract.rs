@@ -269,10 +269,12 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                     ),
                     hidden_paths: vec![relative_path("README.md")?],
                 }),
+                changes_since: Some(MachineTimestamp::try_from("2026-08-09T07:00:00-03:00")?),
             }),
         },
         preferences: ViewerPreferences {
             copy_with_line_context: true,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Changes,
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
             language: gtl_models::settings::ViewerLanguage::default(),
             date_format: gtl_models::settings::ViewerDateFormat::default(),
@@ -346,6 +348,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         revision: gtl_models::settings::UserSettingsRevision::from_digest([0x11; 32]),
         focus_window_on_diff: true,
         copy_with_line_context: true,
+        diff_files_sort: gtl_models::settings::DiffFilesSort::Changes,
         sidebars: gtl_models::viewer::ViewerSidebarVisibility {
             files: false,
             commits: true,

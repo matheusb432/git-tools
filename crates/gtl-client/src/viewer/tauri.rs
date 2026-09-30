@@ -9,8 +9,9 @@ use gtl_wire::viewer::{
     ViewerRowStreamItem, ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerUserSettings,
     projects::{
         DiscoverProjectRepositories, GetViewerProjectStatus, ImportProjectRepositories,
-        ListViewerProjects, OpenViewerProject, OpenViewerProjectOk, ProjectDiscovery,
-        ProjectImportResult, UpdateViewerProject, ViewerProjectPage, ViewerProjectStatus,
+        ListViewerProjects, OpenUnpushedProjectDiffsOk, OpenViewerProject, OpenViewerProjectOk,
+        ProjectDiscovery, ProjectImportResult, UpdateViewerProject, ViewerProjectPage,
+        ViewerProjectStatus,
     },
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -138,6 +139,7 @@ impl ViewerClient {
         refresh_tab(ViewerTabRequest) -> ViewerShell => "viewer_refresh_tab";
         update_tab(ViewerTabRequest) -> ViewerShell => "viewer_update_tab";
         set_tab_live(SetViewerTabLive) -> ViewerShell => "viewer_set_tab_live";
+        set_changes_since(gtl_wire::viewer::SetViewerChangesSince) -> ViewerShell => "viewer_set_changes_since";
         select_commit(SelectViewerCommit) -> ViewerShell => "viewer_select_commit";
         rename_snapshot(RenameViewerSnapshot) -> () => "viewer_rename_snapshot";
         set_tab_pinned(SetViewerTabPinned) -> () => "viewer_set_tab_pinned";
@@ -145,6 +147,8 @@ impl ViewerClient {
         set_modified_files(SetViewerModifiedFiles) -> () => "viewer_set_modified_files";
         clear_commit_selection(ViewerTabRequest) -> ViewerShell => "viewer_clear_commit_selection";
         set_preference(SetViewerPreference) -> ViewerShell => "viewer_set_preference";
+        search_commits(gtl_wire::viewer::commit_search::SearchViewerCommits) -> gtl_wire::viewer::commit_search::ViewerCommitSearchResult => "viewer_search_commits";
+        open_commit(gtl_wire::viewer::commit_search::OpenViewerCommit) -> OpenViewerProjectOk => "viewer_open_commit";
         list_commits(ListViewerCommits) -> ViewerCommitPage => "viewer_list_commits";
         search_files(SearchViewerFiles) -> ViewerFileSearchResult => "viewer_search_files";
         find_diff(FindViewerDiff) -> ViewerDiffSearchResult => "viewer_find_diff";
@@ -167,6 +171,12 @@ impl ViewerClient {
 
     pub async fn get_settings(&mut self) -> Result<ViewerUserSettings, ViewerClientError> {
         invoke_without_arguments("viewer_get_settings").await
+    }
+
+    pub async fn open_unpushed_project_diffs(
+        &mut self,
+    ) -> Result<OpenUnpushedProjectDiffsOk, ViewerClientError> {
+        invoke_without_arguments("viewer_open_unpushed_project_diffs").await
     }
 
     pub async fn stream_rows(

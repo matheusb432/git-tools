@@ -36,6 +36,29 @@ pub enum ProjectsSort {
     BranchDescending,
 }
 
+/// Orders the changed files of a diff in the viewer.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum DiffFilesSort {
+    /// Directories before files at each level, then by name.
+    #[default]
+    Path,
+    /// Most added plus removed lines first.
+    Changes,
+}
+
 #[nutype::nutype(
     validate(predicate = |value| matches!(value, 10 | 15 | 30)),
     default = 15,
@@ -317,6 +340,7 @@ pub struct UserSettings {
     date_format: ViewerDateFormat,
     focus_window_on_diff: bool,
     copy_with_line_context: bool,
+    diff_files_sort: DiffFilesSort,
     theme: Option<Theme>,
     viewer_render_options: RenderOptions,
     viewer_keybindings: ViewerKeybindings,
@@ -358,6 +382,7 @@ impl UserSettings {
             date_format: ViewerDateFormat::default(),
             focus_window_on_diff: true,
             copy_with_line_context: Self::COPY_WITH_LINE_CONTEXT_DEFAULT,
+            diff_files_sort: DiffFilesSort::default(),
             theme,
             viewer_render_options,
             viewer_keybindings,
@@ -429,6 +454,19 @@ impl UserSettings {
     #[must_use]
     pub const fn copy_with_line_context(&self) -> bool {
         self.copy_with_line_context
+    }
+
+    #[must_use]
+    pub fn with_diff_files_sort(self, diff_files_sort: DiffFilesSort) -> Self {
+        Self {
+            diff_files_sort,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub const fn diff_files_sort(&self) -> DiffFilesSort {
+        self.diff_files_sort
     }
 
     #[must_use]

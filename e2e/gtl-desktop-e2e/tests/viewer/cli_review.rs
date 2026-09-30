@@ -30,6 +30,10 @@ async fn user_reviews_a_cli_snapshot_and_reopens_it_from_history() -> Result<()>
                 copied == "// * work.txt, lines: 2\nalpha-one-shot-marker",
                 "copy omitted the file context: {copied:?}"
             );
+            support::selectors::by_test_id(driver, test_ids::FILE_FILTERS_CLEAR)
+                .await?
+                .click()
+                .await?;
             copy_truncated_line(driver).await?;
 
             rename_snapshot(driver, "Auth review").await?;
@@ -118,7 +122,15 @@ async fn find_in_all_files(driver: &WebDriver, text: &str) -> Result<()> {
         Ok(region.text().await?.contains("1 match").then_some(()))
     })
     .await?;
-    support::click(driver, By::Css("button[aria-label='Close search']")).await
+    support::click(driver, By::Css("button[aria-label='Close search']")).await?;
+    ensure!(
+        driver
+            .find_all(By::Css("button[data-file-target][title='a.css']"))
+            .await?
+            .is_empty(),
+        "the text filter kept a file without matches"
+    );
+    Ok(())
 }
 
 async fn copy_truncated_line(driver: &WebDriver) -> Result<()> {

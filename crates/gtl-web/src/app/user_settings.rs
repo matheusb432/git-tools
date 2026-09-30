@@ -287,6 +287,11 @@ fn merge_settings(
         submitted.copy_with_line_context,
         loaded.copy_with_line_context,
     );
+    merge(
+        &mut selected.diff_files_sort,
+        submitted.diff_files_sort,
+        loaded.diff_files_sort,
+    );
     selected
 }
 
@@ -315,6 +320,7 @@ mod tests {
             },
             focus_window_on_diff: true,
             copy_with_line_context: true,
+            diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
             push_confirmation_required: true,
             accessibility: ViewerAccessibility::default(),
         }

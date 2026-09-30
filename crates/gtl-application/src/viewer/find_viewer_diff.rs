@@ -1,6 +1,8 @@
 //! The `viewer/find_viewer_diff` query: navigate rendered diff-row text on the server.
 
-use gtl_models::failure::{ErrorMeta, ViewerFailure};
+use std::collections::HashSet;
+
+use gtl_models::failure::{ErrorMeta, Failure, ViewerFailure};
 use gtl_wire::viewer::{
     FindViewerDiff, ViewerDiffFileId, ViewerDiffSearchDirection, ViewerDiffSearchMatch,
     ViewerDiffSearchResult,
@@ -25,6 +27,9 @@ pub enum FindViewerDiffError {
     #[error("viewer diff search match count exceeds u64")]
     #[meta(failure = ViewerFailure::SearchTooLarge)]
     MatchCountExhausted,
+    #[error("viewer diff search files are unknown or repeated")]
+    #[meta(failure = Failure::InvalidRequest { field: "files".to_owned() })]
+    InvalidFiles,
     #[error("viewer diff search was cancelled")]
     #[meta(private(Cancelled))]
     Cancelled,
@@ -50,6 +55,7 @@ fn find(
     if cancellation.is_cancelled() {
         return Err(FindViewerDiffError::Cancelled);
     }
+    validate_files(query, view)?;
     let needle = query.query.to_lowercase();
     if needle.is_empty() {
         return Ok(ViewerDiffSearchResult {
@@ -57,31 +63,54 @@ fn find(
             total_matches: 0,
             active_match: None,
             wrapped: false,
+            matched_files: Vec::new(),
         });
     }
-    let anchor = query
-        .anchor
-        .as_ref()
-        .and_then(|anchor| search_key(view, anchor));
+    let anchor = query.anchor.as_ref().and_then(|anchor| {
+        query
+            .files
+            .iter()
+            .position(|file| file == &anchor.file)
+            .map(|position| (position, anchor.row_index))
+    });
     let mut search = SearchAccumulator::new(query.direction, anchor);
 
-    for file_index in 0..view.files.len() {
-        search_file(&mut search, query, view, file_index, &needle, cancellation)?;
+    for (position, file) in query.files.iter().enumerate() {
+        search_file(
+            &mut search,
+            query,
+            view,
+            position,
+            file,
+            &needle,
+            cancellation,
+        )?;
     }
 
     Ok(search.finish(query.identity))
+}
+
+fn validate_files(query: &FindViewerDiff, view: &View) -> Result<(), FindViewerDiffError> {
+    let density = query.identity.render_options.density;
+    let mut seen = HashSet::with_capacity(query.files.len());
+    for file in &query.files {
+        if !seen.insert(file) || viewer_diff_file_source(view, file, density).is_none() {
+            return Err(FindViewerDiffError::InvalidFiles);
+        }
+    }
+    Ok(())
 }
 
 fn search_file(
     search: &mut SearchAccumulator,
     query: &FindViewerDiff,
     view: &View,
-    file_index: usize,
+    position: usize,
+    file: &ViewerDiffFileId,
     needle: &str,
     cancellation: &ViewerWorkCancellation,
 ) -> Result<(), FindViewerDiffError> {
-    let file = ViewerDiffFileId::for_index(file_index);
-    let Some(source) = viewer_diff_file_source(view, &file, query.identity.render_options.density)
+    let Some(source) = viewer_diff_file_source(view, file, query.identity.render_options.density)
     else {
         return Ok(());
     };
@@ -104,7 +133,7 @@ fn search_file(
             })
         });
         if matches {
-            search.observe(file_index, row_index, file.clone())?;
+            search.observe(position, row_index, file.clone())?;
         }
     }
     Ok(())
@@ -112,14 +141,6 @@ fn search_file(
 
 fn contains_case_insensitive(text: &str, needle: &str) -> bool {
     text.to_lowercase().contains(needle)
-}
-
-fn search_key(view: &View, found: &ViewerDiffSearchMatch) -> Option<(usize, u32)> {
-    view.files
-        .iter()
-        .enumerate()
-        .find(|(index, _)| ViewerDiffFileId::for_index(*index) == found.file)
-        .map(|(index, _)| (index, found.row_index))
 }
 
 struct SearchAccumulator {
@@ -130,6 +151,7 @@ struct SearchAccumulator {
     selected: Option<ViewerDiffSearchMatch>,
     found_in_direction: bool,
     total_matches: u64,
+    matched_files: Vec<ViewerDiffFileId>,
 }
 
 impl SearchAccumulator {
@@ -142,12 +164,13 @@ impl SearchAccumulator {
             selected: None,
             found_in_direction: false,
             total_matches: 0,
+            matched_files: Vec::new(),
         }
     }
 
     fn observe(
         &mut self,
-        file_index: usize,
+        position: usize,
         row_index: usize,
         file: ViewerDiffFileId,
     ) -> Result<(), FindViewerDiffError> {
@@ -157,13 +180,16 @@ impl SearchAccumulator {
             .total_matches
             .checked_add(1)
             .ok_or(FindViewerDiffError::MatchCountExhausted)?;
+        if self.matched_files.last() != Some(&file) {
+            self.matched_files.push(file.clone());
+        }
         let found = ViewerDiffSearchMatch { file, row_index };
         self.first.get_or_insert_with(|| found.clone());
         self.last = Some(found.clone());
         let Some(anchor) = self.anchor else {
             return Ok(());
         };
-        let key = (file_index, row_index);
+        let key = (position, row_index);
         match self.direction {
             ViewerDiffSearchDirection::Forward if key > anchor && !self.found_in_direction => {
                 self.selected = Some(found);
@@ -188,6 +214,7 @@ impl SearchAccumulator {
             total_matches: self.total_matches,
             active_match,
             wrapped: self.anchor.is_some() && self.total_matches > 0 && !self.found_in_direction,
+            matched_files: self.matched_files,
         }
     }
 }
@@ -249,6 +276,76 @@ pub(crate) mod tests {
         view
     }
 
+    fn both_files() -> Vec<ViewerDiffFileId> {
+        vec![
+            ViewerDiffFileId::for_index(0),
+            ViewerDiffFileId::for_index(1),
+        ]
+    }
+
+    fn find_needle(
+        files: Vec<ViewerDiffFileId>,
+        anchor: Option<ViewerDiffSearchMatch>,
+    ) -> Result<ViewerDiffSearchResult, FindViewerDiffError> {
+        find_viewer_diff::find(
+            &FindViewerDiff {
+                identity: identity(ViewerDiffLayout::Unified),
+                files,
+                query: "needle".into(),
+                direction: ViewerDiffSearchDirection::Forward,
+                anchor,
+            },
+            &search_view(),
+            &ViewerWorkCancellation::default(),
+        )
+    }
+
+    #[test]
+    fn search_follows_the_requested_file_order_and_reports_matched_files() {
+        let reversed = vec![
+            ViewerDiffFileId::for_index(1),
+            ViewerDiffFileId::for_index(0),
+        ];
+
+        let first = find_needle(reversed.clone(), None).unwrap();
+        let next = find_needle(reversed.clone(), first.active_match.clone()).unwrap();
+
+        assert_eq!(first.matched_files, reversed);
+        assert_eq!(
+            first.active_match.unwrap().file,
+            ViewerDiffFileId::for_index(1)
+        );
+        assert_eq!(
+            next.active_match.unwrap().file,
+            ViewerDiffFileId::for_index(0)
+        );
+        assert!(!next.wrapped);
+    }
+
+    #[test]
+    fn search_counts_only_requested_files() {
+        let result = find_needle(vec![ViewerDiffFileId::for_index(1)], None).unwrap();
+
+        assert_eq!(result.total_matches, 1);
+        assert_eq!(result.matched_files, [ViewerDiffFileId::for_index(1)]);
+    }
+
+    #[test]
+    fn unknown_or_repeated_files_are_rejected() {
+        for files in [
+            vec![ViewerDiffFileId::for_index(2)],
+            vec![
+                ViewerDiffFileId::for_index(0),
+                ViewerDiffFileId::for_index(0),
+            ],
+        ] {
+            assert!(matches!(
+                find_needle(files, None),
+                Err(FindViewerDiffError::InvalidFiles)
+            ));
+        }
+    }
+
     #[test]
     fn cancelled_search_returns_no_partial_match_count() {
         let cancellation = ViewerWorkCancellation::default();
@@ -256,6 +353,7 @@ pub(crate) mod tests {
         let result = find_viewer_diff::find(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Split),
+                files: both_files(),
                 query: "needle".into(),
                 direction: ViewerDiffSearchDirection::Forward,
                 anchor: None,
@@ -273,6 +371,7 @@ pub(crate) mod tests {
         let first = find_viewer_diff::find(
             &FindViewerDiff {
                 identity,
+                files: both_files(),
                 query: "needle".into(),
                 direction: ViewerDiffSearchDirection::Forward,
                 anchor: None,
@@ -291,6 +390,7 @@ pub(crate) mod tests {
         let wrapped = find_viewer_diff::find(
             &FindViewerDiff {
                 identity,
+                files: both_files(),
                 query: "needle".into(),
                 direction: ViewerDiffSearchDirection::Forward,
                 anchor: Some(ViewerDiffSearchMatch {
@@ -312,6 +412,7 @@ pub(crate) mod tests {
         let result = find_viewer_diff::find(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Split),
+                files: both_files(),
                 query: "needle".into(),
                 direction: ViewerDiffSearchDirection::Forward,
                 anchor: None,
@@ -330,6 +431,7 @@ pub(crate) mod tests {
         let result = find_viewer_diff::find(
             &FindViewerDiff {
                 identity: identity(ViewerDiffLayout::Unified),
+                files: both_files(),
                 query: "needle".into(),
                 direction: ViewerDiffSearchDirection::Backward,
                 anchor: None,

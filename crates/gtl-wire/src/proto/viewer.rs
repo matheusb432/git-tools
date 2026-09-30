@@ -174,6 +174,7 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
         active: Some(encode_viewer_active_state(shell.active)?),
         preferences: Some(v1::ViewerPreferences {
             copy_with_line_context: Some(shell.preferences.copy_with_line_context),
+            diff_files_sort: encode_diff_files_sort(shell.preferences.diff_files_sort) as i32,
             language: encode_viewer_language(shell.preferences.language) as i32,
             date_format: encode_viewer_date_format(shell.preferences.date_format) as i32,
             accessibility: Some(encode_viewer_accessibility(shell.preferences.accessibility)),
@@ -308,6 +309,7 @@ fn encode_viewer_active_view(
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect(),
             }),
+        changes_since: view.changes_since.map(|timestamp| timestamp.to_string()),
     })
 }
 
@@ -785,6 +787,7 @@ pub fn decode_get_viewer_settings_response(
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
         focus_window_on_diff: required(response.focus_window_on_diff)?,
         copy_with_line_context: required(response.copy_with_line_context)?,
+        diff_files_sort: decode_diff_files_sort(response.diff_files_sort)?,
         sidebars: decode_sidebar_visibility(required(response.sidebars)?),
         projects_sort: decode_projects_sort(response.projects_sort)?,
         projects_page_size: gtl_models::settings::ProjectsPageSize::try_new(
@@ -817,6 +820,7 @@ pub fn encode_get_viewer_settings_response(
         revision: settings.revision.to_string(),
         focus_window_on_diff: Some(settings.focus_window_on_diff),
         copy_with_line_context: Some(settings.copy_with_line_context),
+        diff_files_sort: encode_diff_files_sort(settings.diff_files_sort) as i32,
         sidebars: Some(encode_sidebar_visibility(settings.sidebars)),
         projects_sort: encode_projects_sort(settings.projects_sort) as i32,
         projects_page_size: settings.projects_page_size.into_inner(),
@@ -886,6 +890,7 @@ pub fn encode_edit_settings_request(request: &EditSettingsRequest) -> v1::EditSe
         commits_sidebar_visible: encode_bool_field_update(&request.commits_sidebar_visible),
         wrap_lines,
         copy_with_line_context: encode_bool_field_update(&request.copy_with_line_context),
+        diff_files_sort: encode_diff_files_sort_update(&request.diff_files_sort),
         projects_sort: encode_projects_sort_update(&request.projects_sort),
         projects_page_size: encode_projects_page_size_update(&request.projects_page_size),
         theme,
@@ -932,6 +937,8 @@ pub fn decode_edit_settings_request(
             .map_err(field("projects_page_size"))?,
         projects_sort: decode_projects_sort_update(request.projects_sort)
             .map_err(field("projects_sort"))?,
+        diff_files_sort: decode_diff_files_sort_update(request.diff_files_sort)
+            .map_err(field("diff_files_sort"))?,
         theme: decode_theme_update(request.theme).map_err(field("theme"))?,
         layout: decode_layout_update(request.layout).map_err(field("layout"))?,
         density: decode_density_update(request.density).map_err(field("density"))?,
@@ -957,6 +964,20 @@ fn decode_projects_sort_update(
         v1::projects_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
         v1::projects_sort_field_update::Operation::Update(value) => {
             FieldUpdate::Update(decode_projects_sort(value)?)
+        }
+    })
+}
+
+fn decode_diff_files_sort_update(
+    update: Option<v1::DiffFilesSortFieldUpdate>,
+) -> Result<FieldUpdate<gtl_models::settings::DiffFilesSort>, ViewerCodecError> {
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        v1::diff_files_sort_field_update::Operation::Clear(_) => FieldUpdate::Clear,
+        v1::diff_files_sort_field_update::Operation::Update(value) => {
+            FieldUpdate::Update(decode_diff_files_sort(value)?)
         }
     })
 }
@@ -1122,6 +1143,11 @@ pub fn encode_find_viewer_diff_request(request: FindViewerDiff) -> v1::FindViewe
         query: request.query,
         direction: encode_viewer_diff_search_direction(request.direction) as i32,
         anchor: request.anchor.as_ref().map(encode_viewer_diff_search_match),
+        file_ids: request
+            .files
+            .into_iter()
+            .map(|file| file.as_str().to_owned())
+            .collect(),
     }
 }
 
@@ -1130,6 +1156,11 @@ pub fn decode_find_viewer_diff_request(
 ) -> Result<FindViewerDiff, ViewerCodecError> {
     Ok(FindViewerDiff {
         identity: decode_viewer_view_identity(required(request.identity)?)?,
+        files: request
+            .file_ids
+            .into_iter()
+            .map(decode_viewer_diff_file_id)
+            .collect::<Result<Vec<_>, _>>()?,
         query: request.query,
         direction: decode_viewer_diff_search_direction(request.direction)?,
         anchor: request
@@ -1151,6 +1182,11 @@ pub fn encode_find_viewer_diff_response(
             .as_ref()
             .map(encode_viewer_diff_search_match),
         wrapped: result.wrapped,
+        matched_file_ids: result
+            .matched_files
+            .iter()
+            .map(|file| file.as_str().to_owned())
+            .collect(),
     }
 }
 
@@ -1165,6 +1201,11 @@ pub fn decode_find_viewer_diff_response(
             .map(decode_viewer_diff_search_match)
             .transpose()?,
         wrapped: response.wrapped,
+        matched_files: response
+            .matched_file_ids
+            .into_iter()
+            .map(decode_viewer_diff_file_id)
+            .collect::<Result<Vec<_>, _>>()?,
     })
 }
 
@@ -1246,6 +1287,7 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
         active: decode_viewer_active_state(required(shell.active)?)?,
         preferences: ViewerPreferences {
             copy_with_line_context: required(preferences.copy_with_line_context)?,
+            diff_files_sort: decode_diff_files_sort(preferences.diff_files_sort)?,
             language: decode_viewer_language(preferences.language)?,
             date_format: decode_viewer_date_format(preferences.date_format)?,
             accessibility: decode_viewer_accessibility(required(preferences.accessibility)?)?,
@@ -1437,6 +1479,12 @@ fn decode_viewer_active_view(
         extension_filter: view
             .extension_filter
             .map(decode_viewer_applied_extension_filter)
+            .transpose()?,
+        changes_since: view
+            .changes_since
+            .map(|timestamp| {
+                MachineTimestamp::try_from(timestamp).map_err(|_| ViewerCodecError::InvalidMessage)
+            })
             .transpose()?,
     })
 }
@@ -2093,6 +2141,38 @@ pub fn encode_set_viewer_tab_live_request(
     }
 }
 
+#[must_use]
+pub fn encode_set_viewer_changes_since_request(
+    request: crate::viewer::SetViewerChangesSince,
+) -> v1::SetViewerChangesSinceRequest {
+    v1::SetViewerChangesSinceRequest {
+        tab_id: u64::from(request.tab_id),
+        changes_since: request.changes_since.map(|timestamp| timestamp.to_string()),
+    }
+}
+
+pub fn decode_set_viewer_changes_since_request(
+    request: v1::SetViewerChangesSinceRequest,
+) -> Result<crate::viewer::SetViewerChangesSince, ViewerCodecError> {
+    Ok(crate::viewer::SetViewerChangesSince {
+        tab_id: ViewerTabId::try_new(request.tab_id)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        changes_since: request
+            .changes_since
+            .map(|timestamp| {
+                MachineTimestamp::try_from(timestamp).map_err(|_| ViewerCodecError::InvalidMessage)
+            })
+            .transpose()
+            .map_err(field("changes_since"))?,
+    })
+}
+
+pub fn decode_set_viewer_changes_since_response(
+    response: v1::SetViewerChangesSinceResponse,
+) -> Result<ViewerShell, ViewerCodecError> {
+    decode_viewer_shell(required(response.shell)?)
+}
+
 pub fn decode_set_viewer_tab_live_response(
     response: v1::SetViewerTabLiveResponse,
 ) -> Result<ViewerShell, ViewerCodecError> {
@@ -2173,6 +2253,40 @@ fn encode_projects_sort_update(
     })
 }
 
+fn decode_diff_files_sort(
+    value: i32,
+) -> Result<gtl_models::settings::DiffFilesSort, ViewerCodecError> {
+    match v1::DiffFilesSort::try_from(value) {
+        Ok(v1::DiffFilesSort::Path) => Ok(gtl_models::settings::DiffFilesSort::Path),
+        Ok(v1::DiffFilesSort::Changes) => Ok(gtl_models::settings::DiffFilesSort::Changes),
+        Ok(v1::DiffFilesSort::Unspecified) | Err(_) => Err(ViewerCodecError::InvalidMessage),
+    }
+}
+
+const fn encode_diff_files_sort(value: gtl_models::settings::DiffFilesSort) -> v1::DiffFilesSort {
+    match value {
+        gtl_models::settings::DiffFilesSort::Path => v1::DiffFilesSort::Path,
+        gtl_models::settings::DiffFilesSort::Changes => v1::DiffFilesSort::Changes,
+    }
+}
+
+fn encode_diff_files_sort_update(
+    update: &FieldUpdate<gtl_models::settings::DiffFilesSort>,
+) -> Option<v1::DiffFilesSortFieldUpdate> {
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => {
+            v1::diff_files_sort_field_update::Operation::Clear(v1::ClearSetting {})
+        }
+        FieldUpdate::Update(value) => v1::diff_files_sort_field_update::Operation::Update(
+            encode_diff_files_sort(*value) as i32,
+        ),
+    };
+    Some(v1::DiffFilesSortFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
 #[must_use]
 pub fn encode_rename_viewer_snapshot_request(
     request: crate::viewer::RenameViewerSnapshot,
@@ -2225,4 +2339,221 @@ fn decode_project_names_update(
             Operation::Clear(_) => FieldUpdate::Clear,
         },
     })
+}
+
+#[must_use]
+pub fn encode_search_viewer_commits_request(
+    request: crate::viewer::commit_search::SearchViewerCommits,
+) -> v1::SearchViewerCommitsRequest {
+    use v1::search_viewer_commits_request::Scope;
+
+    use crate::viewer::commit_search::ViewerCommitSearchScope;
+    v1::SearchViewerCommitsRequest {
+        scope: Some(match request.scope {
+            ViewerCommitSearchScope::Snapshot(identity) => {
+                Scope::Snapshot(encode_viewer_view_identity(identity))
+            }
+            ViewerCommitSearchScope::ActiveBranch(path) => {
+                Scope::ActiveBranchPath(path.to_string())
+            }
+            ViewerCommitSearchScope::ActiveBranchSnapshot(identity) => {
+                Scope::ActiveBranchSnapshot(encode_viewer_view_identity(identity))
+            }
+        }),
+        query: request.query,
+    }
+}
+
+pub fn decode_search_viewer_commits_request(
+    request: v1::SearchViewerCommitsRequest,
+) -> Result<crate::viewer::commit_search::SearchViewerCommits, ViewerCodecError> {
+    use v1::search_viewer_commits_request::Scope;
+
+    use crate::viewer::commit_search::{SearchViewerCommits, ViewerCommitSearchScope};
+    if request.query.len() > crate::viewer::VIEWER_SEARCH_QUERY_MAX_BYTES {
+        return Err(ViewerCodecError::InvalidField { field: "query" });
+    }
+    let scope = match required(request.scope)? {
+        Scope::Snapshot(identity) => {
+            ViewerCommitSearchScope::Snapshot(decode_viewer_view_identity(identity)?)
+        }
+        Scope::ActiveBranchSnapshot(identity) => {
+            ViewerCommitSearchScope::ActiveBranchSnapshot(decode_viewer_view_identity(identity)?)
+        }
+        Scope::ActiveBranchPath(path) => ViewerCommitSearchScope::ActiveBranch(
+            gtl_models::paths::RepositoryRoot::try_new(path.into())
+                .map_err(|_| ViewerCodecError::InvalidField { field: "path" })?,
+        ),
+    };
+    Ok(SearchViewerCommits {
+        scope,
+        query: request.query,
+    })
+}
+
+#[must_use]
+pub fn encode_search_viewer_commits_response(
+    result: crate::viewer::commit_search::ViewerCommitSearchResult,
+) -> v1::SearchViewerCommitsResponse {
+    v1::SearchViewerCommitsResponse {
+        commits: result
+            .commits
+            .into_iter()
+            .map(|commit| v1::ViewerCommitSummary {
+                id: commit.id.to_string(),
+                subject: commit.subject,
+                body: commit.body,
+                committed_at: commit.committed_at.to_string(),
+                is_merge: commit.is_merge,
+                body_omitted: true,
+            })
+            .collect(),
+        total_matches: result.total_matches,
+        branch: result.branch.map(|branch| branch.to_string()),
+    }
+}
+
+pub fn decode_search_viewer_commits_response(
+    result: v1::SearchViewerCommitsResponse,
+) -> Result<crate::viewer::commit_search::ViewerCommitSearchResult, ViewerCodecError> {
+    Ok(crate::viewer::commit_search::ViewerCommitSearchResult {
+        commits: result
+            .commits
+            .into_iter()
+            .map(decode_viewer_commit_summary)
+            .collect::<Result<_, _>>()?,
+        total_matches: result.total_matches,
+        branch: result
+            .branch
+            .map(|branch| {
+                branch
+                    .try_into()
+                    .map_err(|_| ViewerCodecError::InvalidMessage)
+            })
+            .transpose()?,
+    })
+}
+
+#[must_use]
+pub fn encode_open_viewer_commit_request(
+    request: crate::viewer::commit_search::OpenViewerCommit,
+) -> v1::OpenViewerCommitRequest {
+    use v1::open_viewer_commit_request::Scope;
+
+    use crate::viewer::commit_search::ViewerCommitSearchScope;
+    v1::OpenViewerCommitRequest {
+        scope: Some(match request.scope {
+            ViewerCommitSearchScope::Snapshot(identity) => {
+                Scope::Snapshot(encode_viewer_view_identity(identity))
+            }
+            ViewerCommitSearchScope::ActiveBranch(path) => {
+                Scope::ActiveBranchPath(path.to_string())
+            }
+            ViewerCommitSearchScope::ActiveBranchSnapshot(identity) => {
+                Scope::ActiveBranchSnapshot(encode_viewer_view_identity(identity))
+            }
+        }),
+        id: request.id.to_string(),
+    }
+}
+
+pub fn decode_open_viewer_commit_request(
+    request: v1::OpenViewerCommitRequest,
+) -> Result<crate::viewer::commit_search::OpenViewerCommit, ViewerCodecError> {
+    use v1::open_viewer_commit_request::Scope;
+
+    use crate::viewer::commit_search::ViewerCommitSearchScope;
+    let scope = match required(request.scope)? {
+        Scope::Snapshot(identity) => {
+            ViewerCommitSearchScope::Snapshot(decode_viewer_view_identity(identity)?)
+        }
+        Scope::ActiveBranchSnapshot(identity) => {
+            ViewerCommitSearchScope::ActiveBranchSnapshot(decode_viewer_view_identity(identity)?)
+        }
+        Scope::ActiveBranchPath(path) => ViewerCommitSearchScope::ActiveBranch(
+            gtl_models::paths::RepositoryRoot::try_new(path.into())
+                .map_err(|_| ViewerCodecError::InvalidField { field: "path" })?,
+        ),
+    };
+    Ok(crate::viewer::commit_search::OpenViewerCommit {
+        scope,
+        id: request
+            .id
+            .try_into()
+            .map_err(|_| ViewerCodecError::InvalidField { field: "id" })?,
+    })
+}
+
+pub fn decode_open_viewer_commit_response(
+    response: v1::OpenViewerCommitResponse,
+) -> Result<crate::viewer::projects::OpenViewerProjectOk, ViewerCodecError> {
+    Ok(crate::viewer::projects::OpenViewerProjectOk {
+        tab_id: ViewerTabId::try_from(response.tab_id)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+    })
+}
+
+#[cfg(test)]
+mod commit_search_tests {
+    use super::*;
+    use crate::viewer::commit_search::{
+        OpenViewerCommit, SearchViewerCommits, ViewerCommitSearchScope,
+    };
+
+    #[test]
+    fn scoped_commit_requests_round_trip_and_reject_missing_or_oversized_input() {
+        let identity = ViewerViewIdentity {
+            tab_id: ViewerTabId::try_from(1_u64).unwrap(),
+            range_generation: ViewerRangeGeneration::new(1),
+            selection_generation: ViewerSelectionGeneration::default(),
+            render_options: crate::viewer::ViewerRenderOptions {
+                wrap_lines: false,
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+            },
+        };
+        for scope in [
+            ViewerCommitSearchScope::ActiveBranch(
+                gtl_models::paths::RepositoryRoot::try_new("/repo".into()).unwrap(),
+            ),
+            ViewerCommitSearchScope::Snapshot(identity),
+            ViewerCommitSearchScope::ActiveBranchSnapshot(identity),
+        ] {
+            let request = SearchViewerCommits {
+                scope: scope.clone(),
+                query: "ação".into(),
+            };
+            assert_eq!(
+                decode_search_viewer_commits_request(encode_search_viewer_commits_request(
+                    request.clone()
+                ))
+                .unwrap(),
+                request
+            );
+            let request = OpenViewerCommit {
+                scope,
+                id: "a".repeat(40).try_into().unwrap(),
+            };
+            assert_eq!(
+                decode_open_viewer_commit_request(encode_open_viewer_commit_request(
+                    request.clone()
+                ))
+                .unwrap(),
+                request
+            );
+        }
+        assert!(
+            decode_search_viewer_commits_request(v1::SearchViewerCommitsRequest::default())
+                .is_err()
+        );
+        assert!(decode_open_viewer_commit_request(v1::OpenViewerCommitRequest::default()).is_err());
+        assert_eq!(
+            decode_search_viewer_commits_request(v1::SearchViewerCommitsRequest {
+                query: "x".repeat(257),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            ViewerCodecError::InvalidField { field: "query" }
+        );
+    }
 }

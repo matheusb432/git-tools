@@ -50,7 +50,16 @@ pub fn execute(
     };
     let tab_filter = state.inspect(|session| session.tab_extension_filter(request.tab_id))?;
     let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
-    let view = compute_recipe::execute(recipe, settings, git, &filters, comparisons)?;
+    let view = compute_recipe::execute(
+        compute_recipe::ComputeRecipe {
+            recipe,
+            changes_since: None,
+        },
+        settings,
+        git,
+        &filters,
+        comparisons,
+    )?;
     let snapshot = state.prepare_snapshot(Arc::new(view))?;
     match state.update(|session| session.publish_modified_files(ticket, snapshot))? {
         PublishOutcome::Published => Ok(()),

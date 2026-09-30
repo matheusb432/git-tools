@@ -132,7 +132,7 @@ async fn complete_copy(
     match result {
         Ok(Some(text)) => {
             if browser::copy_text(&text.text).await {
-                toast.ok(copy_status_toast(text.status));
+                show_copy_success(text.status, toast);
             } else {
                 toast.error(localized_toast(SelectionCopyMessage::Failed));
             }
@@ -179,7 +179,7 @@ fn handle_copy(
                 .is_some_and(|data| data.set_data("text/plain", &text.text).is_ok())
             {
                 event.prevent_default();
-                toast.ok(copy_status_toast(text.status));
+                show_copy_success(text.status, toast);
             }
         }
         Ok(None) => {}
@@ -191,8 +191,10 @@ fn handle_copy(
     }
 }
 
-fn copy_status_toast(status: SelectionCopyStatus) -> ToastText {
-    ToastText::localized(move |language| status.message(language))
+fn show_copy_success(status: SelectionCopyStatus, toast: ToastHandle) {
+    if let Some(message) = status.success_toast() {
+        toast.ok(message);
+    }
 }
 
 /// Formats one argument-free selection message when its toast renders.

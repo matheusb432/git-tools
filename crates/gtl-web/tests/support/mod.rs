@@ -56,5 +56,6 @@ pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<Viewe
             command: "gtl diff".to_owned(),
         },
         extension_filter: None,
+        changes_since: None,
     })
 }

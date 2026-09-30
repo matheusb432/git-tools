@@ -170,18 +170,26 @@ pub(super) fn DiffViewport(
     use_context_provider(|| context);
     use_effect(move || {
         let target = search_target();
-        let target = target.filter(|target| target.identity == identity);
+        let target = target
+            .filter(|target| target.identity == identity)
+            .and_then(|target| {
+                let workspace = workspace.peek();
+                let (index, file) = workspace
+                    .files
+                    .iter()
+                    .enumerate()
+                    .find(|(_, file)| file.summary.id == target.file)?;
+                Some((
+                    index,
+                    target.row,
+                    file.summary.path.to_string_lossy().into_owned(),
+                ))
+            });
         context
             .browser
-            .search(target.map(|target| (target.file, target.row)));
-        let Some(target) = target else { return };
-        let file = workspace
-            .peek()
-            .files
-            .get(target.file)
-            .map(|file| file.summary.path.to_string_lossy().into_owned());
-        let Some(file) = file else { return };
-        let Ok(row) = u32::try_from(target.row) else {
+            .search(target.as_ref().map(|(index, row, _)| (*index, *row)));
+        let Some((_, row, file)) = target else { return };
+        let Ok(row) = u32::try_from(row) else {
             return;
         };
         context.jump(ScrollAnchor {

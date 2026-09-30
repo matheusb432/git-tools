@@ -169,7 +169,7 @@ pub fn restore(
         let mut active = None;
         for tab in tabs.into_iter().rev() {
             let id = session
-                .open_labeled(tab.recipe, RecipeBatchId::generate(), tab.label)
+                .restore_labeled(tab.recipe, RecipeBatchId::generate(), tab.label)
                 .ok_or(ReserveRecipeError::TabIdentifiersExhausted)?;
             session.restore_history_id(id, tab.history_id);
             session.set_comparison_name(id, tab.comparison_name);

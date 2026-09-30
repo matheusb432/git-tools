@@ -319,6 +319,18 @@ projects-changes-popover = Alterações do projeto
 ## Projects dashboard
 
 projects-add = Adicionar projetos
+projects-diff-all = Diff dos projetos não enviados
+projects-diff-all-empty = Nenhum projeto tem commits não enviados.
+projects-diff-all-opened =
+    { $count ->
+        [one] Snapshot de diff aberto para { $count } projeto.
+       *[other] Snapshots de diff abertos para { $count } projetos.
+    }
+projects-diff-all-warning =
+    { $count ->
+        [one] { $count } projeto não pôde ser comparado: { $projects }.
+       *[other] { $count } projetos não puderam ser comparados: { $projects }.
+    }
 projects-snapshots-title = Snapshots
 projects-unavailable = Projetos indisponíveis
 projects-unavailable-message = Verifique o catálogo de projetos e tente novamente.
@@ -380,6 +392,7 @@ recipe-label-unpushed-commits =
        *[other] { $repository }: { $count } commits
     }
 recipe-label-working-tree = { $repository }: { $base }->working tree
+recipe-label-commit = { $repository }: { $rev }^!
 recipe-label-compared = { $repository } | { $base }->{ $head }
 recipe-label-working-tree-head = working tree
 recipe-label-range = { $repository }: { $range }
@@ -605,6 +618,14 @@ files-count =
         [one] { $count } arquivo
        *[other] { $count } arquivos
     }
+files-sort = Ordenar arquivos
+files-sort-selected =
+    { $sort ->
+        [changes] Ordenar arquivos: mais alterados
+       *[path] Ordenar arquivos: caminho
+    }
+files-sort-path = Caminho
+files-sort-changes = Mais alterados
 sidebar-visibility = Visibilidade das barras laterais
 sidebar-toggle-files = Alternar a barra lateral de arquivos
 sidebar-toggle-commits = Alternar a barra lateral de commits
@@ -616,24 +637,48 @@ path-filter-results = Arquivos correspondentes
 path-filter-empty = Nenhum arquivo corresponde
 path-filter-searching = Buscando arquivos...
 
-## Diff extension filters
+## Diff file filters
 
-extensions-filter-label = Filtrar por extensão
-extensions-filter-label-hide = Filtrar por extensão: ocultando { $extensions }
-extensions-filter-label-only = Filtrar por extensão: mostrando só { $extensions }
+file-filters-label = Filtrar arquivos
+file-filters-label-hidden =
+    { $count ->
+        [one] Filtrar arquivos: { $count } arquivo oculto
+       *[other] Filtrar arquivos: { $count } arquivos ocultos
+    }
+file-filters-text = Texto nos arquivos
+file-filters-text-placeholder = Buscar código…
+file-filters-changes = Alterações
+file-filters-change-added = Adicionados
+file-filters-change-removed = Removidos
+file-filters-change-modified = Modificados
+file-filters-change-modified-hint = Inclui arquivos renomeados
+file-filters-since = Alterado desde
+file-filters-since-notice = Desde
+file-filters-since-any-time = Qualquer momento
+file-filters-since-last-hour = Última hora
+file-filters-since-today = Hoje
+file-filters-since-last-24-hours = Últimas 24 horas
+file-filters-since-last-7-days = Últimos 7 dias
+file-filters-since-custom = Personalizado…
+file-filters-since-custom-label = Data e hora de início das alterações
+file-filters-since-description = Mostra só as alterações com commit depois deste momento. Alterações sem commit continuam visíveis.
+file-filters-since-unavailable = Arquivos modificados mostram só alterações sem commit.
+file-filters-extensions = Extensões
+file-filters-hidden-count =
+    { $count ->
+        [0] Nenhum arquivo oculto
+        [one] { $count } arquivo oculto
+       *[other] { $count } arquivos ocultos
+    }
+file-filters-clear = Limpar os filtros
+file-filters-no-matches = Nenhum arquivo corresponde aos filtros
+file-filters-no-matches-message = Altere ou limpe os filtros para mostrar os arquivos ocultos.
 extensions-selected = Extensões filtradas
 extensions-mode-label = Modo do filtro
 extensions-mode-only = Mostrar só
 extensions-mode-hide = Ocultar
 extensions-mode-only-description = Mostra só os arquivos alterados com estas extensões.
 extensions-mode-hide-description = Oculta os arquivos alterados com estas extensões.
-extensions-hidden-count =
-    { $count ->
-        [0] Nenhum arquivo oculto nesta aba
-        [one] { $count } arquivo oculto nesta aba
-       *[other] { $count } arquivos ocultos nesta aba
-    }
-extensions-clear = Limpar o filtro
 extensions-too-many-changes = Há alterações de filtro pendentes demais. Tente novamente em instantes.
 
 ## Project comparisons
@@ -673,3 +718,29 @@ review-close-label = Fechar
 review-unpushed-hint = Este snapshot contém commits que ainda não receberam push.
 review-close = Fechar diff
 review-close-pinned = Desafixe este diff antes de fechá-lo.
+
+commit-search-label = Buscar commits
+commit-search-placeholder = Buscar…
+commit-search-hint = Mensagem ou hash
+commit-search-snapshot = Snapshot
+commit-search-branch = Branch
+commit-search-scope = Escopo da busca
+commit-search-snapshot-option = Este snapshot
+commit-search-branch-option = Branch ativa
+commit-search-close = Fechar busca de commits
+commit-search-clear = Limpar busca de commits
+commit-search-snapshot-hint = Apenas commits deste snapshot.
+commit-search-branch-hint = Commits locais da branch ativa.
+commit-search-project-title = Buscar commits · { $project }
+commit-search-loading = Buscando commits…
+commit-search-count =
+    { $total ->
+        [0] Nenhum resultado
+        [one] 1 resultado
+       *[other] { $total } resultados
+    }
+commit-search-count-limited = { $shown } de { $total } resultados
+commit-search-results = Commits encontrados
+commit-search-open = Abrir commit { $id }: { $subject }
+commit-search-empty = Tente uma busca mais curta ou um hash de commit.
+commit-search-detached = Faça checkout de uma branch para buscar seus commits.

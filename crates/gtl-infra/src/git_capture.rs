@@ -8,6 +8,8 @@ use gtl_models::{
     timestamps::MachineTimestamp,
 };
 
+mod utf16;
+
 pub(crate) fn run_git(repo_path: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::git_process::run(repo_path.as_ref(), args)?;
     if !output.success() {
@@ -99,7 +101,17 @@ pub(crate) fn diff(
         .map(|directory| directory.path().join("index"));
     let output = crate::git_process::run_with_index(repo_path, &args, index.as_deref())?;
     anyhow::ensure!(output.success(), "{}", output.error_line());
-    Ok(output.stdout)
+    if request.format == GitDiffFormat::NamesOnly {
+        return Ok(output.stdout);
+    }
+    Ok(utf16::expand_binary_text(
+        repo_path,
+        &args,
+        index.as_deref(),
+        &request.spec,
+        request.format,
+        output.stdout,
+    ))
 }
 
 /// Builds one pathspec per extension that matches exactly the paths

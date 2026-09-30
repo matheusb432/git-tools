@@ -3,7 +3,7 @@ use std::time::Duration;
 use dioxus::prelude::*;
 use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
-use lucide_dioxus::{Check, X};
+use lucide_dioxus::{Check, Search, X};
 
 use crate::shared::{
     browser,
@@ -58,6 +58,65 @@ pub(super) fn WorkspaceCommitsPanel(
 ) -> Element {
     let language = use_language();
     let workspace = super::use_workspace_context();
+    let mut search_visible = use_signal(|| false);
+    let mut query = use_signal(String::new);
+    let mut active_branch = use_signal(|| false);
+    let request = use_memo(move || {
+        if !search_visible() || (!active_branch() && query().trim().is_empty()) {
+            return None;
+        }
+        let view = workspace.view.read();
+        Some(gtl_wire::viewer::commit_search::SearchViewerCommits {
+            scope: if active_branch() {
+                gtl_wire::viewer::commit_search::ViewerCommitSearchScope::ActiveBranchSnapshot(
+                    view.identity,
+                )
+            } else {
+                gtl_wire::viewer::commit_search::ViewerCommitSearchScope::Snapshot(view.identity)
+            },
+            query: query(),
+        })
+    });
+    let mut search = crate::views::commit_search::use_commit_search(request);
+    let opening = crate::views::commit_search::use_open_commit(
+        gtl_wire::viewer::commit_search::ViewerCommitSearchScope::ActiveBranchSnapshot(
+            workspace.view.read().identity,
+        ),
+    );
+    let response = search.read();
+    let response = response.as_ref().and_then(Option::as_ref);
+    let current = *search.state().read() != UseResourceState::Pending
+        && response.is_some_and(|response| Some(&response.request) == request.read().as_ref());
+    let search_result = response.map(|response| response.result.clone());
+    let first = current
+        .then(|| {
+            search_result
+                .as_ref()
+                .and_then(|result| result.as_ref().ok())
+                .and_then(|result| result.commits.first())
+                .map(|commit| commit.id.clone())
+        })
+        .flatten();
+    let search_select = use_callback(move |id| {
+        if active_branch() {
+            opening.open.call(id);
+        } else if let Some(onselect) = onselect {
+            onselect.call(id);
+        }
+    });
+    let searching = request().is_some();
+    let search_id = format!("{details_popover_id_prefix}-search");
+    let search_region_id = format!("{search_id}-region");
+    let search_trigger_id = format!("{search_id}-trigger");
+    let search_focus_id = search_id.clone();
+    let dismiss_focus_id = search_trigger_id.clone();
+    let dismiss = use_callback(move |()| {
+        query.set(String::new());
+        active_branch.set(false);
+        search_visible.set(false);
+        browser::focus_element(dismiss_focus_id.clone());
+    });
+    let first_id = format!("{search_id}-result-0");
     let scroll = super::panel_scroll::use_panel_scroll(super::panel_scroll::Panel::Commits);
     let view = workspace.view.read();
     let selected_id = match &view.commit_selection {
@@ -74,69 +133,134 @@ pub(super) fn WorkspaceCommitsPanel(
         onselect.filter(|_| view.modified_files || commit_selection_enabled(view.commit_count));
 
     rsx! {
-        ScrollArea {
-            class: "diff-commits-scroll-panel h-full min-h-0",
-            "data-testid": test_id,
-            onmounted: scroll.mount,
-            onresize: move |_| scroll.restore.call(()),
-            onscroll: move |event: ScrollEvent| {
-                scroll.save.call(event.clone());
-                if has_more
-                    && scroll_is_near_bottom(&event.data())
-                    && let Some(onloadmore) = onloadmore
-                {
-                    onloadmore.call(());
-                }
-            },
-            CommitsPanelHeader { actions }
+        div { class: "flex h-full min-h-0 flex-col",
+            CommitsPanelHeader {
+                actions: rsx! {
+                    div { class: "flex flex-none items-center",
+                        Button {
+                            id: search_trigger_id,
+                            class: "commit-search-toggle",
+                            variant: ButtonVariant::Ghost,
+                            size: ButtonSize::IconCompact,
+                            aria_label: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
+                            title: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
+                            aria_expanded: search_visible().to_string(),
+                            aria_controls: search_region_id.clone(),
+                            onclick: move |_| {
+                                if search_visible() {
+                                    dismiss.call(());
+                                } else {
+                                    search_visible.set(true);
+                                    browser::focus_element(search_focus_id.clone());
+                                }
+                            },
+                            Search { size: 14 }
+                        }
+                        {actions}
+                    }
+                },
+            }
             if let ViewerCommitSelection::Error { failure, .. } = &view.commit_selection {
                 CommitSelectionError { message: failure_message(failure, language) }
             }
-            if view.commit_count == 0 {
-                EmptyNotice { class: "m-3 compact:m-2.5", {t!(language, "commits-empty")} }
+            div { id: search_region_id,
+                if search_visible() {
+                    crate::views::commit_search::CommitSearchInput {
+                        id: search_id.clone(),
+                        query: query(),
+                        snapshot: true,
+                        active_branch: active_branch(),
+                        onchange: move |value| query.set(value),
+                        onscope: move |value| active_branch.set(value),
+                        ondismiss: dismiss,
+                        onfirst: move |()| browser::focus_element(first_id.clone()),
+                        onopenfirst: move |()| {
+                            if let Some(id) = first.clone() {
+                                search_select.call(id);
+                            }
+                        },
+                    }
+                }
             }
-            for (commit_index, commit) in workspace.commits.iter().enumerate() {
-                {
-                    let commit_id = commit.peek().id.clone();
-                    let selected = selected_id == Some(&commit_id);
-                    rsx! {
-                        CommitCard {
-                            key: "{commit_id}",
-                            commit_index,
+            if search_visible() && let Some(error) = (opening.error)() {
+                p { class: "px-3 text-xs text-warn", role: "alert",
+                    "{crate::shared::failure_notice::client_error_message(&error, language)}"
+                }
+            }
+            ScrollArea {
+                class: "diff-commits-scroll-panel min-h-0 flex-1",
+                "data-testid": test_id,
+                onmounted: scroll.mount,
+                onresize: move |_| scroll.restore.call(()),
+                onscroll: move |event: ScrollEvent| {
+                    scroll.save.call(event.clone());
+                    if !searching && has_more
+                        && scroll_is_near_bottom(&event.data())
+                        && let Some(onloadmore) = onloadmore
+                    {
+                        onloadmore.call(());
+                    }
+                },
+                if searching {
+                    crate::views::commit_search::CommitSearchResults {
+                        id: search_id,
+                        result: search_result,
+                        selected: (!active_branch()).then(|| selected_id.cloned()).flatten(),
+                        loading: !current,
+                        disabled: selection_pending || (opening.pending)(),
+                        onselect: search_select,
+                        onretry: move |()| search.restart(),
+                    }
+                } else {
+                    if view.commit_count == 0 {
+                        EmptyNotice { class: "m-3 compact:m-2.5", {t!(language, "commits-empty")} }
+                    }
+                    for (commit_index, commit) in workspace.commits.iter().enumerate() {
+                        {
+                            let commit_id = commit.peek().id.clone();
+                            let selected = selected_id == Some(&commit_id);
+                            rsx! {
+                                CommitCard {
+                                    key: "{commit_id}",
+                                    commit_index,
 
-                            details_popover_id_prefix: details_popover_id_prefix.clone(),
-                            selected,
-                            selection_pending,
-                            onselect,
+                                    details_popover_id_prefix: details_popover_id_prefix.clone(),
+                                    selected,
+                                    selection_pending,
+                                    onselect,
+                                }
+                            }
                         }
                     }
-                }
-            }
-            if loading {
-                p { class: "diff-commits-loading px-3 py-3", role: "status",
-                    {t!(language, "commits-loading")}
-                }
-            } else if let Some(message) = load_error {
-                div { class: "diff-commits-error", role: "alert",
-                    p { "{message}" }
-                    if let Some(onloadmore) = onloadmore {
-                        Button {
-                            class: "mt-2",
-                            size: ButtonSize::Small,
-                            variant: ButtonVariant::Failure,
-                            onclick: move |_| onloadmore.call(()),
-                            {t!(language, "action-retry")}
+                    if loading {
+                        p {
+                            class: "diff-commits-loading px-3 py-3",
+                            role: "status",
+                            {t!(language, "commits-loading")}
                         }
-                    }
-                }
-            } else if has_more {
-                if let Some(onloadmore) = onloadmore {
-                    Button {
-                        class: "mx-auto my-3",
-                        size: ButtonSize::Small,
-                        variant: ButtonVariant::Ghost,
-                        onclick: move |_| onloadmore.call(()),
-                        {t!(language, "commits-load-more")}
+                    } else if let Some(message) = load_error {
+                        div { class: "diff-commits-error", role: "alert",
+                            p { "{message}" }
+                            if let Some(onloadmore) = onloadmore {
+                                Button {
+                                    class: "mt-2",
+                                    size: ButtonSize::Small,
+                                    variant: ButtonVariant::Failure,
+                                    onclick: move |_| onloadmore.call(()),
+                                    {t!(language, "action-retry")}
+                                }
+                            }
+                        }
+                    } else if has_more {
+                        if let Some(onloadmore) = onloadmore {
+                            Button {
+                                class: "mx-auto my-3",
+                                size: ButtonSize::Small,
+                                variant: ButtonVariant::Ghost,
+                                onclick: move |_| onloadmore.call(()),
+                                {t!(language, "commits-load-more")}
+                            }
+                        }
                     }
                 }
             }

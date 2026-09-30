@@ -1,11 +1,13 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use gtl_models::diffs::DiffLineCount;
+use gtl_models::{diffs::DiffLineCount, settings::DiffFilesSort};
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
-use lucide_dioxus::ChevronRight;
+use lucide_dioxus::{ChevronRight, RotateCcw};
 
 use crate::{
     shared::{
+        date_display::DateDisplayTime,
         i18n::{t, use_language},
         ui::{
             Button, ButtonLayout, ButtonSize, ButtonVariant, CountBadge, EmptyNotice, ScrollArea,
@@ -38,6 +40,14 @@ struct WorkspaceFileTree {
 }
 
 impl WorkspaceFileTree {
+    fn from_files(files: &[ViewerFileSummary]) -> Self {
+        let mut tree = Self::default();
+        for (file_index, file) in files.iter().enumerate() {
+            tree.insert(file.path.to_string_lossy().as_ref(), file_index);
+        }
+        tree
+    }
+
     fn insert(&mut self, path: &str, file_index: usize) {
         let Some((directory_name, remainder)) = path.split_once('/') else {
             self.files.push(file_index);
@@ -57,22 +67,30 @@ impl WorkspaceFileTree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+enum WorkspaceFilesLayout {
+    Tree(WorkspaceFileTree),
+    List,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct WorkspaceFilesModel {
     totals: WorkspaceLineTotals,
-    tree: WorkspaceFileTree,
+    layout: WorkspaceFilesLayout,
     file_count: usize,
     commit_count: usize,
 }
 
 impl WorkspaceFilesModel {
-    pub(super) fn new(view: &ViewerActiveView) -> Self {
-        let mut tree = WorkspaceFileTree::default();
-        for (file_index, file) in view.files.iter().enumerate() {
-            tree.insert(file.path.to_string_lossy().as_ref(), file_index);
-        }
+    pub(super) fn new(view: &ViewerActiveView, sort: DiffFilesSort) -> Self {
+        let layout = match sort {
+            DiffFilesSort::Path => {
+                WorkspaceFilesLayout::Tree(WorkspaceFileTree::from_files(&view.files))
+            }
+            DiffFilesSort::Changes => WorkspaceFilesLayout::List,
+        };
         Self {
             totals: WorkspaceLineTotals::from_files(&view.files),
-            tree,
+            layout,
             file_count: view.files.len(),
             commit_count: view.commit_count,
         }
@@ -91,6 +109,7 @@ impl WorkspaceFilesModel {
 pub(super) fn FilesPanel(
     test_id: Option<String>,
     onnavigate: EventHandler<String>,
+    sort_control: Option<Element>,
     filter_control: Option<Element>,
 ) -> Element {
     let workspace = super::use_workspace_context();
@@ -99,38 +118,104 @@ pub(super) fn FilesPanel(
 
     rsx! {
         ScrollArea {
-            class: "diff-files-scroll-panel h-full min-h-0 p-3 compact:p-2.5",
+            class: "diff-files-scroll-panel h-full min-h-0",
             "data-testid": test_id,
             onmounted: scroll.mount,
             onresize: move |_| scroll.restore.call(()),
             onscroll: scroll.save,
-            FilesPanelHeading { file_count: model.file_count, filter_control }
-            FilesPanelSummary { totals: model.totals }
-            if model.file_count == 0 {
-                EmptyNotice { {t!(use_language(), "files-empty")} }
-            } else {
-                {render_file_tree(&model.tree, false, onnavigate)}
+            div { class: "p-3 compact:p-2.5",
+                FilesPanelHeading {
+                    file_count: model.file_count,
+                    sort_control,
+                    filter_control,
+                }
+                FilesPanelSummary { totals: model.totals }
+                FilesHiddenNotice {}
+                if model.file_count == 0 {
+                    EmptyNotice { {t!(use_language(), "files-empty")} }
+                } else {
+                    match &model.layout {
+                        WorkspaceFilesLayout::Tree(tree) => render_file_tree(tree, false, onnavigate),
+                        WorkspaceFilesLayout::List => rsx! {
+                            ul { class: "m-0 list-none p-0",
+                                for file_index in 0..model.file_count {
+                                    WorkspaceFileItem {
+                                        key: "{file_index}",
+                                        file_index,
+                                        show_directory: true,
+                                        onnavigate,
+                                    }
+                                }
+                            }
+                        },
+                    }
+                }
             }
         }
     }
 }
 
 #[component]
-fn FilesPanelHeading(file_count: usize, filter_control: Option<Element>) -> Element {
+fn FilesPanelHeading(
+    file_count: usize,
+    sort_control: Option<Element>,
+    filter_control: Option<Element>,
+) -> Element {
     let language = use_language();
     rsx! {
-        div { class: "mx-1 mb-2 flex items-center justify-between gap-1",
-            h2 { class: "flex items-center gap-1.5 font-semibold text-ink",
-                {t!(language, "workspace-files")}
+        div { class: "mx-1 mb-2 flex min-w-0 items-center justify-between gap-1",
+            h2 { class: "flex min-w-0 items-center gap-1.5 font-semibold text-ink",
+                span { class: "truncate", {t!(language, "workspace-files")} }
                 CountBadge {
                     count: file_count,
                     aria_label: t!(language, "files-count", count = file_count),
                 }
             }
-            div { class: "flex items-center",
-                super::path_filter::PathFilterTrigger {}
-                super::titlebar::CollapseFilesButton {}
+            div { class: "flex flex-none items-center",
+                {sort_control}
                 {filter_control}
+            }
+        }
+    }
+}
+
+#[component]
+fn FilesHiddenNotice() -> Element {
+    let language = use_language();
+    let Some(filters) = try_use_context::<super::file_filters::workspace::WorkspaceFileFilters>()
+    else {
+        return rsx! {};
+    };
+    if !(filters.active)() {
+        return rsx! {};
+    }
+    let hidden_count = (filters.hidden_count)();
+    let changes_since = filters.changes_since.applied.read().clone();
+    rsx! {
+        div { class: "diff-files-hidden-notice", role: "status",
+            div { class: "diff-files-hidden-notice-text",
+                if hidden_count > 0 || changes_since.is_none() {
+                    span { {t!(language, "file-filters-hidden-count", count = hidden_count)} }
+                }
+                if let Some(changes_since) = changes_since {
+                    span {
+                        {t!(language, "file-filters-since-notice")}
+                        " "
+                        DateDisplayTime { timestamp: changes_since }
+                    }
+                }
+            }
+            Button {
+                class: "flex-none",
+                size: ButtonSize::IconSmall,
+                variant: ButtonVariant::Ghost,
+                aria_label: t!(language, "file-filters-clear"),
+                title: t!(language, "file-filters-clear"),
+                "data-testid": test_ids::FILE_FILTERS_CLEAR.value(),
+                onclick: move |_| filters.clear.call(()),
+                span { aria_hidden: "true",
+                    RotateCcw { size: 14 }
+                }
             }
         }
     }
@@ -139,12 +224,18 @@ fn FilesPanelHeading(file_count: usize, filter_control: Option<Element>) -> Elem
 #[component]
 fn FilesPanelSummary(totals: WorkspaceLineTotals) -> Element {
     rsx! {
-        div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
-            DiffLineChangeBadge { kind: DiffLineChangeKind::Added, count: totals.added.value() }
-            DiffLineChangeBadge {
-                kind: DiffLineChangeKind::Removed,
-                count: totals.removed.value(),
+        div { class: "mx-0.5 mb-3 flex flex-wrap items-center justify-between gap-2",
+            div { class: "flex min-w-0 flex-wrap gap-2",
+                DiffLineChangeBadge {
+                    kind: DiffLineChangeKind::Added,
+                    count: totals.added.value(),
+                }
+                DiffLineChangeBadge {
+                    kind: DiffLineChangeKind::Removed,
+                    count: totals.removed.value(),
+                }
             }
+            super::titlebar::CollapseFilesButton {}
         }
     }
 }
@@ -168,7 +259,11 @@ fn render_file_tree(
                 }
             }
             for file_index in &tree.files {
-                WorkspaceFileItem { file_index: *file_index, onnavigate }
+                WorkspaceFileItem {
+                    file_index: *file_index,
+                    show_directory: false,
+                    onnavigate,
+                }
             }
         }
     }
@@ -186,7 +281,11 @@ fn WorkspaceDirectoryCaret() -> Element {
 }
 
 #[component]
-fn WorkspaceFileItem(file_index: usize, onnavigate: EventHandler<String>) -> Element {
+fn WorkspaceFileItem(
+    file_index: usize,
+    show_directory: bool,
+    onnavigate: EventHandler<String>,
+) -> Element {
     let workspace = super::use_workspace_context();
     let file = use_memo(use_reactive((&file_index,), move |(file_index,)| {
         workspace.view.read().files.get(file_index).cloned()
@@ -199,6 +298,18 @@ fn WorkspaceFileItem(file_index: usize, onnavigate: EventHandler<String>) -> Ele
         || file.path.to_string_lossy(),
         |name| name.to_string_lossy(),
     );
+    let directory = show_directory.then(|| {
+        file.path
+            .as_path()
+            .parent()
+            .map(|directory| directory.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    });
+    let name_class = if show_directory {
+        "diff-files-file-name-leading"
+    } else {
+        "diff-files-file-name"
+    };
     let anchor_id = file.anchor_id.clone();
     let color = file_status_text_class(file.status);
 
@@ -217,7 +328,10 @@ fn WorkspaceFileItem(file_index: usize, onnavigate: EventHandler<String>) -> Ele
 
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
-                span { class: "diff-files-file-name min-w-0 {color}", "{file_name}" }
+                span { class: "{name_class} min-w-0 {color}", "{file_name}" }
+                if let Some(directory) = directory {
+                    span { class: "diff-files-file-directory min-w-0", "{directory}" }
+                }
                 DiffFileStatus { status: file.status }
             }
         }
@@ -269,10 +383,7 @@ mod tests {
             file("crates/web/src/view.rs", 1, 5)?,
         ];
 
-        let mut tree = WorkspaceFileTree::default();
-        for (index, file) in files.iter().enumerate() {
-            tree.insert(file.path.to_string_lossy().as_ref(), index);
-        }
+        let tree = WorkspaceFileTree::from_files(&files);
 
         assert_eq!(tree.directories[0].0, "crates");
         assert_eq!(tree.directories[0].1.directories[0].0, "web");

@@ -86,6 +86,7 @@ pub fn project(
             theme: project_theme(settings.theme().unwrap_or_default()),
             render_options: project_render_options(options),
             copy_with_line_context: settings.copy_with_line_context(),
+            diff_files_sort: settings.diff_files_sort(),
             keybindings: settings.viewer_keybindings(),
         },
         feedback,
@@ -145,6 +146,7 @@ fn ready_active_view(
         view.title = gtl_models::diffs::DiffViewTitle::Named { name: name.clone() };
     }
     view.modified_files = modified_files;
+    view.changes_since = session.tab_changes_since(tab_id);
     if options.density() == super::DiffDensity::Full
         && matches!(
             displayed.full_context,

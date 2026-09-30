@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gtl_models::{failure::ErrorMeta, recipes::RecipeLabel};
+use gtl_models::{failure::ErrorMeta, recipes::RecipeLabel, timestamps::MachineTimestamp};
 
 use super::{
     ViewerTabState,
@@ -22,6 +22,7 @@ use crate::{
 pub struct PrepareRecipe {
     pub comparison_name: Option<gtl_models::git::GitRevision>,
     pub recipe: Recipe,
+    pub changes_since: Option<MachineTimestamp>,
 }
 
 /// The application decision the process root applies to its session.
@@ -61,6 +62,7 @@ pub fn execute(
     let PrepareRecipe {
         mut recipe,
         mut comparison_name,
+        changes_since,
     } = query;
     let probe = probe_recipe::execute(
         ProbeRecipe {
@@ -88,8 +90,16 @@ pub fn execute(
             target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
         };
     }
-    let mut view =
-        compute_recipe::execute(recipe.clone(), user_settings, git, filters, comparisons)?;
+    let mut view = compute_recipe::execute(
+        compute_recipe::ComputeRecipe {
+            recipe: recipe.clone(),
+            changes_since,
+        },
+        user_settings,
+        git,
+        filters,
+        comparisons,
+    )?;
     if let Some(name) = &comparison_name {
         // The titlebar names the compared branch as the tab label does, not the pinned commit.
         view.upstream = name.clone();
@@ -138,6 +148,7 @@ mod tests {
         let response = prepare_recipe::execute(
             PrepareRecipe {
                 comparison_name: None,
+                changes_since: None,
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),
@@ -160,6 +171,7 @@ mod tests {
         let response = prepare_recipe::execute(
             PrepareRecipe {
                 comparison_name: None,
+                changes_since: None,
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 }),

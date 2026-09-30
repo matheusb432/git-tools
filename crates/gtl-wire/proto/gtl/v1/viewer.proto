@@ -24,6 +24,7 @@ service ViewerService {
   rpc DiscoverProjectRepositories(DiscoverProjectRepositoriesRequest) returns (DiscoverProjectRepositoriesResponse);
   rpc ImportProjectRepositories(ImportProjectRepositoriesRequest) returns (ImportProjectRepositoriesResponse);
   rpc OpenViewerProject(OpenViewerProjectRequest) returns (OpenViewerProjectResponse);
+  rpc OpenUnpushedProjectDiffs(OpenUnpushedProjectDiffsRequest) returns (OpenUnpushedProjectDiffsResponse);
   rpc UpdateViewerProject(UpdateViewerProjectRequest) returns (UpdateViewerProjectResponse);
   rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
   rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
@@ -38,9 +39,12 @@ service ViewerService {
   rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
   rpc UpdateViewerTab(UpdateViewerTabRequest) returns (UpdateViewerTabResponse);
   rpc SetViewerTabLive(SetViewerTabLiveRequest) returns (SetViewerTabLiveResponse);
+  rpc SetViewerChangesSince(SetViewerChangesSinceRequest) returns (SetViewerChangesSinceResponse);
   rpc SelectViewerCommit(SelectViewerCommitRequest) returns (SelectViewerCommitResponse);
   rpc ClearViewerCommitSelection(ClearViewerCommitSelectionRequest) returns (ClearViewerCommitSelectionResponse);
   rpc SetViewerPreference(SetViewerPreferenceRequest) returns (SetViewerPreferenceResponse);
+  rpc SearchViewerCommits(SearchViewerCommitsRequest) returns (SearchViewerCommitsResponse);
+  rpc OpenViewerCommit(OpenViewerCommitRequest) returns (OpenViewerCommitResponse);
   rpc ListViewerCommits(ListViewerCommitsRequest) returns (ListViewerCommitsResponse);
   rpc ListViewerHistory(ListViewerHistoryRequest) returns (ListViewerHistoryResponse);
   rpc OpenViewerHistory(OpenViewerHistoryRequest) returns (OpenViewerHistoryResponse);
@@ -239,6 +243,7 @@ message ViewerRecipeChangesLabel {
     string merge_into_base = 6;
     ViewerRecipeMergeLabel merge = 7;
     uint32 last_commit_count = 8;
+    string commit_revision = 9;
   }
 }
 
@@ -339,6 +344,7 @@ message ViewerActiveView {
   ViewerRowSourceState row_source = 14;
   bool modified_files = 15;
   ViewerDiffViewTitle view_title = 16;
+  optional string changes_since = 17;
 }
 
 // Names what one diff view shows, in parts the viewer localizes.
@@ -383,6 +389,7 @@ message ViewerSidebarVisibility {
 }
 
 message ViewerPreferences {
+  DiffFilesSort diff_files_sort = 9;
   optional bool copy_with_line_context = 8;
   ViewerDateFormat date_format = 7;
   ViewerLanguage language = 6;
@@ -516,6 +523,16 @@ message SetViewerTabLiveResponse {
   ViewerShell shell = 1;
 }
 
+// Narrows a tab to changes committed after a time, or restores its whole range when unset.
+message SetViewerChangesSinceRequest {
+  uint64 tab_id = 1;
+  optional string changes_since = 2;
+}
+
+message SetViewerChangesSinceResponse {
+  ViewerShell shell = 1;
+}
+
 message SelectViewerCommitRequest {
   uint64 tab_id = 1;
   string commit_id = 2;
@@ -623,6 +640,7 @@ message FindViewerDiffRequest {
   string query = 2;
   ViewerDiffSearchDirection direction = 3;
   optional ViewerDiffSearchMatch anchor = 4;
+  repeated string file_ids = 5;
 }
 
 message FindViewerDiffResponse {
@@ -630,6 +648,7 @@ message FindViewerDiffResponse {
   uint64 total_matches = 2;
   optional ViewerDiffSearchMatch active_match = 3;
   bool wrapped = 4;
+  repeated string matched_file_ids = 5;
 }
 
 enum ViewerSyntaxClass {
@@ -833,7 +852,20 @@ message ProjectsSortFieldUpdate {
   }
 }
 
+enum DiffFilesSort {
+  DIFF_FILES_SORT_UNSPECIFIED = 0;
+  DIFF_FILES_SORT_PATH = 1;
+  DIFF_FILES_SORT_CHANGES = 2;
+}
+message DiffFilesSortFieldUpdate {
+  oneof operation {
+    DiffFilesSort update = 1;
+    ClearSetting clear = 2;
+  }
+}
+
 message GetViewerSettingsResponse {
+  DiffFilesSort diff_files_sort = 19;
   optional bool copy_with_line_context = 18;
   repeated string viewer_push_no_confirmation_projects = 17;
   ViewerDateFormat date_format = 16;
@@ -901,6 +933,7 @@ message ViewerProjectNamesFieldUpdate {
 }
 
 message EditSettingsRequest {
+  DiffFilesSortFieldUpdate diff_files_sort = 21;
   BoolFieldUpdate copy_with_line_context = 20;
   ViewerProjectNamesFieldUpdate viewer_push_no_confirmation_projects = 19;
   ViewerDateFormatFieldUpdate date_format = 18;
@@ -1008,6 +1041,12 @@ message OpenViewerProjectRequest {
 }
 message OpenViewerProjectResponse {
   uint64 tab_id = 1;
+}
+message OpenUnpushedProjectDiffsRequest {}
+message OpenUnpushedProjectDiffsResponse {
+  uint32 opened_count = 1;
+  // One line per project whose comparison could not be resolved.
+  repeated string warnings = 2;
 }
 
 message GetSettingsRecoveryRequest {}
@@ -1143,3 +1182,31 @@ message RenameViewerSnapshotRequest {
   string name = 2;
 }
 message RenameViewerSnapshotResponse {}
+
+message SearchViewerCommitsRequest {
+  oneof scope {
+    ViewerViewIdentity snapshot = 1;
+    string active_branch_path = 2;
+    ViewerViewIdentity active_branch_snapshot = 4;
+  }
+  string query = 3;
+}
+
+message SearchViewerCommitsResponse {
+  repeated ViewerCommitSummary commits = 1;
+  uint64 total_matches = 2;
+  optional string branch = 3;
+}
+
+message OpenViewerCommitRequest {
+  oneof scope {
+    string active_branch_path = 1;
+    ViewerViewIdentity snapshot = 3;
+    ViewerViewIdentity active_branch_snapshot = 4;
+  }
+  string id = 2;
+}
+
+message OpenViewerCommitResponse {
+  uint64 tab_id = 1;
+}

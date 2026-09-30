@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gtl_models::diffs::ExtensionFilter;
+use gtl_models::{diffs::ExtensionFilter, timestamps::MachineTimestamp};
 
 use super::{
     ActiveContentIdentity, CachedView, CommitSelection, CommitSelectionSnapshot, ViewerSession,
@@ -25,6 +25,23 @@ impl ViewerSession {
         id: ViewerTabId,
     ) -> Option<ExtensionFilter> {
         self.tab(id).and_then(|tab| tab.extension_filter.clone())
+    }
+
+    pub(in crate::viewer) fn tab_changes_since(&self, id: ViewerTabId) -> Option<MachineTimestamp> {
+        self.tab(id).and_then(|tab| tab.changes_since.clone())
+    }
+
+    /// Records the tab's cutoff; the caller recomputes the tab to apply it.
+    pub(in crate::viewer) fn set_changes_since(
+        &mut self,
+        id: ViewerTabId,
+        changes_since: Option<MachineTimestamp>,
+    ) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        tab.changes_since = changes_since;
+        true
     }
 
     pub(in crate::viewer) fn file_filter_views(

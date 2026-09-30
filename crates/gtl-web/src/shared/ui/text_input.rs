@@ -27,6 +27,8 @@ pub(crate) fn TextInput(
     #[props(extends = input)]
     attributes: Vec<Attribute>,
     oninput: Option<EventHandler<FormEvent>>,
+    onchange: Option<EventHandler<FormEvent>>,
+    onkeydown: Option<EventHandler<KeyboardEvent>>,
 ) -> Element {
     let error_id = format!("{id}-error");
     let description_id = format!("{id}-description");
@@ -54,8 +56,18 @@ pub(crate) fn TextInput(
             label { class: if hidden { "block min-w-0" } else { "grid min-w-0 gap-1.5" },
                 span { class: if hidden { "sr-only" } else { "font-semibold text-ink" }, "{label}" }
                 input {
+                    onkeydown: move |event| {
+                        if let Some(handler) = onkeydown {
+                            handler.call(event);
+                        }
+                    },
                     oninput: move |event| {
                         if let Some(handler) = &oninput {
+                            handler.call(event);
+                        }
+                    },
+                    onchange: move |event| {
+                        if let Some(handler) = &onchange {
                             handler.call(event);
                         }
                     },

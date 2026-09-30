@@ -13,9 +13,12 @@ gtl-infra.workspace = true
 gtl-local-transport.workspace = true
 gtl-models.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
+clap.workspace = true
 libc.workspace = true
 prost.workspace = true
 rolling-file.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [
   "macros",
@@ -40,7 +43,6 @@ gtl-client.workspace = true
 gtl-application = { workspace = true, features = ["testing"] }
 gtl-infra = { workspace = true, features = ["testing"] }
 prost-types.workspace = true
-serde_json.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
 

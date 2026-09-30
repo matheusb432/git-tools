@@ -25,10 +25,10 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct DiffSearchTarget {
     identity: ViewerViewIdentity,
-    file: usize,
+    file: ViewerDiffFileId,
     row: usize,
 }
 
@@ -48,14 +48,17 @@ pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>)
         })
     });
     use_diff_rows_loading_tab(identity.tab_id, is_loading);
+    let search_target = use_signal(|| None::<DiffSearchTarget>);
 
     rsx! {
+        find::DiffFindBar { open: diff.find_open, identity, target: search_target }
         if row_source != gtl_wire::viewer::ViewerRowSourceState::Ready {
             DiffSourcePreparation { state: row_source, tab_id: identity.tab_id }
         } else if let Some(workspace_store) = workspace_store {
             LoadedDiffDocument {
                 workspace: workspace_store,
                 controller: workspace,
+                search_target,
                 is_loading,
                 retry_allowed,
                 onopen,
@@ -102,6 +105,7 @@ fn DiffSourcePreparation(
 fn LoadedDiffDocument(
     workspace: Store<ClientDiffWorkspace>,
     controller: crate::entities::diffs::ClientDiffWorkspaceController,
+    search_target: ReadSignal<Option<DiffSearchTarget>>,
     is_loading: bool,
     retry_allowed: bool,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
@@ -112,7 +116,6 @@ fn LoadedDiffDocument(
     }))();
     let diff = super::diff_workspace::use_workspace_context();
     let view = diff.view;
-    let search_target = use_signal(|| None::<DiffSearchTarget>);
     let language = use_language();
     let (title, identity, content_id) = view.with(|view| {
         (
@@ -127,16 +130,10 @@ fn LoadedDiffDocument(
         section {
             class: "relative h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: t!(use_language(), "diff-rendered"),
-            // Dioxus reconciles keys in lists; each tab owns these hook lifetimes.
+            // Dioxus reconciles keys in lists; each displayed file list owns these hook lifetimes.
             for identity in [identity] {
-                find::DiffFindBar {
-                    key: "{identity.tab_id}:{content_id:?}:{identity.render_options.wrap_lines}",
-                    open: diff.find_open,
-                    identity,
-                    workspace,
-                    target: search_target,
-                }
                 viewport::DiffViewport {
+                    key: "{identity.tab_id}:{content_id:?}:{identity.render_options.wrap_lines}",
                     title: title.clone(),
                     workspace,
                     identity,

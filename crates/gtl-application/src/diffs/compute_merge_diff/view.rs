@@ -2,6 +2,7 @@ use gtl_models::{
     diffs::{AppliedExtensionFilter, DiffViewTitle, ExtensionFilter},
     git::{GitDiffSpec, GitRevision},
     paths::RepositoryRoot,
+    timestamps::MachineTimestamp,
 };
 
 use crate::{
@@ -27,6 +28,7 @@ pub(super) fn build(
     base: Option<&GitRevision>,
     pinned: Option<&PinnedRange>,
     filter: &ExtensionFilter,
+    changes_since: Option<&MachineTimestamp>,
 ) -> anyhow::Result<MergeViewBuild> {
     let branch = git.current_branch(top)?;
     let repo_name = top.project_name();
@@ -47,17 +49,22 @@ pub(super) fn build(
     )?;
     let range_view = RangeView::new(&view_ranges.diff, DiffViewTitle::MergeDiff);
     let DiffData {
+        spec,
         commits,
         files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), filter)?;
+    } = assemble(
+        git,
+        top,
+        &io_ranges.diff,
+        io_ranges.log.as_ref(),
+        filter,
+        changes_since,
+    )?;
 
     let view = View {
-        file_filter: crate::diffs::file_filter::DiffFileFilter::new(
-            io_ranges.diff.clone(),
-            filter.clone(),
-        ),
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(spec.clone(), filter.clone()),
         repo_name,
         repo_root: top.clone(),
         branch,
@@ -74,6 +81,6 @@ pub(super) fn build(
         view,
         top: top.clone(),
         base,
-        diff_range: io_ranges.diff,
+        diff_range: spec,
     })
 }

@@ -196,6 +196,49 @@ pub(super) async fn open_viewer_project(
     Ok(Response::new(v1::OpenViewerProjectResponse { tab_id }))
 }
 
+pub(super) async fn open_unpushed_project_diffs(
+    state: &AppState,
+    _request: Request<v1::OpenUnpushedProjectDiffsRequest>,
+) -> Result<Response<v1::OpenUnpushedProjectDiffsResponse>, Status> {
+    use gtl_application::{
+        projects::build_recipes::{self, BuildProjectRecipes},
+        recipes::{RecipeBatch, RecipeOp, RecipeTarget},
+    };
+    use gtl_models::recipes::RecipeBatchId;
+
+    let repos = state
+        .projects
+        .list_projects()
+        .await
+        .map_err(|error| project_catalogue_error(&error))?;
+    let request = BuildProjectRecipes {
+        repos,
+        operation: RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { pinned: None },
+        },
+    };
+    let state = state.clone();
+    let runtime_state = state.clone();
+    let built = run_blocking(move || build_recipes::execute(request, &state.git, &state.database))
+        .await?
+        .map_err(|error| unexpected(error, "build project diff recipes"))?;
+    let opened_count = u32::try_from(built.recipes.len()).unwrap_or(u32::MAX);
+    if !built.recipes.is_empty() {
+        viewer_runtime::open_recipe_batch(
+            &runtime_state,
+            RecipeBatch {
+                batch_id: RecipeBatchId::generate(),
+                recipes: built.recipes,
+            },
+        )
+        .map_err(|error| unexpected(error, "open project diff batch"))?;
+    }
+    Ok(Response::new(v1::OpenUnpushedProjectDiffsResponse {
+        opened_count,
+        warnings: built.notes.into_iter().map(|note| note.text).collect(),
+    }))
+}
+
 pub(super) async fn update_viewer_project(
     state: &AppState,
     request: Request<v1::UpdateViewerProjectRequest>,

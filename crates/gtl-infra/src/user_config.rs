@@ -176,7 +176,7 @@ mod tests {
     };
     use gtl_models::{
         paths::ProjectName,
-        settings::{ProjectsPageSize, ProjectsSort},
+        settings::{DiffFilesSort, ProjectsPageSize, ProjectsSort},
         viewer::{
             DiffDensity, DiffLayout, RenderOptions, Theme, ViewerKeybinding,
             ViewerKeybindingAction, ViewerKeybindings,
@@ -487,6 +487,7 @@ excluded_from_push_all = true
             commits_sidebar_visible: UserSettingsFieldUpdate::Update(true),
             wrap_lines: UserSettingsFieldUpdate::Update(false),
             copy_with_line_context: UserSettingsFieldUpdate::Update(false),
+            diff_files_sort: UserSettingsFieldUpdate::Update(DiffFilesSort::Changes),
             projects_sort: UserSettingsFieldUpdate::Update(ProjectsSort::Name),
             projects_page_size: UserSettingsFieldUpdate::Update(ProjectsPageSize::default()),
             theme: UserSettingsFieldUpdate::Clear,
@@ -521,6 +522,7 @@ excluded_from_push_all = true
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full)
         );
         assert!(!settings.copy_with_line_context());
+        assert_eq!(settings.diff_files_sort(), DiffFilesSort::Changes);
         assert!(!settings.push_confirmation_required());
     }
 
@@ -832,6 +834,39 @@ excluded_from_push_all = true
                 .contains("copy_with_line_context")
         );
         std::fs::write(&path, "copy_with_line_context = \"false\"\n").unwrap();
+        assert!(store.load().is_err());
+    }
+
+    #[test]
+    fn diff_files_sort_defaults_to_path_and_round_trips_explicit_values_and_clear() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "theme = \"dark\"\n").unwrap();
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        assert_eq!(store.load().unwrap().diff_files_sort(), DiffFilesSort::Path);
+        for (update, expected) in [
+            (
+                UserSettingsFieldUpdate::Update(DiffFilesSort::Changes),
+                DiffFilesSort::Changes,
+            ),
+            (UserSettingsFieldUpdate::Clear, DiffFilesSort::Path),
+        ] {
+            store
+                .edit(UserSettingsPatch {
+                    diff_files_sort: update,
+                    ..Default::default()
+                })
+                .unwrap();
+            let settings = store.load().unwrap();
+            assert_eq!(settings.diff_files_sort(), expected);
+            assert_eq!(settings.theme(), Some(Theme::Dark));
+        }
+        std::fs::write(&path, "diff_files_sort = \"changes\"\n").unwrap();
+        assert_eq!(
+            store.load().unwrap().diff_files_sort(),
+            DiffFilesSort::Changes
+        );
+        std::fs::write(&path, "diff_files_sort = \"size\"\n").unwrap();
         assert!(store.load().is_err());
     }
 

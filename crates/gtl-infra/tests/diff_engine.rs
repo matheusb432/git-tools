@@ -44,6 +44,7 @@ fn compute_view_with_settings(
         ComputeDiff {
             repo_root: repository.root(),
             target,
+            changes_since: None,
         },
         &FixedUserSettingsStore::new(settings),
         &HybridGitClient,
@@ -92,6 +93,126 @@ fn file_paths(view: &View) -> Vec<String> {
 
 fn relative_path(path: &str) -> RepositoryRelativePath {
     RepositoryRelativePath::try_new(path.into()).unwrap()
+}
+
+fn utf16_le(contents: &str) -> Vec<u8> {
+    let mut bytes = vec![0xff, 0xfe];
+    bytes.extend(contents.encode_utf16().flat_map(u16::to_le_bytes));
+    bytes
+}
+
+fn utf16_be(contents: &str) -> Vec<u8> {
+    let mut bytes = vec![0xfe, 0xff];
+    bytes.extend(contents.encode_utf16().flat_map(u16::to_be_bytes));
+    bytes
+}
+
+#[test]
+fn utf16_sql_changes_render_as_text_in_commits_and_working_tree() {
+    let repository = TestRepository::new();
+    let path = "queries/sample.sql";
+    let context = "SELECT 10;\nSELECT 20;\nSELECT 30;\nSELECT 40;\nSELECT 50;\nSELECT 60;\n";
+    repository.write(path, utf16_le(&format!("SELECT 1;\n{context}")));
+    let base = repository.commit_all("add sample query");
+    repository.write(path, utf16_le(&format!("SELECT 2;\n{context}")));
+    let head = repository.commit_all("change sample query");
+    let target = range(&format!("{base}..{head}"));
+
+    let committed = compute_view(&repository, target.clone(), ExtensionFilter::default());
+    let file = &committed.files[0];
+    let lines = file.lines.iter().collect::<Vec<_>>();
+    assert_eq!(file.path, relative_path(path));
+    assert_eq!(file.added, DiffLineCount::new(1));
+    assert_eq!(file.removed, DiffLineCount::new(1));
+    assert!(lines.contains(&"-SELECT 1;"));
+    assert!(lines.contains(&"+SELECT 2;"));
+    assert!(!lines.contains(&" SELECT 60;"));
+
+    let full = compute_view_with_settings(
+        &repository,
+        target,
+        ExtensionFilter::default(),
+        settings_with_density(DiffDensity::Full),
+    );
+    assert!(
+        full.files[0]
+            .full_lines
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|line| line == " SELECT 60;")
+    );
+
+    repository.write(path, utf16_le(&format!("SELECT 3;\n{context}")));
+    let working = compute_view(&repository, working_tree(), ExtensionFilter::default());
+    let lines = working.files[0].lines.iter().collect::<Vec<_>>();
+    assert!(lines.contains(&"-SELECT 2;"));
+    assert!(lines.contains(&"+SELECT 3;"));
+}
+
+#[test]
+fn utf16_big_endian_additions_and_deletions_leave_binary_files_binary() {
+    let repository = TestRepository::new();
+    repository.write("removed.sql", utf16_be("SELECT 1;\n"));
+    repository.write("payload.dat", [0, 1, 2]);
+    let base = repository.commit_all("add files");
+    std::fs::remove_file(repository.path().join("removed.sql")).unwrap();
+    repository.write("added.sql", utf16_be("SELECT 2;\n"));
+    repository.write("payload.dat", [0, 1, 3]);
+    let head = repository.commit_all("change files");
+
+    let view = compute_view(
+        &repository,
+        range(&format!("{base}..{head}")),
+        ExtensionFilter::default(),
+    );
+    let added = view
+        .files
+        .iter()
+        .find(|file| file.path == relative_path("added.sql"))
+        .unwrap();
+    let removed = view
+        .files
+        .iter()
+        .find(|file| file.path == relative_path("removed.sql"))
+        .unwrap();
+    let binary = view
+        .files
+        .iter()
+        .find(|file| file.path == relative_path("payload.dat"))
+        .unwrap();
+    assert_eq!(added.status(), FileStatus::Added);
+    assert!(added.lines.iter().any(|line| line == "+SELECT 2;"));
+    assert_eq!(removed.status(), FileStatus::Deleted);
+    assert!(removed.lines.iter().any(|line| line == "-SELECT 1;"));
+    assert!(
+        binary
+            .lines
+            .iter()
+            .any(|line| line.starts_with("Binary files "))
+    );
+}
+
+#[test]
+fn explicit_binary_diff_attribute_keeps_utf16_sql_binary() {
+    let repository = TestRepository::new();
+    repository.write(".gitattributes", "*.sql -diff\n");
+    repository.write("sample.sql", utf16_le("SELECT 1;\n"));
+    let base = repository.commit_all("add sample query");
+    repository.write("sample.sql", utf16_le("SELECT 2;\n"));
+    let head = repository.commit_all("change sample query");
+
+    let view = compute_view(
+        &repository,
+        range(&format!("{base}..{head}")),
+        ExtensionFilter::default(),
+    );
+    assert!(
+        view.files[0]
+            .lines
+            .iter()
+            .any(|line| line.starts_with("Binary files "))
+    );
 }
 
 #[test]

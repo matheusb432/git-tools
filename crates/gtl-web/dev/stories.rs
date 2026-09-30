@@ -1,9 +1,10 @@
 mod alert_dialog;
 mod badge;
 mod button;
+mod commit_search;
 mod data_table;
 mod empty_notice;
-mod extension_filter;
+mod file_filters;
 mod icon_popover;
 mod loading_spinner;
 mod page_notice;

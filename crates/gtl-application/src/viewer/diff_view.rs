@@ -260,6 +260,7 @@ pub(super) fn project_diff_view_with_content_id(
                 hidden_paths: applied.hidden_paths.clone(),
             }
         }),
+        changes_since: None,
     }
 }
 

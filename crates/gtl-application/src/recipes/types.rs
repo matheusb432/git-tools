@@ -35,6 +35,9 @@ pub enum RecipeTarget {
     Base {
         rev: GitRevision,
     },
+    Commit {
+        rev: GitRevision,
+    },
     Range {
         range: GitRange,
         pinned: Option<PinnedRange>,
@@ -103,7 +106,7 @@ impl Recipe {
                 | RecipeTarget::Range { pinned, .. }
                 | RecipeTarget::Merge { pinned, .. }
                 | RecipeTarget::Last { pinned, .. } => *pinned = None,
-                RecipeTarget::Base { .. } => {}
+                RecipeTarget::Base { .. } | RecipeTarget::Commit { .. } => {}
             },
             RecipeOp::MergeDiff { pinned, .. } => {
                 *pinned = None;

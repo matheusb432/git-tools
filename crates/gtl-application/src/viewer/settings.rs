@@ -44,6 +44,7 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
             std::convert::identity,
         ),
         projects_sort: application_field_update(request.projects_sort, |value| value),
+        diff_files_sort: application_field_update(request.diff_files_sort, |value| value),
         projects_page_size: application_field_update(request.projects_page_size, |value| value),
         theme: application_field_update(request.theme, |value| match value {
             ViewerTheme::Dark => Theme::Dark,
@@ -106,6 +107,7 @@ pub fn project_settings(
         revision,
         focus_window_on_diff: settings.focus_window_on_diff(),
         copy_with_line_context: settings.copy_with_line_context(),
+        diff_files_sort: settings.diff_files_sort(),
         sidebars: settings.sidebar_visibility(),
         projects_sort: projects.sort,
         projects_page_size: projects.page_size,

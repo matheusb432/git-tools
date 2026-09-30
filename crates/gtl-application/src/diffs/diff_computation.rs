@@ -1,7 +1,8 @@
 use gtl_models::{
     diffs::{AppliedExtensionFilter, CommitIdAbbreviation, DiffViewTitle, ExtensionFilter},
-    git::{GitRange, GitRevision},
+    git::{GitDiffSpec, GitRange, GitRevision},
     paths::RepositoryRoot,
+    timestamps::MachineTimestamp,
 };
 
 use crate::{
@@ -64,6 +65,7 @@ pub(super) fn build(
     target: &DiffTarget,
     filter: &ExtensionFilter,
     comparisons: &impl crate::ports::ProjectComparisonReader,
+    changes_since: Option<&MachineTimestamp>,
 ) -> Result<DiffComputation, crate::projects::comparison::ComparisonError> {
     let mut notes = Vec::new();
     let branch = git.current_branch(top)?;
@@ -79,18 +81,23 @@ pub(super) fn build(
     let range_view = RangeView::new(&view_ranges.diff, title);
 
     let DiffData {
+        spec,
         commits,
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, top, &io_ranges.diff, io_ranges.log.as_ref(), filter)?;
+    } = assemble(
+        git,
+        top,
+        &io_ranges.diff,
+        io_ranges.log.as_ref(),
+        filter,
+        changes_since,
+    )?;
     sort_files_tree_order(&mut files);
 
     let view = View {
-        file_filter: crate::diffs::file_filter::DiffFileFilter::new(
-            io_ranges.diff.clone(),
-            filter.clone(),
-        ),
+        file_filter: crate::diffs::file_filter::DiffFileFilter::new(spec, filter.clone()),
         repo_name: repo_name.clone(),
         repo_root: top.clone(),
         branch,
@@ -106,7 +113,7 @@ pub(super) fn build(
     notes.extend(extension_filter_note::note("diff-artifact", &view));
 
     let summary = match target {
-        DiffTarget::Range { .. } => base_ref.to_string(),
+        DiffTarget::Range { .. } | DiffTarget::Commit(_) => base_ref.to_string(),
         DiffTarget::Base(_) => format!("{base_ref}..working"),
         DiffTarget::Merge { .. } => format!("to merge into {base_ref}"),
         DiffTarget::Unpushed { .. } if fallback_to_branch => {
@@ -172,6 +179,7 @@ fn resolve_target_ranges(
                 fallback_to_branch: false,
             }
         }
+        DiffTarget::Commit(rev) => resolve_commit_range(git, top, rev)?,
         DiffTarget::Merge {
             base,
             pinned: Some(pin),
@@ -220,6 +228,42 @@ fn resolve_target_ranges(
         }
     };
     Ok(resolved)
+}
+
+fn resolve_commit_range(
+    git: &impl GitClient,
+    top: &RepositoryRoot,
+    rev: &GitRevision,
+) -> anyhow::Result<ResolvedTarget> {
+    let id = git.resolve_commit_id(top, rev)?;
+    let log_range = GitRange::single_commit(&id);
+    let commit = git
+        .log_commits(top, &log_range)?
+        .into_iter()
+        .find(|commit| commit.id == id)
+        .ok_or_else(|| anyhow::anyhow!("commit metadata is unavailable"))?;
+    let (parent, parent_short) = match commit.parents.first() {
+        Some(parent) => (
+            GitRevision::from(parent),
+            GitRevision::abbreviated_commit(parent, CommitIdAbbreviation::TenCharacters),
+        ),
+        None => (
+            GitRevision::try_new(super::EMPTY_TREE_ID)?,
+            GitRevision::try_new(super::EMPTY_TREE_ABBREVIATED_ID)?,
+        ),
+    };
+    let rev_short = GitRevision::abbreviated_commit(&id, CommitIdAbbreviation::TenCharacters);
+    let view_range = GitRange::two_dot(&parent_short, &rev_short);
+    Ok(ResolvedTarget {
+        base_ref: GitRevision::from(&view_range),
+        io_ranges: DiffRanges {
+            diff: GitDiffSpec::Range(GitRange::two_dot(&parent, &GitRevision::from(&id))),
+            log: Some(log_range),
+        },
+        view_ranges: DiffRanges::exact(view_range),
+        title: DiffViewTitle::Diff,
+        fallback_to_branch: false,
+    })
 }
 
 fn verify_exact_range(

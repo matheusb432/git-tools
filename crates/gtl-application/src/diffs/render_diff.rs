@@ -105,6 +105,10 @@ fn resolved_range(
         DiffTarget::Merge { base, pinned: None } => {
             (DiffKind::ThreeDot, DiffRanges::merge(base).diff)
         }
+        DiffTarget::Commit(rev) => (
+            DiffKind::TwoDot,
+            GitDiffSpec::Range(gtl_models::git::GitRange::two_dot(&rev.first_parent(), rev)),
+        ),
         DiffTarget::Unpushed { pinned: None } => {
             let comparison = crate::projects::comparison::resolve(top, git, comparisons).ok()?;
             let kind = match comparison {
@@ -179,7 +183,8 @@ pub fn execute(
     }
 
     let commit_range = resolved_range(git, &top, &target, preferences).map(|range| range.commits);
-    let computed = diff_computation::build(git, &top, &target, &extension_filter, preferences)?;
+    let computed =
+        diff_computation::build(git, &top, &target, &extension_filter, preferences, None)?;
     let mut view = computed.view;
     let summary = computed.summary;
     notes.extend(computed.notes);

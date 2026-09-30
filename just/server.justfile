@@ -9,11 +9,7 @@ _preload_entry_count := "2000"
 _default:
     @just --list server
 
-[doc("Read the installed gtl-server log stream through hl; trailing arguments go to hl and override the scope flags.
-  own       --follow --tail " + _preload_entry_count + " --filter target~=gtl_server   gtl-server records only (default)
-  all       --follow                                           every record, tower_http request lifecycle included
-  failures  --follow --tail " + _preload_entry_count + " --level warn                  warnings and errors from every target
-  history   --sort                                             current and rotated segments once, no follow")]
+[doc("Read the installed gtl-server log stream through hl; trailing arguments go to hl and override the scope flags.")]
 [arg("scope", help="Log scope", pattern="own|all|failures|history")]
 [group('server')]
 [linux]

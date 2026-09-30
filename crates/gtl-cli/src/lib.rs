@@ -3,9 +3,10 @@ use gtl_wire::v1;
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
-        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, ProjectCommand,
-        ProjectStatusArgs, PullArgs, PushArgs, ServerArgs, ServerCommand, StatusArgs, Theme,
+        Cli, ColorChoice, Command, DataArgs, DataCommand, DiffArgs, DiffSub, DiffTarget,
+        DiffTargetArgs, DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs,
+        ProjectCommand, ProjectStatusArgs, PullArgs, PushArgs, ServerArgs, ServerCommand,
+        StatusArgs, Theme,
     },
     commands::managed::{ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary},
     failure::{CommandFailure, Refusal, fail},
@@ -73,6 +74,18 @@ fn dispatch(command: Command) -> ExitCode {
         Command::Status(args) => managed_exit(&run_status(&args)),
         Command::Ls(args) => run_project(ProjectCommand::Ls(args)),
         Command::Server(ServerArgs { command }) => run_server_ctl(&command),
+        Command::Data(DataArgs { command }) => run_data(&command),
+    }
+}
+
+fn run_data(command: &DataCommand) -> ExitCode {
+    let result = match command {
+        DataCommand::Export(args) => commands::data::export(args),
+        DataCommand::Import(args) => commands::data::import(args),
+    };
+    match result {
+        Ok(exit) => exit,
+        Err(error) => fail("data", &error),
     }
 }
 
@@ -232,6 +245,10 @@ fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError>
             None => match args.target {
                 None => Ok(DiffTarget::Unpushed { pinned: None }),
                 Some(value) if value.trim().is_empty() => Ok(DiffTarget::Unpushed { pinned: None }),
+                Some(rev) if rev.ends_with("^!") => Ok(DiffTarget::Commit(
+                    gtl_models::git::GitRevision::try_new(rev[..rev.len() - "^!".len()].to_owned())
+                        .map_err(|_| DiffTargetParseError::EmptyRevision)?,
+                )),
                 Some(range) if range.contains("..") => Ok(DiffTarget::Range {
                     range: gtl_models::git::GitRange::try_new(range)
                         .map_err(|_| DiffTargetParseError::EmptyRange)?,
@@ -584,6 +601,14 @@ mod tests {
         assert_eq!(
             diff_target(target_args(Some("abc123"))).unwrap(),
             DiffTarget::Base(gtl_models::git::GitRevision::try_new("abc123").unwrap())
+        );
+    }
+
+    #[test]
+    fn diff_target_treats_a_caret_bang_suffix_as_a_single_commit() {
+        assert_eq!(
+            diff_target(target_args(Some("abc123^!"))).unwrap(),
+            DiffTarget::Commit(gtl_models::git::GitRevision::try_new("abc123").unwrap())
         );
     }
 

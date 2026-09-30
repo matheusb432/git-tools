@@ -6,6 +6,7 @@
 pub(crate) mod artifacts;
 mod assemble;
 pub(crate) mod batch;
+mod changes_since;
 pub mod compute_commit_patch;
 pub mod compute_diff;
 pub mod compute_merge_diff;
@@ -37,3 +38,6 @@ pub use view::{
     Cmd, Foot, FullContextDiff, FullContextDiffSource, FullContextDiffState,
     FullContextDiffTransitionError, View,
 };
+
+const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE_ABBREVIATED_ID: &str = "4b825dc642";

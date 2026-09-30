@@ -6,6 +6,7 @@ use gtl_models::{
     paths::RepositoryRoot,
 };
 
+use super::{EMPTY_TREE_ABBREVIATED_ID, EMPTY_TREE_ID};
 use crate::{
     diffs::{
         Cmd, FetchFullContextDiff, Foot, FullContextDiffState, View,
@@ -15,9 +16,6 @@ use crate::{
     },
     ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
 };
-
-const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const EMPTY_TREE_ABBREVIATED_ID: &str = "4b825dc642";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeCommitPatch {
@@ -60,11 +58,12 @@ pub fn execute(
     let diff_spec = GitDiffSpec::Range(diff_range);
     let log_range = GitRange::single_commit(&commit.id);
     let DiffData {
+        spec: _,
         commits,
         mut files,
         hidden_paths,
         full_context,
-    } = assemble(git, &repo_path, &diff_spec, Some(&log_range), &filter)?;
+    } = assemble(git, &repo_path, &diff_spec, Some(&log_range), &filter, None)?;
     sort_files_tree_order(&mut files);
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);

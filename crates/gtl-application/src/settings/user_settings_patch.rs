@@ -30,6 +30,7 @@ pub struct UserSettingsPatch {
     pub wrap_lines: UserSettingsFieldUpdate<bool>,
     pub copy_with_line_context: UserSettingsFieldUpdate<bool>,
     pub projects_sort: UserSettingsFieldUpdate<gtl_models::settings::ProjectsSort>,
+    pub diff_files_sort: UserSettingsFieldUpdate<gtl_models::settings::DiffFilesSort>,
     pub projects_page_size: UserSettingsFieldUpdate<gtl_models::settings::ProjectsPageSize>,
     /// Changes the configured viewer theme.
     pub theme: UserSettingsFieldUpdate<Theme>,

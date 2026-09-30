@@ -271,6 +271,7 @@ fn compute_compact(fixture: &MaterializedFixture, source: HybridGitClient) -> Re
                 range,
                 pinned: None,
             },
+            changes_since: None,
         },
         &CompactSettingsStore,
         &source,

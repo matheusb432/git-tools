@@ -166,6 +166,13 @@ impl ViewerService for ViewerGrpcService {
         projects::update_viewer_project(&self.state, request).await
     }
 
+    async fn open_unpushed_project_diffs(
+        &self,
+        request: Request<v1::OpenUnpushedProjectDiffsRequest>,
+    ) -> Result<Response<v1::OpenUnpushedProjectDiffsResponse>, Status> {
+        projects::open_unpushed_project_diffs(&self.state, request).await
+    }
+
     async fn get_viewer_shell(
         &self,
         _request: Request<v1::GetViewerShellRequest>,
@@ -375,6 +382,21 @@ impl ViewerService for ViewerGrpcService {
         }))
     }
 
+    async fn set_viewer_changes_since(
+        &self,
+        request: Request<v1::SetViewerChangesSinceRequest>,
+    ) -> Result<Response<v1::SetViewerChangesSinceResponse>, Status> {
+        let request = proto::viewer::decode_set_viewer_changes_since_request(request.into_inner())
+            .map_err(|error| invalid_request(error.field().unwrap_or("tab_id")))?;
+        let work =
+            work::reserve_changes_since(&self.state.viewer, request.tab_id, request.changes_since)
+                .into_grpc()?;
+        viewer_runtime::spawn_recipe(self.state.clone(), work);
+        Ok(Response::new(v1::SetViewerChangesSinceResponse {
+            shell: Some(project_shell(&self.state)?),
+        }))
+    }
+
     async fn select_viewer_commit(
         &self,
         request: Request<v1::SelectViewerCommitRequest>,
@@ -436,6 +458,55 @@ impl ViewerService for ViewerGrpcService {
         request: Request<v1::SetViewerPreferenceRequest>,
     ) -> Result<Response<v1::SetViewerPreferenceResponse>, Status> {
         settings::set_viewer_preference(&self.state, request).await
+    }
+
+    async fn search_viewer_commits(
+        &self,
+        request: Request<v1::SearchViewerCommitsRequest>,
+    ) -> Result<Response<v1::SearchViewerCommitsResponse>, Status> {
+        use gtl_application::viewer::search_viewer_commits;
+        let request = proto::viewer::decode_search_viewer_commits_request(request.into_inner())
+            .map_err(|error| invalid_request(error.field().unwrap_or("scope")))?;
+        let permit = self
+            .state
+            .viewer_project_status_workers
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| status(&Failure::Busy))?;
+        let state = self.state.clone();
+        let result = super::run_blocking(move || {
+            let _permit = permit;
+            search_viewer_commits::execute(
+                &request,
+                &state.viewer,
+                &state.user_settings,
+                &state.git,
+            )
+        })
+        .await?
+        .into_grpc()?;
+        Ok(Response::new(
+            proto::viewer::encode_search_viewer_commits_response(result),
+        ))
+    }
+
+    async fn open_viewer_commit(
+        &self,
+        request: Request<v1::OpenViewerCommitRequest>,
+    ) -> Result<Response<v1::OpenViewerCommitResponse>, Status> {
+        use gtl_application::viewer::open_viewer_commit;
+        let request = proto::viewer::decode_open_viewer_commit_request(request.into_inner())
+            .map_err(|error| invalid_request(error.field().unwrap_or("scope")))?;
+        let state = self.state.clone();
+        let runtime = state.clone();
+        let work = super::run_blocking(move || {
+            open_viewer_commit::execute(request, &state.viewer, &state.git, &state.user_settings)
+        })
+        .await?
+        .into_grpc()?;
+        let tab_id = work.ticket().tab_id.into();
+        viewer_runtime::spawn_recipe(runtime, work);
+        Ok(Response::new(v1::OpenViewerCommitResponse { tab_id }))
     }
 
     async fn list_viewer_commits(

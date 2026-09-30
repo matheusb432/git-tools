@@ -4,8 +4,8 @@ use gtl_application::settings::{UserSettingsFieldUpdate, UserSettingsPatch};
 use gtl_models::{
     paths::{ProjectName, ProjectNameError},
     settings::{
-        ProjectsPageSize, ProjectsPreferences, ProjectsSort, PushAllExclusions, UserSettings,
-        ViewerDateFormat, ViewerLanguage,
+        DiffFilesSort, ProjectsPageSize, ProjectsPreferences, ProjectsSort, PushAllExclusions,
+        UserSettings, ViewerDateFormat, ViewerLanguage,
     },
     tags::{
         TagPatternName, TagPatternNameError, TagPatternSet, TagPatternSetError, TagPatternSettings,
@@ -37,6 +37,8 @@ pub(super) enum UserSettingsDocumentKey {
     WrapLines,
     #[strum(to_string = "copy_with_line_context")]
     CopyWithLineContext,
+    #[strum(to_string = "diff_files_sort")]
+    DiffFilesSort,
     #[strum(to_string = "projects_sort")]
     ProjectsSort,
     #[strum(to_string = "projects_page_size")]
@@ -95,6 +97,7 @@ impl UserSettingsDocumentKey {
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::CopyWithLineContext => "copy_with_line_context",
+            Self::DiffFilesSort => "diff_files_sort",
             Self::Theme => "theme",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
@@ -130,6 +133,7 @@ impl UserSettingsDocumentKey {
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::CopyWithLineContext => "copy_with_line_context",
+            Self::DiffFilesSort => "diff_files_sort",
             Self::Theme => "theme",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
@@ -162,6 +166,7 @@ impl UserSettingsDocumentKey {
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::WrapLines => "wrap_lines",
             Self::CopyWithLineContext => "copy_with_line_context",
+            Self::DiffFilesSort => "diff_files_sort",
             Self::Theme => "theme",
             Self::ProjectsSort => "projects_sort",
             Self::ProjectsPageSize => "projects_page_size",
@@ -334,6 +339,8 @@ struct RawUserSettingsDocument {
     #[serde(default)]
     wrap_lines: Option<RawSettingValue>,
     copy_with_line_context: Option<RawSettingValue>,
+    #[serde(default)]
+    diff_files_sort: DiffFilesSort,
     #[serde(default)]
     projects_sort: ProjectsSort,
     projects_page_size: Option<RawSettingValue>,
@@ -547,6 +554,7 @@ fn parse_settings(
         .with_date_format(document.date_format)
         .with_focus_window_on_diff(focus_window_on_diff)
         .with_copy_with_line_context(copy_with_line_context)
+        .with_diff_files_sort(document.diff_files_sort)
         .with_sidebar_visibility(sidebars)
         .with_tag_patterns(TagPatternSettings::new(
             tag_patterns_default,
@@ -808,6 +816,11 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         document,
         UserSettingsDocumentKey::ProjectsSort,
         patch.projects_sort,
+    );
+    apply_root_string(
+        document,
+        UserSettingsDocumentKey::DiffFilesSort,
+        patch.diff_files_sort,
     );
     apply_root_string(document, UserSettingsDocumentKey::Language, patch.language);
     apply_root_string(

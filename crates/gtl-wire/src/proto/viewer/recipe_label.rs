@@ -51,6 +51,7 @@ fn encode_changes(changes: RecipeLabelChanges) -> v1::viewer_recipe_changes_labe
             Changes::UnpushedCommitCount(count.into_inner())
         }
         RecipeLabelChanges::WorkingTree { base } => Changes::WorkingTreeBase(base.to_string()),
+        RecipeLabelChanges::Commit { rev } => Changes::CommitRevision(rev.to_string()),
         RecipeLabelChanges::Range { range } => Changes::Range(range.to_string()),
         RecipeLabelChanges::MergeInto { base } => Changes::MergeIntoBase(base.to_string()),
         RecipeLabelChanges::Merge { branch, upstream } => {
@@ -106,6 +107,9 @@ fn decode_changes(
         },
         Changes::WorkingTreeBase(base) => RecipeLabelChanges::WorkingTree {
             base: revision(base)?,
+        },
+        Changes::CommitRevision(rev) => RecipeLabelChanges::Commit {
+            rev: revision(rev)?,
         },
         Changes::Range(range) => RecipeLabelChanges::Range {
             range: GitRange::try_new(range).map_err(|_| ViewerCodecError::InvalidMessage)?,

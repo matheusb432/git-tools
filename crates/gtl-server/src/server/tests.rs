@@ -1,3 +1,4 @@
+mod commit_search;
 mod file_filters;
 mod live_views;
 mod projects;

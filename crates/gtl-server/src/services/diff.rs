@@ -384,6 +384,7 @@ fn validated_diff_target(target: Option<v1::DiffTarget>) -> Result<DiffTarget, S
     let request = match selection {
         v1::diff_target::Selection::Unpushed(_) => DiffTargetRequest::Unpushed,
         v1::diff_target::Selection::BaseRevision(rev) => DiffTargetRequest::Base { rev },
+        v1::diff_target::Selection::CommitRevision(rev) => DiffTargetRequest::Commit { rev },
         v1::diff_target::Selection::RevisionRange(range) => DiffTargetRequest::Range { range },
         v1::diff_target::Selection::MergeBase(base) => DiffTargetRequest::Merge { base },
         v1::diff_target::Selection::LastCommitCount(count) => DiffTargetRequest::Last { count },
@@ -395,6 +396,7 @@ fn viewer_recipe_target(target: Option<v1::DiffTarget>) -> Result<RecipeTarget, 
     Ok(match validated_diff_target(target)? {
         DiffTarget::Unpushed { pinned } => RecipeTarget::Unpushed { pinned },
         DiffTarget::Base(rev) => RecipeTarget::Base { rev },
+        DiffTarget::Commit(rev) => RecipeTarget::Commit { rev },
         DiffTarget::Range { range, pinned } => RecipeTarget::Range { range, pinned },
         DiffTarget::Merge { base, pinned } => RecipeTarget::Merge { base, pinned },
         DiffTarget::Last { count, pinned } => RecipeTarget::Last { count, pinned },

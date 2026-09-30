@@ -139,6 +139,7 @@ fn target_columns(target: &RecipeTarget) -> (&'static str, Option<String>, Optio
     match target {
         RecipeTarget::Unpushed { pinned } => ("unpushed", None, pinned.clone()),
         RecipeTarget::Base { rev } => ("base", Some(rev.to_string()), None),
+        RecipeTarget::Commit { rev } => ("commit", Some(rev.to_string()), None),
         RecipeTarget::Range { range, pinned } => ("range", Some(range.to_string()), pinned.clone()),
         RecipeTarget::Merge { base, pinned } => ("merge", Some(base.to_string()), pinned.clone()),
         RecipeTarget::Last { count, pinned } => ("last", Some(count.to_string()), pinned.clone()),
@@ -310,14 +311,18 @@ impl RecentRenderRow {
                 .clone()
                 .ok_or_else(|| format!("target '{target}' requires an argument"))
         };
-        if target == "base" && pinned.is_some() {
-            return Err("target 'base' does not accept a pin".into());
+        if (target == "base" || target == "commit") && pinned.is_some() {
+            return Err(format!("target '{target}' does not accept a pin"));
         }
         Ok(match target {
             "unpushed" => RecipeTarget::Unpushed { pinned },
             "base" => RecipeTarget::Base {
                 rev: gtl_models::git::GitRevision::try_new(argument()?)
                     .map_err(|_| "target 'base' revision is empty".to_owned())?,
+            },
+            "commit" => RecipeTarget::Commit {
+                rev: gtl_models::git::GitRevision::try_new(argument()?)
+                    .map_err(|_| "target 'commit' revision is empty".to_owned())?,
             },
             "range" => RecipeTarget::Range {
                 range: gtl_models::git::GitRange::try_new(argument()?)
@@ -389,7 +394,7 @@ pub(super) fn store_test() -> Connection {
           name TEXT NOT NULL UNIQUE
         ) STRICT;
         INSERT INTO render_targets (id, name) VALUES
-          (1, 'unpushed'), (2, 'base'), (3, 'range'), (4, 'merge'), (5, 'last');
+          (1, 'unpushed'), (2, 'base'), (3, 'range'), (4, 'merge'), (5, 'last'), (6, 'commit');
         CREATE TABLE recent_renders (
           id           INTEGER PRIMARY KEY,
           source_id    INTEGER NOT NULL REFERENCES render_sources (id),
@@ -531,6 +536,9 @@ mod tests {
             },
             RecipeTarget::Base {
                 rev: crate::utils::git_revision("HEAD~2"),
+            },
+            RecipeTarget::Commit {
+                rev: crate::utils::git_revision("abc123"),
             },
             RecipeTarget::Range {
                 range: crate::utils::git_range("a..b"),

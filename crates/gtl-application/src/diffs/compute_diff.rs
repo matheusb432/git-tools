@@ -1,4 +1,4 @@
-use gtl_models::{failure::ErrorMeta, paths::RepositoryRoot};
+use gtl_models::{failure::ErrorMeta, paths::RepositoryRoot, timestamps::MachineTimestamp};
 
 use crate::{
     diffs::{
@@ -13,6 +13,8 @@ use crate::{
 pub struct ComputeDiff {
     pub repo_root: RepositoryRoot,
     pub target: DiffTarget,
+    /// Narrows the diff to changes committed after this time.
+    pub changes_since: Option<MachineTimestamp>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,10 +45,21 @@ pub fn execute(
     filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
-    let ComputeDiff { repo_root, target } = req;
+    let ComputeDiff {
+        repo_root,
+        target,
+        changes_since,
+    } = req;
     let settings = app_settings.load()?;
     let filter = filters.extension_filter(&repo_root)?;
-    let mut built = diff_computation::build(git, &repo_root, &target, &filter, comparisons)?;
+    let mut built = diff_computation::build(
+        git,
+        &repo_root,
+        &target,
+        &filter,
+        comparisons,
+        changes_since.as_ref(),
+    )?;
     if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &built.view.full_context
     {
@@ -86,6 +99,7 @@ mod tests {
         ComputeDiff {
             repo_root: repository_root("/repo"),
             target,
+            changes_since: None,
         }
     }
 
@@ -129,6 +143,55 @@ mod tests {
         assert_eq!(response.view.files[0].path.to_string_lossy(), "f.txt");
         assert_eq!(response.summary, "1 unpushed commit(s)");
         assert!(response.notes.is_empty());
+    }
+
+    #[test]
+    fn changes_since_starts_the_diff_at_the_last_commit_before_the_cutoff() {
+        let at = |id: &str, subject: &str, parent: &str, time: &str| gtl_models::diffs::Commit {
+            committed_at: gtl_models::timestamps::MachineTimestamp::try_from(time).unwrap(),
+            ..crate::utils::diffs::commit_with(id, subject, &[parent])
+        };
+        let source = FakeGitClient {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![
+                at("cccc", "newer", "bbbb", "2026-09-28T10:00:00Z"),
+                at("bbbb", "older", "aaaa", "2026-09-27T10:00:00Z"),
+            ],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+
+        let response = execute_default_settings(
+            ComputeDiff {
+                changes_since: Some(
+                    gtl_models::timestamps::MachineTimestamp::try_from("2026-09-28T00:00:00Z")
+                        .unwrap(),
+                ),
+                ..req(DiffTarget::Unpushed { pinned: None })
+            },
+            &source,
+        )
+        .unwrap();
+
+        let revision =
+            |id| gtl_models::git::GitRevision::from(&crate::utils::commit_id_fixture(id));
+        assert_eq!(
+            response.view.file_filter.source,
+            Some(gtl_models::git::GitDiffSpec::Range(
+                gtl_models::git::GitRange::two_dot(&revision("bbbb"), &revision("cccc"))
+            ))
+        );
+        assert_eq!(
+            response
+                .view
+                .commits
+                .iter()
+                .map(|commit| commit.subject.as_str())
+                .collect::<Vec<_>>(),
+            ["newer"]
+        );
     }
 
     #[test]

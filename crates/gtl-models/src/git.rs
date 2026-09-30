@@ -268,6 +268,12 @@ impl GitRevision {
         known_valid(Self::try_new(format!("{branch}@{{1}}")))
     }
 
+    /// Returns the first parent of this revision.
+    #[must_use]
+    pub fn first_parent(&self) -> Self {
+        known_valid(Self::try_new(format!("{self}^")))
+    }
+
     /// Returns the full remote-tracking reference for `branch`.
     #[must_use]
     pub fn remote_branch(remote: &RemoteName, branch: &BranchName) -> Self {

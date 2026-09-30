@@ -1,8 +1,6 @@
 use std::fmt;
 
-use gtl_models::settings::ViewerLanguage;
-
-use crate::shared::i18n::t;
+use crate::shared::{i18n::t, ui::ToastText};
 
 mod selection;
 pub(super) use selection::use_diff_copy;
@@ -91,7 +89,7 @@ impl CopyFormat {
     }
 }
 
-/// Selected source and the message to show after copying it.
+/// Selected source and its copy outcome.
 #[derive(Debug, PartialEq, Eq)]
 struct SelectedDiffCopy {
     text: String,
@@ -109,14 +107,18 @@ enum SelectionCopyStatus {
 }
 
 impl SelectionCopyStatus {
-    fn message(self, language: ViewerLanguage) -> String {
+    fn success_toast(self) -> Option<ToastText> {
         match self {
-            Self::Plain => t!(language, "copy-copied"),
-            Self::File(None) => t!(language, "copy-context"),
-            Self::File(Some(range)) => {
+            Self::Plain => None,
+            Self::File(None) => Some(ToastText::localized(move |language| {
+                t!(language, "copy-context")
+            })),
+            Self::File(Some(range)) => Some(ToastText::localized(move |language| {
                 t!(language, "copy-context-lines", lines = range.to_string())
-            }
-            Self::Files(count) => t!(language, "copy-context-files", count = count),
+            })),
+            Self::Files(count) => Some(ToastText::localized(move |language| {
+                t!(language, "copy-context-files", count = count)
+            })),
         }
     }
 }

@@ -1,15 +1,12 @@
 use dioxus::prelude::*;
 use gtl_models::settings::ViewerLanguage;
 use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
-use lucide_dioxus::{File, Search};
+use lucide_dioxus::File;
 
 use super::{DiffWorkspaceContext, file_search::WorkspaceFileMatches, use_workspace_context};
 use crate::shared::{
     i18n::{t, use_language},
-    ui::{
-        Button, ButtonSize, ButtonVariant, ScrollArea, SearchPanel, SearchPanelPlacement,
-        TextInput, TextInputLabelVisibility,
-    },
+    ui::{ScrollArea, SearchPanel, SearchPanelPlacement, TextInput, TextInputLabelVisibility},
 };
 
 const PATH_FILTER_INPUT_ID: &str = "viewer-path-filter";
@@ -22,27 +19,6 @@ pub(super) fn open_path_filter(mut workspace: DiffWorkspaceContext) {
 fn close_path_filter(mut workspace: DiffWorkspaceContext) {
     workspace.path_filter_open.set(false);
     crate::shared::browser::focus_element("workspace-heading".to_owned());
-}
-
-#[component]
-pub(super) fn PathFilterTrigger() -> Element {
-    let language = use_language();
-    let workspace = use_workspace_context();
-    rsx! {
-        Button {
-            class: "mobile:size-11",
-            size: ButtonSize::IconSmall,
-            variant: ButtonVariant::Ghost,
-            aria_label: t!(language, "path-filter-label"),
-            title: t!(language, "path-filter-label"),
-            aria_expanded: (workspace.path_filter_open)().to_string(),
-
-            onclick: move |_| open_path_filter(workspace),
-            span { aria_hidden: "true",
-                Search { size: 16 }
-            }
-        }
-    }
 }
 
 #[component]

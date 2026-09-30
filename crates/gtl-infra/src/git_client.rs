@@ -2,6 +2,7 @@
 
 pub mod status_context;
 
+mod commit_search;
 mod parsing;
 mod viewer_push;
 mod working_tree;
