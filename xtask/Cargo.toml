@@ -20,7 +20,6 @@ ico.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-service-manager.workspace = true
 sha2.workspace = true
 resvg.workspace = true
 tokio = { workspace = true, features = ["rt", "time"] }

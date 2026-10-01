@@ -251,7 +251,13 @@ mod tests {
 
     #[test]
     fn output_without_rejected_refs_has_no_rejections() {
-        assert!(rejected_refs("To //fixture.invalid/repositories/remote.git\nDone\n").is_empty());
-        assert!(rejected_refs("").is_empty());
+        assert_eq!(
+            rejected_refs("To //fixture.invalid/repositories/remote.git\nDone\n"),
+            Vec::<gtl_models::failure::RejectedPushRef>::new()
+        );
+        assert_eq!(
+            rejected_refs(""),
+            Vec::<gtl_models::failure::RejectedPushRef>::new()
+        );
     }
 }

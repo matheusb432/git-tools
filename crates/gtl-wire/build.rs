@@ -18,6 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_transport(false)
         .build_client(cfg!(feature = "grpc"))
         .build_server(cfg!(feature = "grpc"))
+        // async_trait adds must_use to futures that Rust already marks as must_use.
+        .trait_attribute(".", "#[allow(clippy::double_must_use)]")
         .boxed(".gtl.v1.ViewerActiveState.state.ready")
         .boxed(".gtl.v1.ViewerProjectStatusUpdate.result.status")
         .file_descriptor_set_path(std::env::var("OUT_DIR")? + "/gtl_descriptor.bin")

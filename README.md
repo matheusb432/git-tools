@@ -56,7 +56,7 @@ mise bootstrap --yes
 
 Mise converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
 
-On Linux with systemd and on macOS, installation reconciles and starts `gtl-server` through the native user-service manager. Native clients connect through a private Unix-domain socket on Linux and macOS or a per-user named pipe on Windows.
+On Linux with systemd and on macOS, installation reconciles and starts `gtl-server` through the native user-service manager. Native clients connect through a private Unix-domain socket on Linux and macOS or a per-user named pipe on Windows. Use `gtl server` to manage login startup and the background process, and `gtl doctor` to check installation, settings, Git, database integrity, and RPC health.
 
 Refresh an existing installation with:
 

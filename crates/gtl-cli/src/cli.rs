@@ -82,8 +82,10 @@ pub enum Command {
     /// Alias for `project ls`.
     #[command(hide = true)]
     Ls(LsArgs),
-    /// Inspect the resident gtl-server.
+    /// Manage the local background server and login startup.
     Server(ServerArgs),
+    /// Check installation, startup prerequisites and local server health.
+    Doctor(DoctorArgs),
     #[command(about = "Export or import portable data for cross-machine handoff.")]
     Data(DataArgs),
 }
@@ -96,8 +98,25 @@ pub struct ServerArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
-    /// Check the private local gRPC health endpoint.
+    /// Register login startup, start the sibling server and wait until ready.
+    Install,
+    /// Stop and remove startup registration, retaining binaries and application data.
+    Uninstall,
+    /// Start the registered server and wait until ready.
+    Start,
+    /// Stop the registered server and wait until it exits.
+    Stop,
+    /// Stop, then start the registered server and wait until ready.
+    Restart,
+    /// Show startup registration, health and client/server versions.
     Status,
+}
+
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Print a machine-readable report; failed checks return exit status 1.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

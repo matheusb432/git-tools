@@ -71,7 +71,7 @@ mod tests {
             commits.push(commit);
         })
         .unwrap();
-        assert!(commits.is_empty());
+        assert_eq!(commits, Vec::<gtl_models::diffs::Commit>::new());
         repository.git(&["commit", "--allow-empty", "-m", "shared ancestor"]);
         repository.git(&["checkout", "-b", "other"]);
         repository.git(&["commit", "--allow-empty", "-m", "other branch"]);
@@ -96,6 +96,6 @@ mod tests {
             commits.push(commit);
         })
         .unwrap();
-        assert!(commits.is_empty());
+        assert_eq!(commits, Vec::<gtl_models::diffs::Commit>::new());
     }
 }

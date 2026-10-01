@@ -356,6 +356,7 @@ async fn viewer_server_info_is_stable_until_the_server_is_replaced() -> TestResu
         .await?
         .into_inner();
     assert_eq!(first, repeated);
+    assert_eq!(first.server_version, env!("CARGO_PKG_VERSION"));
     uuid::Uuid::parse_str(&first.server_instance_id)?;
     assert_eq!(
         first.protocol_version,

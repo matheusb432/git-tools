@@ -324,7 +324,10 @@ mod tests {
             pending.row_source,
             gtl_wire::viewer::ViewerRowSourceState::Pending
         );
-        assert!(!pending.files.is_empty());
+        assert_ne!(
+            pending.files,
+            Vec::<gtl_wire::viewer::ViewerFileSummary>::new()
+        );
         assert!(pending.commit_count > 0);
         assert!(!watch.has_changed().unwrap());
         assert!(matches!(

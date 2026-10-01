@@ -69,6 +69,9 @@ mod tests {
             &connection,
         )
         .unwrap();
-        assert!(unassociated.entries.is_empty());
+        assert_eq!(
+            unassociated.entries,
+            Vec::<crate::history::persistence::RecentRenderRecord>::new()
+        );
     }
 }

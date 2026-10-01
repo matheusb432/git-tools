@@ -361,7 +361,10 @@ mod tests {
         let page = list_recent_render_page::execute(&ListRecentRenderPage::default(), &connection)
             .unwrap();
 
-        assert!(page.entries.is_empty());
+        assert_eq!(
+            page.entries,
+            Vec::<crate::history::persistence::RecentRenderRecord>::new()
+        );
         assert_eq!(page.total_count, HistoryRenderCount::default());
         assert_eq!(page.position, HistoryPagePosition::Empty);
         assert!(!page.has_newer);

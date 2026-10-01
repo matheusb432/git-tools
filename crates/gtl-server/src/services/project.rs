@@ -388,7 +388,7 @@ mod tests {
                 status: SyncStatus::WouldPush,
                 detail: "ahead by 2".into(),
             }],
-            vec![ProjectName::try_new("sample_project").unwrap()],
+            vec![ProjectName::try_new("example-project").unwrap()],
             SyncExit::Warn,
         );
 
@@ -397,7 +397,7 @@ mod tests {
             response.selected[0].status(),
             v1::RepositorySyncStatus::WouldPush
         );
-        assert_eq!(response.excluded_project_names, ["sample_project"]);
+        assert_eq!(response.excluded_project_names, ["example-project"]);
     }
 
     #[test]

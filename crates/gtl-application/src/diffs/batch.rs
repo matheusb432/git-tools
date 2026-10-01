@@ -282,7 +282,10 @@ diff --git a/notes.md b/notes.md\n\
             &crate::utils::ProjectComparisons::default(),
         );
 
-        assert!(result.unwrap().views.is_empty());
+        assert_eq!(
+            result.unwrap().views,
+            Vec::<crate::diffs::view::View>::new()
+        );
         assert_eq!(notes.len(), 2);
         assert!(notes[0].text.contains("repo"));
     }

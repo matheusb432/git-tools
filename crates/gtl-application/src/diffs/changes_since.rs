@@ -151,7 +151,7 @@ mod tests {
             narrowed.spec,
             GitDiffSpec::AgainstWorkingTree(GitRevision::from(&commit_id_fixture("dddd")))
         );
-        assert!(narrowed.commits.is_empty());
+        assert_eq!(narrowed.commits, Vec::<gtl_models::diffs::Commit>::new());
     }
 
     #[test]

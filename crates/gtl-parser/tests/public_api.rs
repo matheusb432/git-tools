@@ -118,7 +118,7 @@ fn downstream_consumer_can_select_a_language_and_attach_semantic_tokens() {
             && span.syntax_class() == Some(SyntaxTokenClass::Constant)
             && span.change() == SemanticTextChange::Unchanged
     }));
-    assert!(parsed.syntax_diagnostics().is_empty());
+    assert_eq!(parsed.syntax_diagnostics(), []);
 }
 
 #[cfg(feature = "syntax")]

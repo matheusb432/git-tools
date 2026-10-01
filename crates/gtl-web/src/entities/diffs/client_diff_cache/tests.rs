@@ -181,8 +181,14 @@ fn active_and_inactive_windows_share_the_same_byte_bound() -> TestResult {
         complete_with_capacity(cache, &views[0], 33 * 1024 * 1024).unwrap();
         let second = cache.select(Some("server-a".to_owned()), &views[1]);
         complete_with_capacity(cache, &views[1], 33 * 1024 * 1024).unwrap();
-        assert!(first.peek().files[0].rows.unified[0].is_empty());
-        assert!(!second.peek().files[0].rows.unified[0].is_empty());
+        assert_eq!(
+            first.peek().files[0].rows.unified[0],
+            Vec::<gtl_wire::viewer::ViewerUnifiedRow>::new()
+        );
+        assert_ne!(
+            second.peek().files[0].rows.unified[0],
+            Vec::<gtl_wire::viewer::ViewerUnifiedRow>::new()
+        );
         assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
         assert_eq!(cache.workspaces.peek().len(), 2);
         assert_eq!(first.peek().files[0].summary, views[0].files[0]);
@@ -213,7 +219,10 @@ fn a_single_active_file_evicts_old_windows_without_losing_file_metadata() -> Tes
                 )
                 .unwrap();
         }
-        assert!(active.peek().files[0].rows.unified[0].is_empty());
+        assert_eq!(
+            active.peek().files[0].rows.unified[0],
+            Vec::<gtl_wire::viewer::ViewerUnifiedRow>::new()
+        );
         assert_eq!(active.peek().files[0].rows.unified[1].len(), 64);
         let mut rows = vec![ViewerUnifiedRow::Meta(String::new()); 64];
         rows[0] = ViewerUnifiedRow::Meta(String::with_capacity(33 * 1024 * 1024));
@@ -230,7 +239,10 @@ fn a_single_active_file_evicts_old_windows_without_losing_file_metadata() -> Tes
                 )
                 .unwrap()
         );
-        assert!(active.peek().files[0].rows.unified[0].is_empty());
+        assert_eq!(
+            active.peek().files[0].rows.unified[0],
+            Vec::<gtl_wire::viewer::ViewerUnifiedRow>::new()
+        );
         assert_eq!(active.peek().files[0].rows.unified[1].len(), 64);
         assert_eq!(active.peek().files[0].summary, view.files[0]);
         assert!(cache.rows.peek().bytes <= super::RETAINED_ROW_BYTES_MAX);
@@ -320,7 +332,10 @@ fn assert_loading(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView
     assert_eq!(file.summary, view.files[0]);
     assert_eq!(file.state, ClientDiffFileState::Loading);
     assert!(file.rows.unified.iter().all(Vec::is_empty));
-    assert!(file.rows.split.is_empty());
+    assert_eq!(
+        file.rows.split,
+        Vec::<Vec<gtl_wire::viewer::ViewerSplitRow>>::new()
+    );
 }
 
 fn view(content: u8) -> TestResult<ViewerActiveView> {
@@ -388,7 +403,10 @@ fn extension_changes_reuse_unchanged_file_windows_after_indices_move() -> TestRe
         complete(cache, &original);
         let selected = cache.select(Some("server-a".to_owned()), &expanded);
         let workspace = selected.peek();
-        assert!(workspace.files[0].rows.unified[0].is_empty());
+        assert_eq!(
+            workspace.files[0].rows.unified[0],
+            Vec::<gtl_wire::viewer::ViewerUnifiedRow>::new()
+        );
         assert_eq!(
             workspace.files[1].rows.unified[0],
             vec![ViewerUnifiedRow::Meta("cached".to_owned())]

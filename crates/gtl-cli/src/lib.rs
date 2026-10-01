@@ -75,6 +75,10 @@ fn dispatch(command: Command) -> ExitCode {
         Command::Ls(args) => run_project(ProjectCommand::Ls(args)),
         Command::Server(ServerArgs { command }) => run_server_ctl(&command),
         Command::Data(DataArgs { command }) => run_data(&command),
+        Command::Doctor(args) => match commands::doctor::run(&args) {
+            Ok(exit) => exit,
+            Err(error) => fail("doctor", &error),
+        },
     }
 }
 
@@ -193,11 +197,11 @@ fn run_pull(args: &PullArgs) -> ExitCode {
 }
 
 fn run_server_ctl(command: &ServerCommand) -> ExitCode {
-    let result = match command {
-        ServerCommand::Status => crate::commands::server_ctl::status(),
-    };
-    match result {
-        Ok(()) => ExitCode::Ok,
+    match commands::server_ctl::run(command) {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::Ok
+        }
         Err(error) => fail("gtl-server", &error),
     }
 }

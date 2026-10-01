@@ -25,7 +25,7 @@ pub(crate) fn open(focus_window: bool) -> Result<(), OpenViewerError> {
     platform_spawn(&executable, focus_window).map_err(OpenViewerError::Start)
 }
 
-fn resolve_viewer_bin() -> Option<PathBuf> {
+pub(crate) fn resolve_viewer_bin() -> Option<PathBuf> {
     let name = format!("gtl-viewer{}", std::env::consts::EXE_SUFFIX);
     if let Ok(executable) = std::env::current_exe()
         && let Some(directory) = executable.parent()

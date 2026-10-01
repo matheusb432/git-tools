@@ -446,7 +446,7 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
-        assert!(std::fs::read(&target).unwrap().is_empty());
+        assert_eq!(std::fs::read(&target).unwrap(), Vec::<u8>::new());
         assert_eq!(std::fs::read(&backup).unwrap(), raw);
         assert_eq!(
             std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777,

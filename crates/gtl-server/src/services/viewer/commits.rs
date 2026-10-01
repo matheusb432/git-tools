@@ -105,7 +105,7 @@ mod tests {
             let response = page(v1::ViewerViewIdentity::default(), &commits, cursor).unwrap();
             assert!(response.encoded_len() <= VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES);
             assert!(response.commits.len() <= VIEWER_COMMIT_PAGE_MAX_ENTRIES);
-            assert!(!response.commits.is_empty());
+            assert_ne!(response.commits, Vec::<v1::ViewerCommitSummary>::new());
             count += response.commits.len();
             cursor = response.next_cursor;
             if cursor.is_none() {
@@ -121,7 +121,7 @@ mod tests {
         let commits = [commit("x".repeat(VIEWER_COMMIT_BODY_MAX_BYTES + 1))];
         let response = page(v1::ViewerViewIdentity::default(), &commits, None).unwrap();
         assert!(response.commits[0].body_omitted);
-        assert!(response.commits[0].body.is_empty());
+        assert_eq!(response.commits[0].body, "");
         assert!(response.next_cursor.is_none());
         assert_eq!(
             page(v1::ViewerViewIdentity::default(), &commits, Some(2))

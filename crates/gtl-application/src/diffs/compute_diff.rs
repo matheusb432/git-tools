@@ -142,7 +142,7 @@ mod tests {
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.files[0].path.to_string_lossy(), "f.txt");
         assert_eq!(response.summary, "1 unpushed commit(s)");
-        assert!(response.notes.is_empty());
+        assert_eq!(response.notes, Vec::<crate::shared::notes::Note>::new());
     }
 
     #[test]
@@ -329,7 +329,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(response.notes.is_empty());
+        assert_eq!(response.notes, Vec::<crate::shared::notes::Note>::new());
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
     }
 
@@ -566,7 +566,7 @@ new file mode 100644\n\
 
         assert_eq!(response.view.files.len(), 2);
         assert_eq!(response.view.extension_filter, None);
-        assert!(response.notes.is_empty());
+        assert_eq!(response.notes, Vec::<crate::shared::notes::Note>::new());
     }
 
     #[test]
@@ -595,6 +595,6 @@ new file mode 100644\n\
 
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.extension_filter, None);
-        assert!(response.notes.is_empty());
+        assert_eq!(response.notes, Vec::<crate::shared::notes::Note>::new());
     }
 }

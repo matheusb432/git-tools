@@ -1104,7 +1104,7 @@ excluded_from_push_all = true
 patterns = { bare = "{major}.{minor}.{patch}" }
 
 [[projects]]
-name = "sample_project"
+name = "example-project"
 [projects.tags]
 default = "dev"
 [projects.tags.patterns]
@@ -1123,10 +1123,12 @@ release = "release-{major}.{minor}.{patch}"
             .unwrap();
         assert_eq!(name.as_ref(), "bare");
         assert_eq!(template.to_string(), "{major}.{minor}.{patch}");
-        let sample_project = tag_patterns.for_project_or_default(&ProjectName::try_from("sample_project").unwrap());
-        assert_eq!(sample_project.select(None).unwrap().0.as_ref(), "dev");
+        let project_patterns =
+            tag_patterns.for_project_or_default(&ProjectName::try_from("example-project").unwrap());
+        assert_eq!(project_patterns.select(None).unwrap().0.as_ref(), "dev");
         assert_eq!(
-            sample_project.select(Some(&TagPatternName::try_new("release").unwrap()))
+            project_patterns
+                .select(Some(&TagPatternName::try_new("release").unwrap()))
                 .unwrap()
                 .1
                 .to_string(),
@@ -1174,7 +1176,7 @@ release = "release-{major}.{minor}.{patch}"
             UserSettingsDocument::parse(
                 br#"
 [[projects]]
-name = "sample_project"
+name = "example-project"
 [projects.tags]
 default = "release"
 patterns = { dev = "{n}" }

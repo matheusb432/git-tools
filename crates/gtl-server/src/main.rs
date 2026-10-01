@@ -9,6 +9,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect startup prerequisites as JSON without changing application state.
+    Doctor,
     #[command(
         subcommand,
         about = "Run a one-shot data snapshot operation for `gtl data`."
@@ -20,6 +22,7 @@ fn main() -> anyhow::Result<std::process::ExitCode> {
     match Cli::parse().command {
         None => run_daemon().map(|()| std::process::ExitCode::SUCCESS),
         Some(Command::Data(command)) => Ok(gtl_server::data::run(command)),
+        Some(Command::Doctor) => Ok(gtl_server::doctor::run()),
     }
 }
 

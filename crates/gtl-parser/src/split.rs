@@ -311,8 +311,8 @@ mod tests {
         }
         .unwrap();
 
-        assert!(old.intraline_spans().is_empty());
-        assert!(new.intraline_spans().is_empty());
+        assert_eq!(old.intraline_spans(), []);
+        assert_eq!(new.intraline_spans(), []);
     }
 
     #[test]
@@ -327,7 +327,7 @@ mod tests {
         }
         .unwrap();
 
-        assert!(old.intraline_spans().is_empty());
+        assert_eq!(old.intraline_spans(), []);
         assert_eq!(old.text(), "-b");
     }
 
@@ -346,7 +346,10 @@ mod tests {
         let mut actual = stream.push(parsed.rows()[..2].iter().cloned());
 
         assert!(matches!(actual.as_slice(), [SplitDiffRow::Hunk { .. }]));
-        assert!(stream.push(parsed.rows()[2..4].iter().cloned()).is_empty());
+        assert_eq!(
+            stream.push(parsed.rows()[2..4].iter().cloned()),
+            Vec::<SplitDiffRow>::new()
+        );
         actual.extend(stream.push(parsed.rows()[4..].iter().cloned()));
         actual.extend(stream.finish());
 

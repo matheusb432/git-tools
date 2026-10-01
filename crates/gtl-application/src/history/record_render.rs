@@ -582,7 +582,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(computed_columns, (None, None));
-        assert!(list_recent(&connection).is_empty());
+        assert_eq!(
+            list_recent(&connection),
+            Vec::<crate::history::persistence::RecentRenderRecord>::new()
+        );
 
         record_render::succeed(render_id, &command, &mut connection).unwrap();
 
@@ -644,7 +647,10 @@ mod tests {
                 ),
             ]
         );
-        assert!(list_recent(&connection).is_empty());
+        assert_eq!(
+            list_recent(&connection),
+            Vec::<crate::history::persistence::RecentRenderRecord>::new()
+        );
     }
 
     #[test]

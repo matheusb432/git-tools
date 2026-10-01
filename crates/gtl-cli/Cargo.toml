@@ -18,6 +18,7 @@ clap.workspace = true
 clap-cargo.workspace = true
 dialoguer.workspace = true
 gtl-client.workspace = true
+gtl-local-transport.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
 gtl-models.workspace = true
 libc.workspace = true
@@ -29,8 +30,7 @@ tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 assert_cmd.workspace = true
-gtl-local-transport.workspace = true
-gtl-server.workspace = true
+gtl-server = { workspace = true, features = ["benchmark-support"] }
 predicates.workspace = true
 strum.workspace = true
 tempfile.workspace = true

@@ -423,7 +423,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(response.selected.len(), 3);
-        assert!(response.excluded.is_empty());
+        assert_eq!(
+            response.excluded,
+            Vec::<gtl_models::paths::ProjectName>::new()
+        );
         assert_eq!(
             response
                 .selected
@@ -491,7 +494,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(response.selected.len(), 1);
-        assert!(response.excluded.is_empty());
+        assert_eq!(
+            response.excluded,
+            Vec::<gtl_models::paths::ProjectName>::new()
+        );
     }
 
     #[tokio::test]
@@ -505,7 +511,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(response.selected.is_empty());
+        assert_eq!(
+            response.selected,
+            Vec::<crate::projects::remote_sync::RepoSyncResult>::new()
+        );
         assert_eq!(
             response
                 .excluded
@@ -515,7 +524,7 @@ mod tests {
             ["a", "b"]
         );
         assert_eq!(response.exit, SyncExit::Clean);
-        assert!(response.ledger.entries().is_empty());
+        assert_eq!(response.ledger.entries(), []);
     }
 
     #[tokio::test]

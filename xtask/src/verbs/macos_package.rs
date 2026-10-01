@@ -284,7 +284,7 @@ fn wait_for_server() -> Result<()> {
         if output.status.success() {
             return Ok(());
         }
-        failure = String::from_utf8_lossy(&output.stderr).into_owned();
+        failure = String::from_utf8_lossy_owned(output.stderr);
         thread::sleep(Duration::from_millis(200));
     }
     bail!("installed server did not become ready: {failure}")

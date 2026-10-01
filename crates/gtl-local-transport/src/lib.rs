@@ -1,5 +1,7 @@
 //! User-private local IPC for native git-tools processes.
 
+pub mod service;
+
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]

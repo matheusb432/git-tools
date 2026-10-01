@@ -120,7 +120,7 @@ fn project_add_validates_json_and_creates_projects_through_the_server() -> Resul
     assert_eq!(project.status(), v1::ProjectStatus::Active);
     assert_eq!(project.git_remote, None);
     assert_eq!(project.color, None);
-    assert!(project.groups.is_empty());
+    assert_eq!(project.groups, Vec::<String>::new());
     let Some(v1::project_source::Source::Directory(directory)) =
         project.source.and_then(|source| source.source)
     else {

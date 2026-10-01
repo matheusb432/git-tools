@@ -81,6 +81,7 @@ impl ViewerService for ViewerGrpcService {
         Ok(Response::new(v1::GetViewerServerInfoResponse {
             server_instance_id: self.server_info.server_instance_id.clone(),
             protocol_version: self.server_info.protocol_version,
+            server_version: env!("CARGO_PKG_VERSION").into(),
         }))
     }
 

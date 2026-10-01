@@ -333,33 +333,21 @@ fn migrate_absolute_project_sources(
     Ok(())
 }
 
-/// Init-sequence retry ceiling: bounded well under the 5s `busy_timeout` so a
-/// genuinely failing pragma/migration still surfaces promptly.
+// Keep startup retries below the five-second busy timeout.
 const INIT_RETRY_ATTEMPTS: u32 = 8;
-/// Backoff between init retries, linear in the attempt number (50ms, 100ms,
-/// ..., 350ms), for a worst-case total wait of ~1.4s.
+// Linear backoff totals 1.4 seconds across seven waits.
 const INIT_RETRY_BACKOFF: Duration = Duration::from_millis(50);
 
 pub(super) const DATABASE_FILE_NAME: &str = "gtl.db";
 
-/// Opens one app-state connection under `data_root` and initializes its schema policy.
 pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     std::fs::create_dir_all(data_root)?;
     let mut conn = Connection::open(data_root.join(DATABASE_FILE_NAME))?;
-    // ! busy_timeout first: every subsequent locking step (the WAL switch,
-    // ! the migration) must respect it from the start.
+    // Set the timeout before any operation that can acquire a database lock.
     conn.busy_timeout(Duration::from_secs(5))?;
 
-    // ! Fresh-file race: two server starts can both open a brand-new gtl.db
-    // ! and both attempt the WAL switch and migrations concurrently. SQLite
-    // ! does not run the busy_timeout retry loop for the journal_mode=WAL
-    // ! transition on a fresh file, so the loser can get an immediate
-    // ! SQLITE_BUSY ("database is locked") right there, and even past that
-    // ! point the migration can see "table already exists" if the winner
-    // ! hasn't committed yet. Retry the whole init sequence with backoff: the
-    // ! pragmas are idempotent and to_latest no-ops once the loser re-reads
-    // ! the winner's committed user_version. Only the final attempt's error
-    // ! propagates; a genuine failure keeps failing every attempt.
+    // Concurrent starts can race on WAL setup or migration despite the busy timeout.
+    // Both steps are idempotent; retry initialization with bounded backoff.
     let mut last_err = None;
     for attempt in 1..=INIT_RETRY_ATTEMPTS {
         match initialize_app_db(&mut conn) {
@@ -1323,7 +1311,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert!(violations.is_empty());
+        assert_eq!(violations, Vec::<()>::new());
     }
 
     type MigratedLabelParts = (

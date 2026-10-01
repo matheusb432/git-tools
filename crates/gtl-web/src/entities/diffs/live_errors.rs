@@ -96,7 +96,7 @@ mod tests {
         errors.observe(Ok(()), 159_999);
         assert_eq!(errors.entries().len(), 1);
         errors.observe(Ok(()), 160_000);
-        assert!(errors.entries().is_empty());
+        assert_eq!(errors.entries(), []);
     }
 
     #[test]
@@ -111,6 +111,6 @@ mod tests {
         errors.observe(Ok(()), 200_000);
         assert_eq!(errors.entries().len(), 2);
         errors.observe(Ok(()), 260_000);
-        assert!(errors.entries().is_empty());
+        assert_eq!(errors.entries(), []);
     }
 }

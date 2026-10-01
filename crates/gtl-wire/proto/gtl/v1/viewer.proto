@@ -117,6 +117,7 @@ message GetViewerServerInfoRequest {}
 message GetViewerServerInfoResponse {
   string server_instance_id = 1;
   uint32 protocol_version = 2;
+  string server_version = 3;
 }
 
 message GetViewerShellRequest {}

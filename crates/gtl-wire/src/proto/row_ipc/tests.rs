@@ -64,10 +64,9 @@ fn binary_frames_preserve_rows_offsets_identity_and_terminal_events() {
         .unwrap();
     let bytes = encode_batch(&frames).unwrap();
     assert_eq!(decode_batch(&bytes).unwrap(), expected);
-    assert!(
-        decode_batch(&encode_batch(&[]).unwrap())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        decode_batch(&encode_batch(&[]).unwrap()).unwrap(),
+        Vec::<crate::viewer::ViewerRowStreamItem>::new()
     );
 }
 

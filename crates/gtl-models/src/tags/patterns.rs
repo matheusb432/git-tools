@@ -132,7 +132,6 @@ impl TagPatternSet {
         })
     }
 
-    #[must_use]
     pub fn patterns(&self) -> impl ExactSizeIterator<Item = (&TagPatternName, &TagTemplate)> {
         self.patterns.iter()
     }
@@ -195,7 +194,7 @@ mod tests {
         source.parse().unwrap()
     }
 
-    fn sample_project_set(default: Option<&str>) -> TagPatternSet {
+    fn project_tag_patterns(default: Option<&str>) -> TagPatternSet {
         TagPatternSet::try_new(
             [
                 (name("dev"), template("{major}.{minor}.{patch}")),
@@ -217,7 +216,7 @@ mod tests {
 
     #[test]
     fn several_patterns_without_a_default_require_a_request() {
-        let set = sample_project_set(None);
+        let set = project_tag_patterns(None);
 
         assert_eq!(
             set.select(None),
@@ -233,7 +232,7 @@ mod tests {
 
     #[test]
     fn the_configured_default_and_unknown_requests_are_reported() {
-        let set = sample_project_set(Some("dev"));
+        let set = project_tag_patterns(Some("dev"));
 
         assert_eq!(set.select(None).unwrap().0.as_ref(), "dev");
         assert_eq!(
@@ -261,12 +260,13 @@ mod tests {
 
     #[test]
     fn project_sets_replace_the_user_default_entirely() {
-        let project = ProjectName::try_new("sample_project".to_owned()).unwrap();
-        let settings = TagPatternSettings::new(None, [(project.clone(), sample_project_set(Some("dev")))]);
+        let project = ProjectName::try_new("example-project".to_owned()).unwrap();
+        let settings =
+            TagPatternSettings::new(None, [(project.clone(), project_tag_patterns(Some("dev")))]);
 
         assert_eq!(
             settings.for_project_or_default(&project),
-            &sample_project_set(Some("dev"))
+            &project_tag_patterns(Some("dev"))
         );
         assert_eq!(
             settings.for_project_or_default(&ProjectName::try_new("other".to_owned()).unwrap()),

@@ -418,7 +418,10 @@ fn working_tree_diff_includes_untracked_without_mutating_the_index() {
         index_before
     );
     let committed = compute_view(&repository, range("HEAD..HEAD"), ExtensionFilter::default());
-    assert!(committed.files.is_empty());
+    assert_eq!(
+        committed.files,
+        Vec::<gtl_application::diffs::FileDiff>::new()
+    );
 }
 
 #[test]
@@ -432,7 +435,7 @@ fn initial_working_tree_diff_handles_staged_and_untracked_files() {
 
     let view = compute_view(&repository, working_tree(), ExtensionFilter::default());
 
-    assert!(view.commits.is_empty());
+    assert_eq!(view.commits, Vec::<gtl_models::diffs::Commit>::new());
     assert_eq!(view.files.len(), 2);
     assert!(
         view.files
@@ -493,7 +496,7 @@ fn revealing_extensions_preserves_loaded_sources_and_reuses_hidden_contents() {
 
         let hidden = apply_filter(revealed, ExtensionFilterMode::Hide, &["lock", "rs", "md"]);
 
-        assert!(hidden.files.is_empty());
+        assert_eq!(hidden.files, Vec::<gtl_application::diffs::FileDiff>::new());
         assert!(
             hidden.has_diff_content(),
             "a fully hidden diff must remain available"

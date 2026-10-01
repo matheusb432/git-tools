@@ -326,7 +326,6 @@ impl PushAllExclusions {
     }
 
     /// Iterates excluded project names in stable order.
-    #[must_use]
     pub fn projects(&self) -> impl ExactSizeIterator<Item = &ProjectName> {
         self.0.iter()
     }
@@ -686,7 +685,7 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             ViewerKeybindings::default(),
             false,
-            PushAllExclusions::new([project("sample_project")]),
+            PushAllExclusions::new([project("example-project")]),
         );
 
         assert_eq!(settings.theme(), Some(Theme::Mirage));
@@ -696,7 +695,11 @@ mod tests {
         );
         assert_eq!(settings.viewer_keybindings(), ViewerKeybindings::default());
         assert!(!settings.push_confirmation_required());
-        assert!(settings.push_all_exclusions().contains(&project("sample_project")));
+        assert!(
+            settings
+                .push_all_exclusions()
+                .contains(&project("example-project"))
+        );
         assert!(
             !settings
                 .push_all_exclusions()

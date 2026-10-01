@@ -71,7 +71,7 @@ pub(crate) fn run_with_index(
 
     Ok(GitProcessOutput {
         stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stderr: String::from_utf8_lossy_owned(output.stderr),
         exit_code: output.status.code().unwrap_or(1),
     })
 }

@@ -46,7 +46,7 @@ fn project_pause_and_resume_report_idempotence_and_preserve_membership() -> Resu
         serde_json::from_slice::<serde_json::Value>(&paused)?,
         serde_json::json!({"project_id": "RP", "status": "paused", "changed": true})
     );
-    assert!(active_project_ids()?.is_empty());
+    assert_eq!(active_project_ids()?, Vec::<String>::new());
     command(&["project", "pause", "RP"])
         .assert()
         .success()

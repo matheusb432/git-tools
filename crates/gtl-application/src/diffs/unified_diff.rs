@@ -209,8 +209,14 @@ index 111..222 100644\n\
 
     #[test]
     fn returns_empty_for_blank_input() {
-        assert!(parse("").unwrap().is_empty());
-        assert!(parse("   \n\t").unwrap().is_empty());
+        assert_eq!(
+            parse("").unwrap(),
+            Vec::<crate::diffs::file::FileDiff>::new()
+        );
+        assert_eq!(
+            parse("   \n\t").unwrap(),
+            Vec::<crate::diffs::file::FileDiff>::new()
+        );
     }
 
     #[test]

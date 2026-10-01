@@ -400,7 +400,9 @@ async fn manages_its_own_projects_through_private_grpc() -> TestResult {
         .await?
         .into_inner();
     assert_eq!(response.project_id, "GTL");
-    client.create_project(creation("APP", "sample_project")).await?;
+    client
+        .create_project(creation("APP", "Example App"))
+        .await?;
     let projects = client
         .list_active_projects(v1::ListActiveProjectsRequest {})
         .await?
@@ -587,7 +589,7 @@ async fn rejects_invalid_project_requests_and_rolls_back_duplicate_creation() ->
         client.create_project(missing).await.unwrap_err().code(),
         tonic::Code::InvalidArgument
     );
-    let mut request = creation("APP", "sample_project");
+    let mut request = creation("APP", "Example App");
     request.project.as_mut().unwrap().source = Some(v1::ProjectSource {
         source: Some(v1::project_source::Source::Directory(v1::DirectorySource {
             path: "~/../outside".into(),
@@ -686,13 +688,13 @@ async fn resolves_managed_project_sources_including_paused_projects() -> TestRes
             .repository_root,
         expected
     );
-    assert!(
+    assert_eq!(
         client
             .list_active_projects(v1::ListActiveProjectsRequest {})
             .await?
             .into_inner()
-            .projects
-            .is_empty()
+            .projects,
+        Vec::<v1::Project>::new()
     );
 
     client
@@ -746,7 +748,7 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
     let mut viewer = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
     let first = || page_request(2, Cursor::First(v1::Empty {}));
     let empty = viewer.list_viewer_projects(first()).await?.into_inner();
-    assert!(empty.projects.is_empty());
+    assert_eq!(empty.projects, Vec::<v1::ViewerProject>::new());
     assert_eq!(empty.total, 0);
     for (id, name) in [
         ("EE", "First title"),
@@ -805,13 +807,13 @@ async fn viewer_projects_require_id_cursors_and_fetch_status_independently() -> 
         .await?
         .into_inner();
     assert_eq!(ids(&previous), ["AA", "BB"]);
-    assert!(
+    assert_eq!(
         viewer
             .list_viewer_projects(page_request(2, Cursor::AfterProjectId("EE".into())))
             .await?
             .into_inner()
-            .projects
-            .is_empty()
+            .projects,
+        Vec::<v1::ViewerProject>::new()
     );
     for request in [
         page_request(0, Cursor::First(v1::Empty {})),

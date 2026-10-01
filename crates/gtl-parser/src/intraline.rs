@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn merges_contiguous_inserted_chars_into_one_span() {
         let spans = changed_spans("foobar", "fooXYbar");
-        assert!(spans.old.is_empty());
+        assert_eq!(spans.old, Vec::<CharacterSpan>::new());
         assert_eq!(spans.new, vec![span(3, 5)]);
     }
 

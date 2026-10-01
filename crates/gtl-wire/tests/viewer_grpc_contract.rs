@@ -494,7 +494,10 @@ fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
         viewer::ViewerRowContentId::from_digest([42; 32])
     );
     assert_eq!(view.commit_count, 17);
-    assert!(view.commits.is_empty());
+    assert_eq!(
+        view.commits,
+        Vec::<gtl_wire::viewer::ViewerCommitSummary>::new()
+    );
     assert_eq!(encode_viewer_shell(decoded).unwrap(), encoded);
     for content_id in [None, Some(vec![]), Some(vec![42; 31]), Some(vec![42; 33])] {
         let mut invalid = encoded.clone();

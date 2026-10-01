@@ -134,7 +134,10 @@ mod tests {
         let mut cache = RetainedPages::default();
         cache.restore(Some("before"), identity, 1);
         cache.retain(Some("before"), &pages);
-        assert!(cache.restore(Some("after"), identity, 1).commits.is_empty());
+        assert_eq!(
+            cache.restore(Some("after"), identity, 1).commits,
+            Vec::<gtl_wire::viewer::ViewerCommitSummary>::new()
+        );
         assert_eq!(cache.bytes, 0);
         cache.retain(Some("before"), &pages);
         assert!(cache.lists.is_empty());

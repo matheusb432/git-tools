@@ -4,6 +4,8 @@ use anyhow::Context as _;
 use gtl_local_transport::{LocalEndpoint, LocalListener};
 
 pub mod data;
+pub mod doctor;
+
 #[cfg(any(test, feature = "benchmark-support"))]
 mod harness;
 mod observability;

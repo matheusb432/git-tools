@@ -6,11 +6,6 @@ pub(crate) struct ServerClient {
     client: GtlClient,
 }
 
-pub(crate) struct ServerStatus {
-    pub(crate) endpoint: std::path::PathBuf,
-    pub(crate) instance_id: String,
-}
-
 impl ServerClient {
     pub(crate) fn connect() -> anyhow::Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -18,16 +13,6 @@ impl ServerClient {
             .build()?;
         let client = runtime.block_on(GtlClient::connect_local())?;
         Ok(Self { runtime, client })
-    }
-
-    pub(crate) fn status(&self) -> anyhow::Result<ServerStatus> {
-        let server_info = self
-            .runtime
-            .block_on(self.client.get_viewer_server_info())?;
-        Ok(ServerStatus {
-            endpoint: self.client.endpoint().path().to_path_buf(),
-            instance_id: server_info.server_instance_id().to_owned(),
-        })
     }
 
     pub(crate) fn render_diff(

@@ -319,7 +319,10 @@ fn invalid_comparisons_are_reported_and_skipped_in_batches() {
         &fixture.database,
     )
     .unwrap();
-    assert!(result.repositories.is_empty());
+    assert_eq!(
+        result.repositories,
+        Vec::<gtl_models::repository::traversal::RepositoryTarget>::new()
+    );
     assert_eq!(result.notes.len(), 1);
     let conflict = update_project_comparison::execute(
         update_project_comparison::UpdateProjectComparison {

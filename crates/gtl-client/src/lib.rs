@@ -104,6 +104,7 @@ impl ViewerServerInfoError {
 pub struct ViewerServerInfo {
     server_instance_id: String,
     protocol_version: u32,
+    server_version: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -120,12 +121,18 @@ impl ViewerServerInfo {
         Ok(Self {
             server_instance_id,
             protocol_version: response.protocol_version,
+            server_version: response.server_version.clone(),
         })
     }
 
     #[must_use]
     pub fn server_instance_id(&self) -> &str {
         &self.server_instance_id
+    }
+
+    #[must_use]
+    pub fn server_version(&self) -> &str {
+        &self.server_version
     }
 
     #[must_use]
@@ -685,6 +692,7 @@ mod tests {
             ViewerServerInfo::try_from_response(&v1::GetViewerServerInfoResponse {
                 server_instance_id: "not-a-uuid".to_owned(),
                 protocol_version: 1,
+                server_version: "0.1.0".into(),
             })
             .unwrap_err();
         assert!(matches!(
@@ -696,6 +704,7 @@ mod tests {
             ViewerServerInfo::try_from_response(&v1::GetViewerServerInfoResponse {
                 server_instance_id: uuid::Uuid::new_v4().to_string(),
                 protocol_version: 0,
+                server_version: "0.1.0".into(),
             })
             .unwrap_err();
         assert!(matches!(

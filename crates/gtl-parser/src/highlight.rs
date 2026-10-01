@@ -363,7 +363,7 @@ mod tests {
                 row.kind(),
                 DiffRowKind::Removed | DiffRowKind::Added
             ));
-            assert!(!row.syntax_tokens().is_empty());
+            assert_ne!(row.syntax_tokens(), []);
             assert!(
                 row.syntax_tokens()
                     .iter()
@@ -378,11 +378,11 @@ mod tests {
         let first = stream.push(lines(&["@@ -1,4 +1,4 @@", " /* open"]));
         let second = stream.push(lines(&["-old inside", "+new inside", " */"]));
 
-        assert!(first.rows().is_empty());
-        assert!(second.rows().is_empty());
+        assert_eq!(first.rows(), []);
+        assert_eq!(second.rows(), []);
         let finished = stream.finish();
         assert_eq!(finished.rows().len(), 5);
-        assert!(finished.syntax_diagnostics().is_empty());
+        assert_eq!(finished.syntax_diagnostics(), []);
         for row in &finished.rows()[2..=3] {
             assert!(
                 row.syntax_tokens()
@@ -428,7 +428,7 @@ mod tests {
         ]));
 
         assert_eq!(parsed.syntax_diagnostics().len(), 1);
-        assert!(parsed.rows()[1].syntax_tokens().is_empty());
+        assert_eq!(parsed.rows()[1].syntax_tokens(), []);
         assert!(
             parsed.rows()[3]
                 .syntax_tokens()
@@ -479,7 +479,7 @@ mod tests {
                         && async_in_string < token.end().into_inner()
                 })
         );
-        assert!(parsed.syntax_diagnostics().is_empty());
+        assert_eq!(parsed.syntax_diagnostics(), []);
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
             " x",
         ]));
 
-        assert!(parsed.rows()[1].syntax_tokens().is_empty());
+        assert_eq!(parsed.rows()[1].syntax_tokens(), []);
         assert!(token_overlaps(
             &parsed.rows()[2],
             "x",
@@ -531,7 +531,7 @@ mod tests {
             "async",
             SyntaxTokenClass::Keyword
         ));
-        assert!(parsed.syntax_diagnostics().is_empty());
+        assert_eq!(parsed.syntax_diagnostics(), []);
     }
 
     #[test]
@@ -585,7 +585,7 @@ mod tests {
 
         assert_eq!(parsed.syntax_diagnostics().len(), 1);
         assert_eq!(parsed.syntax_diagnostics()[0].side(), DiffSide::New);
-        assert!(parsed.rows()[1].syntax_tokens().is_empty());
+        assert_eq!(parsed.rows()[1].syntax_tokens(), []);
         assert!(token_overlaps(
             &parsed.rows()[4],
             "let",

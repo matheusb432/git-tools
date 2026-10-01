@@ -354,15 +354,15 @@ name = "git-tools"
 excluded_from_push_all = true
 
 [[projects]]
-name = "sample_project"
+name = "example-project"
 "#,
         )
         .unwrap();
         let git_tools = ProjectName::try_from("git-tools").unwrap();
-        let sample_project = ProjectName::try_from("sample_project").unwrap();
+        let example_project = ProjectName::try_from("example-project").unwrap();
 
         assert!(settings.push_all_exclusions().contains(&git_tools));
-        assert!(!settings.push_all_exclusions().contains(&sample_project));
+        assert!(!settings.push_all_exclusions().contains(&example_project));
     }
 
     #[test]

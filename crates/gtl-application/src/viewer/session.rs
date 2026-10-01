@@ -1274,7 +1274,6 @@ impl ViewerSession {
         self.version = self.version.next();
     }
 
-    #[must_use]
     pub fn tabs(&self) -> impl ExactSizeIterator<Item = &SessionTab> {
         self.tabs.iter()
     }
@@ -2025,7 +2024,10 @@ mod tests {
             );
             assert!(session.tab(ticket.tab_id).is_some());
         }
-        assert!(session.take_finished_skipped_snapshots().is_empty());
+        assert_eq!(
+            session.take_finished_skipped_snapshots(),
+            Vec::<gtl_models::recipes::RecipeLabel>::new()
+        );
     }
 
     fn open_snapshot(session: &mut ViewerSession, repository: &str, batch: u64) -> ComputeTicket {
@@ -2049,7 +2051,10 @@ mod tests {
         let label = crate::utils::viewer::label("empty");
 
         session.skip_empty_snapshot_if_current(skipped, label.clone());
-        assert!(session.take_finished_skipped_snapshots().is_empty());
+        assert_eq!(
+            session.take_finished_skipped_snapshots(),
+            Vec::<gtl_models::recipes::RecipeLabel>::new()
+        );
         session.publish_labeled_if_current(
             computing,
             CachedView::new(view("changed")),
@@ -2061,7 +2066,10 @@ mod tests {
             &ViewerTabState::Pending
         );
         assert_eq!(session.take_finished_skipped_snapshots(), [label]);
-        assert!(session.take_finished_skipped_snapshots().is_empty());
+        assert_eq!(
+            session.take_finished_skipped_snapshots(),
+            Vec::<gtl_models::recipes::RecipeLabel>::new()
+        );
     }
 
     #[test]
