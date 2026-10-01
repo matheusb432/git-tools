@@ -494,6 +494,7 @@ excluded_from_push_all = true
             layout: UserSettingsFieldUpdate::Update(DiffLayout::Split),
             density: UserSettingsFieldUpdate::Update(DiffDensity::Full),
             push_confirmation_required: UserSettingsFieldUpdate::Update(false),
+            viewer_push_confirmation_required: UserSettingsFieldUpdate::Update(false),
             viewer_push_no_confirmation_projects: UserSettingsFieldUpdate::Unchanged,
         };
 

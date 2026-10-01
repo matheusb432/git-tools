@@ -69,6 +69,10 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
             request.push_confirmation_required,
             |value| value,
         ),
+        viewer_push_confirmation_required: application_field_update(
+            request.viewer_push_confirmation_required,
+            |value| value,
+        ),
     }
 }
 
@@ -115,7 +119,10 @@ pub fn project_settings(
         configured_theme,
         effective_theme: super::project_theme(settings.theme().unwrap_or_default()),
         render_options: super::project_render_options(settings.viewer_render_options()),
-        push_confirmation_required: settings.push_confirmation_required(),
+        push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+            cli_required: settings.push_confirmation_required(),
+            viewer_required: settings.viewer_push_confirmation_required(),
+        },
         viewer_push_no_confirmation_projects: settings
             .viewer_push_no_confirmation_projects()
             .iter()

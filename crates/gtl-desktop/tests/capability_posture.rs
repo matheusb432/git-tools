@@ -61,10 +61,6 @@ fn production_flavor_embeds_the_local_dioxus_bundle() {
     let dioxus_conf = fs::read_to_string(manifest_dir.join("../gtl-web/Dioxus.toml")).unwrap();
     let dioxus: toml::Value = toml::from_str(&dioxus_conf).unwrap();
     assert_eq!(dioxus["application"]["out_dir"].as_str(), Some("dist"));
-    assert!(
-        dioxus["application"].get("tailwind_input").is_none(),
-        "the locked xtask owns release stylesheet generation"
-    );
 }
 
 #[test]

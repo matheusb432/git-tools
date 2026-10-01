@@ -801,7 +801,10 @@ pub fn decode_get_viewer_settings_response(
             .transpose()?,
         effective_theme: decode_viewer_theme(response.effective_theme)?,
         render_options: decode_viewer_render_options(required(response.render_options)?)?,
-        push_confirmation_required: response.push_confirmation_required,
+        push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+            cli_required: response.push_confirmation_required,
+            viewer_required: required(response.viewer_push_confirmation_required)?,
+        },
         viewer_push_no_confirmation_projects: decode_project_names(
             response.viewer_push_no_confirmation_projects,
         )?,
@@ -830,7 +833,8 @@ pub fn encode_get_viewer_settings_response(
             .map(|theme| encode_viewer_theme(theme) as i32),
         effective_theme: encode_viewer_theme(settings.effective_theme) as i32,
         render_options: Some(encode_viewer_render_options(settings.render_options)),
-        push_confirmation_required: settings.push_confirmation_required,
+        push_confirmation_required: settings.push_confirmation.cli_required,
+        viewer_push_confirmation_required: Some(settings.push_confirmation.viewer_required),
         viewer_push_no_confirmation_projects: settings
             .viewer_push_no_confirmation_projects
             .into_iter()
@@ -897,6 +901,9 @@ pub fn encode_edit_settings_request(request: &EditSettingsRequest) -> v1::EditSe
         layout,
         density,
         push_confirmation_required,
+        viewer_push_confirmation_required: encode_bool_field_update(
+            &request.viewer_push_confirmation_required,
+        ),
         viewer_push_no_confirmation_projects: encode_project_names_update(
             request.viewer_push_no_confirmation_projects.clone(),
         ),
@@ -951,6 +958,10 @@ pub fn decode_edit_settings_request(
         .map_err(field("viewer_push_no_confirmation_projects"))?,
         push_confirmation_required: decode_bool_field_update(request.push_confirmation_required)
             .map_err(field("push_confirmation_required"))?,
+        viewer_push_confirmation_required: decode_bool_field_update(
+            request.viewer_push_confirmation_required,
+        )
+        .map_err(field("viewer_push_confirmation_required"))?,
     })
 }
 

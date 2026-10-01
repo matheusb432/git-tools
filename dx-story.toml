@@ -1,7 +1,3 @@
 [catalog]
 package = "gtl-web"
 example = "component-preview"
-
-[tailwind]
-input = "dev/styles/tailwind.css"
-output = "assets/component-preview.css"

@@ -17,7 +17,8 @@ mod verify;
 
 pub use comparison::{
     DesktopScrollComparison, DesktopScrollComparisonError, DesktopScrollPanel,
-    DesktopScrollReportRole, FrameGapComparison, MetricDelta, PanelComparison, compare_reports,
+    DesktopScrollReportRole, FrameGapComparison, MetricDelta, PanelComparison,
+    ProcessResourceComparison, compare_reports,
 };
 pub use report::{
     BENCHMARK_NAME, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch,

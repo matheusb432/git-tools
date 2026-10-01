@@ -253,9 +253,14 @@ fn merge_settings(
         loaded.focus_window_on_diff,
     );
     merge(
-        &mut selected.push_confirmation_required,
-        submitted.push_confirmation_required,
-        loaded.push_confirmation_required,
+        &mut selected.push_confirmation.cli_required,
+        submitted.push_confirmation.cli_required,
+        loaded.push_confirmation.cli_required,
+    );
+    merge(
+        &mut selected.push_confirmation.viewer_required,
+        submitted.push_confirmation.viewer_required,
+        loaded.push_confirmation.viewer_required,
     );
     merge(
         &mut selected.accessibility.ui_scale_percent,
@@ -321,7 +326,7 @@ mod tests {
             focus_window_on_diff: true,
             copy_with_line_context: true,
             diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
-            push_confirmation_required: true,
+            push_confirmation: gtl_models::settings::PushConfirmationPreferences::default(),
             accessibility: ViewerAccessibility::default(),
         }
     }
@@ -332,16 +337,28 @@ mod tests {
         let selected = ViewerSettingsSelection {
             theme: Some(ViewerTheme::Carbon),
             language: ViewerLanguage::PtBr,
+            push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+                viewer_required: false,
+                ..submitted.push_confirmation
+            },
             ..submitted
         };
         let loaded = ViewerSettingsSelection {
             focus_window_on_diff: false,
+            push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+                cli_required: false,
+                ..submitted.push_confirmation
+            },
             ..submitted
         };
         assert_eq!(
             merge_settings(submitted, selected, loaded),
             ViewerSettingsSelection {
                 focus_window_on_diff: false,
+                push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+                    cli_required: false,
+                    ..selected.push_confirmation
+                },
                 ..selected
             },
         );

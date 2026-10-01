@@ -867,12 +867,16 @@ fn settings_codec_round_trips_effective_values() {
             density: ViewerDiffDensity::Full,
         },
         viewer_push_no_confirmation_projects: Vec::new(),
-        push_confirmation_required: true,
+        push_confirmation: gtl_models::settings::PushConfirmationPreferences::default(),
     };
 
     for focus_window_on_diff in [true, false] {
         let settings = ViewerUserSettings {
             focus_window_on_diff,
+            push_confirmation: gtl_models::settings::PushConfirmationPreferences {
+                viewer_required: focus_window_on_diff,
+                ..settings.push_confirmation
+            },
             ..settings.clone()
         };
         let mut encoded = encode_get_viewer_settings_response(settings.clone());
@@ -885,6 +889,10 @@ fn settings_codec_round_trips_effective_values() {
     let mut missing_copy_setting = encode_get_viewer_settings_response(settings.clone());
     missing_copy_setting.copy_with_line_context = None;
     assert!(decode_get_viewer_settings_response(missing_copy_setting).is_err());
+
+    let mut missing_viewer_push_setting = encode_get_viewer_settings_response(settings.clone());
+    missing_viewer_push_setting.viewer_push_confirmation_required = None;
+    assert!(decode_get_viewer_settings_response(missing_viewer_push_setting).is_err());
 
     let mut unspecified_files_sort = encode_get_viewer_settings_response(settings.clone());
     unspecified_files_sort.diff_files_sort = v1::DiffFilesSort::Unspecified as i32;
@@ -922,6 +930,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
         density: FieldUpdate::Update(ViewerDiffDensity::Compact),
         viewer_push_no_confirmation_projects: FieldUpdate::Unchanged,
         push_confirmation_required: FieldUpdate::Update(false),
+        viewer_push_confirmation_required: FieldUpdate::Update(false),
     };
 
     for wrap_lines in [
@@ -936,6 +945,7 @@ fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
             files_sidebar_visible: wrap_lines.clone(),
             commits_sidebar_visible: wrap_lines.clone(),
             copy_with_line_context: wrap_lines.clone(),
+            viewer_push_confirmation_required: wrap_lines.clone(),
             wrap_lines,
             ..request.clone()
         };

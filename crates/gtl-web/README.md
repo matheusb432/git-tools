@@ -13,9 +13,12 @@ Offline HTML documents belong to `gtl-artifacts`, which has its own renderer and
 ## Runtime and development
 
 Release builds contain local application assets and connect to the local `gtl-server`.
-The typed xtask owns stylesheet generation, the Dioxus Web bundle, Tauri embedding, drift checks,
-and the development server. Use `just --list` for current entry points.
+The typed xtask owns Dioxus Web release staging, Tauri embedding, bundle fingerprints, and the development server.
+Use `just --list` for current entry points.
 
-`src/app/assets/styles/` owns viewer theme and component rules. The `tailwind.css` entry point
-includes the application and generates its tracked stylesheet in `assets/`.
+`src/app/assets/styles/` owns viewer theme and component SCSS.
+Dioxus compiles `viewer.scss` and `diff-rows.scss` with Grass and minifies the CSS for the production viewer.
+Component previews import the same styles through `dev/styles/preview.scss` and add their story frames.
+The finite helpers in `helpers.scss` support existing local layout classes; new classes need an explicit SCSS rule.
+Stylesheets are bundled directly from their source assets; there is no separate stylesheet generator, watcher, or JavaScript toolchain.
 The `web` feature selects the browser runtime; `component-preview` adds the component catalog.

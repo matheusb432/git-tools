@@ -4,7 +4,9 @@ use anyhow::{Context, Result, ensure};
 use futures_util::FutureExt;
 use serde::Deserialize;
 use serde_json::json;
-use thirtyfour::{By, WebDriver, WebElement, prelude::ElementQueryable as _};
+use thirtyfour::{
+    By, WebDriver, WebElement, error::WebDriverErrorInner, prelude::ElementQueryable as _,
+};
 
 pub mod evidence;
 pub mod fixture;
@@ -174,15 +176,24 @@ pub async fn click(driver: &WebDriver, locator: By) -> Result<()> {
         wait::ASSERTION_TIMEOUT,
         || async {
             for element in driver.find_all(locator.clone()).await? {
-                if element.is_displayed().await? && element.is_enabled().await? {
-                    element.click().await?;
-                    return Ok(Some(()));
+                if !element.is_displayed().await? || !element.is_enabled().await? {
+                    continue;
+                }
+                match element.click().await {
+                    Ok(()) => return Ok(Some(())),
+                    Err(error)
+                        if matches!(
+                            error.as_inner(),
+                            WebDriverErrorInner::ElementNotInteractable(_)
+                        ) => {}
+                    Err(error) => return Err(error.into()),
                 }
             }
             Ok(None)
         },
     )
     .await
+    .with_context(|| format!("click {locator:?}"))
 }
 
 /// Waits for a current toast containing `text` and dismisses it.

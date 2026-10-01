@@ -4,6 +4,112 @@ use thirtyfour::{By, Key, WebDriver};
 use crate::support::{self, wait};
 
 #[tokio::test(flavor = "multi_thread")]
+async fn global_viewer_push_opt_out_is_independent_of_cli_and_survives_restart() -> Result<()> {
+    support::run_test("push-preference", |session| {
+        Box::pin(async move {
+            let directory = tempfile::Builder::new()
+                .prefix(".gtl-push-preference-")
+                .tempdir_in(std::env::var_os("HOME").context("fixture home")?)?;
+            let fixture = support::fixture::PushFixture::create(directory.path())?;
+            fixture.forward_snapshot(session.data_root())?;
+            let driver = session.driver();
+            support::wait_for_active_diff(driver, "push-review", "push-latest-marker").await?;
+
+            super::settings::open_settings(driver).await?;
+            support::click(driver, By::Css("[data-settings-section='git']")).await?;
+            assert_confirmation_options(driver, false, false).await?;
+            support::click(driver, By::Id("settings-push-confirmation")).await?;
+            wait_for_saved_confirmation(session.data_root(), false, true).await?;
+            assert_confirmation_options(driver, true, false).await?;
+            support::click(driver, By::Css("button[aria-label='Back']")).await?;
+            support::visible(driver, By::Css("#viewer-push-trigger:enabled")).await?;
+            push_with_keyboard(driver).await?;
+            wait_for_review(driver, &fixture.latest).await?;
+            support::click(
+                driver,
+                By::XPath(
+                    "//dialog[@id='viewer-push-confirmation']//button[normalize-space()='Cancel']",
+                ),
+            )
+            .await?;
+
+            support::click(driver, By::Css("button[aria-label='Settings']")).await?;
+            support::click(driver, By::Css("[data-settings-section='git']")).await?;
+            support::click(driver, By::Id("settings-viewer-push-confirmation")).await?;
+            wait_for_saved_confirmation(session.data_root(), false, false).await?;
+            support::evidence::capture(driver, "viewer-push-preference", true).await?;
+
+            session.restart().await?;
+            let driver = session.driver();
+            fixture.forward_snapshot(session.data_root())?;
+            support::wait_for_active_diff(driver, "push-review", "push-latest-marker").await?;
+            support::click(driver, By::Css("button[aria-label='Settings']")).await?;
+            support::click(driver, By::Css("[data-settings-section='git']")).await?;
+            assert_confirmation_options(driver, true, true).await?;
+            support::click(driver, By::Css("button[aria-label='Back']")).await?;
+            support::visible(driver, By::Css("#viewer-push-trigger:enabled")).await?;
+            push_with_keyboard(driver).await?;
+            support::dismiss_toast(driver, "Push completed.").await?;
+            ensure!(
+                fixture.remote_head()? == fixture.latest,
+                "global viewer opt-out did not push the reviewed snapshot"
+            );
+            ensure!(
+                driver
+                    .find(By::Css("#viewer-push-confirmation[open]"))
+                    .await
+                    .is_err(),
+                "global viewer opt-out showed confirmation"
+            );
+            ensure!(
+                fixture.repository.join("untracked.txt").exists(),
+                "global viewer opt-out changed untracked work"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
+async fn assert_confirmation_options(
+    driver: &WebDriver,
+    cli_skip: bool,
+    viewer_skip: bool,
+) -> Result<()> {
+    for (id, expected) in [
+        ("settings-push-confirmation", cli_skip),
+        ("settings-viewer-push-confirmation", viewer_skip),
+    ] {
+        let checkbox = support::visible(driver, By::Id(id)).await?;
+        ensure!(
+            checkbox.is_selected().await? == expected,
+            "{id} did not retain its independent preference"
+        );
+    }
+    Ok(())
+}
+
+async fn wait_for_saved_confirmation(
+    data_root: &std::path::Path,
+    cli_required: bool,
+    viewer_required: bool,
+) -> Result<()> {
+    let endpoint = gtl_local_transport::LocalEndpoint::from_root(data_root)?;
+    wait::until(
+        "push confirmation preference saved",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let mut client = gtl_client::ViewerClient::connect(&endpoint).await?;
+            let preferences = client.get_settings().await?.push_confirmation;
+            Ok((preferences.cli_required == cli_required
+                && preferences.viewer_required == viewer_required)
+                .then_some(()))
+        },
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn user_pushes_exactly_the_reviewed_commit() -> Result<()> {
     support::run_test("push", |session| {
         Box::pin(async move {

@@ -382,7 +382,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
             density: ViewerDiffDensity::Compact,
         },
         viewer_push_no_confirmation_projects: Vec::new(),
-        push_confirmation_required: true,
+        push_confirmation: gtl_models::settings::PushConfirmationPreferences::default(),
     };
 
     let history_json = serde_json::to_value(&history).unwrap();

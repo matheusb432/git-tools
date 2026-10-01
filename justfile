@@ -27,7 +27,7 @@ up:
 # Serve the development-only component story catalog in a browser.
 [group('build')]
 preview-components *args:
-    dx-story serve {{ args }}
+    cargo run --quiet -p xtask -- component-preview-serve -- {{ args }}
 
 # Build both the CLI engine and the desktop viewer.
 [group('build')]
@@ -171,14 +171,13 @@ test-e2e-native:
 test-e2e-browser:
     @timeout --signal=TERM --kill-after=30s 2h cargo run --quiet -p xtask -- desktop-e2e-worker browser
 
-# Run every Rust target, feature supplement, doctest, drift check, and viewer journey.
+# Run every Rust target, feature supplement, doctest, and viewer journey.
 [group('quality')]
 test-all:
     @cargo nextest run --workspace
     @just test-parser
     @just test-web-component-preview
     @just test-docs
-    @just drift-check
     @just test-e2e
     @just test-e2e-native
     @just test-e2e-browser
@@ -234,19 +233,6 @@ check: fmt-check lint
 fix *args:
     cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged {{ args }}
     just fmt
-
-# Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
-[group('quality')]
-drift-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    just web preview-styles
-    just web build
-    status=$(git status --short --untracked-files=all -- crates/gtl-web/assets/{tailwind,component-preview}.css)
-    if [[ -n "$status" ]]; then
-        printf '%s\n' "$status" 'Stylesheets are stale; run just web styles and just web preview-styles, then commit.' >&2
-        exit 1
-    fi
 
 # Report missing Mise-managed tools without changing the host.
 [group('setup')]

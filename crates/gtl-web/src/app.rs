@@ -12,14 +12,16 @@ mod window_header;
 use application_router::Route;
 
 const FAVICON: Asset = asset!("/src/app/assets/app-icon.svg");
-const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+pub(crate) const VIEWER_CSS: Asset = asset!("/src/app/assets/styles/viewer.scss");
+pub(crate) const DIFF_ROWS_CSS: Asset = asset!("/src/app/assets/styles/diff-rows.scss");
 
 #[component]
 pub(crate) fn App() -> Element {
     displayed_language::use_displayed_language_provider();
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        document::Link { rel: "stylesheet", href: VIEWER_CSS }
+        document::Link { rel: "stylesheet", href: DIFF_ROWS_CSS }
         Router::<Route> {}
     }
 }

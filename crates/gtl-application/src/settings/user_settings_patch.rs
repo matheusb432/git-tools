@@ -42,6 +42,8 @@ pub struct UserSettingsPatch {
         UserSettingsFieldUpdate<std::collections::BTreeSet<gtl_models::paths::ProjectName>>,
     /// Changes whether CLI pushes require confirmation.
     pub push_confirmation_required: UserSettingsFieldUpdate<bool>,
+    /// Changes whether viewer pushes require confirmation unless the project opts out.
+    pub viewer_push_confirmation_required: UserSettingsFieldUpdate<bool>,
 }
 
 impl UserSettingsPatch {

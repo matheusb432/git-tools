@@ -1,0 +1,82 @@
+@layer components {
+  .story-viewer-frame {
+    max-width: var(--container-4xl);
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    overflow: hidden;
+  }
+  .story-viewer-frame-narrow {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    --control-shadow: var(--elevation-floating);
+    width: 23rem;
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    overflow: hidden;
+  }
+  .story-viewer-shell-mobile {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    --control-shadow: var(--elevation-floating);
+    width: 390px;
+    height: 844px;
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    flex-direction: column;
+    display: flex;
+    overflow: hidden;
+  }
+  .story-viewer-shell-desktop {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    --control-shadow: var(--elevation-floating);
+    min-width: 70rem;
+    max-width: 90rem;
+    height: 760px;
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    flex-direction: column;
+    display: flex;
+    overflow: hidden;
+  }
+  .story-viewer-body {
+    flex: 1;
+    overflow: hidden;
+  }
+  .story-active-view {
+    text-align: center;
+    place-items: center;
+    display: grid;
+  }
+  .story-settings-preview {
+    height: 800px;
+    max-width: var(--container-5xl);
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    overflow: auto;
+  }
+  .story-thumbnail-frame {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--bg);
+    overflow: hidden;
+  }
+}

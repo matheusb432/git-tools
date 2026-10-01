@@ -20,11 +20,12 @@ pub fn execute(
             let preferences = settings
                 .load()
                 .map_err(crate::viewer::source::ViewerSourceError::from)?;
-            plan.no_confirmation = plan.project.as_ref().is_some_and(|project| {
-                preferences
-                    .viewer_push_no_confirmation_projects()
-                    .contains(project)
-            });
+            plan.no_confirmation = !preferences.viewer_push_confirmation_required()
+                || plan.project.as_ref().is_some_and(|project| {
+                    preferences
+                        .viewer_push_no_confirmation_projects()
+                        .contains(project)
+                });
             Ok(plan)
         }),
     )

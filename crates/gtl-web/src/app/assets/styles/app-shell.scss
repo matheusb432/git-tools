@@ -1,0 +1,109 @@
+@layer components {
+  .viewer-window-header {
+    z-index: 70;
+    height: calc(var(--spacing) * 9);
+    background-color: var(--surface);
+    flex-shrink: 0;
+    align-items: center;
+    display: flex;
+  }
+  .viewer-window-drag-region {
+    height: calc(var(--spacing) * 9);
+    width: calc(var(--spacing) * 6);
+    -webkit-user-select: none;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .viewer-window-actions,.viewer-window-controls {
+    height: calc(var(--spacing) * 9);
+    flex-shrink: 0;
+    align-items: center;
+    display: flex;
+  }
+  .viewer-window-button {
+    width: calc(var(--spacing) * 9);
+    height: calc(var(--spacing) * 9);
+    cursor: default;
+    border-style: var(--control-border-style);
+    color: var(--ink-2);
+    background-color: #0000;
+    border-width: 0;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    display: flex;
+  }
+  @media (hover:hover) {
+    .viewer-window-button:hover {
+      background-color: var(--surface-2);
+      color: var(--ink);
+    }
+  }
+  .viewer-window-button:focus-visible {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+    outline-color: var(--ink-3);
+    --control-outline-style: solid;
+    outline-style: solid;
+  }
+  @media (forced-colors:active) {
+    .viewer-window-button:focus-visible {
+      outline-color: highlight;
+    }
+  }
+  .viewer-window-button:focus-visible {
+    outline-offset: calc(2px * -1);
+  }
+  .viewer-window-button:active {
+    background-color: var(--line);
+  }
+  @media (hover:hover) {
+    .viewer-window-button[data-close=true]:hover {
+      background-color: var(--del);
+      color: var(--color-white);
+    }
+  }
+  .viewer-window-button[data-close=true]:active {
+    background-color: var(--del);
+    color: var(--color-white);
+  }
+  .viewer-connection-content {
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+  .viewer-connection-content[inert] {
+    opacity: .7;
+    --control-saturate: saturate(50%);
+    filter: var(--control-blur,) var(--control-brightness,) var(--control-contrast,) var(--control-grayscale,) var(--control-hue-rotate,) var(--control-invert,) var(--control-saturate,) var(--control-sepia,) var(--control-drop-shadow,);
+  }
+  .viewer-connection-notice {
+    inset-inline: calc(var(--spacing) * 4);
+    bottom: calc(var(--spacing) * 6);
+    z-index: 80;
+    max-width: var(--container-3xl);
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--del-line);
+    background-color: var(--surface);
+    color: var(--del);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    align-items: center;
+    display: flex;
+    position: fixed;
+  }
+  .viewer-navigation-icon {
+    flex: none;
+    justify-content: center;
+    align-items: center;
+    display: inline-flex;
+  }
+  .viewer-navigation-empty {
+    color: var(--ink-3);
+    align-items: center;
+    display: flex;
+  }
+}

@@ -74,7 +74,7 @@ fn unified_header_row(tone: HeaderTone, text: &str, row_index: usize) -> Element
             "data-row-index": "{row_index}",
             "data-diff-tone": tone,
             "data-gtl-diff-row": "",
-            code { class: "diff-row-header-code diff-row-code col-[1/-1]", "{text}" }
+            code { class: "diff-row-header-code diff-row-code", "{text}" }
         }
     }
 }
@@ -117,7 +117,7 @@ fn unified_source_row(
                 "data-diff-tone": gutter_tone,
                 {gutter_number}
             }
-            code { class: "diff-row-unified-code min-w-0 py-0 pr-1 pl-3 text-sm diff-row-code",
+            code { class: "diff-row-unified-code diff-row-code",
                 {
                     code_cell_content(
                         &source.code,

@@ -29,11 +29,14 @@ mod metrics;
 mod process_memory;
 #[path = "desktop_scroll_baseline/runner_environment.rs"]
 mod runner_environment;
+#[path = "desktop_scroll_baseline/styles.rs"]
+mod styles;
 
 use metrics::BrowserScrollSample;
 
 const ASSERTION_TIMEOUT: Duration = Duration::from_secs(120);
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(120);
+const PROCESS_SAMPLE_INTERVAL_MILLISECONDS: u64 = 100;
 const WINDOW_WIDTH: u32 = 1_200;
 const WINDOW_HEIGHT: u32 = 700;
 const DIAGNOSTIC_BYTES_MAX: usize = 64 * 1024;
@@ -410,6 +413,7 @@ async fn production_viewer_scrolls_large_diff_workloads() -> Result<()> {
             readiness: "usable initial viewport and complete file/commit metadata for the unchanged many-file and 20,005-row fixtures; logical row totals verified separately".to_owned(),
             memory_attribution: process_memory::ATTRIBUTION.to_owned(),
             process_cpu_clock_ticks_per_second: process_memory::clock_ticks_per_second()?,
+            process_sample_interval_milliseconds: PROCESS_SAMPLE_INTERVAL_MILLISECONDS,
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
             side_panel_scroll: ScrollProtocol::side_panel(),
             diff_document_scroll: ScrollProtocol::diff_document(),
@@ -549,13 +553,8 @@ async fn measure_launch(
         "diff-document scroll region",
     )
     .await?;
-    let diff_document = scroll_element(
-        driver,
-        &diff_document_element,
-        "diff-document",
-        ScrollProtocol::diff_document(),
-    )
-    .await?;
+    let (diff_document, diff_document_resources) =
+        scroll_document(driver, &diff_document_element, session.data_root()).await?;
     let memory_after_diff_document = process_memory::snapshot(session.data_root())?;
     let changed_files_element = visible_element(
         driver,
@@ -613,6 +612,7 @@ async fn measure_launch(
         readiness,
         loading_frame_gaps_ms,
         diff_document,
+        diff_document_resources,
         memory_after_diff_document,
         changed_files,
         memory_after_changed_files,
@@ -656,13 +656,8 @@ async fn measure_single_file_launch(
         "diff-document scroll region",
     )
     .await?;
-    let diff_document = scroll_element(
-        driver,
-        &diff_document_element,
-        "diff-document",
-        ScrollProtocol::diff_document(),
-    )
-    .await?;
+    let (diff_document, diff_document_resources) =
+        scroll_document(driver, &diff_document_element, session.data_root()).await?;
     let memory_after_diff_document = process_memory::snapshot(session.data_root())?;
 
     interactions::measure(
@@ -687,6 +682,7 @@ async fn measure_single_file_launch(
         readiness,
         loading_frame_gaps_ms,
         diff_document,
+        diff_document_resources,
         memory_after_diff_document,
     })
 }
@@ -961,6 +957,34 @@ async fn visible_element(
     result
         .element()
         .with_context(|| format!("decode visible {label}"))
+}
+
+async fn scroll_document(
+    driver: &WebDriver,
+    element: &WebElement,
+    data_root: &Path,
+) -> Result<(ScrollSample, desktop_scroll::DesktopScrollReadinessSample)> {
+    let mut resources = process_memory::ReadinessProcessSampler::try_start(data_root)?
+        .context("stable process tree before document scrolling")?;
+    let started = Instant::now();
+    let scrolling = scroll_element(
+        driver,
+        element,
+        "diff-document",
+        ScrollProtocol::diff_document(),
+    );
+    tokio::pin!(scrolling);
+    let mut observations =
+        tokio::time::interval(Duration::from_millis(PROCESS_SAMPLE_INTERVAL_MILLISECONDS));
+    observations.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            result = &mut scrolling => {
+                return Ok((result?, resources.finish(started.elapsed())?));
+            }
+            _ = observations.tick() => resources.observe()?,
+        }
+    }
 }
 
 async fn scroll_element(

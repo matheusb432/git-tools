@@ -6,7 +6,8 @@ use anyhow::{Context, Result, ensure};
 use resvg::{tiny_skia, usvg};
 
 const MARK: &str = include_str!("../../../crates/gtl-web/src/app/assets/repository-hub.svg");
-const THEME_TOKENS: &str = include_str!("../../../crates/gtl-web/src/app/assets/styles/tokens.css");
+const THEME_TOKENS: &str =
+    include_str!("../../../crates/gtl-web/src/app/assets/styles/tokens.scss");
 /// Colors the launcher, favicon, and bundle icons, which cannot follow the selected theme.
 const DEFAULT_THEME: &str = "dark";
 const ICO_SIZES: &[u16] = &[16, 24, 32, 48, 64, 128, 256];

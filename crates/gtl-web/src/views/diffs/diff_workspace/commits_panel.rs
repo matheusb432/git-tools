@@ -552,20 +552,6 @@ mod tests {
             "bg-transparent hover:bg-surface-2"
         );
         assert!(COMMIT_CARD_CLASSES.contains("diff-commit-card w-full px-3 py-3"));
-        let stylesheet = include_str!("../../../app/assets/styles/diff-workspace.css");
-        let (_, styles) = stylesheet.split_once(".diff-commit-card {").unwrap();
-        let styles = styles.split('}').next().unwrap();
-        assert!(styles.contains("border-b"));
-        assert!(
-            styles
-                .split_whitespace()
-                .all(|class| !class.starts_with("border-l-"))
-        );
-        assert!(
-            styles
-                .split_whitespace()
-                .all(|class| !class.starts_with("rounded"))
-        );
     }
 
     #[test]

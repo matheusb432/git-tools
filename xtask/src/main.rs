@@ -49,7 +49,9 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::ReleasePackage { platform } => verbs::release_package::run(platform),
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
-        cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
+        cli::Command::ComponentPreviewServe { arguments } => {
+            verbs::dioxus_web::serve_component_preview(&arguments)
+        }
         cli::Command::CheckDioxusFormat => verbs::dioxus_format::check(),
         cli::Command::PreCommit => verbs::pre_commit::run(),
         cli::Command::CheckStructure => {

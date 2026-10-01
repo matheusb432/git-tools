@@ -11,6 +11,57 @@ use gtl_infra::user_config::TomlSettingsStore;
 use gtl_models::{timestamps::MachineTimestamp, viewer::Theme};
 
 #[test]
+fn viewer_push_confirmation_persists_independently_of_cli_and_clear_restores_default()
+-> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("config.toml");
+    for cli_confirmation in [true, false] {
+        fs::write(
+            &path,
+            format!(
+                "# keep this\nviewer_push_no_confirmation_projects = ['review-project']\n[push]\nconfirm = {cli_confirmation}\n"
+            ),
+        )?;
+        let mut store = TomlSettingsStore::new(Some(path.clone()));
+        let cached = store.clone();
+        assert!(cached.load()?.viewer_push_confirmation_required());
+        for viewer_confirmation in [true, false] {
+            store.edit(UserSettingsPatch {
+                viewer_push_confirmation_required: UserSettingsFieldUpdate::Update(
+                    viewer_confirmation,
+                ),
+                ..Default::default()
+            })?;
+            for loaded in [
+                cached.load()?,
+                TomlSettingsStore::new(Some(path.clone())).load()?,
+            ] {
+                assert_eq!(
+                    loaded.viewer_push_confirmation_required(),
+                    viewer_confirmation
+                );
+                assert_eq!(loaded.push_confirmation_required(), cli_confirmation);
+                assert_eq!(loaded.viewer_push_no_confirmation_projects().len(), 1);
+            }
+            assert!(fs::read_to_string(&path)?.contains("# keep this"));
+        }
+        store.edit(UserSettingsPatch {
+            viewer_push_confirmation_required: UserSettingsFieldUpdate::Clear,
+            ..Default::default()
+        })?;
+        let loaded = cached.load()?;
+        assert!(loaded.viewer_push_confirmation_required());
+        assert_eq!(loaded.push_confirmation_required(), cli_confirmation);
+    }
+    fs::write(&path, "[viewer_push]\nconfirm = 'false'\n")?;
+    assert!(matches!(
+        TomlSettingsStore::new(Some(path)).load(),
+        Err(UserSettingsLoadError::InvalidConfiguration(_))
+    ));
+    Ok(())
+}
+
+#[test]
 fn viewer_push_confirmation_is_opted_out_per_project_and_preserves_cli_preferences()
 -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;

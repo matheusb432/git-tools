@@ -1,0 +1,552 @@
+@layer components {
+  .control-choice {
+    min-height: calc(var(--spacing) * 10);
+    cursor: pointer;
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 3);
+    padding-block: calc(var(--spacing) * 2);
+    color: var(--ink);
+    display: flex;
+  }
+  .control-choice:has(:disabled) {
+    cursor: not-allowed;
+    opacity: .5;
+  }
+  .control-choice>span {
+    flex: 1;
+    min-width: 0;
+  }
+  .control-checkbox,.control-radio {
+    margin-top: calc(var(--spacing) * .5);
+    width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+    cursor: pointer;
+    appearance: none;
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--ink-3);
+    background-color: var(--surface);
+    transition-property: color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--control-gradient-from,--control-gradient-via,--control-gradient-to;
+    transition-timing-function: var(--control-ease,var(--default-transition-timing-function));
+    transition-duration: var(--control-duration,var(--default-transition-duration));
+    --control-duration: .15s;
+    flex-shrink: 0;
+    place-content: center;
+    transition-duration: .15s;
+    display: grid;
+  }
+  :is(.control-checkbox,.control-radio):checked {
+    border-color: var(--acc);
+  }
+  @media (hover:hover) {
+    :is(.control-checkbox,.control-radio):hover {
+      border-color: var(--acc);
+    }
+  }
+  :is(.control-checkbox,.control-radio):focus-visible {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+    outline-color: var(--ink-3);
+    --control-outline-style: solid;
+    outline-style: solid;
+  }
+  @media (forced-colors:active) {
+    :is(.control-checkbox,.control-radio):focus-visible {
+      outline-color: highlight;
+    }
+  }
+  :is(.control-checkbox,.control-radio):focus-visible {
+    outline-offset: 2px;
+  }
+  .control-checkbox {
+    border-radius: var(--radius-xs);
+  }
+  .control-checkbox:checked {
+    background-color: var(--acc);
+  }
+  .control-radio {
+    border-radius: 3.40282e38px;
+  }
+  .control-checkbox:after,.control-radio:after {
+    content: "";
+    opacity: 0;
+    transition: opacity .12s ease-out,transform .18s cubic-bezier(.16,1,.3,1);
+  }
+  .control-radio:after {
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    background-color: var(--acc);
+    border-radius: 3.40282e38px;
+    transform: scale(.4);
+  }
+  .control-radio:checked:after {
+    opacity: 1;
+    transform: scale(1);
+  }
+  .control-checkbox:after {
+    border-left: 2px solid var(--bg);
+    border-bottom: 2px solid var(--bg);
+    width: 9px;
+    height: 5px;
+    transform: translateY(-1px)rotate(-45deg)scale(.4);
+  }
+  .control-checkbox:checked:after {
+    opacity: 1;
+    transform: translateY(-1px)rotate(-45deg);
+  }
+  .control-choice-label {
+    --control-leading: calc(var(--spacing) * 5);
+    line-height: calc(var(--spacing) * 5);
+    display: block;
+  }
+  .control-choice-hint {
+    margin-top: var(--spacing);
+    font-size: var(--text-xs);
+    line-height: var(--control-leading,var(--text-xs--line-height));
+    --control-leading: calc(var(--spacing) * 5);
+    line-height: calc(var(--spacing) * 5);
+    color: var(--ink-2);
+    display: block;
+  }
+  .control-button {
+    cursor: pointer;
+    border-radius: var(--r);
+    --control-font-weight: var(--font-weight-medium);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    align-items: center;
+  }
+  .control-button:focus-visible {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+    outline-color: var(--ink-3);
+    --control-outline-style: solid;
+    outline-style: solid;
+  }
+  @media (forced-colors:active) {
+    .control-button:focus-visible {
+      outline-color: highlight;
+    }
+  }
+  .control-button:focus-visible {
+    outline-offset: 2px;
+  }
+  .control-button:disabled {
+    cursor: not-allowed;
+    opacity: .4;
+  }
+  .control-button-layout-inline {
+    flex-shrink: 0;
+    justify-content: center;
+    display: inline-flex;
+  }
+  .control-button-layout-full-width-start {
+    justify-content: flex-start;
+    display: flex;
+  }
+  .control-button-variant-primary {
+    border-style: var(--control-border-style);
+    background-color: var(--acc);
+    --control-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--bg);
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-primary:enabled:hover {
+      background-color: var(--acc-2);
+    }
+  }
+  .control-button-variant-primary:enabled:active {
+    background-color: var(--acc);
+  }
+  .control-button-variant-destructive {
+    border-style: var(--control-border-style);
+    background-color: var(--del-bg);
+    color: var(--del);
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-destructive:enabled:hover {
+      background-color: var(--del);
+    }
+    @supports (color:color-mix(in lab, red, red)) {
+      .control-button-variant-destructive:enabled:hover {
+        background-color: color-mix(in oklab, var(--del) 20%, transparent);
+      }
+    }
+  }
+  .control-button-variant-destructive:enabled:active {
+    background-color: var(--del);
+  }
+  @supports (color:color-mix(in lab, red, red)) {
+    .control-button-variant-destructive:enabled:active {
+      background-color: color-mix(in oklab, var(--del) 30%, transparent);
+    }
+  }
+  .control-button-variant-warning {
+    border-style: var(--control-border-style);
+    background-color: var(--warn-bg);
+    color: var(--warn);
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-warning:enabled:hover {
+      background-color: var(--warn);
+    }
+    @supports (color:color-mix(in lab, red, red)) {
+      .control-button-variant-warning:enabled:hover {
+        background-color: color-mix(in oklab, var(--warn) 20%, transparent);
+      }
+    }
+  }
+  .control-button-variant-warning:enabled:active {
+    background-color: var(--warn);
+  }
+  @supports (color:color-mix(in lab, red, red)) {
+    .control-button-variant-warning:enabled:active {
+      background-color: color-mix(in oklab, var(--warn) 30%, transparent);
+    }
+  }
+  .control-button-variant-failure {
+    border-style: var(--control-border-style);
+    background-color: var(--del);
+    --control-font-weight: var(--font-weight-semibold);
+    font-weight: var(--font-weight-semibold);
+    color: var(--bg);
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-failure:enabled:hover {
+      background-color: var(--del);
+    }
+    @supports (color:color-mix(in lab, red, red)) {
+      .control-button-variant-failure:enabled:hover {
+        background-color: color-mix(in oklab, var(--del) 85%, transparent);
+      }
+    }
+  }
+  .control-button-variant-failure:enabled:active {
+    background-color: var(--del);
+  }
+  .control-button-variant-outline {
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--surface-2);
+    color: var(--ink);
+  }
+  @media (hover:hover) {
+    .control-button-variant-outline:enabled:hover {
+      border-color: var(--line-2);
+      background-color: var(--line);
+    }
+  }
+  .control-button-variant-outline:enabled:active {
+    background-color: var(--line-2);
+  }
+  .control-button-variant-ghost {
+    border-style: var(--control-border-style);
+    color: var(--ink-2);
+    background-color: #0000;
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-ghost:enabled:hover {
+      background-color: var(--surface-2);
+      color: var(--ink);
+    }
+  }
+  .control-button-variant-ghost:enabled:active {
+    background-color: var(--line);
+    color: var(--ink);
+  }
+  .control-button-variant-accent {
+    border-style: var(--control-border-style);
+    background-color: var(--acc-soft);
+    color: var(--acc);
+    border-width: 1px;
+    border-color: #0000;
+  }
+  @media (hover:hover) {
+    .control-button-variant-accent:enabled:hover {
+      background-color: var(--acc);
+    }
+    @supports (color:color-mix(in lab, red, red)) {
+      .control-button-variant-accent:enabled:hover {
+        background-color: color-mix(in oklab, var(--acc) 20%, transparent);
+      }
+    }
+  }
+  .control-button-variant-accent:enabled:active {
+    background-color: var(--acc);
+  }
+  @supports (color:color-mix(in lab, red, red)) {
+    .control-button-variant-accent:enabled:active {
+      background-color: color-mix(in oklab, var(--acc) 30%, transparent);
+    }
+  }
+  .control-button-variant-accent:disabled {
+    color: var(--ink-3);
+  }
+  .control-button-variant-toggle[aria-pressed=true] {
+    background-color: var(--acc-soft);
+    color: var(--acc);
+  }
+  .control-table-actions {
+    justify-content: flex-end;
+    gap: var(--spacing);
+    display: flex;
+  }
+  .control-table-actions>.control-button:not(:disabled),.control-table-actions>span>.control-button:not(:disabled) {
+    color: var(--acc);
+  }
+  .control-badge {
+    border-radius: var(--r-sm);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    justify-content: center;
+    align-items: center;
+    display: inline-flex;
+  }
+  .control-badge-neutral {
+    border-color: var(--line-2);
+    background-color: var(--sunk);
+    color: var(--ink-2);
+  }
+  .control-badge-addition {
+    border-color: var(--add-line);
+    background-color: var(--add-bg);
+    color: var(--add);
+  }
+  .control-badge-deletion {
+    border-color: var(--del-line);
+    background-color: var(--del-bg);
+    color: var(--del);
+  }
+  .control-count-badge {
+    background-color: var(--acc-soft);
+    text-align: center;
+    color: var(--acc);
+    border-radius: 3.40282e38px;
+    flex-shrink: 0;
+    justify-content: center;
+    align-items: center;
+    display: inline-flex;
+  }
+  .control-empty-notice {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    --control-border-style: dashed;
+    border-style: dashed;
+    border-width: 1px;
+    border-color: var(--line-2);
+    text-align: center;
+    color: var(--ink-2);
+    font-style: italic;
+  }
+  .control-floating-notice {
+    pointer-events: none;
+    inset-inline: calc(var(--spacing) * 4);
+    bottom: calc(var(--spacing) * 6);
+    z-index: 50;
+    max-width: var(--container-3xl);
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--acc-line);
+    background-color: var(--surface);
+    overflow-wrap: anywhere;
+    color: var(--ink);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    position: fixed;
+  }
+  .control-sectioned-surface {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--surface);
+    overflow: hidden;
+  }
+  .control-sectioned-surface-header,.control-sectioned-surface-footer {
+    background-color: var(--surface-2);
+  }
+  .control-sectioned-surface-body {
+    background-color: var(--surface);
+  }
+  .control-loading-spinner {
+    flex: none;
+    justify-content: center;
+    align-items: center;
+    display: inline-flex;
+  }
+  .control-loading-spinner-icon {
+    animation: var(--animate-spin);
+  }
+  @media (prefers-reduced-motion:reduce) {
+    .control-loading-spinner-icon {
+      animation: none;
+    }
+  }
+  .control-menu-action {
+    cursor: pointer;
+    border-radius: var(--r-sm);
+    border-style: var(--control-border-style);
+    text-align: left;
+    white-space: nowrap;
+    color: var(--ink-2);
+    background-color: #0000;
+    border-width: 1px;
+    border-color: #0000;
+    justify-content: flex-start;
+    align-items: center;
+    display: flex;
+  }
+  @media (hover:hover) {
+    .control-menu-action:hover {
+      border-color: var(--line-2);
+      background-color: var(--surface-2);
+      color: var(--ink);
+    }
+  }
+  .control-menu-action:focus-visible {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+    outline-color: var(--ink-3);
+    --control-outline-style: solid;
+    outline-style: solid;
+  }
+  @media (forced-colors:active) {
+    .control-menu-action:focus-visible {
+      outline-color: highlight;
+    }
+  }
+  .control-menu-action:focus-visible {
+    outline-offset: calc(1px * -1);
+  }
+  .control-menu-action:active {
+    border-color: var(--line-2);
+    background-color: var(--line);
+    color: var(--ink);
+  }
+  .control-menu-action:disabled {
+    cursor: not-allowed;
+    opacity: .5;
+  }
+  .control-menu-action[aria-current=page] {
+    border-color: var(--acc-line);
+    background-color: var(--acc-soft);
+    color: var(--ink);
+  }
+  @media (hover:hover) {
+    .control-menu-action[aria-current=page]:hover {
+      border-color: var(--acc);
+    }
+  }
+  .control-menu-action[aria-current=page]:active {
+    border-color: var(--acc);
+    background-color: var(--acc);
+    color: var(--bg);
+  }
+  .control-menu-action-icon {
+    border-radius: var(--r-sm);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line);
+    background-color: var(--sunk);
+    color: var(--ink-2);
+    flex: none;
+    justify-content: center;
+    align-items: center;
+    display: inline-flex;
+  }
+  @media (hover:hover) {
+    .control-menu-action-icon:is(:where(.group\/action):hover *) {
+      border-color: var(--acc-line);
+      color: var(--acc);
+    }
+  }
+  .control-search-panel {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line-2);
+    background-color: var(--surface);
+    --control-shadow: var(--elevation-floating);
+    width: min(34rem,100% - 1.5rem);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    position: absolute;
+    overflow: hidden;
+  }
+  .control-search-panel-document-end {
+    top: calc(var(--spacing) * 3);
+    right: calc(var(--spacing) * 5);
+    z-index: 20;
+  }
+  @media (max-width:760px) {
+    .control-search-panel-document-end {
+      top: var(--spacing);
+      right: var(--spacing);
+    }
+  }
+  @media (max-width:1024px) {
+    .control-search-panel-document-end {
+      right: calc(var(--spacing) * 3);
+    }
+  }
+  .control-search-panel-workspace-center {
+    top: calc(var(--spacing) * 2);
+    z-index: 60;
+    --control-translate-x: calc(calc(1 / 2 * 100%) * -1);
+    translate: var(--control-translate-x) var(--control-translate-y);
+    left: 50%;
+  }
+  .control-text-input {
+    border-radius: var(--r-sm);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line-2);
+    background-color: var(--sunk);
+    color: var(--ink);
+    --control-outline-style: none;
+    outline-style: none;
+  }
+  .control-text-input::placeholder {
+    color: var(--ink-3);
+  }
+  @media (hover:hover) {
+    .control-text-input:hover {
+      border-color: var(--ink-3);
+    }
+  }
+  .control-text-input:focus-visible {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+    outline-color: var(--ink-3);
+    --control-outline-style: solid;
+    outline-style: solid;
+  }
+  @media (forced-colors:active) {
+    .control-text-input:focus-visible {
+      outline-color: highlight;
+    }
+  }
+  .control-text-input:focus-visible {
+    outline-offset: 2px;
+  }
+  .control-text-input:disabled {
+    cursor: not-allowed;
+    background-color: var(--surface-2);
+    color: var(--ink-3);
+  }
+  .control-text-input[aria-invalid=true] {
+    border-color: var(--del);
+  }
+}

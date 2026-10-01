@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use gtl_models::settings::{
-    DiffFilesSort, UserSettingsRevision, ViewerAccessibility, ViewerDateFormat, ViewerLanguage,
-    ViewerScalePercent,
+    DiffFilesSort, PushConfirmationPreferences, UserSettingsRevision, ViewerAccessibility,
+    ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
 };
 use gtl_wire::viewer::{
     EditSettingsRequest, FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
@@ -31,6 +31,7 @@ pub(crate) enum SettingsField {
     Density,
     FocusWindowOnDiff,
     PushConfirmationRequired,
+    ViewerPushConfirmationRequired,
 }
 
 impl FormField for SettingsField {
@@ -46,6 +47,7 @@ impl FormField for SettingsField {
         Self::Density,
         Self::FocusWindowOnDiff,
         Self::PushConfirmationRequired,
+        Self::ViewerPushConfirmationRequired,
     ];
 
     fn request_field(self) -> &'static str {
@@ -61,6 +63,7 @@ impl FormField for SettingsField {
             Self::Density => "density",
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::PushConfirmationRequired => "push_confirmation_required",
+            Self::ViewerPushConfirmationRequired => "viewer_push_confirmation_required",
         }
     }
 
@@ -77,7 +80,7 @@ pub(crate) struct ViewerSettingsSelection {
     pub(crate) focus_window_on_diff: bool,
     pub(crate) copy_with_line_context: bool,
     pub(crate) diff_files_sort: DiffFilesSort,
-    pub(crate) push_confirmation_required: bool,
+    pub(crate) push_confirmation: PushConfirmationPreferences,
     pub(crate) theme: Option<ViewerTheme>,
     pub(crate) render_options: ViewerRenderOptions,
 }
@@ -96,6 +99,7 @@ pub(crate) enum SettingsEdit {
     DiffFilesSort(DiffFilesSort),
     FocusWindow(bool),
     ConfirmPush(bool),
+    ConfirmViewerPush(bool),
 }
 
 impl SettingsEdit {
@@ -112,7 +116,8 @@ impl SettingsEdit {
             Self::CopyWithLineContext(value) => selected.copy_with_line_context = value,
             Self::DiffFilesSort(value) => selected.diff_files_sort = value,
             Self::FocusWindow(value) => selected.focus_window_on_diff = value,
-            Self::ConfirmPush(value) => selected.push_confirmation_required = value,
+            Self::ConfirmPush(value) => selected.push_confirmation.cli_required = value,
+            Self::ConfirmViewerPush(value) => selected.push_confirmation.viewer_required = value,
         }
     }
 }
@@ -126,7 +131,7 @@ impl From<&ViewerUserSettings> for ViewerSettingsSelection {
             focus_window_on_diff: settings.focus_window_on_diff,
             copy_with_line_context: settings.copy_with_line_context,
             diff_files_sort: settings.diff_files_sort,
-            push_confirmation_required: settings.push_confirmation_required,
+            push_confirmation: settings.push_confirmation,
             theme: settings.configured_theme,
             render_options: settings.render_options,
         }
@@ -430,10 +435,22 @@ pub(crate) fn ViewerSettingsForm(
                                     id: "settings-push-confirmation",
                                     label: t!(language, "settings-push-confirmation"),
                                     hint: t!(language, "settings-push-confirmation-hint"),
-                                    checked: !selected.push_confirmation_required,
+                                    checked: !selected.push_confirmation.cli_required,
                                     error: field_errors.message(SettingsField::PushConfirmationRequired, language),
                                     onchange: move |checked: bool| {
                                         onchange.call(SettingsEdit::ConfirmPush(!checked));
+                                    },
+                                }
+                            }
+                            div { class: "settings-field-row",
+                                Checkbox {
+                                    id: "settings-viewer-push-confirmation",
+                                    label: t!(language, "settings-viewer-push-confirmation"),
+                                    hint: t!(language, "settings-viewer-push-confirmation-hint"),
+                                    checked: !selected.push_confirmation.viewer_required,
+                                    error: field_errors.message(SettingsField::ViewerPushConfirmationRequired, language),
+                                    onchange: move |checked: bool| {
+                                        onchange.call(SettingsEdit::ConfirmViewerPush(!checked));
                                     },
                                 }
                             }
@@ -527,8 +544,12 @@ pub(crate) fn viewer_settings_patch(
             selected.render_options.density,
         ),
         push_confirmation_required: changed_field(
-            &current.push_confirmation_required,
-            selected.push_confirmation_required,
+            &current.push_confirmation.cli_required,
+            selected.push_confirmation.cli_required,
+        ),
+        viewer_push_confirmation_required: changed_field(
+            &current.push_confirmation.viewer_required,
+            selected.push_confirmation.viewer_required,
         ),
         ..EditSettingsRequest::default()
     }
@@ -588,7 +609,9 @@ fn theme_options(language: ViewerLanguage) -> Vec<SelectOption> {
 mod tests {
     use gtl_wire::viewer::{FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions};
 
-    use super::{ViewerSettingsSelection, viewer_settings_patch};
+    use super::{
+        PushConfirmationPreferences, SettingsEdit, ViewerSettingsSelection, viewer_settings_patch,
+    };
 
     fn selection(
         theme: Option<gtl_wire::viewer::ViewerTheme>,
@@ -608,7 +631,10 @@ mod tests {
             focus_window_on_diff: true,
             copy_with_line_context: true,
             diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
-            push_confirmation_required,
+            push_confirmation: PushConfirmationPreferences {
+                cli_required: push_confirmation_required,
+                ..Default::default()
+            },
             accessibility: gtl_models::settings::ViewerAccessibility::default(),
         }
     }
@@ -656,6 +682,32 @@ mod tests {
             request.push_confirmation_required,
             FieldUpdate::Update(false)
         );
+        assert_eq!(
+            request.viewer_push_confirmation_required,
+            FieldUpdate::Unchanged
+        );
+    }
+
+    #[test]
+    fn viewer_push_preference_does_not_change_cli_confirmation() {
+        let current = selection(
+            None,
+            ViewerDiffLayout::Unified,
+            ViewerDiffDensity::Compact,
+            true,
+        );
+        let mut selected = current;
+        SettingsEdit::ConfirmViewerPush(false).apply(&mut selected);
+        let request = viewer_settings_patch(
+            current,
+            selected,
+            gtl_models::settings::UserSettingsRevision::from_digest([0x46; 32]),
+        );
+        assert_eq!(
+            request.viewer_push_confirmation_required,
+            FieldUpdate::Update(false)
+        );
+        assert_eq!(request.push_confirmation_required, FieldUpdate::Unchanged);
     }
 
     #[test]

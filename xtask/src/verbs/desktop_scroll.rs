@@ -3,7 +3,7 @@
 use std::{
     fs::{self, File},
     io::Read as _,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use gtl_benchmarks::desktop_scroll::{
     self, DesktopScrollComparison, DesktopScrollReport, MetricDelta, PanelComparison,
-    compare_reports,
+    ProcessResourceComparison, compare_reports,
 };
 
 use super::{desktop_e2e, repository_root};
@@ -22,8 +22,6 @@ const CARGO_JOBS_MAX: usize = 1;
 const RAYON_THREADS_MAX: usize = 2;
 const GIT_OUTPUT_BYTES_MAX: usize = 64 * 1024;
 const BENCHMARK_LAUNCHES: usize = 3;
-const BENCHMARK_BASELINE_RELATIVE_PATH: &str = ".artifacts/benchmarks/desktop-scroll/baseline.json";
-const BENCHMARK_CURRENT_RELATIVE_PATH: &str = ".artifacts/benchmarks/desktop-scroll/current.json";
 const BENCHMARK_REPORT_BYTES_MAX: u64 = 16 * 1024 * 1024;
 
 const FIXTURE_BOUNDS: WorkerBounds = WorkerBounds {
@@ -62,6 +60,18 @@ pub(crate) struct DesktopScrollBenchmarkArguments {
     /// Use five interaction samples per launch and separate quick reports.
     #[arg(long)]
     pub(crate) quick: bool,
+    /// Measure a prebuilt release viewer instead of rebuilding it.
+    #[arg(long, requires = "viewer_commit")]
+    pub(crate) viewer_binary: Option<PathBuf>,
+    /// Source commit of the prebuilt viewer.
+    #[arg(long, requires = "viewer_binary", value_parser = parse_commit)]
+    pub(crate) viewer_commit: Option<String>,
+    /// Directory containing this comparison's baseline.json and current.json.
+    #[arg(long)]
+    pub(crate) output_directory: Option<PathBuf>,
+    /// Capture viewer styles and animations without running timing measurements.
+    #[arg(long, conflicts_with_all = ["update", "quick"])]
+    pub(crate) capture_styles: bool,
 }
 
 pub(crate) fn refresh_fixture() -> Result<()> {
@@ -86,40 +96,59 @@ pub(crate) fn run_fixture_worker() -> Result<()> {
 pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Result<()> {
     require_linux_systemd("desktop scroll benchmark")?;
     let root = repository_root();
-    let baseline_path = root.join(if arguments.quick {
-        ".artifacts/benchmarks/desktop-scroll/quick-baseline.json"
+    let output_directory = root.join(
+        arguments
+            .output_directory
+            .as_deref()
+            .unwrap_or_else(|| Path::new(".artifacts/benchmarks/desktop-scroll")),
+    );
+    let baseline_path = output_directory.join(if arguments.quick {
+        "quick-baseline.json"
     } else {
-        BENCHMARK_BASELINE_RELATIVE_PATH
+        "baseline.json"
     });
-    let current_path = root.join(if arguments.quick {
-        ".artifacts/benchmarks/desktop-scroll/quick-current.json"
+    let current_path = output_directory.join(if arguments.quick {
+        "quick-current.json"
     } else {
-        BENCHMARK_CURRENT_RELATIVE_PATH
+        "current.json"
     });
-    let baseline = load_baseline(&baseline_path, arguments.update)?;
-    if !arguments.quick {
+    let baseline = if arguments.capture_styles {
+        None
+    } else {
+        load_baseline(&baseline_path, arguments.update)?
+    };
+    if !arguments.quick && !arguments.capture_styles {
         ensure_clean_repository(&root)?;
     }
+    fs::create_dir_all(&output_directory).context("create desktop scroll report directory")?;
     let executable =
         std::env::current_exe().context("resolve xtask desktop benchmark worker executable")?;
-    let source_commit = git_output(&root, &["rev-parse", "HEAD"])?;
+    let source_commit = arguments
+        .viewer_commit
+        .clone()
+        .map_or_else(|| git_output(&root, &["rev-parse", "HEAD"]), Ok)?;
+    let viewer_binary = arguments
+        .viewer_binary
+        .as_deref()
+        .map(fs::canonicalize)
+        .transpose()
+        .context("resolve prebuilt release viewer")?;
     ensure!(
         source_commit.len() == 40 && source_commit.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "Git returned an invalid source commit: {source_commit}"
     );
-    let source_commit =
-        if arguments.quick && !git_output(&root, &["status", "--porcelain=v1"])?.is_empty() {
-            format!("{source_commit}-dirty")
-        } else {
-            source_commit
-        };
-    let invocation = if arguments.quick {
-        "just bench-scroll --quick"
-    } else if arguments.update {
-        "just bench-scroll --update"
+    let source_commit = if viewer_binary.is_none()
+        && arguments.quick
+        && !git_output(&root, &["status", "--porcelain=v1"])?.is_empty()
+    {
+        format!("{source_commit}-dirty")
     } else {
-        "just bench-scroll"
+        source_commit
     };
+    let invocation = std::env::args().collect::<Vec<_>>().join(" ");
+    let styles_path = arguments
+        .capture_styles
+        .then(|| output_directory.join(format!("styles-{source_commit}")));
     process::run_step(&bounded_benchmark_worker_step(
         &executable,
         &BenchmarkWorkerInputs {
@@ -127,9 +156,15 @@ pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Resu
             launches: BENCHMARK_LAUNCHES,
             interaction_samples: if arguments.quick { 5 } else { 20 },
             source_commit: &source_commit,
-            invocation,
+            invocation: &invocation,
+            viewer_binary: viewer_binary.as_deref(),
+            styles_path: styles_path.as_deref(),
+            capture_styles: arguments.capture_styles,
         },
     ))?;
+    if arguments.capture_styles {
+        return Ok(());
+    }
 
     let current = read_report(&current_path)?;
     if let Some(baseline) = baseline {
@@ -158,6 +193,9 @@ struct BenchmarkWorkerInputs<'a> {
     interaction_samples: usize,
     source_commit: &'a str,
     invocation: &'a str,
+    viewer_binary: Option<&'a Path>,
+    styles_path: Option<&'a Path>,
+    capture_styles: bool,
 }
 
 fn bounded_fixture_worker_step(executable: &Path) -> Step {
@@ -179,6 +217,10 @@ fn bounded_benchmark_worker_step(executable: &Path, inputs: &BenchmarkWorkerInpu
     )
     .with_environment("CARGO_TERM_QUIET", "true")
     .with_environment(
+        "GTL_DESKTOP_SCROLL_CAPTURE_STYLES",
+        inputs.capture_styles.to_string(),
+    )
+    .with_environment(
         "GTL_DESKTOP_SCROLL_REPORT_PATH",
         inputs.output.to_string_lossy(),
     )
@@ -189,6 +231,18 @@ fn bounded_benchmark_worker_step(executable: &Path, inputs: &BenchmarkWorkerInpu
     )
     .with_environment("GTL_DESKTOP_SCROLL_SOURCE_COMMIT", inputs.source_commit)
     .with_environment("GTL_DESKTOP_SCROLL_INVOCATION", inputs.invocation)
+    .with_environment(
+        "GTL_DESKTOP_SCROLL_VIEWER_BINARY",
+        inputs
+            .viewer_binary
+            .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
+    )
+    .with_environment(
+        "GTL_DESKTOP_SCROLL_STYLES_PATH",
+        inputs
+            .styles_path
+            .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
+    )
     .with_environment(
         "GTL_DESKTOP_SCROLL_CPU_QUOTA_PERCENT",
         bounds.cpu_quota_percent.to_string(),
@@ -263,6 +317,14 @@ fn require_linux_systemd(operation: &str) -> Result<()> {
         bail!("bounded {operation} requires Linux systemd user scopes");
     }
     Ok(())
+}
+
+fn parse_commit(value: &str) -> Result<String, String> {
+    if value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(value.to_ascii_lowercase())
+    } else {
+        Err("expected a complete 40-character Git commit".to_owned())
+    }
 }
 
 fn ensure_clean_repository(root: &Path) -> Result<()> {
@@ -401,6 +463,7 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
     );
     print_panel("many-file loading", comparison.loading);
     print_panel("many-file diff document", comparison.diff_document);
+    print_resources("many-file scrolling", comparison.diff_document_resources);
     print_panel("changed files", comparison.changed_files);
     print_panel("commits", comparison.commits);
     print_metric("many-file peak RSS", comparison.peak_rss_bytes, |value| {
@@ -426,11 +489,36 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
         "single-file diff document",
         comparison.single_file_diff_document,
     );
+    print_resources(
+        "single-file scrolling",
+        comparison.single_file_diff_document_resources,
+    );
     print_metric(
         "single-file peak RSS",
         comparison.single_file_peak_rss_bytes,
         |value| format!("{:.1} MiB", value / 1024.0 / 1024.0),
     );
+}
+
+fn print_resources(name: &str, comparison: ProcessResourceComparison) {
+    print_metric(
+        &format!("{name} wall time"),
+        comparison.wall_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
+    print_metric(
+        &format!("{name} process CPU time"),
+        comparison.process_cpu_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
+    for (label, delta) in [
+        ("peak RSS", comparison.peak_rss_bytes),
+        ("viewer peak RSS", comparison.viewer_peak_rss_bytes),
+    ] {
+        print_metric(&format!("{name} {label}"), delta, |value| {
+            format!("{:.1} MiB", value / 1024.0 / 1024.0)
+        });
+    }
 }
 
 fn print_panel(name: &str, comparison: PanelComparison) {
@@ -463,7 +551,84 @@ fn print_metric(label: &str, delta: MetricDelta, format_value: impl Fn(f64) -> S
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser as _;
+
     use super::*;
+    use crate::cli::{Cli, Command};
+
+    #[test]
+    fn prebuilt_measurement_requires_source_identity_and_preserves_arguments() -> Result<()> {
+        let command = ["xtask", "desktop-scroll-benchmark"];
+        assert!(
+            Cli::try_parse_from(
+                command
+                    .into_iter()
+                    .chain(["--viewer-binary", "/tmp/viewer"])
+            )
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(command.into_iter().chain([
+                "--viewer-commit",
+                "0123456789012345678901234567890123456789"
+            ]))
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(command.into_iter().chain([
+                "--viewer-binary",
+                "/tmp/viewer",
+                "--viewer-commit",
+                "main"
+            ]))
+            .is_err()
+        );
+        let cli = Cli::try_parse_from(command.into_iter().chain([
+            "--viewer-binary",
+            "/tmp/viewer",
+            "--viewer-commit",
+            "ABCDEF6789012345678901234567890123456789",
+            "--output-directory",
+            "/tmp/reports",
+            "--capture-styles",
+        ]))
+        .unwrap();
+        let Command::DesktopScrollBenchmark(arguments) = cli.command else {
+            bail!("expected desktop scroll benchmark");
+        };
+        assert_eq!(
+            arguments.viewer_binary.as_deref(),
+            Some(Path::new("/tmp/viewer"))
+        );
+        assert_eq!(
+            arguments.viewer_commit.as_deref(),
+            Some("abcdef6789012345678901234567890123456789")
+        );
+        assert_eq!(
+            arguments.output_directory.as_deref(),
+            Some(Path::new("/tmp/reports"))
+        );
+        assert!(arguments.capture_styles);
+        Ok(())
+    }
+
+    #[test]
+    fn standalone_style_capture_excludes_measurement_options() {
+        for option in ["--update", "--quick"] {
+            assert!(
+                Cli::try_parse_from([
+                    "xtask",
+                    "desktop-scroll-benchmark",
+                    "--capture-styles",
+                    option
+                ])
+                .is_err()
+            );
+        }
+        assert!(
+            Cli::try_parse_from(["xtask", "desktop-scroll-benchmark", "--capture-styles"]).is_ok()
+        );
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -513,6 +678,9 @@ mod tests {
                 interaction_samples: 20,
                 source_commit: "0123456789012345678901234567890123456789",
                 invocation: "just bench-scroll",
+                viewer_binary: None,
+                styles_path: None,
+                capture_styles: false,
             },
         );
 

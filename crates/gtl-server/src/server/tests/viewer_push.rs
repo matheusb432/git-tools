@@ -237,6 +237,46 @@ async fn confirmation_uses_catalogue_project_title_when_available() -> TestResul
     Ok(())
 }
 
+#[tokio::test]
+async fn global_viewer_confirmation_is_independent_of_cli_for_unregistered_repositories()
+-> TestResult {
+    use gtl_wire::viewer::{EditSettingsRequest, FieldUpdate};
+
+    let mut fixture = Fixture::new().await?;
+    let mut settings_client =
+        v1::settings_service_client::SettingsServiceClient::new(fixture.server.native_channel());
+    for (cli_confirmation, viewer_confirmation) in
+        [(true, true), (true, false), (false, true), (false, false)]
+    {
+        fixture
+            .client
+            .edit_settings(proto::viewer::encode_edit_settings_request(
+                &EditSettingsRequest {
+                    push_confirmation_required: FieldUpdate::Update(cli_confirmation),
+                    viewer_push_confirmation_required: FieldUpdate::Update(viewer_confirmation),
+                    ..Default::default()
+                },
+            ))
+            .await?;
+        let request = fixture.prepare().await?;
+        let ViewerPushStatus::Review(preview) = fixture.status(request).await? else {
+            return Err("expected review".into());
+        };
+        assert_eq!(preview.project, None);
+        assert_eq!(preview.no_confirmation, !viewer_confirmation);
+        let cli_requirement = settings_client
+            .get_push_confirmation_requirement(v1::GetPushConfirmationRequirementRequest {})
+            .await?
+            .into_inner();
+        assert_eq!(cli_requirement.push_confirmation_required, cli_confirmation);
+    }
+    let request = fixture.prepare().await?;
+    assert_eq!(fixture.start(request).await?, ViewerPushStatus::Succeeded);
+    assert_eq!(fixture.remote.git(&["rev-parse", "main"]), fixture.latest);
+    fixture.server.stop().await?;
+    Ok(())
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn confirmed_pushes_continue_in_server_order_after_the_client_disconnects() -> TestResult {

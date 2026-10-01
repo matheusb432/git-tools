@@ -94,16 +94,20 @@ pub enum Command {
         #[arg(value_enum)]
         platform: crate::verbs::release_package::ReleasePlatform,
     },
-    /// Generate the viewer stylesheet and stage the release Dioxus Web bundle.
+    /// Compile the viewer styles and stage the release Dioxus Web bundle.
     WebBuild,
-    /// Serve the Dioxus shell with repository-owned asset watchers.
+    /// Serve the Dioxus shell with SCSS refresh and Rust hot reload.
     WebServe {
         /// Arguments forwarded to `dx serve`.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<String>,
     },
-    /// Generate the tracked shared Tailwind stylesheet.
-    WebStyles,
+    /// Serve component stories with native SCSS import refresh.
+    ComponentPreviewServe {
+        /// Arguments forwarded to `dx-story serve`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<String>,
+    },
     /// Reject forbidden outward Cargo dependency edges.
     CheckStructure,
     /// Compile every parser feature for the browser target with the managed C toolchain.

@@ -55,12 +55,30 @@ const SCROLL_BENCHMARK_TEST_ARGUMENTS: &[&str] = &[
     "--test-threads",
     "1",
 ];
+const SCROLL_STYLES_TEST_ARGUMENTS: &[&str] = &[
+    "test",
+    "-p",
+    "gtl-desktop-e2e",
+    "--features",
+    "e2e",
+    "--test",
+    "viewer",
+    "--",
+    "desktop_scroll_baseline::styles::production_viewer_captures_style_states",
+    "--exact",
+    "--ignored",
+    "--nocapture",
+    "--test-threads",
+    "1",
+];
 const SCROLL_BENCHMARK_ENVIRONMENT_VARIABLE_NAMES: &[&str] = &[
     "GTL_DESKTOP_SCROLL_REPORT_PATH",
     "GTL_DESKTOP_SCROLL_LAUNCHES",
     "GTL_DESKTOP_SCROLL_INTERACTION_SAMPLES",
     "GTL_DESKTOP_SCROLL_SOURCE_COMMIT",
     "GTL_DESKTOP_SCROLL_INVOCATION",
+    "GTL_DESKTOP_SCROLL_STYLES_PATH",
+    "GTL_DESKTOP_SCROLL_CAPTURE_STYLES",
     "GTL_DESKTOP_SCROLL_CPU_QUOTA_PERCENT",
     "GTL_DESKTOP_SCROLL_MEMORY_MAX_BYTES",
     "GTL_DESKTOP_SCROLL_MEMORY_SWAP_MAX_BYTES",
@@ -398,9 +416,18 @@ pub(crate) fn run_scroll_benchmark() -> Result<()> {
     if std::env::consts::OS != "linux" {
         bail!("the production desktop scroll benchmark requires Linux WebKit");
     }
-    build::run(BuildTarget::Both)?;
+    let viewer = env::var_os("GTL_DESKTOP_SCROLL_VIEWER_BINARY")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+    if viewer.is_none() {
+        build::run(BuildTarget::Both)?;
+    }
 
-    let sandbox = Sandbox::create()?;
+    let mut sandbox = Sandbox::create()?;
+    if let Some(viewer) = viewer {
+        sandbox.viewer_binary = fs::canonicalize(&viewer)
+            .with_context(|| format!("resolve prebuilt viewer {}", viewer.display()))?;
+    }
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
     let environment = scroll_benchmark_environment(&sandbox)?;
     let result = run_linux_session(&sandbox, environment, |environment| {
@@ -753,7 +780,13 @@ fn run_scroll_benchmark_phase(
     command
         .arg("--config")
         .arg(&sandbox.cargo_runner_config)
-        .args(SCROLL_BENCHMARK_TEST_ARGUMENTS)
+        .args(
+            if env::var("GTL_DESKTOP_SCROLL_CAPTURE_STYLES").as_deref() == Ok("true") {
+                SCROLL_STYLES_TEST_ARGUMENTS
+            } else {
+                SCROLL_BENCHMARK_TEST_ARGUMENTS
+            },
+        )
         .current_dir(".");
     seed_hostile_git_environment(&mut command, &sandbox.root);
     env.apply_cargo(&mut command, host_environment);

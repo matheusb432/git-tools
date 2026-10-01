@@ -24,7 +24,7 @@ pub(super) fn DiffRowsScrollArea(
         div { class: "diff-file-scroll",
             div {
                 id: id.clone(),
-                class: "diff-rows text-sm leading-5",
+                class: "diff-rows",
                 style,
                 aria_label: t!(
                     use_language(), "diff-rows-label", layout = layout.as_str(), density = density

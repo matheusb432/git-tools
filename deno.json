@@ -1,7 +1,0 @@
-{
-  "imports": {
-    "@tailwindcss/cli": "npm:@tailwindcss/cli@4.3.3",
-    "tailwindcss": "npm:tailwindcss@4.3.3"
-  },
-  "nodeModulesDir": "auto"
-}

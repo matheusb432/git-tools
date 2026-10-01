@@ -332,6 +332,21 @@ impl PushAllExclusions {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PushConfirmationPreferences {
+    pub cli_required: bool,
+    pub viewer_required: bool,
+}
+
+impl Default for PushConfirmationPreferences {
+    fn default() -> Self {
+        Self {
+            cli_required: UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT,
+            viewer_required: UserSettings::VIEWER_PUSH_CONFIRMATION_REQUIRED_DEFAULT,
+        }
+    }
+}
+
 // TODO: remove Clone once a store-owned smart pointer is added.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSettings {
@@ -345,7 +360,7 @@ pub struct UserSettings {
     viewer_render_options: RenderOptions,
     viewer_keybindings: ViewerKeybindings,
     sidebar_visibility: crate::viewer::ViewerSidebarVisibility,
-    push_confirmation_required: bool,
+    push_confirmation: PushConfirmationPreferences,
     viewer_push_no_confirmation_projects: BTreeSet<ProjectName>,
     push_all_exclusions: PushAllExclusions,
     tag_patterns: TagPatternSettings,
@@ -365,6 +380,7 @@ impl Default for UserSettings {
 
 impl UserSettings {
     pub const PUSH_CONFIRMATION_REQUIRED_DEFAULT: bool = true;
+    pub const VIEWER_PUSH_CONFIRMATION_REQUIRED_DEFAULT: bool = true;
     pub const COPY_WITH_LINE_CONTEXT_DEFAULT: bool = true;
 
     /// Constructs a complete settings snapshot from validated values.
@@ -387,7 +403,10 @@ impl UserSettings {
             viewer_render_options,
             viewer_keybindings,
             sidebar_visibility: crate::viewer::ViewerSidebarVisibility::default(),
-            push_confirmation_required,
+            push_confirmation: PushConfirmationPreferences {
+                cli_required: push_confirmation_required,
+                ..PushConfirmationPreferences::default()
+            },
             viewer_push_no_confirmation_projects: BTreeSet::new(),
             push_all_exclusions,
             tag_patterns: TagPatternSettings::default(),
@@ -507,11 +526,18 @@ impl UserSettings {
     }
 
     #[must_use]
-    pub fn with_push_confirmation_required(self, push_confirmation_required: bool) -> Self {
-        Self {
-            push_confirmation_required,
-            ..self
-        }
+    pub fn with_push_confirmation_required(mut self, push_confirmation_required: bool) -> Self {
+        self.push_confirmation.cli_required = push_confirmation_required;
+        self
+    }
+
+    #[must_use]
+    pub fn with_viewer_push_confirmation_required(
+        mut self,
+        viewer_push_confirmation_required: bool,
+    ) -> Self {
+        self.push_confirmation.viewer_required = viewer_push_confirmation_required;
+        self
     }
 
     #[must_use]
@@ -559,7 +585,13 @@ impl UserSettings {
     /// Returns whether a plain current-repository push requires confirmation.
     #[must_use]
     pub const fn push_confirmation_required(&self) -> bool {
-        self.push_confirmation_required
+        self.push_confirmation.cli_required
+    }
+
+    /// Returns whether viewer pushes require confirmation unless the project opts out.
+    #[must_use]
+    pub const fn viewer_push_confirmation_required(&self) -> bool {
+        self.push_confirmation.viewer_required
     }
 
     /// Returns the configured project names omitted from managed push fan-out.

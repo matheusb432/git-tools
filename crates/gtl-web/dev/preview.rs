@@ -13,7 +13,7 @@ use crate::shared::{
 };
 
 const FAVICON: Asset = asset!("/src/app/assets/app-icon.svg");
-const PREVIEW_CSS: Asset = asset!("/assets/component-preview.css");
+const PREVIEW_CSS: Asset = asset!("/dev/styles/preview.scss");
 const CATALOG_CONFIG: CatalogConfig = CatalogConfig::new("Component catalog")
     .with_story_sets_per_page(match NonZeroUsize::new(15) {
         Some(value) => value,
@@ -38,6 +38,11 @@ pub(super) fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: PREVIEW_CSS, blocking: "render" }
+        document::Link {
+            rel: "stylesheet",
+            href: crate::app::DIFF_ROWS_CSS,
+            blocking: "render",
+        }
         Catalog { config: CATALOG_CONFIG }
     }
 }

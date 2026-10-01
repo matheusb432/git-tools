@@ -1,3 +1,0 @@
-# Workstations inherit Deno globally; CI has no user tool configuration.
-[tools]
-deno = "2.9.5"

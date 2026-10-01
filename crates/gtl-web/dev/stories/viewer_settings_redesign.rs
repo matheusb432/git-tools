@@ -522,7 +522,7 @@ fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
         focus_window_on_diff: true,
         copy_with_line_context: true,
         diff_files_sort: gtl_models::settings::DiffFilesSort::Path,
-        push_confirmation_required: true,
+        push_confirmation: gtl_models::settings::PushConfirmationPreferences::default(),
         accessibility: gtl_models::settings::ViewerAccessibility::default(),
     };
     let mut selected = use_signal(|| initial);
@@ -604,12 +604,6 @@ mod tests {
         });
 
         assert!(html.contains(r#"class="viewer-tab-selection-indicator" data-active="true""#));
-        let styles = include_str!("../../src/app/assets/styles/viewer-tabs.css");
-        assert!(styles.contains("min-w-24 max-w-80 shrink-0"));
-        assert!(
-            styles.contains(r#".viewer-tab[data-active="true"] { @apply bg-surface-2 text-ink; }"#)
-        );
-        assert!(styles.contains(r#".viewer-tab-selection-indicator[data-active="true"] { @apply opacity-100 transition-opacity"#));
         assert!(html.contains(r#"data-gtl-diff-file="""#));
         assert!(html.contains(r#"title="Copy commit ID""#));
         assert!(html.contains(r#"aria-pressed="false""#));

@@ -6,7 +6,7 @@ use std::{
     fs::{self, File},
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
-    process::{Child, Command, ExitStatus},
+    process::{Child, ExitStatus},
     thread,
     time::{Duration, Instant},
 };
@@ -29,8 +29,6 @@ const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
 const SOURCE_FILES: &[&str] = &[
     "Cargo.lock",
     "Cargo.toml",
-    "deno.json",
-    "deno.lock",
     "mise.lock",
     "mise.toml",
     "crates/gtl-wire/Cargo.toml",
@@ -47,11 +45,9 @@ const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-desktop/src",
     "crates/gtl-parser/src",
     "crates/gtl-parser/wasm-compat",
-    "crates/gtl-web/assets",
     "crates/gtl-web/src",
     "crates/gtl-web-contracts/src",
 ];
-const GENERATED_SOURCE_OUTPUTS: &[&str] = &["crates/gtl-web/assets/tailwind.css"];
 const FILE_COUNT_MAX: usize = 10_000;
 const FILE_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const SOURCE_BYTES_MAX: u64 = 256 * 1024 * 1024;
@@ -62,18 +58,8 @@ const EXPECTED_BUNDLE_ASSETS: &[(&str, &str)] = &[
     ("focus-trap-dxh", "js"),
     ("gtl-web-dxh", "js"),
     ("gtl-web_bg-dxh", "wasm"),
-    ("tailwind-dxh", "css"),
-];
-const TAILWIND_ARGUMENTS: &[&str] = &[
-    "run",
-    "--frozen",
-    "--allow-all",
-    "@tailwindcss/cli",
-    "--input",
-    "crates/gtl-web/src/app/assets/styles/tailwind.css",
-    "--output",
-    "crates/gtl-web/assets/tailwind.css",
-    "--minify",
+    ("viewer-dxh", "css"),
+    ("diff-rows-dxh", "css"),
 ];
 const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
     "bundle",
@@ -105,18 +91,37 @@ const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
 const DEVELOPMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEVELOPMENT_STOP_GRACE_PERIOD: Duration = Duration::from_secs(2);
 
-pub(crate) fn serve(arguments: &[String]) -> Result<()> {
-    build_styles()?;
+const VIEWER_STYLE_SOURCE_DIRECTORIES: &[&str] = &["crates/gtl-web/src/app/assets/styles"];
+const PREVIEW_STYLE_SOURCE_DIRECTORIES: &[&str] = &[
+    "crates/gtl-web/src/app/assets/styles",
+    "crates/gtl-web/dev/styles",
+];
 
+struct DevelopmentSources {
+    rust: BTreeSet<PathBuf>,
+    styles: String,
+}
+
+pub(crate) fn serve(arguments: &[String]) -> Result<()> {
     let root = repository_root();
-    let _tailwind_watcher = DevelopmentWatcher::spawn(
-        "dioxus-tailwind-watch",
-        "deno",
-        &watch_arguments(TAILWIND_ARGUMENTS),
-        &root,
-    )?;
     let step = super::wasm_c::configure_step(&root, development_serve_step(&root, arguments))?;
-    run_development_server(&step, &root)
+    run_development_server(
+        &step,
+        &root,
+        DEVELOPMENT_RUST_SOURCE_DIRECTORIES,
+        VIEWER_STYLE_SOURCE_DIRECTORIES,
+    )
+}
+
+pub(crate) fn serve_component_preview(arguments: &[String]) -> Result<()> {
+    let root = repository_root();
+    let step = Step::new("component-preview-serve", "dx-story", ["serve"])
+        .with_arguments(arguments.iter().cloned())
+        .with_current_directory(&root);
+    if arguments.iter().any(|argument| argument == "--no-watch") {
+        return process::run_step(&step);
+    }
+    run_development_server(&step, &root, &[], PREVIEW_STYLE_SOURCE_DIRECTORIES)
 }
 
 fn development_serve_step(root: &Path, arguments: &[String]) -> Step {
@@ -127,14 +132,20 @@ fn development_serve_step(root: &Path, arguments: &[String]) -> Step {
         .with_current_directory(root)
 }
 
-fn run_development_server(step: &Step, root: &Path) -> Result<()> {
-    // Dioxus 0.7 snapshots its Rust source map at startup and silently ignores files created
-    // afterward. Restarting only for new Rust paths refreshes that map without sacrificing normal
-    // RSX hot reloads.
-    let mut known_sources = development_rust_sources(root)?;
-    while let Some(current_sources) =
-        run_development_server_until_source_change(step, root, &known_sources)?
-    {
+fn run_development_server(
+    step: &Step,
+    root: &Path,
+    rust_directories: &[&str],
+    style_directories: &[&str],
+) -> Result<()> {
+    let mut known_sources = development_sources(root, rust_directories, style_directories)?;
+    while let Some(current_sources) = run_development_server_until_source_change(
+        step,
+        root,
+        &known_sources,
+        rust_directories,
+        style_directories,
+    )? {
         known_sources = current_sources;
     }
     Ok(())
@@ -143,8 +154,10 @@ fn run_development_server(step: &Step, root: &Path) -> Result<()> {
 fn run_development_server_until_source_change(
     step: &Step,
     root: &Path,
-    known_sources: &BTreeSet<PathBuf>,
-) -> Result<Option<BTreeSet<PathBuf>>> {
+    known_sources: &DevelopmentSources,
+    rust_directories: &[&str],
+    style_directories: &[&str],
+) -> Result<Option<DevelopmentSources>> {
     let mut server = DevelopmentServer::spawn(step)?;
     loop {
         if let Some(status) = server.try_wait()? {
@@ -152,9 +165,9 @@ fn run_development_server_until_source_change(
             return Ok(None);
         }
 
-        let current_sources = development_rust_sources(root)?;
-        let new_sources = new_development_rust_sources(known_sources, &current_sources);
-        if new_sources.is_empty() {
+        let current_sources = development_sources(root, rust_directories, style_directories)?;
+        let new_sources = new_development_rust_sources(&known_sources.rust, &current_sources.rust);
+        if new_sources.is_empty() && known_sources.styles == current_sources.styles {
             thread::sleep(DEVELOPMENT_POLL_INTERVAL);
             continue;
         }
@@ -169,7 +182,19 @@ fn run_development_server_until_source_change(
             })
             .collect::<Vec<_>>()
             .join(", ");
-        eprintln!("dioxus-web-serve: restarting Dioxus to register new Rust source: {paths}");
+        if known_sources.styles != current_sources.styles {
+            // Dioxus 0.7 refreshes primary SCSS assets but does not track their imports.
+            eprintln!(
+                "{}: restarting to compile changed stylesheet imports",
+                step.label()
+            );
+        }
+        if !paths.is_empty() {
+            eprintln!(
+                "{}: restarting to register new Rust source: {paths}",
+                step.label()
+            );
+        }
         server.stop()?;
         return Ok(Some(current_sources));
     }
@@ -185,9 +210,24 @@ fn development_server_result(step: &Step, status: ExitStatus) -> Result<()> {
     Ok(())
 }
 
-fn development_rust_sources(root: &Path) -> Result<BTreeSet<PathBuf>> {
+fn development_sources(
+    root: &Path,
+    rust_directories: &[&str],
+    style_directories: &[&str],
+) -> Result<DevelopmentSources> {
+    let mut styles = Vec::new();
+    for directory in style_directories {
+        styles.extend(collect_tree_files(&root.join(directory))?);
+    }
+    Ok(DevelopmentSources {
+        rust: development_rust_sources(root, rust_directories)?,
+        styles: fingerprint_source_files(root, styles)?,
+    })
+}
+
+fn development_rust_sources(root: &Path, directories: &[&str]) -> Result<BTreeSet<PathBuf>> {
     let mut sources = BTreeSet::new();
-    for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
+    for directory in directories {
         sources.extend(
             collect_tree_files(&root.join(directory))?
                 .into_iter()
@@ -283,41 +323,6 @@ impl Drop for DevelopmentServer {
     }
 }
 
-fn watch_arguments(arguments: &[&'static str]) -> Vec<&'static str> {
-    let mut watched = arguments.to_vec();
-    watched.extend_from_slice(&["--watch=always", "--poll=100"]);
-    watched
-}
-
-struct DevelopmentWatcher {
-    label: &'static str,
-    child: Child,
-}
-
-impl DevelopmentWatcher {
-    fn spawn(label: &'static str, program: &str, arguments: &[&str], root: &Path) -> Result<Self> {
-        let child = Command::new(program)
-            .args(arguments)
-            .current_dir(root)
-            .spawn()
-            .with_context(|| format!("start {label}"))?;
-        Ok(Self { label, child })
-    }
-}
-
-impl Drop for DevelopmentWatcher {
-    fn drop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none()
-            && let Err(error) = self.child.kill()
-        {
-            eprintln!("{0}: failed to stop watcher: {error}", self.label);
-        }
-        if let Err(error) = self.child.wait() {
-            eprintln!("{0}: failed to reap watcher: {error}", self.label);
-        }
-    }
-}
-
 pub(crate) fn build_release() -> Result<()> {
     let root = repository_root();
     let _lock = lock_web_assets(&root)?;
@@ -325,8 +330,7 @@ pub(crate) fn build_release() -> Result<()> {
 }
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
-    let inputs_before = release_input_fingerprint(root)?;
-    build_styles_unlocked(root)?;
+    let inputs_before = source_fingerprint(root)?;
     let target = cargo_target_directory(root)?;
     clean_desktop_release_outputs(root, &target)?;
     let step = Step::new(
@@ -337,7 +341,7 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     .with_environment("RUSTC_WRAPPER", "")
     .with_current_directory(root);
     process::run_step(&super::wasm_c::configure_step(root, step)?)?;
-    let inputs_after = release_input_fingerprint(root)?;
+    let inputs_after = source_fingerprint(root)?;
     ensure!(
         inputs_after == inputs_before,
         "Dioxus Web inputs changed during asset generation or bundling; retry the build"
@@ -348,23 +352,6 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     write_fingerprint(root, SOURCE_FINGERPRINT_PATH, &fingerprint)?;
     write_fingerprint(root, BUNDLE_FINGERPRINT_PATH, &bundle)?;
     verify_staged_bundle(root)
-}
-
-pub(crate) fn build_styles() -> Result<()> {
-    let root = repository_root();
-    let _lock = lock_web_assets(&root)?;
-    build_styles_unlocked(&root)
-}
-
-pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
-    process::run_step(
-        &Step::new(
-            "dioxus-tailwind",
-            "deno",
-            TAILWIND_ARGUMENTS.iter().copied(),
-        )
-        .with_current_directory(root),
-    )
 }
 
 pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
@@ -515,14 +502,6 @@ fn write_fingerprint(root: &Path, relative: &str, fingerprint: &str) -> Result<(
 }
 
 fn source_fingerprint(root: &Path) -> Result<String> {
-    fingerprint_sources(root, true)
-}
-
-fn release_input_fingerprint(root: &Path) -> Result<String> {
-    fingerprint_sources(root, false)
-}
-
-fn fingerprint_sources(root: &Path, include_generated: bool) -> Result<String> {
     let mut files = SOURCE_FILES
         .iter()
         .map(|path| root.join(path))
@@ -530,15 +509,12 @@ fn fingerprint_sources(root: &Path, include_generated: bool) -> Result<String> {
     for directory in SOURCE_DIRECTORIES {
         files.extend(collect_tree_files(&root.join(directory))?);
     }
+    fingerprint_source_files(root, files)
+}
+
+fn fingerprint_source_files(root: &Path, mut files: Vec<PathBuf>) -> Result<String> {
     files.sort();
     files.dedup();
-    if !include_generated {
-        let generated = GENERATED_SOURCE_OUTPUTS
-            .iter()
-            .map(|path| root.join(path))
-            .collect::<Vec<_>>();
-        files.retain(|path| generated.iter().all(|output| !path.starts_with(output)));
-    }
     ensure!(
         files.len() <= FILE_COUNT_MAX,
         "Dioxus source inventory exceeds {FILE_COUNT_MAX} files"
@@ -694,7 +670,8 @@ mod tests {
             ("assets/focus-trap-dxhone.js", "focus"),
             (application_script, "app"),
             ("assets/gtl-web_bg-dxhone.wasm", "wasm"),
-            ("assets/tailwind-dxhone.css", "body{}"),
+            ("assets/viewer-dxhone.css", "body{}"),
+            ("assets/diff-rows-dxhone.css", "@layer components{}"),
         ] {
             let path = public.join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -913,14 +890,10 @@ mod tests {
                 CANDIDATE_DIRECTORY
             ]
         );
-        assert_eq!(TAILWIND_ARGUMENTS[3], "@tailwindcss/cli");
-        assert!(TAILWIND_ARGUMENTS.contains(&"crates/gtl-web/assets/tailwind.css"));
     }
 
     #[test]
-    fn development_serve_watches_the_shared_tailwind_source() {
-        let watched = watch_arguments(TAILWIND_ARGUMENTS);
-        assert!(watched.ends_with(&["--watch=always", "--poll=100"]));
+    fn development_serve_enables_dioxus_asset_and_rsx_hot_reload() {
         assert!(
             SERVE_ARGUMENTS
                 .windows(2)
@@ -931,6 +904,42 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
         );
+    }
+
+    #[test]
+    fn development_import_changes_require_refresh_without_primary_asset_edits() {
+        let root = tempfile::tempdir().unwrap();
+        let styles = root.path().join("styles");
+        fs::create_dir(&styles).unwrap();
+        let primary = styles.join("viewer.scss");
+        fs::write(&primary, "@import './controls';").unwrap();
+        fs::write(styles.join("controls.scss"), ".button { color: red; }").unwrap();
+        let before = development_sources(root.path(), &[], &["styles"]).unwrap();
+
+        fs::write(styles.join("controls.scss"), ".button { color: blue; }").unwrap();
+        let after = development_sources(root.path(), &[], &["styles"]).unwrap();
+
+        assert_ne!(before.styles, after.styles);
+        assert_eq!(before.rust, after.rust);
+        assert_eq!(
+            fs::read_to_string(&primary).unwrap(),
+            "@import './controls';"
+        );
+    }
+
+    #[test]
+    fn development_file_notifications_without_content_changes_do_not_refresh() {
+        let root = tempfile::tempdir().unwrap();
+        let styles = root.path().join("styles");
+        fs::create_dir(&styles).unwrap();
+        let path = styles.join("controls.scss");
+        fs::write(&path, ".button { color: red; }").unwrap();
+        let before = development_sources(root.path(), &[], &["styles"]).unwrap();
+
+        fs::write(&path, ".button { color: red; }").unwrap();
+        let after = development_sources(root.path(), &[], &["styles"]).unwrap();
+
+        assert_eq!(before.styles, after.styles);
     }
 
     #[test]
@@ -959,12 +968,14 @@ mod tests {
         for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
             fs::create_dir_all(root.path().join(directory)).unwrap();
         }
-        let before = development_rust_sources(root.path()).unwrap();
+        let before =
+            development_rust_sources(root.path(), DEVELOPMENT_RUST_SOURCE_DIRECTORIES).unwrap();
         let rust_source = root.path().join("crates/gtl-web/src/new_view.rs");
         fs::create_dir_all(rust_source.parent().unwrap()).unwrap();
         fs::write(&rust_source, "pub fn code_text() {}").unwrap();
         fs::write(root.path().join("crates/gtl-web/src/notes.txt"), "not Rust").unwrap();
-        let after = development_rust_sources(root.path()).unwrap();
+        let after =
+            development_rust_sources(root.path(), DEVELOPMENT_RUST_SOURCE_DIRECTORIES).unwrap();
 
         assert_eq!(new_development_rust_sources(&before, &after), [rust_source]);
     }

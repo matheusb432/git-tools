@@ -1,0 +1,152 @@
+@layer components {
+  .dialog-surface {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line-2);
+    background-color: var(--surface);
+    width: min(34rem,100vw - 2rem);
+    height: min(42rem,100vh - 2rem);
+    color: var(--ink);
+    --control-shadow: 0 0 #0000;
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+  }
+  .dialog-surface::backdrop {
+    background-color: var(--bg);
+  }
+  @supports (color:color-mix(in lab, red, red)) {
+    .dialog-surface::backdrop {
+      background-color: color-mix(in oklab, var(--bg) 80%, transparent);
+    }
+  }
+  .dialog-surface-fit {
+    height: auto;
+    max-height: min(42rem,100vh - 2rem);
+  }
+  .dialog-body {
+    grid-template-rows: auto minmax(0,1fr);
+    display: grid;
+  }
+  .dialog-header {
+    border-bottom-style: var(--control-border-style);
+    border-bottom-width: 1px;
+    border-color: var(--line);
+    justify-content: space-between;
+    align-items: center;
+    display: flex;
+  }
+  .dialog-surface[open]:not([data-state=closing]) {
+    animation: .2s cubic-bezier(.16,1,.3,1) both dialog-surface-enter;
+  }
+  .dialog-surface[open]:not([data-state=closing])::backdrop {
+    animation: .2s ease-out both dialog-scrim-in;
+  }
+  .dialog-surface[data-state=closing] {
+    animation: .12s ease-in both dialog-surface-exit;
+  }
+  .dialog-surface[data-state=closing]::backdrop {
+    animation: .12s ease-in both dialog-scrim-out;
+  }
+  .hover-popover-shell {
+    z-index: 70;
+    border-style: var(--control-border-style);
+    background-color: #0000;
+    border-width: 0;
+    width: min(19rem,100vw - 1rem);
+    position: fixed;
+    inset: auto;
+  }
+  .hover-popover-content {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line-2);
+    background-color: var(--surface);
+    max-height: min(18rem,100vh - 1rem);
+    color: var(--ink);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    animation: .1s linear commit-popover-enter;
+    overflow: hidden auto;
+  }
+  @media (prefers-reduced-motion:reduce) {
+    .hover-popover-content {
+      animation: none;
+    }
+  }
+  .icon-popover {
+    flex: none;
+    display: inline-flex;
+  }
+  .icon-popover[data-placement=viewport-end] {
+    margin-block: var(--spacing);
+  }
+  @media (max-width:760px) {
+    .icon-popover[data-placement=viewport-end] {
+      margin-block: calc(var(--spacing) * .5);
+    }
+  }
+  .popover-surface {
+    border-radius: var(--r);
+    border-style: var(--control-border-style);
+    border-width: 1px;
+    border-color: var(--line-2);
+    background-color: var(--surface);
+    text-align: left;
+    white-space: normal;
+    color: var(--ink);
+    --control-shadow: var(--elevation-floating);
+    box-shadow: var(--control-inset-shadow), var(--control-inset-ring-shadow), var(--control-ring-offset-shadow), var(--control-ring-shadow), var(--control-shadow);
+    margin: 0;
+    padding: 0;
+    position: fixed;
+    inset: auto;
+    overflow: hidden;
+  }
+  .popover-surface[data-placement=viewport-end] {
+    top: 3.25rem;
+    right: calc(var(--spacing) * 3);
+    width: min(17.25rem,100vw - 1rem);
+    max-height: calc(100vh - 3.75rem);
+  }
+  @media (max-width:760px) {
+    .popover-surface[data-placement=viewport-end] {
+      top: 3.75rem;
+      right: calc(var(--spacing) * 2);
+      max-height: calc(100vh - 4.25rem);
+    }
+  }
+  .popover-surface[data-placement=trigger-end] {
+    margin-top: var(--spacing);
+    position-area: bottom span-left;
+    position-try-fallbacks: flip-block;
+    width: min(19rem,100vw - 1rem);
+    max-height: min(18rem,100vh - 1rem);
+  }
+  .popover-surface[data-placement=trigger-start] {
+    margin-top: var(--spacing);
+    position-area: bottom span-right;
+    position-try-fallbacks: flip-block;
+    width: min(19rem,100vw - 1rem);
+    max-height: min(18rem,100vh - 1rem);
+  }
+  .icon-popover-trigger:is(:where(.group\/icon-popover):has(:popover-open) *) {
+    border-color: var(--acc-line);
+    background-color: var(--acc-soft);
+    color: var(--acc);
+  }
+}
+
+@keyframes dialog-surface-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px)scale(.98);
+  }
+}
+
+@keyframes dialog-surface-exit {
+  to {
+    opacity: 0;
+    transform: translateY(4px)scale(.99);
+  }
+}

@@ -1,0 +1,842 @@
+@layer utilities {
+  .pointer-events-auto {
+    pointer-events: auto;
+  }
+  .pointer-events-none {
+    pointer-events: none;
+  }
+  .invisible {
+    visibility: hidden;
+  }
+  .visible {
+    visibility: visible;
+  }
+  .sr-only {
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border-width: 0;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    position: absolute;
+    overflow: hidden;
+  }
+  @each $class, $value in (
+    "absolute": absolute,
+    "fixed": fixed,
+    "relative": relative,
+    "static": static,
+    "sticky": sticky,
+  ) {
+    .#{$class} {
+      position: $value;
+    }
+  }
+  .inset-0 {
+    inset: 0;
+  }
+  .top-0 {
+    top: 0;
+  }
+  .top-1\/2 {
+    top: 50%;
+  }
+  .top-10 {
+    top: calc(var(--spacing) * 10);
+  }
+  .right-0 {
+    right: 0;
+  }
+  .bottom-0 {
+    bottom: 0;
+  }
+  .left-0 {
+    left: 0;
+  }
+  .left-2\.5 {
+    left: calc(var(--spacing) * 2.5);
+  }
+  .z-2 {
+    z-index: 2;
+  }
+  .z-10 {
+    z-index: 10;
+  }
+  .z-20 {
+    z-index: 20;
+  }
+  .col-\[1\/-1\] {
+    grid-column: 1/-1;
+  }
+  .col-span-2 {
+    grid-column: span 2/span 2;
+  }
+  .col-start-2 {
+    grid-column-start: 2;
+  }
+  .row-start-1 {
+    grid-row-start: 1;
+  }
+  .container {
+    width: 100%;
+  }
+  @media (min-width:40rem) {
+    .container {
+      max-width: 40rem;
+    }
+  }
+  @media (min-width:48rem) {
+    .container {
+      max-width: 48rem;
+    }
+  }
+  @media (min-width:64rem) {
+    .container {
+      max-width: 64rem;
+    }
+  }
+  @media (min-width:80rem) {
+    .container {
+      max-width: 80rem;
+    }
+  }
+  @media (min-width:96rem) {
+    .container {
+      max-width: 96rem;
+    }
+  }
+  @each $class, $value in (
+    "m-0": 0,
+    "m-2": calc(var(--spacing) * 2),
+    "m-3": calc(var(--spacing) * 3),
+    "m-auto": auto,
+  ) {
+    .#{$class} {
+      margin: $value;
+    }
+  }
+  .-mx-3 {
+    margin-inline: calc(var(--spacing) * -3);
+  }
+  .mx-0\.5 {
+    margin-inline: calc(var(--spacing) * .5);
+  }
+  .mx-1 {
+    margin-inline: var(--spacing);
+  }
+  .mx-auto {
+    margin-inline: auto;
+  }
+  .my-3 {
+    margin-block: calc(var(--spacing) * 3);
+  }
+  @each $class, $value in (
+    "mt-0\\.5": calc(var(--spacing) * .5),
+    "mt-1": var(--spacing),
+    "mt-2": calc(var(--spacing) * 2),
+    "mt-3": calc(var(--spacing) * 3),
+    "mt-4": calc(var(--spacing) * 4),
+  ) {
+    .#{$class} {
+      margin-top: $value;
+    }
+  }
+  .mb-2 {
+    margin-bottom: calc(var(--spacing) * 2);
+  }
+  .mb-3 {
+    margin-bottom: calc(var(--spacing) * 3);
+  }
+  .mb-4 {
+    margin-bottom: calc(var(--spacing) * 4);
+  }
+  .ml-auto {
+    margin-left: auto;
+  }
+  @each $class, $value in (
+    "block": block,
+    "contents": contents,
+    "flex": flex,
+    "grid": grid,
+    "hidden": none,
+    "inline-flex": inline-flex,
+    "table": table,
+  ) {
+    .#{$class} {
+      display: $value;
+    }
+  }
+  @each $class, $value in (
+    "size-2": calc(var(--spacing) * 2),
+    "size-2\\.5": calc(var(--spacing) * 2.5),
+    "size-3": calc(var(--spacing) * 3),
+    "size-3\\.5": calc(var(--spacing) * 3.5),
+    "size-4": calc(var(--spacing) * 4),
+    "size-5": calc(var(--spacing) * 5),
+    "size-6": calc(var(--spacing) * 6),
+    "size-7": calc(var(--spacing) * 7),
+    "size-8": calc(var(--spacing) * 8),
+    "size-9": calc(var(--spacing) * 9),
+    "size-11": calc(var(--spacing) * 11),
+    "size-full": 100%,
+  ) {
+    .#{$class} {
+      width: $value;
+      height: $value;
+    }
+  }
+  @each $class, $value in (
+    "h-3": calc(var(--spacing) * 3),
+    "h-4": calc(var(--spacing) * 4),
+    "h-5": calc(var(--spacing) * 5),
+    "h-8": calc(var(--spacing) * 8),
+    "h-9": calc(var(--spacing) * 9),
+    "h-11": calc(var(--spacing) * 11),
+    "h-14": calc(var(--spacing) * 14),
+  ) {
+    .#{$class} {
+      height: $value;
+    }
+  }
+  .h-\[65vh\] {
+    height: 65vh;
+  }
+  .h-full {
+    height: 100%;
+  }
+  .h-screen {
+    height: 100vh;
+  }
+  .max-h-\[inherit\] {
+    max-height: inherit;
+  }
+  .max-h-\[min\(24rem\,50vh\)\] {
+    max-height: min(24rem,50vh);
+  }
+  @each $class, $value in (
+    "min-h-0": 0,
+    "min-h-4": calc(var(--spacing) * 4),
+    "min-h-5": calc(var(--spacing) * 5),
+    "min-h-7": calc(var(--spacing) * 7),
+    "min-h-8": calc(var(--spacing) * 8),
+    "min-h-10": calc(var(--spacing) * 10),
+    "min-h-11": calc(var(--spacing) * 11),
+    "min-h-12": calc(var(--spacing) * 12),
+    "min-h-14": calc(var(--spacing) * 14),
+    "min-h-48": calc(var(--spacing) * 48),
+    "min-h-64": calc(var(--spacing) * 64),
+    "min-h-full": 100%,
+  ) {
+    .#{$class} {
+      min-height: $value;
+    }
+  }
+  @each $class, $value in (
+    "w-3\\/5": 60%,
+    "w-4\\/5": 80%,
+    "w-8": calc(var(--spacing) * 8),
+    "w-20": calc(var(--spacing) * 20),
+    "w-24": calc(var(--spacing) * 24),
+    "w-40": calc(var(--spacing) * 40),
+    "w-48": calc(var(--spacing) * 48),
+  ) {
+    .#{$class} {
+      width: $value;
+    }
+  }
+  .w-\[min\(72rem\,calc\(100vw-2rem\)\)\] {
+    width: min(72rem,100vw - 2rem);
+  }
+  @each $class, $value in (
+    "w-fit": fit-content,
+    "w-full": 100%,
+    "w-max": max-content,
+    "w-px": 1px,
+  ) {
+    .#{$class} {
+      width: $value;
+    }
+  }
+  @each $class, $value in (
+    "max-w-7xl": var(--container-7xl),
+    "max-w-40": calc(var(--spacing) * 40),
+    "max-w-48": calc(var(--spacing) * 48),
+    "max-w-64": calc(var(--spacing) * 64),
+    "max-w-80": calc(var(--spacing) * 80),
+  ) {
+    .#{$class} {
+      max-width: $value;
+    }
+  }
+  .max-w-\[60\%\] {
+    max-width: 60%;
+  }
+  .max-w-md {
+    max-width: var(--container-md);
+  }
+  .max-w-none {
+    max-width: none;
+  }
+  @each $class, $value in (
+    "min-w-0": 0,
+    "min-w-5": calc(var(--spacing) * 5),
+    "min-w-16": calc(var(--spacing) * 16),
+    "min-w-24": calc(var(--spacing) * 24),
+    "min-w-36": calc(var(--spacing) * 36),
+  ) {
+    .#{$class} {
+      min-width: $value;
+    }
+  }
+  .min-w-\[10ch\] {
+    min-width: 10ch;
+  }
+  .min-w-full {
+    min-width: 100%;
+  }
+  .flex-1 {
+    flex: 1;
+  }
+  .flex-none {
+    flex: none;
+  }
+  .shrink-0 {
+    flex-shrink: 0;
+  }
+  .-translate-x-2 {
+    --control-translate-x: calc(var(--spacing) * -2);
+    translate: var(--control-translate-x) var(--control-translate-y);
+  }
+  .-translate-y-1\/2 {
+    --control-translate-y: calc(calc(1 / 2 * 100%) * -1);
+    translate: var(--control-translate-x) var(--control-translate-y);
+  }
+  .translate-y-1 {
+    --control-translate-y: var(--spacing);
+    translate: var(--control-translate-x) var(--control-translate-y);
+  }
+  .transform {
+    transform: var(--control-rotate-x,) var(--control-rotate-y,) var(--control-rotate-z,) var(--control-skew-x,) var(--control-skew-y,);
+  }
+  .resize {
+    resize: both;
+  }
+  .list-none {
+    list-style-type: none;
+  }
+  .grid-cols-\[auto_minmax\(0\,1fr\)\] {
+    grid-template-columns: auto minmax(0,1fr);
+  }
+  .grid-rows-\[auto_minmax\(0\,1fr\)\] {
+    grid-template-rows: auto minmax(0,1fr);
+  }
+  .flex-col {
+    flex-direction: column;
+  }
+  .flex-wrap {
+    flex-wrap: wrap;
+  }
+  .items-center {
+    align-items: center;
+  }
+  .items-end {
+    align-items: flex-end;
+  }
+  .items-start {
+    align-items: flex-start;
+  }
+  .justify-between {
+    justify-content: space-between;
+  }
+  .justify-center {
+    justify-content: center;
+  }
+  .justify-end {
+    justify-content: flex-end;
+  }
+  @each $class, $value in (
+    "gap-0": 0,
+    "gap-0\\.5": calc(var(--spacing) * .5),
+    "gap-1": var(--spacing),
+    "gap-1\\.5": calc(var(--spacing) * 1.5),
+    "gap-2": calc(var(--spacing) * 2),
+    "gap-3": calc(var(--spacing) * 3),
+    "gap-4": calc(var(--spacing) * 4),
+    "gap-5": calc(var(--spacing) * 5),
+    "gap-px": 1px,
+  ) {
+    .#{$class} {
+      gap: $value;
+    }
+  }
+  .gap-x-2 {
+    column-gap: calc(var(--spacing) * 2);
+  }
+  .gap-x-3 {
+    column-gap: calc(var(--spacing) * 3);
+  }
+  .gap-y-1 {
+    row-gap: var(--spacing);
+  }
+  .gap-y-1\.5 {
+    row-gap: calc(var(--spacing) * 1.5);
+  }
+  .justify-self-start {
+    justify-self: flex-start;
+  }
+  .truncate {
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .overflow-auto {
+    overflow: auto;
+  }
+  .overflow-hidden {
+    overflow: hidden;
+  }
+  .overflow-y-auto {
+    overflow-y: auto;
+  }
+  @each $class, $value in (
+    "rounded": .25rem,
+    "rounded-none": 0,
+    "rounded-panel": var(--r),
+    "rounded-sm": var(--r-sm),
+    "rounded-xs": var(--radius-xs),
+  ) {
+    .#{$class} {
+      border-radius: $value;
+    }
+  }
+  .border {
+    border-style: var(--control-border-style);
+    border-width: 1px;
+  }
+  .border-0 {
+    border-style: var(--control-border-style);
+    border-width: 0;
+  }
+  .border-t {
+    border-top-style: var(--control-border-style);
+    border-top-width: 1px;
+  }
+  .border-r {
+    border-right-style: var(--control-border-style);
+    border-right-width: 1px;
+  }
+  .border-b {
+    border-bottom-style: var(--control-border-style);
+    border-bottom-width: 1px;
+  }
+  @each $class, $value in (
+    "border-acc": var(--acc),
+    "border-acc-line": var(--acc-line),
+    "border-add-line": var(--add-line),
+    "border-current": currentColor,
+    "border-del-line": var(--del-line),
+    "border-line": var(--line),
+    "border-line-2": var(--line-2),
+    "border-warn-line": var(--warn-line),
+  ) {
+    .#{$class} {
+      border-color: $value;
+    }
+  }
+  @each $class, $value in (
+    "bg-acc": var(--acc),
+    "bg-acc-soft": var(--acc-soft),
+    "bg-add": var(--add),
+    "bg-bg": var(--bg),
+    "bg-del": var(--del),
+    "bg-del-bg": var(--del-bg),
+    "bg-ink-3": var(--ink-3),
+    "bg-line": var(--line),
+    "bg-sunk": var(--sunk),
+    "bg-surface-2": var(--surface-2),
+    "bg-transparent": #0000,
+    "bg-warn": var(--warn),
+  ) {
+    .#{$class} {
+      background-color: $value;
+    }
+  }
+  .fill-surface {
+    fill: var(--surface);
+  }
+  .stroke-line-2 {
+    stroke: var(--line-2);
+  }
+  @each $class, $value in (
+    "p-0": 0,
+    "p-1": var(--spacing),
+    "p-1\\.5": calc(var(--spacing) * 1.5),
+    "p-2": calc(var(--spacing) * 2),
+    "p-3": calc(var(--spacing) * 3),
+    "p-4": calc(var(--spacing) * 4),
+  ) {
+    .#{$class} {
+      padding: $value;
+    }
+  }
+  @each $class, $value in (
+    "px-0\\.5": calc(var(--spacing) * .5),
+    "px-1": var(--spacing),
+    "px-1\\.5": calc(var(--spacing) * 1.5),
+    "px-2": calc(var(--spacing) * 2),
+    "px-2\\.5": calc(var(--spacing) * 2.5),
+    "px-3": calc(var(--spacing) * 3),
+    "px-4": calc(var(--spacing) * 4),
+    "px-5": calc(var(--spacing) * 5),
+  ) {
+    .#{$class} {
+      padding-inline: $value;
+    }
+  }
+  @each $class, $value in (
+    "py-0\\.5": calc(var(--spacing) * .5),
+    "py-1": var(--spacing),
+    "py-1\\.5": calc(var(--spacing) * 1.5),
+    "py-2": calc(var(--spacing) * 2),
+    "py-3": calc(var(--spacing) * 3),
+    "py-6": calc(var(--spacing) * 6),
+    "py-8": calc(var(--spacing) * 8),
+    "py-px": 1px,
+  ) {
+    .#{$class} {
+      padding-block: $value;
+    }
+  }
+  .pt-2 {
+    padding-top: calc(var(--spacing) * 2);
+  }
+  .pt-3 {
+    padding-top: calc(var(--spacing) * 3);
+  }
+  .pt-4 {
+    padding-top: calc(var(--spacing) * 4);
+  }
+  @each $class, $value in (
+    "pr-1": var(--spacing),
+    "pr-2": calc(var(--spacing) * 2),
+    "pr-8": calc(var(--spacing) * 8),
+    "pr-9": calc(var(--spacing) * 9),
+    "pr-14": calc(var(--spacing) * 14),
+  ) {
+    .#{$class} {
+      padding-right: $value;
+    }
+  }
+  @each $class, $value in (
+    "pb-1": var(--spacing),
+    "pb-2": calc(var(--spacing) * 2),
+    "pb-3": calc(var(--spacing) * 3),
+    "pb-4": calc(var(--spacing) * 4),
+  ) {
+    .#{$class} {
+      padding-bottom: $value;
+    }
+  }
+  @each $class, $value in (
+    "pl-2\\.5": calc(var(--spacing) * 2.5),
+    "pl-7": calc(var(--spacing) * 7),
+    "pl-8": calc(var(--spacing) * 8),
+    "pl-9": calc(var(--spacing) * 9),
+  ) {
+    .#{$class} {
+      padding-left: $value;
+    }
+  }
+  .text-center {
+    text-align: center;
+  }
+  .text-right {
+    text-align: right;
+  }
+  .font-mono {
+    font-family: var(--mono);
+  }
+  .text-base {
+    font-size: var(--text-base);
+    line-height: var(--control-leading,var(--text-base--line-height));
+  }
+  .text-lg {
+    font-size: var(--text-lg);
+    line-height: var(--control-leading,var(--text-lg--line-height));
+  }
+  .text-sm {
+    font-size: var(--text-sm);
+    line-height: var(--control-leading,var(--text-sm--line-height));
+  }
+  .text-xl {
+    font-size: var(--text-xl);
+    line-height: var(--control-leading,var(--text-xl--line-height));
+  }
+  .text-xs {
+    font-size: var(--text-xs);
+    line-height: var(--control-leading,var(--text-xs--line-height));
+  }
+  @each $class, $value in (
+    "leading-5": calc(var(--spacing) * 5),
+    "leading-6": calc(var(--spacing) * 6),
+    "leading-none": 1,
+    "leading-normal": var(--leading-normal),
+    "leading-snug": var(--leading-snug),
+  ) {
+    .#{$class} {
+      --control-leading: #{$value};
+      line-height: $value;
+    }
+  }
+  @each $class, $value in (
+    "font-bold": var(--font-weight-bold),
+    "font-medium": var(--font-weight-medium),
+    "font-normal": var(--font-weight-normal),
+    "font-semibold": var(--font-weight-semibold),
+  ) {
+    .#{$class} {
+      --control-font-weight: #{$value};
+      font-weight: $value;
+    }
+  }
+  .tracking-tight {
+    --control-tracking: var(--tracking-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+  .tracking-widest {
+    --control-tracking: var(--tracking-widest);
+    letter-spacing: var(--tracking-widest);
+  }
+  .text-wrap {
+    text-wrap: wrap;
+  }
+  .break-words {
+    overflow-wrap: break-word;
+  }
+  .break-all {
+    word-break: break-all;
+  }
+  .whitespace-normal {
+    white-space: normal;
+  }
+  .whitespace-nowrap {
+    white-space: nowrap;
+  }
+  .text-\[var\(--sy-com\)\] {
+    color: var(--sy-com);
+  }
+  .text-\[var\(--sy-con\)\] {
+    color: var(--sy-con);
+  }
+  .text-\[var\(--sy-fn\)\] {
+    color: var(--sy-fn);
+  }
+  .text-\[var\(--sy-kw\)\] {
+    color: var(--sy-kw);
+  }
+  .text-\[var\(--sy-num\)\] {
+    color: var(--sy-num);
+  }
+  .text-\[var\(--sy-op\)\] {
+    color: var(--sy-op);
+  }
+  .text-\[var\(--sy-str\)\] {
+    color: var(--sy-str);
+  }
+  .text-\[var\(--sy-tag\)\] {
+    color: var(--sy-tag);
+  }
+  .text-\[var\(--sy-typ\)\] {
+    color: var(--sy-typ);
+  }
+  .text-\[var\(--sy-var\)\] {
+    color: var(--sy-var);
+  }
+  @each $class, $value in (
+    "text-acc": var(--acc),
+    "text-add": var(--add),
+    "text-add-ink": var(--add-ink),
+    "text-bg": var(--bg),
+    "text-del": var(--del),
+    "text-del-ink": var(--del-ink),
+    "text-inherit": inherit,
+    "text-ink": var(--ink),
+    "text-ink-2": var(--ink-2),
+    "text-ink-3": var(--ink-3),
+    "text-warn": var(--warn),
+  ) {
+    .#{$class} {
+      color: $value;
+    }
+  }
+  .uppercase {
+    text-transform: uppercase;
+  }
+  .tabular-nums {
+    --control-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--control-ordinal,) var(--control-slashed-zero,) var(--control-numeric-figure,) var(--control-numeric-spacing,) var(--control-numeric-fraction,);
+  }
+  .antialiased {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  .accent-acc {
+    accent-color: var(--acc);
+  }
+  .outline {
+    outline-style: var(--control-outline-style);
+    outline-width: 1px;
+  }
+  .outline-offset-\[-1px\] {
+    outline-offset: -1px;
+  }
+  .outline-acc {
+    outline-color: var(--acc);
+  }
+  .blur {
+    --control-blur: blur(8px);
+    filter: var(--control-blur,) var(--control-brightness,) var(--control-contrast,) var(--control-grayscale,) var(--control-hue-rotate,) var(--control-invert,) var(--control-saturate,) var(--control-sepia,) var(--control-drop-shadow,);
+  }
+  .filter {
+    filter: var(--control-blur,) var(--control-brightness,) var(--control-contrast,) var(--control-grayscale,) var(--control-hue-rotate,) var(--control-invert,) var(--control-saturate,) var(--control-sepia,) var(--control-drop-shadow,);
+  }
+  .transition {
+    transition-property: color,background-color,border-color,outline-color,text-decoration-color,fill,stroke,--control-gradient-from,--control-gradient-via,--control-gradient-to,opacity,box-shadow,transform,translate,scale,rotate,filter,-webkit-backdrop-filter,backdrop-filter,display,content-visibility,overlay,pointer-events;
+    transition-timing-function: var(--control-ease,var(--default-transition-timing-function));
+    transition-duration: var(--control-duration,var(--default-transition-duration));
+  }
+  .duration-150 {
+    --control-duration: .15s;
+    transition-duration: .15s;
+  }
+  .select-text {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .\[position-area\:bottom_span-left\] {
+    position-area: bottom span-left;
+  }
+  .\[position-area\:left_span-bottom\] {
+    position-area: left span-bottom;
+  }
+  .\[position-try-fallbacks\:flip-block\] {
+    position-try-fallbacks: flip-block;
+  }
+  .\[position-try-fallbacks\:flip-inline\] {
+    position-try-fallbacks: flip-inline;
+  }
+  .group-open\:rotate-90:is(:where(.group):is([open],:popover-open,:open) *),.group-open\/file\:rotate-90:is(:where(.group\/file):is([open],:popover-open,:open) *) {
+    rotate: 90deg;
+  }
+  @media (hover:hover) {
+    .hover\:bg-surface-2:hover {
+      background-color: var(--surface-2);
+    }
+    .hover\:text-acc-2:hover {
+      color: var(--acc-2);
+    }
+    .hover\:text-ink:hover {
+      color: var(--ink);
+    }
+  }
+  .focus-visible\:-outline-offset-2:focus-visible {
+    outline-offset: calc(2px * -1);
+  }
+  .active\:text-ink:active {
+    color: var(--ink);
+  }
+  @media (prefers-reduced-motion:reduce) {
+    .motion-reduce\:transition-none {
+      transition-property: none;
+    }
+  }
+  @media (min-width:40rem) {
+    .sm\:max-w-sm {
+      max-width: var(--container-sm);
+    }
+    .sm\:grid-cols-\[7rem_minmax\(0\,1fr\)\] {
+      grid-template-columns: 7rem minmax(0,1fr);
+    }
+    .sm\:grid-cols-\[minmax\(0\,1fr\)_auto_auto\] {
+      grid-template-columns: minmax(0,1fr) auto auto;
+    }
+    .sm\:items-end {
+      align-items: flex-end;
+    }
+    .sm\:p-6 {
+      padding: calc(var(--spacing) * 6);
+    }
+    .sm\:px-4 {
+      padding-inline: calc(var(--spacing) * 4);
+    }
+    .sm\:px-6 {
+      padding-inline: calc(var(--spacing) * 6);
+    }
+  }
+  @media (min-width:80rem) {
+    .xl\:block {
+      display: block;
+    }
+    .xl\:grid-cols-\[15rem_minmax\(0\,1fr\)_16rem\] {
+      grid-template-columns: 15rem minmax(0,1fr) 16rem;
+    }
+  }
+  @media print {
+    .print\:hidden\! {
+      display: none !important;
+    }
+    .print\:overflow-visible {
+      overflow: visible;
+    }
+  }
+  @media (max-width:760px) {
+    .mobile\:hidden {
+      display: none;
+    }
+    .mobile\:size-11 {
+      width: calc(var(--spacing) * 11);
+      height: calc(var(--spacing) * 11);
+    }
+    .mobile\:min-h-11 {
+      min-height: calc(var(--spacing) * 11);
+    }
+    .mobile\:p-0 {
+      padding: 0;
+    }
+  }
+  @media (min-width:1025px) {
+    .workspace\:flex {
+      display: flex;
+    }
+    .workspace\:hidden {
+      display: none;
+    }
+  }
+  @media (max-width:1280px) {
+    .compact\:m-2\.5 {
+      margin: calc(var(--spacing) * 2.5);
+    }
+    .compact\:p-2\.5 {
+      padding: calc(var(--spacing) * 2.5);
+    }
+    .compact\:px-2\.5 {
+      padding-inline: calc(var(--spacing) * 2.5);
+    }
+  }
+  .\[\&_svg\]\:size-5 svg {
+    width: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 5);
+  }
+  @media (max-width:760px) {
+    .mobile\:\[\&_svg\]\:size-5 svg {
+      width: calc(var(--spacing) * 5);
+      height: calc(var(--spacing) * 5);
+    }
+  }
+  @media print {
+    .print\:\[\&\[hidden\]\]\:block\![hidden] {
+      display: block !important;
+    }
+  }
+}

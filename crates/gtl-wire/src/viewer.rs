@@ -21,7 +21,7 @@ pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 59;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 60;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -498,7 +498,7 @@ pub struct ViewerUserSettings {
     pub configured_theme: Option<ViewerTheme>,
     pub effective_theme: ViewerTheme,
     pub render_options: ViewerRenderOptions,
-    pub push_confirmation_required: bool,
+    pub push_confirmation: gtl_models::settings::PushConfirmationPreferences,
     pub viewer_push_no_confirmation_projects: Vec<ProjectName>,
 }
 
@@ -529,6 +529,7 @@ pub struct EditSettingsRequest {
     pub layout: FieldUpdate<ViewerDiffLayout>,
     pub density: FieldUpdate<ViewerDiffDensity>,
     pub push_confirmation_required: FieldUpdate<bool>,
+    pub viewer_push_confirmation_required: FieldUpdate<bool>,
     pub viewer_push_no_confirmation_projects: FieldUpdate<Vec<ProjectName>>,
 }
 

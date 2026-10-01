@@ -57,6 +57,8 @@ pub(super) enum UserSettingsDocumentKey {
     ViewerPushNoConfirmationProjects,
     #[strum(to_string = "push.confirm")]
     PushConfirmation,
+    #[strum(to_string = "viewer_push.confirm")]
+    ViewerPushConfirmation,
     #[strum(to_string = "keybindings.search_files")]
     KeybindingsSearchFiles,
     #[strum(to_string = "keybindings.search_text_in_all_files")]
@@ -107,6 +109,7 @@ impl UserSettingsDocumentKey {
             Self::Density => "density",
             Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
             Self::PushConfirmation => "push",
+            Self::ViewerPushConfirmation => "viewer_push",
             Self::KeybindingsSearchFiles
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
@@ -142,7 +145,7 @@ impl UserSettingsDocumentKey {
             Self::Layout => "layout",
             Self::Density => "density",
             Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
-            Self::PushConfirmation => "confirm",
+            Self::PushConfirmation | Self::ViewerPushConfirmation => "confirm",
             Self::KeybindingsSearchFiles => "search_files",
             Self::KeybindingsSearchTextInAllFiles => "search_text_in_all_files",
             Self::KeybindingsToggleFilesSidebar => "toggle_files_sidebar",
@@ -176,6 +179,7 @@ impl UserSettingsDocumentKey {
             Self::Density => "density",
             Self::ViewerPushNoConfirmationProjects => "viewer_push_no_confirmation_projects",
             Self::PushConfirmation => "push",
+            Self::ViewerPushConfirmation => "viewer_push",
             Self::KeybindingsSearchFiles
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
@@ -352,6 +356,8 @@ struct RawUserSettingsDocument {
     density: Option<RawSettingValue>,
     #[serde(default)]
     push: Option<RawPushSettingsDocument>,
+    #[serde(default)]
+    viewer_push: Option<RawPushSettingsDocument>,
     #[serde(default)]
     viewer_push_no_confirmation_projects: std::collections::BTreeSet<ProjectName>,
     #[serde(default)]
@@ -534,6 +540,11 @@ fn parse_settings(
         document.push.and_then(|push| push.confirm),
     )?
     .unwrap_or(UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT);
+    let viewer_push_confirmation_required = optional_bool(
+        UserSettingsDocumentKey::ViewerPushConfirmation,
+        document.viewer_push.and_then(|push| push.confirm),
+    )?
+    .unwrap_or(UserSettings::VIEWER_PUSH_CONFIRMATION_REQUIRED_DEFAULT);
     let tag_patterns_default = document
         .tags
         .map(|tags| tag_pattern_set(TagPatternScope::UserDefault, tags))
@@ -549,6 +560,7 @@ fn parse_settings(
             projects.push_all_exclusions,
         )
         .with_viewer_push_no_confirmation_projects(document.viewer_push_no_confirmation_projects)
+        .with_viewer_push_confirmation_required(viewer_push_confirmation_required)
         .with_accessibility(accessibility)
         .with_language(document.language)
         .with_date_format(document.date_format)
@@ -831,7 +843,24 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     apply_root_string(document, UserSettingsDocumentKey::Theme, patch.theme);
     apply_root_string(document, UserSettingsDocumentKey::Layout, patch.layout);
     apply_root_string(document, UserSettingsDocumentKey::Density, patch.density);
-    match patch.viewer_push_no_confirmation_projects {
+    apply_viewer_push_preferences(
+        document,
+        &patch.viewer_push_confirmation_required,
+        patch.viewer_push_no_confirmation_projects,
+    );
+    apply_nested_bool(
+        document,
+        UserSettingsDocumentKey::PushConfirmation,
+        &patch.push_confirmation_required,
+    );
+}
+
+fn apply_viewer_push_preferences(
+    document: &mut DocumentMut,
+    confirmation: &UserSettingsFieldUpdate<bool>,
+    projects: UserSettingsFieldUpdate<std::collections::BTreeSet<ProjectName>>,
+) {
+    match projects {
         UserSettingsFieldUpdate::Update(projects) => {
             let mut values = toml_edit::Array::new();
             for project in projects {
@@ -847,8 +876,8 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
     }
     apply_nested_bool(
         document,
-        UserSettingsDocumentKey::PushConfirmation,
-        &patch.push_confirmation_required,
+        UserSettingsDocumentKey::ViewerPushConfirmation,
+        confirmation,
     );
 }
 

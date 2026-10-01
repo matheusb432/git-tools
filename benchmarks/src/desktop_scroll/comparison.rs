@@ -1,4 +1,7 @@
-use super::{BENCHMARK_NAME, DesktopScrollReport, REPORT_FORMAT_VERSION, ScrollSample};
+use super::{
+    BENCHMARK_NAME, DesktopScrollReadinessSample, DesktopScrollReport, REPORT_FORMAT_VERSION,
+    ScrollSample,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MetricDelta {
@@ -22,11 +25,20 @@ pub struct FrameGapComparison {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProcessResourceComparison {
+    pub wall_time_milliseconds: MetricDelta,
+    pub process_cpu_time_milliseconds: MetricDelta,
+    pub peak_rss_bytes: MetricDelta,
+    pub viewer_peak_rss_bytes: MetricDelta,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DesktopScrollComparison {
     pub readiness_wall_time_milliseconds: MetricDelta,
     pub readiness_process_cpu_time_milliseconds: MetricDelta,
     pub loading: PanelComparison,
     pub diff_document: PanelComparison,
+    pub diff_document_resources: ProcessResourceComparison,
     pub changed_files: PanelComparison,
     pub commits: PanelComparison,
     pub peak_rss_bytes: MetricDelta,
@@ -35,6 +47,7 @@ pub struct DesktopScrollComparison {
     pub single_file_readiness_process_cpu_time_milliseconds: MetricDelta,
     pub single_file_loading: PanelComparison,
     pub single_file_diff_document: PanelComparison,
+    pub single_file_diff_document_resources: ProcessResourceComparison,
     pub single_file_peak_rss_bytes: MetricDelta,
     pub single_file_viewer_loading_peak_rss_bytes: MetricDelta,
 }
@@ -233,66 +246,49 @@ pub fn compare_reports(
     let current_diff_document = panel_metrics(current, DesktopScrollPanel::DiffDocument);
     let baseline_single_file_diff_document = single_file_panel_metrics(baseline);
     let current_single_file_diff_document = single_file_panel_metrics(current);
+    let readiness = compare_resources(
+        baseline.launches.iter().map(|launch| &launch.readiness),
+        current.launches.iter().map(|launch| &launch.readiness),
+        baseline.protocol.process_cpu_clock_ticks_per_second,
+    );
+    let single_file_readiness = compare_resources(
+        baseline
+            .single_file_launches
+            .iter()
+            .map(|launch| &launch.readiness),
+        current
+            .single_file_launches
+            .iter()
+            .map(|launch| &launch.readiness),
+        baseline.protocol.process_cpu_clock_ticks_per_second,
+    );
 
     Ok(DesktopScrollComparison {
-        readiness_wall_time_milliseconds: MetricDelta::between(
-            median_u64_as_f64(
-                baseline
-                    .launches
-                    .iter()
-                    .map(|launch| launch.readiness.wall_time_milliseconds),
-            ),
-            median_u64_as_f64(
-                current
-                    .launches
-                    .iter()
-                    .map(|launch| launch.readiness.wall_time_milliseconds),
-            ),
-        ),
-        readiness_process_cpu_time_milliseconds: MetricDelta::between(
-            process_cpu_time_milliseconds(baseline),
-            process_cpu_time_milliseconds(current),
-        ),
+        readiness_wall_time_milliseconds: readiness.wall_time_milliseconds,
+        readiness_process_cpu_time_milliseconds: readiness.process_cpu_time_milliseconds,
         loading: compare_panels(loading_metrics(baseline), loading_metrics(current)),
         diff_document: compare_panels(baseline_diff_document, current_diff_document),
+        diff_document_resources: compare_resources(
+            baseline
+                .launches
+                .iter()
+                .map(|launch| &launch.diff_document_resources),
+            current
+                .launches
+                .iter()
+                .map(|launch| &launch.diff_document_resources),
+            baseline.protocol.process_cpu_clock_ticks_per_second,
+        ),
         changed_files: compare_panels(baseline_changed_files, current_changed_files),
         commits: compare_panels(baseline_commits, current_commits),
         peak_rss_bytes: MetricDelta::between(
             u64_to_f64(peak_rss_bytes(baseline)),
             u64_to_f64(peak_rss_bytes(current)),
         ),
-        viewer_loading_peak_rss_bytes: MetricDelta::between(
-            maximum_u64_as_f64(
-                baseline
-                    .launches
-                    .iter()
-                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
-            ),
-            maximum_u64_as_f64(
-                current
-                    .launches
-                    .iter()
-                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
-            ),
-        ),
-        single_file_readiness_wall_time_milliseconds: MetricDelta::between(
-            median_u64_as_f64(
-                baseline
-                    .single_file_launches
-                    .iter()
-                    .map(|launch| launch.readiness.wall_time_milliseconds),
-            ),
-            median_u64_as_f64(
-                current
-                    .single_file_launches
-                    .iter()
-                    .map(|launch| launch.readiness.wall_time_milliseconds),
-            ),
-        ),
-        single_file_readiness_process_cpu_time_milliseconds: MetricDelta::between(
-            single_file_process_cpu_time_milliseconds(baseline),
-            single_file_process_cpu_time_milliseconds(current),
-        ),
+        viewer_loading_peak_rss_bytes: readiness.viewer_peak_rss_bytes,
+        single_file_readiness_wall_time_milliseconds: single_file_readiness.wall_time_milliseconds,
+        single_file_readiness_process_cpu_time_milliseconds: single_file_readiness
+            .process_cpu_time_milliseconds,
         single_file_loading: compare_panels(
             single_file_loading_metrics(baseline),
             single_file_loading_metrics(current),
@@ -301,20 +297,18 @@ pub fn compare_reports(
             baseline_single_file_diff_document,
             current_single_file_diff_document,
         ),
-        single_file_viewer_loading_peak_rss_bytes: MetricDelta::between(
-            maximum_u64_as_f64(
-                baseline
-                    .single_file_launches
-                    .iter()
-                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
-            ),
-            maximum_u64_as_f64(
-                current
-                    .single_file_launches
-                    .iter()
-                    .map(|launch| launch.readiness.viewer_peak_rss_bytes),
-            ),
+        single_file_diff_document_resources: compare_resources(
+            baseline
+                .single_file_launches
+                .iter()
+                .map(|launch| &launch.diff_document_resources),
+            current
+                .single_file_launches
+                .iter()
+                .map(|launch| &launch.diff_document_resources),
+            baseline.protocol.process_cpu_clock_ticks_per_second,
         ),
+        single_file_viewer_loading_peak_rss_bytes: single_file_readiness.viewer_peak_rss_bytes,
         single_file_peak_rss_bytes: MetricDelta::between(
             u64_to_f64(single_file_peak_rss_bytes(baseline)),
             u64_to_f64(single_file_peak_rss_bytes(current)),
@@ -445,6 +439,7 @@ fn validate_many_file_launches(
         }
         let memory_snapshots = [
             &launch.readiness.peak_memory,
+            &launch.diff_document_resources.peak_memory,
             &launch.memory_after_diff_document,
             &launch.memory_after_changed_files,
             &launch.memory_after_commits,
@@ -491,6 +486,8 @@ fn validate_single_file_launches(
             );
         }
         if launch.readiness.peak_memory.attribution != report.protocol.memory_attribution
+            || launch.diff_document_resources.peak_memory.attribution
+                != report.protocol.memory_attribution
             || launch.memory_after_diff_document.attribution != report.protocol.memory_attribution
         {
             return Err(DesktopScrollComparisonError::MemoryAttributionMismatch {
@@ -677,6 +674,38 @@ fn maximum_u64_as_f64(values: impl Iterator<Item = u64>) -> f64 {
     u64_to_f64(values.max().unwrap_or(0))
 }
 
+fn compare_resources<'a>(
+    baseline: impl Iterator<Item = &'a DesktopScrollReadinessSample> + Clone,
+    current: impl Iterator<Item = &'a DesktopScrollReadinessSample> + Clone,
+    clock_ticks_per_second: u64,
+) -> ProcessResourceComparison {
+    ProcessResourceComparison {
+        wall_time_milliseconds: MetricDelta::between(
+            median_u64_as_f64(baseline.clone().map(|sample| sample.wall_time_milliseconds)),
+            median_u64_as_f64(current.clone().map(|sample| sample.wall_time_milliseconds)),
+        ),
+        process_cpu_time_milliseconds: MetricDelta::between(
+            median_u64_as_f64(
+                baseline
+                    .clone()
+                    .map(|sample| sample.process_cpu_clock_ticks),
+            ) / u64_to_f64(clock_ticks_per_second)
+                * 1_000.0,
+            median_u64_as_f64(current.clone().map(|sample| sample.process_cpu_clock_ticks))
+                / u64_to_f64(clock_ticks_per_second)
+                * 1_000.0,
+        ),
+        peak_rss_bytes: MetricDelta::between(
+            maximum_u64_as_f64(baseline.clone().map(|sample| sample.peak_memory.rss_bytes)),
+            maximum_u64_as_f64(current.clone().map(|sample| sample.peak_memory.rss_bytes)),
+        ),
+        viewer_peak_rss_bytes: MetricDelta::between(
+            maximum_u64_as_f64(baseline.map(|sample| sample.viewer_peak_rss_bytes)),
+            maximum_u64_as_f64(current.map(|sample| sample.viewer_peak_rss_bytes)),
+        ),
+    }
+}
+
 fn u64_to_f64(value: u64) -> f64 {
     let [low_0, low_1, low_2, low_3, high_0, high_1, high_2, high_3] = value.to_le_bytes();
     let low = u32::from_le_bytes([low_0, low_1, low_2, low_3]);
@@ -695,26 +724,6 @@ fn median_u64_as_f64(values: impl Iterator<Item = u64>) -> f64 {
     }
 }
 
-fn process_cpu_time_milliseconds(report: &DesktopScrollReport) -> f64 {
-    median_u64_as_f64(
-        report
-            .launches
-            .iter()
-            .map(|launch| launch.readiness.process_cpu_clock_ticks),
-    ) / u64_to_f64(report.protocol.process_cpu_clock_ticks_per_second)
-        * 1_000.0
-}
-
-fn single_file_process_cpu_time_milliseconds(report: &DesktopScrollReport) -> f64 {
-    median_u64_as_f64(
-        report
-            .single_file_launches
-            .iter()
-            .map(|launch| launch.readiness.process_cpu_clock_ticks),
-    ) / u64_to_f64(report.protocol.process_cpu_clock_ticks_per_second)
-        * 1_000.0
-}
-
 fn peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
     report
         .launches
@@ -722,6 +731,7 @@ fn peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
         .flat_map(|launch| {
             [
                 launch.readiness.peak_memory.rss_bytes,
+                launch.diff_document_resources.peak_memory.rss_bytes,
                 launch.memory_after_diff_document.rss_bytes,
                 launch.memory_after_changed_files.rss_bytes,
                 launch.memory_after_commits.rss_bytes,
@@ -738,6 +748,7 @@ fn single_file_peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
         .flat_map(|launch| {
             [
                 launch.readiness.peak_memory.rss_bytes,
+                launch.diff_document_resources.peak_memory.rss_bytes,
                 launch.memory_after_diff_document.rss_bytes,
             ]
         })
@@ -754,6 +765,51 @@ mod tests {
         DesktopScrollSingleFileLaunch, DesktopScrollSingleFileWorkload, DesktopScrollSource,
         DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
     };
+
+    #[test]
+    fn scrolling_resources_use_cpu_medians_and_peak_memory() {
+        let baseline = standard_report();
+        let mut current = baseline.clone();
+        for (launch, ticks, bytes) in [(0, 30, 2_000), (1, 10, 3_000), (2, 20, 1_000)] {
+            current.launches[launch].diff_document_resources = readiness(7_000, ticks, bytes);
+            current.single_file_launches[launch].diff_document_resources =
+                readiness(7_000, ticks * 2, bytes * 2);
+        }
+        let comparison = compare_reports(&baseline, &current).unwrap();
+        assert_close(
+            comparison
+                .diff_document_resources
+                .process_cpu_time_milliseconds
+                .current,
+            200.0,
+        );
+        assert_close(
+            comparison.diff_document_resources.peak_rss_bytes.current,
+            3_000.0,
+        );
+        assert_close(
+            comparison
+                .single_file_diff_document_resources
+                .process_cpu_time_milliseconds
+                .current,
+            400.0,
+        );
+        assert_close(
+            comparison
+                .single_file_diff_document_resources
+                .peak_rss_bytes
+                .current,
+            6_000.0,
+        );
+        current.launches[0]
+            .diff_document_resources
+            .peak_memory
+            .attribution = "unrelated processes".to_owned();
+        assert!(matches!(
+            compare_reports(&baseline, &current),
+            Err(DesktopScrollComparisonError::MemoryAttributionMismatch { .. })
+        ));
+    }
 
     #[test]
     fn loading_comparison_combines_raw_launches_and_rejects_invalid_samples() {
@@ -1000,6 +1056,7 @@ mod tests {
                 readiness: "complete production view".to_owned(),
                 memory_attribution: "server and viewer process trees".to_owned(),
                 process_cpu_clock_ticks_per_second: 100,
+                process_sample_interval_milliseconds: 100,
                 script_timeout_seconds: 30,
                 side_panel_scroll: ScrollProtocol::side_panel(),
                 diff_document_scroll: ScrollProtocol::diff_document(),
@@ -1060,6 +1117,7 @@ mod tests {
                     changed_files_gaps[index].clone(),
                     ScrollProtocol::diff_document(),
                 ),
+                diff_document_resources: readiness(7_000, 100, peak_rss_bytes[index]),
                 memory_after_diff_document: memory(peak_rss_bytes[index].saturating_sub(3)),
                 changed_files: sample(
                     "changed-files",
@@ -1099,6 +1157,7 @@ mod tests {
                     diff_document_gaps[index].clone(),
                     ScrollProtocol::diff_document(),
                 ),
+                diff_document_resources: readiness(7_000, 100, peak_rss_bytes[index]),
                 memory_after_diff_document: memory(peak_rss_bytes[index]),
             })
             .collect()

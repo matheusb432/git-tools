@@ -866,6 +866,7 @@ message DiffFilesSortFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  optional bool viewer_push_confirmation_required = 20;
   DiffFilesSort diff_files_sort = 19;
   optional bool copy_with_line_context = 18;
   repeated string viewer_push_no_confirmation_projects = 17;
@@ -934,6 +935,7 @@ message ViewerProjectNamesFieldUpdate {
 }
 
 message EditSettingsRequest {
+  BoolFieldUpdate viewer_push_confirmation_required = 22;
   DiffFilesSortFieldUpdate diff_files_sort = 21;
   BoolFieldUpdate copy_with_line_context = 20;
   ViewerProjectNamesFieldUpdate viewer_push_no_confirmation_projects = 19;
