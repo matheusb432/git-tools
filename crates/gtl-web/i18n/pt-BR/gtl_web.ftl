@@ -778,3 +778,54 @@ commit-search-results = Commits encontrados
 commit-search-open = Abrir commit { $id }: { $subject }
 commit-search-empty = Tente uma busca mais curta, um hash de commit ou um intervalo de tempo maior.
 commit-search-detached = Faça checkout de uma branch para buscar seus commits.
+
+settings-keybindings = Atalhos de teclado
+keybindings-description = Encontre um comando ou atalho. Selecione um atalho para alterá-lo ou clique duas vezes em uma linha.
+keybindings-search = Pesquisar atalhos de teclado
+keybindings-search-placeholder = Pesquisar comandos ou atalhos
+keybindings-record-search = Pressione um atalho para encontrar seu comando. Escape encerra a gravação.
+keybindings-record = Gravar teclas para pesquisar
+keybindings-clear-search = Limpar pesquisa
+keybindings-reset-all = Restaurar todos os atalhos
+keybindings-modified = Mostrar apenas modificados
+keybindings-command = Comando
+keybindings-shortcut = Atalho
+keybindings-when = Quando
+keybindings-source = Origem
+keybindings-actions = Ações
+keybindings-context-diff = Área de diffs
+keybindings-source-user = Usuário
+keybindings-source-default = Padrão
+keybindings-empty = Nenhum atalho corresponde à sua pesquisa.
+keybindings-edit = Alterar atalho de { $command }
+keybindings-remove = Remover atalho de { $command }
+keybindings-reset = Restaurar atalho de { $command }
+keybindings-unassigned = Sem atalho
+keybindings-recorder-title = Alterar atalho
+keybindings-recorder-instructions = Pressione o atalho desejado e depois Enter para salvar. Escape cancela. Tab move entre os controles.
+keybindings-recorder-waiting = Pressione as teclas
+keybindings-current = Atual:
+keybindings-replace-hint = Substituir este atalho o remove do outro comando.
+keybindings-replace = Substituir atalho
+keybindings-save = Salvar
+keybindings-cancel = Cancelar
+keybindings-search-files = Arquivos: Encontrar arquivo
+keybindings-search-text = Diff: Encontrar texto
+keybindings-toggle-files = Exibir: Alternar painel de arquivos
+keybindings-toggle-commits = Exibir: Alternar painel de commits
+keybindings-push = Git: Push do diff revisado
+keybindings-next-tab = Abas: Próximo diff
+keybindings-previous-tab = Abas: Diff anterior
+keybindings-close-tab = Abas: Fechar diff
+keybindings-pin-tab = Abas: Fixar ou desafixar diff
+keybindings-close-others = Abas: Fechar outros diffs
+keybindings-conflict = “{ $first }” e “{ $second }” usam o mesmo atalho.
+keybindings-ambiguous = Use cada modificador apenas uma vez no atalho.
+keybindings-modifier-required = Inclua Ctrl, Alt, Command ou Super no atalho.
+keybindings-unsupported = Use uma letra, número, F1–F12 ou tecla de navegação com um modificador.
+keybindings-count = { $count ->
+    [0] Nenhum atalho
+    [one] 1 atalho
+   *[other] { $count } atalhos
+    }
+keybindings-context-tabs = Abas do visualizador

@@ -25,6 +25,7 @@ fn application_field_update<Input, Output>(
 #[must_use]
 pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
     UserSettingsPatch {
+        keybindings: application_field_update(request.keybindings, std::convert::identity),
         ui_scale_percent: application_field_update(request.ui_scale_percent, |value| value),
         reduce_motion: application_field_update(request.reduce_motion, |value| value),
         language: application_field_update(request.language, |value| value),
@@ -105,6 +106,7 @@ pub fn project_settings(
 ) -> ViewerUserSettings {
     let configured_theme = settings.theme().map(super::project_theme);
     ViewerUserSettings {
+        keybindings: settings.viewer_keybindings(),
         accessibility: settings.accessibility(),
         language: settings.language(),
         date_format: settings.date_format(),

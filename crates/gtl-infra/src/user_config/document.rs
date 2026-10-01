@@ -69,6 +69,17 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsToggleCommitsSidebar,
     #[strum(to_string = "keybindings.push_diff")]
     KeybindingsPushDiff,
+    #[strum(to_string = "keybindings.next_tab")]
+    KeybindingsNextTab,
+    #[strum(to_string = "keybindings.previous_tab")]
+    KeybindingsPreviousTab,
+    #[strum(to_string = "keybindings.close_tab")]
+    KeybindingsCloseTab,
+    #[strum(to_string = "keybindings.pin_tab")]
+    KeybindingsPinTab,
+    #[strum(to_string = "keybindings.close_other_tabs")]
+    KeybindingsCloseOtherTabs,
+
     #[strum(to_string = "tags")]
     DefaultTagPatterns,
     #[strum(to_string = "tags.default")]
@@ -114,7 +125,12 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
             | Self::KeybindingsToggleCommitsSidebar
-            | Self::KeybindingsPushDiff => "keybindings",
+            | Self::KeybindingsPushDiff
+            | Self::KeybindingsNextTab
+            | Self::KeybindingsPreviousTab
+            | Self::KeybindingsCloseTab
+            | Self::KeybindingsPinTab
+            | Self::KeybindingsCloseOtherTabs => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable => "tags",
@@ -151,6 +167,12 @@ impl UserSettingsDocumentKey {
             Self::KeybindingsToggleFilesSidebar => "toggle_files_sidebar",
             Self::KeybindingsToggleCommitsSidebar => "toggle_commits_sidebar",
             Self::KeybindingsPushDiff => "push_diff",
+            Self::KeybindingsNextTab => "next_tab",
+            Self::KeybindingsPreviousTab => "previous_tab",
+            Self::KeybindingsCloseTab => "close_tab",
+            Self::KeybindingsPinTab => "pin_tab",
+            Self::KeybindingsCloseOtherTabs => "close_other_tabs",
+
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
             Self::ProjectExcludedFromPushAll { .. } => "excluded_from_push_all",
@@ -184,7 +206,12 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsSearchTextInAllFiles
             | Self::KeybindingsToggleFilesSidebar
             | Self::KeybindingsToggleCommitsSidebar
-            | Self::KeybindingsPushDiff => "keybindings",
+            | Self::KeybindingsPushDiff
+            | Self::KeybindingsNextTab
+            | Self::KeybindingsPreviousTab
+            | Self::KeybindingsCloseTab
+            | Self::KeybindingsPinTab
+            | Self::KeybindingsCloseOtherTabs => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable
@@ -387,6 +414,12 @@ struct RawPushSettingsDocument {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawKeybindingsDocument {
+    next_tab: Option<RawSettingValue>,
+    previous_tab: Option<RawSettingValue>,
+    close_tab: Option<RawSettingValue>,
+    pin_tab: Option<RawSettingValue>,
+    close_other_tabs: Option<RawSettingValue>,
+
     push_diff: Option<RawSettingValue>,
     toggle_files_sidebar: Option<RawSettingValue>,
     toggle_commits_sidebar: Option<RawSettingValue>,
@@ -588,48 +621,58 @@ fn parse_keybindings(
     document: RawKeybindingsDocument,
 ) -> Result<ViewerKeybindings, UserSettingsDocumentError> {
     let platform = ViewerKeybindingPlatform::current();
-    let defaults = ViewerKeybindings::for_platform(platform);
     let search_files = optional_keybinding(
         UserSettingsDocumentKey::KeybindingsSearchFiles,
         document.search_files,
-    )?
-    .unwrap_or(defaults[ViewerKeybindingAction::SearchFiles]);
+    )?;
     let search_text_in_all_files = optional_keybinding(
         UserSettingsDocumentKey::KeybindingsSearchTextInAllFiles,
         document.search_text_in_all_files,
-    )?
-    .unwrap_or(defaults[ViewerKeybindingAction::SearchTextInAllFiles]);
-
+    )?;
     let toggle_files_sidebar = optional_keybinding(
         UserSettingsDocumentKey::KeybindingsToggleFilesSidebar,
         document.toggle_files_sidebar,
-    )?
-    .unwrap_or(defaults[ViewerKeybindingAction::ToggleFilesSidebar]);
+    )?;
     let toggle_commits_sidebar = optional_keybinding(
         UserSettingsDocumentKey::KeybindingsToggleCommitsSidebar,
         document.toggle_commits_sidebar,
-    )?
-    .unwrap_or(defaults[ViewerKeybindingAction::ToggleCommitsSidebar]);
+    )?;
     let push_diff = optional_keybinding(
         UserSettingsDocumentKey::KeybindingsPushDiff,
         document.push_diff,
-    )?
-    .unwrap_or(defaults[ViewerKeybindingAction::PushDiff]);
-    ViewerKeybindings::try_from_fn(platform, |action| match action {
+    )?;
+    let next_tab = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsNextTab,
+        document.next_tab,
+    )?;
+    let previous_tab = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsPreviousTab,
+        document.previous_tab,
+    )?;
+    let close_tab = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsCloseTab,
+        document.close_tab,
+    )?;
+    let pin_tab =
+        optional_keybinding(UserSettingsDocumentKey::KeybindingsPinTab, document.pin_tab)?;
+    let close_other_tabs = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsCloseOtherTabs,
+        document.close_other_tabs,
+    )?;
+    ViewerKeybindings::try_from_overrides(platform, |action| match action {
+        ViewerKeybindingAction::SearchFiles => search_files,
+        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
         ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
         ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
         ViewerKeybindingAction::PushDiff => push_diff,
-        ViewerKeybindingAction::SearchFiles => search_files,
-        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+        ViewerKeybindingAction::NextTab => next_tab,
+        ViewerKeybindingAction::PreviousTab => previous_tab,
+        ViewerKeybindingAction::CloseTab => close_tab,
+        ViewerKeybindingAction::PinTab => pin_tab,
+        ViewerKeybindingAction::CloseOtherTabs => close_other_tabs,
     })
     .map_err(|source| match source {
-        InvalidViewerKeybindings::ReservedTabShortcut { .. } => {
-            UserSettingsDocumentError::InvalidKeybindingSet {
-                key: UserSettingsDocumentKey::KeybindingsPushDiff,
-                source,
-            }
-        }
-        InvalidViewerKeybindings::AmbiguousMacOsModifiers { action } => {
+        InvalidViewerKeybindings::AmbiguousModifiers { action } => {
             UserSettingsDocumentError::InvalidKeybindingSet {
                 key: keybinding_document_key(action),
                 source,
@@ -647,6 +690,13 @@ fn parse_keybindings(
 
 const fn keybinding_document_key(action: ViewerKeybindingAction) -> UserSettingsDocumentKey {
     match action {
+        ViewerKeybindingAction::NextTab => UserSettingsDocumentKey::KeybindingsNextTab,
+        ViewerKeybindingAction::PreviousTab => UserSettingsDocumentKey::KeybindingsPreviousTab,
+        ViewerKeybindingAction::CloseTab => UserSettingsDocumentKey::KeybindingsCloseTab,
+        ViewerKeybindingAction::PinTab => UserSettingsDocumentKey::KeybindingsPinTab,
+        ViewerKeybindingAction::CloseOtherTabs => {
+            UserSettingsDocumentKey::KeybindingsCloseOtherTabs
+        }
         ViewerKeybindingAction::PushDiff => UserSettingsDocumentKey::KeybindingsPushDiff,
         ViewerKeybindingAction::ToggleFilesSidebar => {
             UserSettingsDocumentKey::KeybindingsToggleFilesSidebar
@@ -765,6 +815,7 @@ fn project_settings(
 }
 
 fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
+    apply_keybindings(document, &patch.keybindings);
     for (key, update) in [
         (UserSettingsDocumentKey::ReduceMotion, patch.reduce_motion),
         (
@@ -853,6 +904,28 @@ fn apply_settings_patch(document: &mut DocumentMut, patch: UserSettingsPatch) {
         UserSettingsDocumentKey::PushConfirmation,
         &patch.push_confirmation_required,
     );
+}
+
+fn apply_keybindings(
+    document: &mut DocumentMut,
+    update: &UserSettingsFieldUpdate<ViewerKeybindings>,
+) {
+    match update {
+        UserSettingsFieldUpdate::Update(bindings) => {
+            for action in ViewerKeybindingAction::ALL {
+                let key = keybinding_document_key(action);
+                let (section, field) = key.nested();
+                set_value(
+                    &mut document[section][field],
+                    Value::from(bindings[action].to_string()),
+                );
+            }
+        }
+        UserSettingsFieldUpdate::Clear => {
+            document.remove("keybindings");
+        }
+        UserSettingsFieldUpdate::Unchanged => {}
+    }
 }
 
 fn apply_viewer_push_preferences(

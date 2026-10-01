@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings};
 use gtl_wire::viewer::{ViewerViewIdentity, push::CreateViewerPush};
 use lucide_dioxus::{ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X};
 
@@ -27,6 +28,7 @@ pub(super) fn ReviewActions(
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigation = use_context::<ViewerTabNavigation>();
+    let keybindings = crate::app::user_settings::use_viewer_keybindings();
     let mut collapsed = use_context::<DiffPresentation>().review_dock_collapsed;
     let (available, title, unpushed) = use_view_push_availability(identity, disabled);
     use_diff_push_shortcut(
@@ -45,6 +47,7 @@ pub(super) fn ReviewActions(
     });
     rsx! {
         ReviewActionDock {
+            keybindings,
             unpushed,
             close_disabled: pinned || !viewer.actions_enabled(),
             pinned,
@@ -80,6 +83,7 @@ pub(super) fn ReviewActions(
 /// Collapsing leaves a reveal handle; the push shortcut keeps working while the dock is hidden.
 #[component]
 pub(crate) fn ReviewActionDock(
+    #[props(default)] keybindings: ViewerKeybindings,
     unpushed: Option<bool>,
     close_disabled: bool,
     #[props(default)] pinned: bool,
@@ -122,7 +126,8 @@ pub(crate) fn ReviewActionDock(
                     variant: ButtonVariant::Ghost,
                     state: navigation_state,
                     aria_label: previous_label.clone(),
-                    title: format!("{previous_label} (Ctrl+Shift+Tab)"),
+                    title: shortcut_title(&previous_label, keybindings, ViewerKeybindingAction::PreviousTab),
+                    aria_keyshortcuts: keybindings.aria_keyshortcuts(ViewerKeybindingAction::PreviousTab),
                     onclick: move |_| onstep.call(ViewerTabDirection::Previous),
                     ChevronLeft { size: 16 }
                 }
@@ -148,7 +153,8 @@ pub(crate) fn ReviewActionDock(
                     variant: ButtonVariant::Ghost,
                     state: navigation_state,
                     aria_label: next_label.clone(),
-                    title: format!("{next_label} (Ctrl+Tab)"),
+                    title: shortcut_title(&next_label, keybindings, ViewerKeybindingAction::NextTab),
+                    aria_keyshortcuts: keybindings.aria_keyshortcuts(ViewerKeybindingAction::NextTab),
                     onclick: move |_| onstep.call(ViewerTabDirection::Next),
                     ChevronRight { size: 16 }
                 }
@@ -182,4 +188,20 @@ pub(crate) fn ReviewActionDock(
             }
         }
     }
+}
+
+fn shortcut_title(
+    label: &str,
+    keybindings: ViewerKeybindings,
+    action: ViewerKeybindingAction,
+) -> String {
+    if keybindings[action].is_unassigned() {
+        return label.to_owned();
+    }
+    let keys = keybindings
+        .display_keys(action)
+        .map(|key| key.to_string())
+        .collect::<Vec<_>>()
+        .join("+");
+    format!("{label} ({keys})")
 }

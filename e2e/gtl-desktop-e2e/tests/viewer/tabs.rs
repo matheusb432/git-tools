@@ -65,7 +65,7 @@ async fn user_arranges_pins_and_closes_many_diff_tabs() -> Result<()> {
             support::context_click_element(driver, &inactive).await?;
             support::click(
                 driver,
-                By::Css("[role='menu'][aria-label='Tab actions'] [aria-keyshortcuts='Alt+p']"),
+                By::Css("[role='menu'][aria-label='Tab actions'] [aria-keyshortcuts='Alt+p' i]"),
             )
             .await?;
             support::visible(driver, By::Css("button[aria-label^='Unpin ']")).await?;

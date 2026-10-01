@@ -1,6 +1,9 @@
-use gtl_models::paths::RepositoryRoot;
+use gtl_models::{paths::RepositoryRoot, viewer::DiffDensity};
 
-use super::{FullContextDiff, FullContextDiffSource, unified_diff};
+use super::{
+    FullContextDiff, FullContextDiffSource, FullContextDiffState, View, fetch_full_context_diff,
+    unified_diff,
+};
 use crate::ports::GitClient;
 
 #[derive(Debug)]
@@ -34,6 +37,21 @@ pub fn execute(
         .map_err(FetchFullContextDiffError::Git)?;
     let files = unified_diff::parse(&raw).map_err(FetchFullContextDiffError::Parse)?;
     Ok(FullContextDiff::from_files(files))
+}
+
+pub(super) fn load_for_density(
+    view: View,
+    density: DiffDensity,
+    git: &impl GitClient,
+) -> anyhow::Result<View> {
+    if density == DiffDensity::Full
+        && let FullContextDiffState::Deferred(source) = &view.full_context
+    {
+        let request = FetchFullContextDiff::new(&view.repo_root, source);
+        let full_context = fetch_full_context_diff::execute(&request, git)?;
+        return Ok(view.with_full_context(full_context)?);
+    }
+    Ok(view)
 }
 
 #[cfg(test)]

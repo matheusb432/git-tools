@@ -360,6 +360,7 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
         has_older: false,
     };
     let settings = ViewerUserSettings {
+        keybindings: gtl_models::viewer::ViewerKeybindings::default(),
         accessibility: gtl_models::settings::ViewerAccessibility::default(),
         language: gtl_models::settings::ViewerLanguage::default(),
         date_format: gtl_models::settings::ViewerDateFormat::default(),

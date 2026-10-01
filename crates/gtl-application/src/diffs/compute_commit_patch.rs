@@ -9,7 +9,7 @@ use gtl_models::{
 use super::{EMPTY_TREE_ABBREVIATED_ID, EMPTY_TREE_ID};
 use crate::{
     diffs::{
-        Cmd, FetchFullContextDiff, Foot, FullContextDiffState, View,
+        Cmd, Foot, View,
         assemble::{DiffData, assemble},
         fetch_full_context_diff,
         view::sort_files_tree_order,
@@ -89,18 +89,8 @@ pub fn execute(
         full_context,
         extension_filter: AppliedExtensionFilter::from_hidden(&filter, hidden_paths),
     };
-    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
-        && let FullContextDiffState::Deferred(source) = &view.full_context
-    {
-        let request = FetchFullContextDiff::new(&view.repo_root, source);
-        let full_context =
-            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
-        return view
-            .with_full_context(full_context)
-            .map_err(anyhow::Error::from)
-            .map_err(ComputeCommitPatchError::Unexpected);
-    }
-    Ok(view)
+    fetch_full_context_diff::load_for_density(view, settings.viewer_render_options().density(), git)
+        .map_err(ComputeCommitPatchError::Unexpected)
 }
 
 #[cfg(test)]

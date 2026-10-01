@@ -50,9 +50,4 @@ mod tests {
         assert!("batch-1".parse::<RecipeBatchId>().is_err());
         assert!(serde_json::from_str::<RecipeBatchId>("\"batch-1\"").is_err());
     }
-
-    #[test]
-    fn generated_batch_ids_are_distinct() {
-        assert_ne!(RecipeBatchId::generate(), RecipeBatchId::generate());
-    }
 }

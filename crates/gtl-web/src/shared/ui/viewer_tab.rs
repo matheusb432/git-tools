@@ -1,5 +1,8 @@
 use dioxus::{html::input_data::MouseButton, prelude::*};
-use gtl_models::{settings::ViewerLanguage, viewer::ViewerTabId};
+use gtl_models::{
+    settings::ViewerLanguage,
+    viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
+};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabState};
 use lucide_dioxus::{Check, ListX, Pencil, Pin, Radio, RefreshCw, TriangleAlert, X};
 
@@ -48,6 +51,7 @@ pub(crate) struct ViewerTabMenuTarget {
 #[component]
 pub(crate) fn ViewerTabItem(
     tab: ViewerTab,
+    #[props(default)] keybindings: ViewerKeybindings,
     active: bool,
     #[props(default)] rows_loading: bool,
     #[props(default)] reorderable: bool,
@@ -236,6 +240,7 @@ pub(crate) fn ViewerTabItem(
             }
             if let Some(onpin) = onpin {
                 ViewerTabContextMenu {
+                    keybindings,
                     id: menu_id,
                     trigger_id: viewer_tab_element_id(tab_id),
                     actions,
@@ -521,6 +526,7 @@ mod tests {
         let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             onrename: None,
             menu_actions: None,
             warning_details: None,
@@ -569,6 +575,7 @@ mod tests {
         let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             onrename: None,
             menu_actions: None,
             warning_details: None,
@@ -621,6 +628,7 @@ mod tests {
 
 #[component]
 fn ViewerTabContextMenu(
+    keybindings: ViewerKeybindings,
     id: String,
     actions: Option<Element>,
     details: Element,
@@ -723,7 +731,7 @@ fn ViewerTabContextMenu(
                 class: "control-menu-action viewer-tab-context-action",
                 r#type: "button",
                 role: "menuitem",
-                aria_keyshortcuts: "Alt+p",
+                aria_keyshortcuts: keybindings.aria_keyshortcuts(ViewerKeybindingAction::PinTab),
                 autofocus: true,
                 tabindex: "-1",
                 onclick: move |_| {
@@ -740,13 +748,21 @@ fn ViewerTabContextMenu(
                         {t!(language, "tab-pin")}
                     }
                 }
-                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+P" }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true",
+                    {
+                        keybindings
+                            .display_keys(ViewerKeybindingAction::PinTab)
+                            .map(|key| key.to_string())
+                            .collect::<Vec<_>>()
+                            .join("+")
+                    }
+                }
             }
             button {
                 class: "control-menu-action viewer-tab-context-action",
                 r#type: "button",
                 role: "menuitem",
-                aria_keyshortcuts: "Control+w",
+                aria_keyshortcuts: keybindings.aria_keyshortcuts(ViewerKeybindingAction::CloseTab),
                 disabled: pinned,
                 tabindex: "-1",
                 onclick: move |event| {
@@ -757,13 +773,21 @@ fn ViewerTabContextMenu(
                     X { size: 14 }
                 }
                 span { {t!(language, "tab-close")} }
-                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Ctrl+W" }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true",
+                    {
+                        keybindings
+                            .display_keys(ViewerKeybindingAction::CloseTab)
+                            .map(|key| key.to_string())
+                            .collect::<Vec<_>>()
+                            .join("+")
+                    }
+                }
             }
             button {
                 class: "control-menu-action viewer-tab-context-action",
                 r#type: "button",
                 role: "menuitem",
-                aria_keyshortcuts: "Alt+o",
+                aria_keyshortcuts: keybindings.aria_keyshortcuts(ViewerKeybindingAction::CloseOtherTabs),
                 disabled: oncloseothers.is_none(),
                 tabindex: "-1",
                 onclick: move |_| {
@@ -776,7 +800,15 @@ fn ViewerTabContextMenu(
                     ListX { size: 14 }
                 }
                 span { {t!(language, "tab-close-others")} }
-                span { class: "ml-auto text-ink-3", aria_hidden: "true", "Alt+O" }
+                span { class: "ml-auto text-ink-3", aria_hidden: "true",
+                    {
+                        keybindings
+                            .display_keys(ViewerKeybindingAction::CloseOtherTabs)
+                            .map(|key| key.to_string())
+                            .collect::<Vec<_>>()
+                            .join("+")
+                    }
+                }
             }
         }
     }

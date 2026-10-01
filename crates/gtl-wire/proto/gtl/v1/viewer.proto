@@ -430,6 +430,12 @@ enum ViewerKeybindingPlatform {
 }
 
 message ViewerKeybindings {
+  optional string next_tab = 7;
+  optional string previous_tab = 8;
+  optional string close_tab = 9;
+  optional string pin_tab = 10;
+  optional string close_other_tabs = 11;
+
   optional string push_diff = 6;
   string toggle_files_sidebar = 4;
   string toggle_commits_sidebar = 5;
@@ -867,6 +873,7 @@ message DiffFilesSortFieldUpdate {
 }
 
 message GetViewerSettingsResponse {
+  ViewerKeybindings keybindings = 21;
   optional bool viewer_push_confirmation_required = 20;
   DiffFilesSort diff_files_sort = 19;
   optional bool copy_with_line_context = 18;
@@ -936,6 +943,7 @@ message ViewerProjectNamesFieldUpdate {
 }
 
 message EditSettingsRequest {
+  ViewerKeybindingsFieldUpdate keybindings = 23;
   BoolFieldUpdate viewer_push_confirmation_required = 22;
   DiffFilesSortFieldUpdate diff_files_sort = 21;
   BoolFieldUpdate copy_with_line_context = 20;
@@ -962,6 +970,13 @@ message EditSettingsRequest {
 message ViewerScaleFieldUpdate {
   oneof operation {
     uint32 update = 1;
+    ClearSetting clear = 2;
+  }
+}
+
+message ViewerKeybindingsFieldUpdate {
+  oneof operation {
+    ViewerKeybindings update = 1;
     ClearSetting clear = 2;
   }
 }

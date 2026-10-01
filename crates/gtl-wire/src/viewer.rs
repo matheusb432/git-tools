@@ -21,7 +21,7 @@ pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 60;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 61;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -484,6 +484,8 @@ pub struct ViewerHistoryPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerUserSettings {
+    pub keybindings: ViewerKeybindings,
+
     pub accessibility: gtl_models::settings::ViewerAccessibility,
     pub language: gtl_models::settings::ViewerLanguage,
     pub date_format: gtl_models::settings::ViewerDateFormat,
@@ -512,6 +514,8 @@ pub enum FieldUpdate<T> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct EditSettingsRequest {
+    pub keybindings: FieldUpdate<ViewerKeybindings>,
+
     pub ui_scale_percent: FieldUpdate<gtl_models::settings::ViewerScalePercent>,
     pub reduce_motion: FieldUpdate<bool>,
     pub language: FieldUpdate<gtl_models::settings::ViewerLanguage>,

@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
-use gtl_models::viewer::{
-    ViewerKeybindingAction, ViewerKeybindings, ViewerKeyboardModifier, ViewerTabId,
-};
+use gtl_models::viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId};
 use gtl_wire::viewer::{MoveViewerTab, ViewerTab, ViewerTabRequest};
 use wasm_bindgen::JsCast as _;
 
@@ -15,7 +13,7 @@ use crate::{
         browser,
         failure_notice::client_error_message,
         i18n::{t, use_language},
-        keyboard::native_keyboard_event_key,
+        keyboard::native_keyboard_event_matches,
         ui::{
             NavigationBar, ViewerTabItem, ViewerTabRail, ViewerTabSelectionIndicator, use_toast,
             viewer_tab_element_id,
@@ -103,6 +101,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let toast = use_toast();
     let shell = viewer.shell();
     let diff_rows_loading_tab_id = viewer.diff_rows_loading_tab_id();
+    let keybindings = super::user_settings::use_viewer_keybindings();
     let menu_actions = use_callback(|target| {
         rsx! {
             tab_actions::DiffTabActions { target }
@@ -232,7 +231,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
             }
         }
     });
-    use_viewer_tab_shortcuts(shell, tab_shortcut);
+    use_viewer_tab_shortcuts(keybindings, tab_shortcut);
     let shell_state = shell.read();
     let tabs = match &*shell_state {
         ViewerShellLoad::Ready(shell) => shell.tabs.as_slice(),
@@ -286,6 +285,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     ViewerTabItem {
                                         key: "{tab.id}",
                                         tab: tab.clone(),
+                                        keybindings,
                                         active,
                                         menu_actions,
                                         warning_details: tab.live.then(|| warnings.get(&tab_id).cloned()).flatten(),
@@ -386,57 +386,35 @@ enum ViewerTabShortcut {
 }
 
 impl ViewerTabShortcut {
-    fn conflicts_with(self, keybindings: ViewerKeybindings) -> bool {
-        let (key, modifier) = match self {
-            Self::Next | Self::Previous => return false,
-            Self::Close => ("w", ViewerKeyboardModifier::Control),
-            Self::Pin => ("p", ViewerKeyboardModifier::Alt),
-            Self::CloseOthers => ("o", ViewerKeyboardModifier::Alt),
-        };
-        let modifiers = [modifier].into_iter().collect();
-        [
-            ViewerKeybindingAction::SearchFiles,
-            ViewerKeybindingAction::SearchTextInAllFiles,
-            ViewerKeybindingAction::ToggleFilesSidebar,
-            ViewerKeybindingAction::ToggleCommitsSidebar,
-            ViewerKeybindingAction::PushDiff,
-        ]
-        .into_iter()
-        .any(|action| keybindings.matches_keypress(action, key, modifiers))
-    }
-
-    fn aria(self) -> &'static str {
+    fn action(self) -> ViewerKeybindingAction {
         match self {
-            Self::Next => "Control+Tab",
-            Self::Previous => "Control+Shift+Tab",
-            Self::Close => "Control+w",
-            Self::Pin => "Alt+p",
-            Self::CloseOthers => "Alt+o",
+            Self::Next => ViewerKeybindingAction::NextTab,
+            Self::Previous => ViewerKeybindingAction::PreviousTab,
+            Self::Close => ViewerKeybindingAction::CloseTab,
+            Self::Pin => ViewerKeybindingAction::PinTab,
+            Self::CloseOthers => ViewerKeybindingAction::CloseOtherTabs,
         }
     }
 }
 
 fn use_viewer_tab_shortcuts(
-    shell: ReadSignal<ViewerShellLoad>,
+    keybindings: ViewerKeybindings,
     onshortcut: Callback<ViewerTabShortcut>,
 ) {
-    browser::use_window_keydown(move |event| {
-        if event.default_prevented() || event.is_composing() || event.meta_key() {
+    let onkeydown = use_callback(move |event: web_sys::KeyboardEvent| {
+        if event.default_prevented() || event.is_composing() {
             return;
         }
-        let key = native_keyboard_event_key(&event);
-        let shortcut = match (
-            key.to_ascii_lowercase().as_str(),
-            event.ctrl_key(),
-            event.alt_key(),
-            event.shift_key(),
-        ) {
-            ("tab", true, false, false) => ViewerTabShortcut::Next,
-            ("tab", true, false, true) => ViewerTabShortcut::Previous,
-            ("w", true, false, false) => ViewerTabShortcut::Close,
-            ("p", false, true, false) => ViewerTabShortcut::Pin,
-            ("o", false, true, false) => ViewerTabShortcut::CloseOthers,
-            _ => return,
+        let Some(shortcut) = [
+            ViewerTabShortcut::Next,
+            ViewerTabShortcut::Previous,
+            ViewerTabShortcut::Close,
+            ViewerTabShortcut::Pin,
+            ViewerTabShortcut::CloseOthers,
+        ]
+        .into_iter()
+        .find(|shortcut| native_keyboard_event_matches(&event, keybindings, shortcut.action())) else {
+            return;
         };
         let Some(document) = web_sys::window().and_then(|window| window.document()) else {
             return;
@@ -453,13 +431,11 @@ fn use_viewer_tab_shortcuts(
         {
             return;
         }
-        if menu.is_none()
-            && shell.with(|shell| match shell {
-                ViewerShellLoad::Ready(shell) => {
-                    shortcut.conflicts_with(shell.preferences.keybindings)
-                }
-                _ => false,
-            })
+        if document
+            .query_selector(".settings-page-shell")
+            .ok()
+            .flatten()
+            .is_some()
         {
             return;
         }
@@ -484,7 +460,10 @@ fn use_viewer_tab_shortcuts(
             return;
         };
         if let Some(action) = menu
-            .query_selector(&format!("[aria-keyshortcuts='{}']", shortcut.aria()))
+            .query_selector(&format!(
+                "[aria-keyshortcuts='{}']",
+                keybindings.aria_keyshortcuts(shortcut.action())
+            ))
             .ok()
             .flatten()
             .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
@@ -492,6 +471,7 @@ fn use_viewer_tab_shortcuts(
             action.click();
         }
     });
+    browser::use_window_keydown(move |event| onkeydown.call(event));
 }
 
 fn tabs_in_order<'a>(tabs: &'a [ViewerTab], order: Option<&[ViewerTabId]>) -> Vec<&'a ViewerTab> {

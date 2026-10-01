@@ -1,4 +1,4 @@
-use std::{fmt, iter, ops::Index, str::FromStr};
+use std::{fmt, ops::Index, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
@@ -9,15 +9,25 @@ pub enum ViewerKeybindingAction {
     ToggleFilesSidebar,
     ToggleCommitsSidebar,
     PushDiff,
+    NextTab,
+    PreviousTab,
+    CloseTab,
+    PinTab,
+    CloseOtherTabs,
 }
 
 impl ViewerKeybindingAction {
-    const ALL: [Self; 5] = [
+    pub const ALL: [Self; 10] = [
         Self::SearchFiles,
         Self::SearchTextInAllFiles,
         Self::ToggleFilesSidebar,
         Self::ToggleCommitsSidebar,
         Self::PushDiff,
+        Self::NextTab,
+        Self::PreviousTab,
+        Self::CloseTab,
+        Self::PinTab,
+        Self::CloseOtherTabs,
     ];
     const COUNT: usize = Self::ALL.len();
 
@@ -28,23 +38,56 @@ impl ViewerKeybindingAction {
             Self::ToggleFilesSidebar => 2,
             Self::ToggleCommitsSidebar => 3,
             Self::PushDiff => 4,
+            Self::NextTab => 5,
+            Self::PreviousTab => 6,
+            Self::CloseTab => 7,
+            Self::PinTab => 8,
+            Self::CloseOtherTabs => 9,
         }
     }
 
-    const fn default_keybinding(self) -> ViewerKeybinding {
+    const fn default_keybinding(self, platform: ViewerKeybindingPlatform) -> ViewerKeybinding {
+        let control = if matches!(platform, ViewerKeybindingPlatform::MacOs) {
+            ViewerModifier::Control
+        } else {
+            ViewerModifier::Primary
+        };
         match self {
             Self::SearchFiles => ViewerKeybinding::primary_character('p'),
             Self::SearchTextInAllFiles => ViewerKeybinding::primary_character('f'),
             Self::ToggleFilesSidebar => ViewerKeybinding::primary_character('b'),
             Self::ToggleCommitsSidebar => ViewerKeybinding {
-                key: ViewerKey::Character('b'),
+                key: Some(ViewerKey::Character('b')),
                 modifiers: ViewerModifiers(
                     ViewerModifier::Primary as u8 | ViewerModifier::Alt as u8,
                 ),
             },
             Self::PushDiff => ViewerKeybinding {
-                key: ViewerKey::Named(0),
+                key: Some(ViewerKey::Named(0)),
                 modifiers: ViewerModifiers::only(ViewerModifier::Primary),
+            },
+            Self::NextTab | Self::PreviousTab => ViewerKeybinding {
+                key: Some(ViewerKey::Named(3)),
+                modifiers: ViewerModifiers(
+                    control as u8
+                        | if matches!(self, Self::PreviousTab) {
+                            ViewerModifier::Shift as u8
+                        } else {
+                            0
+                        },
+                ),
+            },
+            Self::CloseTab => ViewerKeybinding {
+                key: Some(ViewerKey::Character('w')),
+                modifiers: ViewerModifiers::only(control),
+            },
+            Self::PinTab | Self::CloseOtherTabs => ViewerKeybinding {
+                key: Some(ViewerKey::Character(if matches!(self, Self::PinTab) {
+                    'p'
+                } else {
+                    'o'
+                })),
+                modifiers: ViewerModifiers::only(ViewerModifier::Alt),
             },
         }
     }
@@ -58,6 +101,11 @@ impl fmt::Display for ViewerKeybindingAction {
             Self::ToggleFilesSidebar => "toggle_files_sidebar",
             Self::ToggleCommitsSidebar => "toggle_commits_sidebar",
             Self::PushDiff => "push_diff",
+            Self::NextTab => "next_tab",
+            Self::PreviousTab => "previous_tab",
+            Self::CloseTab => "close_tab",
+            Self::PinTab => "pin_tab",
+            Self::CloseOtherTabs => "close_other_tabs",
         })
     }
 }
@@ -167,10 +215,17 @@ enum ViewerModifier {
     Alt = 1 << 1,
     Shift = 1 << 2,
     Meta = 1 << 3,
+    Control = 1 << 4,
 }
 
 impl ViewerModifier {
-    const ALL: [Self; 4] = [Self::Primary, Self::Alt, Self::Shift, Self::Meta];
+    const ALL: [Self; 5] = [
+        Self::Primary,
+        Self::Control,
+        Self::Alt,
+        Self::Shift,
+        Self::Meta,
+    ];
 
     fn parse(token: &str) -> Option<Self> {
         Self::ALL
@@ -184,13 +239,14 @@ impl ViewerModifier {
             Self::Alt => "alt",
             Self::Shift => "shift",
             Self::Meta => "meta",
+            Self::Control => "control",
         }
     }
 
     const fn display_value(self, platform: ViewerKeybindingPlatform) -> &'static str {
         match (self, platform) {
             (Self::Primary | Self::Meta, ViewerKeybindingPlatform::MacOs) => "⌘",
-            (Self::Primary, _) => "Ctrl",
+            (Self::Primary | Self::Control, _) => "Ctrl",
             (Self::Alt, ViewerKeybindingPlatform::MacOs) => "⌥",
             (Self::Alt, _) => "Alt",
             (Self::Shift, ViewerKeybindingPlatform::MacOs) => "⇧",
@@ -206,7 +262,7 @@ impl ViewerModifier {
             (Self::Primary, ViewerKeybindingPlatform::MacOs) | (Self::Meta, _) => {
                 ViewerKeyboardModifier::Meta
             }
-            (Self::Primary, _) => ViewerKeyboardModifier::Control,
+            (Self::Primary | Self::Control, _) => ViewerKeyboardModifier::Control,
             (Self::Alt, _) => ViewerKeyboardModifier::Alt,
             (Self::Shift, _) => ViewerKeyboardModifier::Shift,
         }
@@ -238,8 +294,10 @@ impl ViewerModifiers {
     }
 
     const fn has_accelerator(self) -> bool {
-        const ACCELERATORS: u8 =
-            ViewerModifier::Primary as u8 | ViewerModifier::Alt as u8 | ViewerModifier::Meta as u8;
+        const ACCELERATORS: u8 = ViewerModifier::Primary as u8
+            | ViewerModifier::Control as u8
+            | ViewerModifier::Alt as u8
+            | ViewerModifier::Meta as u8;
         self.0 & ACCELERATORS != 0
     }
 }
@@ -257,25 +315,82 @@ pub enum ParseViewerKeybindingError {
     #[error("keyboard chord must contain one key")]
     MissingKey,
     #[error(
-        "unsupported token `{token}`; use ctrl, alt, shift, or meta plus a-z, 0-9, f1-f12, enter, escape, space, tab, backspace, delete, insert, an arrow key, home, end, pageup, or pagedown"
+        "unsupported token `{token}`; use ctrl, control, alt, shift, or meta plus a-z, 0-9, f1-f12, enter, escape, space, tab, backspace, delete, insert, an arrow key, home, end, pageup, or pagedown"
     )]
     UnsupportedToken { token: String },
-    #[error("keyboard chord must include ctrl, alt, or meta")]
+    #[error("keyboard chord must include ctrl, control, alt, or meta")]
     MissingAccelerator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ViewerKeybinding {
     modifiers: ViewerModifiers,
-    key: ViewerKey,
+    key: Option<ViewerKey>,
 }
 
 impl ViewerKeybinding {
     const fn primary_character(key: char) -> Self {
         Self {
             modifiers: ViewerModifiers::only(ViewerModifier::Primary),
-            key: ViewerKey::Character(key),
+            key: Some(ViewerKey::Character(key)),
         }
+    }
+
+    #[must_use]
+    pub const fn unassigned() -> Self {
+        Self {
+            modifiers: ViewerModifiers(0),
+            key: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_unassigned(self) -> bool {
+        self.key.is_none()
+    }
+
+    pub fn from_keypress(
+        platform: ViewerKeybindingPlatform,
+        key: &str,
+        modifiers: ViewerKeyboardModifiers,
+    ) -> Result<Self, ParseViewerKeybindingError> {
+        let key = ViewerKey::parse(if key == " " { "space" } else { key }).ok_or_else(|| {
+            ParseViewerKeybindingError::UnsupportedToken {
+                token: key.to_owned(),
+            }
+        })?;
+        let mut resolved = ViewerModifiers::default();
+        for (physical, modifier) in [
+            (
+                ViewerKeyboardModifier::Control,
+                if platform == ViewerKeybindingPlatform::MacOs {
+                    ViewerModifier::Control
+                } else {
+                    ViewerModifier::Primary
+                },
+            ),
+            (
+                ViewerKeyboardModifier::Meta,
+                if platform == ViewerKeybindingPlatform::MacOs {
+                    ViewerModifier::Primary
+                } else {
+                    ViewerModifier::Meta
+                },
+            ),
+            (ViewerKeyboardModifier::Alt, ViewerModifier::Alt),
+            (ViewerKeyboardModifier::Shift, ViewerModifier::Shift),
+        ] {
+            if modifiers.0 & physical as u8 != 0 {
+                resolved.insert(modifier);
+            }
+        }
+        if !resolved.has_accelerator() {
+            return Err(ParseViewerKeybindingError::MissingAccelerator);
+        }
+        Ok(Self {
+            modifiers: resolved,
+            key: Some(key),
+        })
     }
 
     fn keyboard_modifiers(self, platform: ViewerKeybindingPlatform) -> ViewerKeyboardModifiers {
@@ -285,14 +400,21 @@ impl ViewerKeybinding {
             .collect()
     }
 
-    const fn has_ambiguous_macos_modifiers(self, platform: ViewerKeybindingPlatform) -> bool {
-        matches!(platform, ViewerKeybindingPlatform::MacOs)
-            && self.modifiers.contains(ViewerModifier::Primary)
-            && self.modifiers.contains(ViewerModifier::Meta)
+    const fn has_ambiguous_modifiers(self, platform: ViewerKeybindingPlatform) -> bool {
+        self.modifiers.contains(ViewerModifier::Primary)
+            && self
+                .modifiers
+                .contains(if matches!(platform, ViewerKeybindingPlatform::MacOs) {
+                    ViewerModifier::Meta
+                } else {
+                    ViewerModifier::Control
+                })
     }
 
-    fn conflicts_with(self, other: Self, platform: ViewerKeybindingPlatform) -> bool {
-        self.key == other.key
+    #[must_use]
+    pub fn conflicts_with(self, other: Self, platform: ViewerKeybindingPlatform) -> bool {
+        self.key.is_some()
+            && self.key == other.key
             && self.keyboard_modifiers(platform) == other.keyboard_modifiers(platform)
     }
 }
@@ -301,6 +423,9 @@ impl FromStr for ViewerKeybinding {
     type Err = ParseViewerKeybindingError;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        if raw.trim().eq_ignore_ascii_case("none") {
+            return Ok(Self::unassigned());
+        }
         if raw.trim().is_empty() {
             return Err(ParseViewerKeybindingError::Empty);
         }
@@ -324,7 +449,10 @@ impl FromStr for ViewerKeybinding {
         if !modifiers.has_accelerator() {
             return Err(ParseViewerKeybindingError::MissingAccelerator);
         }
-        Ok(Self { modifiers, key })
+        Ok(Self {
+            modifiers,
+            key: Some(key),
+        })
     }
 }
 
@@ -352,10 +480,13 @@ fn set_key(slot: &mut Option<ViewerKey>, key: ViewerKey) -> Result<(), ParseView
 
 impl fmt::Display for ViewerKeybinding {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(key) = self.key else {
+            return formatter.write_str("none");
+        };
         for modifier in self.modifiers.iter() {
             write!(formatter, "{}+", modifier.config_value())?;
         }
-        write!(formatter, "{}", self.key)
+        write!(formatter, "{key}")
     }
 }
 
@@ -434,10 +565,8 @@ impl fmt::Display for ViewerKeybindingDisplayKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidViewerKeybindings {
-    #[error("`push_diff` uses reserved tab shortcut (`{binding}`)")]
-    ReservedTabShortcut { binding: ViewerKeybinding },
-    #[error("`{action}` uses both ctrl and meta, which are both Command on macOS")]
-    AmbiguousMacOsModifiers { action: ViewerKeybindingAction },
+    #[error("`{action}` uses modifiers that resolve to the same physical key")]
+    AmbiguousModifiers { action: ViewerKeybindingAction },
     #[error("`{first}` conflicts with `{second}` on the selected platform (`{binding}`)")]
     Conflict {
         first: ViewerKeybindingAction,
@@ -453,6 +582,43 @@ pub struct ViewerKeybindings {
 }
 
 impl ViewerKeybindings {
+    /// Omitted defaults yield to explicit overrides from older settings documents.
+    pub fn try_from_overrides(
+        platform: ViewerKeybindingPlatform,
+        binding_for_action: impl FnMut(ViewerKeybindingAction) -> Option<ViewerKeybinding>,
+    ) -> Result<Self, InvalidViewerKeybindings> {
+        let overrides = ViewerKeybindingAction::ALL.map(binding_for_action);
+        Self::try_from_fn(platform, |action| {
+            if let Some(binding) = overrides[action.index()] {
+                return binding;
+            }
+            let binding = action.default_keybinding(platform);
+            let shadowed = action.index() >= ViewerKeybindingAction::NextTab.index()
+                && overrides
+                    .iter()
+                    .flatten()
+                    .any(|other| binding.conflicts_with(*other, platform));
+            if shadowed {
+                ViewerKeybinding::unassigned()
+            } else {
+                binding
+            }
+        })
+    }
+
+    pub fn with_binding(
+        self,
+        action: ViewerKeybindingAction,
+        binding: ViewerKeybinding,
+    ) -> Result<Self, InvalidViewerKeybindings> {
+        Self::try_from_fn(self.platform, |candidate| {
+            if candidate == action {
+                binding
+            } else {
+                self[candidate]
+            }
+        })
+    }
     pub fn try_from_fn(
         platform: ViewerKeybindingPlatform,
         binding_for_action: impl FnMut(ViewerKeybindingAction) -> ViewerKeybinding,
@@ -469,7 +635,7 @@ impl ViewerKeybindings {
     pub fn for_platform(platform: ViewerKeybindingPlatform) -> Self {
         Self {
             platform,
-            bindings: ViewerKeybindingAction::ALL.map(ViewerKeybindingAction::default_keybinding),
+            bindings: ViewerKeybindingAction::ALL.map(|action| action.default_keybinding(platform)),
         }
     }
 
@@ -486,7 +652,9 @@ impl ViewerKeybindings {
         modifiers: ViewerKeyboardModifiers,
     ) -> bool {
         let binding = self[action];
-        binding.key.matches_browser_key(key)
+        binding
+            .key
+            .is_some_and(|binding| binding.matches_browser_key(key))
             && binding.keyboard_modifiers(self.platform) == modifiers
     }
 
@@ -499,9 +667,7 @@ impl ViewerKeybindings {
             .modifiers
             .iter()
             .map(move |modifier| ViewerKeybindingDisplayKey::from_modifier(modifier, self.platform))
-            .chain(iter::once(ViewerKeybindingDisplayKey::from_key(
-                binding.key,
-            )))
+            .chain(binding.key.map(ViewerKeybindingDisplayKey::from_key))
     }
 
     #[must_use]
@@ -517,41 +683,21 @@ impl ViewerKeybindings {
         .into_iter()
         .filter(|(modifier, _)| modifiers.0 & *modifier as u8 != 0)
         .map(|(_, name)| name.to_owned())
-        .chain(iter::once(
-            ViewerKeybindingDisplayKey::from_key(binding.key).to_string(),
-        ))
+        .chain(
+            binding
+                .key
+                .map(|key| ViewerKeybindingDisplayKey::from_key(key).to_string()),
+        )
         .collect::<Vec<_>>()
         .join("+")
     }
 
     fn validate(self) -> Result<(), InvalidViewerKeybindings> {
-        if [
-            ("Tab", ViewerKeyboardModifier::Control, false),
-            ("Tab", ViewerKeyboardModifier::Control, true),
-            ("w", ViewerKeyboardModifier::Control, false),
-            ("p", ViewerKeyboardModifier::Alt, false),
-            ("o", ViewerKeyboardModifier::Alt, false),
-        ]
-        .into_iter()
-        .any(|(key, modifier, shift)| {
-            let modifiers = [
-                Some(modifier),
-                shift.then_some(ViewerKeyboardModifier::Shift),
-            ]
-            .into_iter()
-            .flatten()
-            .collect();
-            self.matches_keypress(ViewerKeybindingAction::PushDiff, key, modifiers)
-        }) {
-            return Err(InvalidViewerKeybindings::ReservedTabShortcut {
-                binding: self[ViewerKeybindingAction::PushDiff],
-            });
-        }
         if let Some(action) = ViewerKeybindingAction::ALL
             .into_iter()
-            .find(|action| self[*action].has_ambiguous_macos_modifiers(self.platform))
+            .find(|action| self[*action].has_ambiguous_modifiers(self.platform))
         {
-            return Err(InvalidViewerKeybindings::AmbiguousMacOsModifiers { action });
+            return Err(InvalidViewerKeybindings::AmbiguousModifiers { action });
         }
         if let Some((first, second)) = action_pairs()
             .find(|(first, second)| self[*first].conflicts_with(self[*second], self.platform))
@@ -589,6 +735,16 @@ struct SerializedViewerKeybindings {
     toggle_commits_sidebar: ViewerKeybinding,
     #[serde(default)]
     push_diff: Option<ViewerKeybinding>,
+    #[serde(default)]
+    next_tab: Option<ViewerKeybinding>,
+    #[serde(default)]
+    previous_tab: Option<ViewerKeybinding>,
+    #[serde(default)]
+    close_tab: Option<ViewerKeybinding>,
+    #[serde(default)]
+    pin_tab: Option<ViewerKeybinding>,
+    #[serde(default)]
+    close_other_tabs: Option<ViewerKeybinding>,
 }
 
 impl Serialize for ViewerKeybindings {
@@ -603,6 +759,11 @@ impl Serialize for ViewerKeybindings {
             toggle_files_sidebar: self[ViewerKeybindingAction::ToggleFilesSidebar],
             toggle_commits_sidebar: self[ViewerKeybindingAction::ToggleCommitsSidebar],
             push_diff: Some(self[ViewerKeybindingAction::PushDiff]),
+            next_tab: Some(self[ViewerKeybindingAction::NextTab]),
+            previous_tab: Some(self[ViewerKeybindingAction::PreviousTab]),
+            close_tab: Some(self[ViewerKeybindingAction::CloseTab]),
+            pin_tab: Some(self[ViewerKeybindingAction::PinTab]),
+            close_other_tabs: Some(self[ViewerKeybindingAction::CloseOtherTabs]),
         }
         .serialize(serializer)
     }
@@ -614,14 +775,17 @@ impl<'de> Deserialize<'de> for ViewerKeybindings {
         D: Deserializer<'de>,
     {
         let value = SerializedViewerKeybindings::deserialize(deserializer)?;
-        Self::try_from_fn(value.platform, |action| match action {
-            ViewerKeybindingAction::SearchFiles => value.search_files,
-            ViewerKeybindingAction::SearchTextInAllFiles => value.search_text_in_all_files,
-            ViewerKeybindingAction::ToggleFilesSidebar => value.toggle_files_sidebar,
-            ViewerKeybindingAction::ToggleCommitsSidebar => value.toggle_commits_sidebar,
-            ViewerKeybindingAction::PushDiff => value
-                .push_diff
-                .unwrap_or(ViewerKeybindingAction::PushDiff.default_keybinding()),
+        Self::try_from_overrides(value.platform, |action| match action {
+            ViewerKeybindingAction::SearchFiles => Some(value.search_files),
+            ViewerKeybindingAction::SearchTextInAllFiles => Some(value.search_text_in_all_files),
+            ViewerKeybindingAction::ToggleFilesSidebar => Some(value.toggle_files_sidebar),
+            ViewerKeybindingAction::ToggleCommitsSidebar => Some(value.toggle_commits_sidebar),
+            ViewerKeybindingAction::PushDiff => value.push_diff,
+            ViewerKeybindingAction::NextTab => value.next_tab,
+            ViewerKeybindingAction::PreviousTab => value.previous_tab,
+            ViewerKeybindingAction::CloseTab => value.close_tab,
+            ViewerKeybindingAction::PinTab => value.pin_tab,
+            ViewerKeybindingAction::CloseOtherTabs => value.close_other_tabs,
         })
         .map_err(D::Error::custom)
     }
@@ -637,6 +801,132 @@ mod tests {
         ViewerKeyboardModifier,
     };
 
+    #[test]
+    fn removed_bindings_stay_unassigned_after_serialization() {
+        let defaults = ViewerKeybindings::for_platform(ViewerKeybindingPlatform::Linux);
+        let bindings = defaults
+            .with_binding(
+                ViewerKeybindingAction::SearchFiles,
+                ViewerKeybinding::unassigned(),
+            )
+            .unwrap();
+        assert!(!bindings.matches_keypress(
+            ViewerKeybindingAction::SearchFiles,
+            "p",
+            [ViewerKeyboardModifier::Control].into_iter().collect()
+        ));
+        assert_eq!(
+            bindings
+                .display_keys(ViewerKeybindingAction::SearchFiles)
+                .count(),
+            0
+        );
+        assert_eq!(
+            bindings.aria_keyshortcuts(ViewerKeybindingAction::SearchFiles),
+            ""
+        );
+        let saved = serde_json::to_value(bindings).unwrap();
+        assert_eq!(saved["search_files"], "none");
+        assert_eq!(
+            serde_json::from_value::<ViewerKeybindings>(saved).unwrap(),
+            bindings
+        );
+    }
+
+    #[test]
+    fn recording_preserves_physical_control_and_command_on_macos() {
+        for (platform, modifier, expected) in [
+            (
+                ViewerKeybindingPlatform::Linux,
+                ViewerKeyboardModifier::Control,
+                "ctrl+k",
+            ),
+            (
+                ViewerKeybindingPlatform::MacOs,
+                ViewerKeyboardModifier::Control,
+                "control+k",
+            ),
+            (
+                ViewerKeybindingPlatform::MacOs,
+                ViewerKeyboardModifier::Meta,
+                "ctrl+k",
+            ),
+            (
+                ViewerKeybindingPlatform::Windows,
+                ViewerKeyboardModifier::Meta,
+                "meta+k",
+            ),
+        ] {
+            let binding =
+                ViewerKeybinding::from_keypress(platform, "K", [modifier].into_iter().collect())
+                    .unwrap();
+            assert_eq!(binding.to_string(), expected);
+            let bindings = ViewerKeybindings::for_platform(platform)
+                .with_binding(ViewerKeybindingAction::SearchFiles, binding)
+                .unwrap();
+            assert!(bindings.matches_keypress(
+                ViewerKeybindingAction::SearchFiles,
+                "k",
+                [modifier].into_iter().collect()
+            ));
+        }
+        assert!(matches!(
+            ViewerKeybinding::from_keypress(
+                ViewerKeybindingPlatform::Linux,
+                "k",
+                [ViewerKeyboardModifier::Shift].into_iter().collect()
+            ),
+            Err(ParseViewerKeybindingError::MissingAccelerator)
+        ));
+    }
+
+    #[test]
+    fn tab_shortcuts_can_be_reassigned_and_conflicts_require_removal() {
+        let defaults = ViewerKeybindings::for_platform(ViewerKeybindingPlatform::Linux);
+        let binding = defaults[ViewerKeybindingAction::NextTab];
+        assert!(matches!(
+            defaults.with_binding(ViewerKeybindingAction::SearchFiles, binding),
+            Err(InvalidViewerKeybindings::Conflict { .. })
+        ));
+        let bindings = defaults
+            .with_binding(
+                ViewerKeybindingAction::NextTab,
+                ViewerKeybinding::unassigned(),
+            )
+            .unwrap()
+            .with_binding(ViewerKeybindingAction::SearchFiles, binding)
+            .unwrap();
+        assert!(bindings.matches_keypress(
+            ViewerKeybindingAction::SearchFiles,
+            "Tab",
+            [ViewerKeyboardModifier::Control].into_iter().collect()
+        ));
+        assert!(!bindings.matches_keypress(
+            ViewerKeybindingAction::NextTab,
+            "Tab",
+            [ViewerKeyboardModifier::Control].into_iter().collect()
+        ));
+    }
+
+    #[test]
+    fn older_overrides_keep_their_shortcut_when_tab_defaults_are_added() {
+        let bindings =
+            ViewerKeybindings::try_from_overrides(ViewerKeybindingPlatform::Linux, |action| {
+                (action == ViewerKeybindingAction::SearchFiles).then(|| "alt+p".parse().unwrap())
+            })
+            .unwrap();
+        assert!(bindings[ViewerKeybindingAction::PinTab].is_unassigned());
+        assert!(bindings.matches_keypress(
+            ViewerKeybindingAction::SearchFiles,
+            "p",
+            [ViewerKeyboardModifier::Alt].into_iter().collect()
+        ));
+        assert_eq!(
+            bindings[ViewerKeybindingAction::CloseTab].to_string(),
+            "ctrl+w"
+        );
+    }
+
     fn try_keybindings(
         platform: ViewerKeybindingPlatform,
         search_files: &str,
@@ -649,9 +939,7 @@ mod tests {
         ViewerKeybindings::try_from_fn(platform, |action| match action {
             ViewerKeybindingAction::SearchFiles => search_files,
             ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
-            ViewerKeybindingAction::ToggleFilesSidebar
-            | ViewerKeybindingAction::ToggleCommitsSidebar
-            | ViewerKeybindingAction::PushDiff => ViewerKeybindings::for_platform(platform)[action],
+            _ => ViewerKeybindings::for_platform(platform)[action],
         })
     }
 
@@ -752,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn push_overrides_cannot_replace_fixed_tab_shortcuts() {
+    fn push_overrides_cannot_shadow_tab_actions() {
         let cases = [
             ViewerKeybindingPlatform::Linux,
             ViewerKeybindingPlatform::Windows,
@@ -772,7 +1060,7 @@ mod tests {
             });
             assert!(matches!(
                 result,
-                Err(InvalidViewerKeybindings::ReservedTabShortcut { .. })
+                Err(InvalidViewerKeybindings::Conflict { .. })
             ));
         }
     }
@@ -836,7 +1124,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_duplicate_and_unmodified_chords() {
-        for alias in ["Cmd", "Win", "Option", "Control"] {
+        for alias in ["Cmd", "Win", "Option"] {
             let chord = format!("{alias}+p");
             assert!(matches!(
                 chord.parse::<ViewerKeybinding>(),

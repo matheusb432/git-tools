@@ -31,7 +31,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewerShellLoad {
     Loading,
-    Ready(ViewerShell),
+    Ready(Box<ViewerShell>),
     Error(ViewerClientError),
 }
 
@@ -354,7 +354,7 @@ impl ViewerContext {
         {
             DisplayedLanguage::show_configured(shell.preferences.language);
         }
-        let next = ViewerShellLoad::Ready(shell);
+        let next = ViewerShellLoad::Ready(Box::new(shell));
         if *self.shell.peek() != next {
             self.shell.set(next);
         }
@@ -868,7 +868,7 @@ mod tests {
     }
 
     fn pending_shell(tab_id: u64) -> TestResult<super::ViewerShellLoad> {
-        Ok(super::ViewerShellLoad::Ready(ViewerShell {
+        Ok(super::ViewerShellLoad::Ready(Box::new(ViewerShell {
             version: ViewerVersion::default(),
             focus_request_version: None,
             tabs: [1, 2]
@@ -904,7 +904,7 @@ mod tests {
                 keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             },
             feedback: None,
-        }))
+        })))
     }
 
     fn inert_changes(mutations: &Mutations) -> Vec<&AttributeValue> {

@@ -1,10 +1,7 @@
 use gtl_models::{failure::ErrorMeta, paths::RepositoryRoot, timestamps::MachineTimestamp};
 
 use crate::{
-    diffs::{
-        DiffTarget, FetchFullContextDiff, FullContextDiffState, View, diff_computation,
-        fetch_full_context_diff,
-    },
+    diffs::{DiffTarget, View, diff_computation, fetch_full_context_diff},
     ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
     shared::notes::Note,
 };
@@ -52,7 +49,7 @@ pub fn execute(
     } = req;
     let settings = app_settings.load()?;
     let filter = filters.extension_filter(&repo_root)?;
-    let mut built = diff_computation::build(
+    let built = diff_computation::build(
         git,
         &repo_root,
         &target,
@@ -60,19 +57,13 @@ pub fn execute(
         comparisons,
         changes_since.as_ref(),
     )?;
-    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
-        && let FullContextDiffState::Deferred(source) = &built.view.full_context
-    {
-        let request = FetchFullContextDiff::new(&built.view.repo_root, source);
-        let full_context =
-            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
-        built.view = built
-            .view
-            .with_full_context(full_context)
-            .map_err(anyhow::Error::from)?;
-    }
+    let view = fetch_full_context_diff::load_for_density(
+        built.view,
+        settings.viewer_render_options().density(),
+        git,
+    )?;
     Ok(ComputeDiffOk {
-        view: built.view,
+        view,
         summary: built.summary,
         notes: built.notes,
     })

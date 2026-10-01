@@ -367,6 +367,56 @@ mod tests {
     const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(8);
 
     #[test]
+    fn keybinding_edits_preserve_other_preferences_and_reset_to_defaults() {
+        use gtl_models::viewer::{ViewerKeybinding, ViewerKeybindingAction, ViewerKeybindings};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(&path, "# keep preferences\ntheme = \"glacier\"\n\n[keybindings]\n# preferred file search\nsearch_files = \"alt+k\"\n").unwrap();
+        let defaults = ViewerKeybindings::default();
+        let bindings = defaults
+            .with_binding(
+                ViewerKeybindingAction::SearchFiles,
+                "alt+k".parse().unwrap(),
+            )
+            .unwrap()
+            .with_binding(
+                ViewerKeybindingAction::CloseTab,
+                ViewerKeybinding::unassigned(),
+            )
+            .unwrap();
+        edit(
+            &path,
+            UserSettingsPatch {
+                keybindings: UserSettingsFieldUpdate::Update(bindings),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("# keep preferences"));
+        assert!(raw.contains("# preferred file search"));
+        let (loaded, _) = super::super::settings_document(&path, raw.into_bytes())
+            .unwrap()
+            .into_viewer_settings();
+        assert_eq!(loaded.viewer_keybindings(), bindings);
+        assert_eq!(loaded.theme(), Some(Theme::Glacier));
+        edit(
+            &path,
+            UserSettingsPatch {
+                keybindings: UserSettingsFieldUpdate::Clear,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let raw = std::fs::read(&path).unwrap();
+        let (loaded, _) = super::super::settings_document(&path, raw)
+            .unwrap()
+            .into_viewer_settings();
+        assert_eq!(loaded.viewer_keybindings(), defaults);
+        assert_eq!(loaded.theme(), Some(Theme::Glacier));
+    }
+
+    #[test]
     fn reset_preserves_invalid_bytes_and_restores_defaults() {
         for raw in [
             b"theme = {{{".as_slice(),

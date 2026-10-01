@@ -1,4 +1,5 @@
 pub(crate) mod diffs;
+pub(crate) mod keybindings;
 pub(crate) mod settings_recovery;
 mod user_settings;
 pub(crate) mod viewer_settings_button;

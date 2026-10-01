@@ -473,6 +473,7 @@ excluded_from_push_all = true
         std::fs::write(&path, "# retained\ntheme = \"dark\"\n").unwrap();
         let mut store = TomlSettingsStore::new(Some(path.clone()));
         let settings_patch = UserSettingsPatch {
+            keybindings: UserSettingsFieldUpdate::Unchanged,
             ui_scale_percent: UserSettingsFieldUpdate::Update(
                 gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
             ),

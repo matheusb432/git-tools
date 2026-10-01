@@ -64,10 +64,28 @@ pub(crate) fn native_keyboard_event_matches(
 }
 
 pub(crate) fn native_keyboard_event_key(event: &web_sys::KeyboardEvent) -> String {
-    let key = event.key();
+    keyboard_key(&event.key(), &event.code()).to_owned()
+}
+
+fn keyboard_key<'a>(key: &'a str, code: &'a str) -> &'a str {
+    // Shifted digits and macOS Option letters can report punctuation instead of the bound key.
+    if let Some(digit) = code
+        .strip_prefix("Digit")
+        .filter(|digit| digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit())
+    {
+        return digit;
+    }
+    if key.chars().count() == 1
+        && !key.is_ascii()
+        && let Some(letter) = code
+            .strip_prefix("Key")
+            .filter(|letter| letter.len() == 1 && letter.as_bytes()[0].is_ascii_alphabetic())
+    {
+        return letter;
+    }
     // WebKit reports Shift+Tab as Unidentified even when its physical code is Tab.
-    if key == "Unidentified" && event.code() == "Tab" {
-        "Tab".to_owned()
+    if key == "Unidentified" && code == "Tab" {
+        "Tab"
     } else {
         key
     }
@@ -89,6 +107,14 @@ mod tests {
     };
 
     use super::{ViewerKeyboardInput, keybinding_matches};
+
+    #[test]
+    fn shifted_digits_and_option_letters_use_the_bindable_key() {
+        assert_eq!(super::keyboard_key("!", "Digit1"), "1");
+        assert_eq!(super::keyboard_key("π", "KeyP"), "P");
+        assert_eq!(super::keyboard_key("Unidentified", "Tab"), "Tab");
+        assert_eq!(super::keyboard_key("F3", "F3"), "F3");
+    }
 
     fn input(key: &str) -> ViewerKeyboardInput<'_> {
         ViewerKeyboardInput {

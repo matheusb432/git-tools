@@ -213,7 +213,11 @@ fn SidebarButton(
         .collect::<Vec<_>>()
         .join("+");
     let label = sidebar.toggle_label(use_language());
-    let title = format!("{label} ({shortcut})");
+    let title = if shortcut.is_empty() {
+        label.clone()
+    } else {
+        format!("{label} ({shortcut})")
+    };
     let (panel, divider) = sidebar.icon_paths();
     rsx! {
         Button {
@@ -268,14 +272,8 @@ pub(crate) fn use_sidebar_controls_provider() {
 
 #[component]
 pub(crate) fn WorkspaceSidebarButtons() -> Element {
-    use crate::app::application_layout::{ViewerContext, ViewerShellLoad};
-
     let controls = use_context::<SidebarControls>();
-    let viewer = use_context::<ViewerContext>();
-    let keybindings = viewer.shell().with(|shell| match shell {
-        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerKeybindings::default(),
-    });
+    let keybindings = crate::app::user_settings::use_viewer_keybindings();
     rsx! {
         SidebarButtons {
             visibility: (controls.visibility)(),

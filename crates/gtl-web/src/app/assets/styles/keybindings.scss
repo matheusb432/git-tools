@@ -1,0 +1,43 @@
+@layer components {
+  .settings-content-inner:has(.keybindings-table) { max-width: 64rem; }
+  .keybindings-description { color: var(--ink-2); margin-bottom: 1rem; line-height: 1.6; }
+  .keybindings-toolbar { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .keybindings-search { display: flex; align-items: center; gap: .25rem; flex: 1; min-width: 15rem; }
+  .keybindings-search > div { flex: 1; }
+  .keybindings-filter-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: .75rem 0; color: var(--ink-2); font-size: var(--text-xs); }
+  .keybindings-record-status { color: var(--ink-2); margin-bottom: .75rem; }
+  .keybindings-table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; }
+  .keybindings-table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); text-align: left; }
+  .keybindings-table th { padding: .625rem .75rem; color: var(--ink-2); font-weight: 500; background: var(--surface); }
+  .keybindings-table td { padding: .625rem .75rem; border-top: 1px solid var(--line); vertical-align: middle; }
+  .keybindings-table tbody tr:hover, .keybindings-table tbody tr:focus-within { background: var(--surface); }
+  .keybindings-command-label { color: var(--ink); line-height: 1.5; }
+  .keybindings-command-id { display: block; color: var(--ink-3); margin-top: .125rem; font-size: .6875rem; overflow-wrap: anywhere; }
+  .keybindings-context, .keybindings-source { color: var(--ink-3); white-space: nowrap; }
+  .keybindings-source-custom { color: var(--ink-2); }
+  .keybindings-binding-button, .keybinding-recorder-capture { outline: none; }
+  .keybindings-binding-button:focus-visible, .keybinding-recorder-capture:focus-visible { outline: 1px solid var(--ink-3); outline-offset: 2px; }
+  @media (forced-colors: active) {
+    .keybindings-binding-button:focus-visible, .keybinding-recorder-capture:focus-visible { outline-color: highlight; }
+  }
+  .keybindings-binding-button { display: inline-flex; border-radius: 4px; padding: .25rem; margin: -.25rem; }
+  .keybinding-keys { display: inline-flex; align-items: center; gap: .25rem; white-space: nowrap; }
+  .keybinding-keys kbd { padding: .125rem .375rem; font-family: inherit; font-size: .6875rem; line-height: 1.4; background: var(--surface-2); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 3px; color: var(--ink); }
+  .keybinding-unassigned { color: var(--ink-3); font-style: italic; }
+  .keybindings-actions { width: 5.5rem; white-space: nowrap; text-align: right; }
+  .keybindings-empty { padding: 2rem 1rem; text-align: center; color: var(--ink-2); }
+  .keybinding-recorder { display: grid; gap: .875rem; max-width: 29rem; }
+  .keybinding-recorder-command { color: var(--ink); font-weight: 500; }
+  .keybinding-recorder-instructions { color: var(--ink-2); line-height: 1.6; }
+  .keybinding-recorder-capture { display: flex; align-items: center; justify-content: center; min-height: 5rem; border: 1px solid var(--line-2); border-radius: 4px; background: var(--surface); color: var(--ink-3); }
+  .keybinding-recorder-capture kbd { font-size: var(--text-sm); padding: .375rem .625rem; }
+  .keybinding-recorder-current { display: flex; align-items: center; gap: .5rem; color: var(--ink-3); font-size: var(--text-xs); }
+  .keybinding-recorder-footer { display: flex; justify-content: flex-end; gap: .5rem; padding-top: .375rem; }
+  @media (max-width: 72rem) { .keybindings-context { display: none; } }
+  @media (max-width: 48rem) {
+    .keybindings-source { display: none; }
+    .keybindings-table td, .keybindings-table th { padding: .5rem; }
+    .keybindings-command-id { font-size: .625rem; }
+    .keybindings-actions { width: 3rem; white-space: normal; }
+  }
+}

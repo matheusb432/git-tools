@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .trait_attribute(".", "#[allow(clippy::double_must_use)]")
         .boxed(".gtl.v1.ViewerActiveState.state.ready")
         .boxed(".gtl.v1.ViewerProjectStatusUpdate.result.status")
+        .boxed(".gtl.v1.ViewerKeybindingsFieldUpdate.operation.update")
         .file_descriptor_set_path(std::env::var("OUT_DIR")? + "/gtl_descriptor.bin")
         .compile_protos(&protos, &["proto"])?;
 

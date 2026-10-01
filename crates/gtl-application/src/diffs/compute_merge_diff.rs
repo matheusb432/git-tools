@@ -10,9 +10,7 @@ use gtl_models::{
 };
 
 use crate::{
-    diffs::{
-        FetchFullContextDiff, FullContextDiffState, PinnedRange, View, fetch_full_context_diff,
-    },
+    diffs::{PinnedRange, View, fetch_full_context_diff},
     ports::{ExtensionFilterReader, GitClient, UserSettingsLoadError, UserSettingsReader},
 };
 
@@ -62,7 +60,7 @@ pub fn execute(
         changes_since,
     } = req;
     let extension_filter = filters.extension_filter(&repo_root)?;
-    let mut built = view::build(
+    let built = view::build(
         git,
         &repo_root,
         base.as_ref(),
@@ -70,19 +68,13 @@ pub fn execute(
         &extension_filter,
         changes_since.as_ref(),
     )?;
-    if settings.viewer_render_options().density() == gtl_models::viewer::DiffDensity::Full
-        && let FullContextDiffState::Deferred(source) = &built.view.full_context
-    {
-        let request = FetchFullContextDiff::new(&built.view.repo_root, source);
-        let full_context =
-            fetch_full_context_diff::execute(&request, git).map_err(anyhow::Error::from)?;
-        built.view = built
-            .view
-            .with_full_context(full_context)
-            .map_err(anyhow::Error::from)?;
-    }
+    let view = fetch_full_context_diff::load_for_density(
+        built.view,
+        settings.viewer_render_options().density(),
+        git,
+    )?;
     Ok(ComputeMergeDiffOk {
-        view: built.view,
+        view,
         top: built.top,
         base: built.base,
         diff_range: built.diff_range,

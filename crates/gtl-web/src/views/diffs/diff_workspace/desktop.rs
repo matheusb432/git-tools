@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use gtl_models::{
     diffs::CommitId,
     failure::{Failure, ProjectFailure},
-    viewer::{ViewerKeybindingAction, ViewerKeybindings, ViewerTabId},
+    viewer::{ViewerKeybindingAction, ViewerTabId},
 };
 use gtl_wire::viewer::{
     CommitSelectionAction, OpenViewerDiffFile, ViewerActiveState, ViewerActiveView,
@@ -240,10 +240,7 @@ fn ReadyWorkspace(
     let files_sort = crate::views::diffs::displayed_files::use_diff_files_sort();
     let (displayed, file_filters) =
         super::file_filters::workspace::use_workspace_file_filters(view, files_sort);
-    let keybindings = shell.with(|shell| match shell {
-        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerKeybindings::default(),
-    });
+    let keybindings = crate::app::user_settings::use_viewer_keybindings();
     let workspace = super::use_diff_workspace_context(
         displayed.into(),
         commit_pages.commits(),
@@ -257,7 +254,10 @@ fn ReadyWorkspace(
         },
         true,
     );
-    browser::use_window_keydown(move |event| {
+    let shortcuts = use_callback(move |event: web_sys::KeyboardEvent| {
+        if event.default_prevented() || event.is_composing() {
+            return;
+        }
         for (action, sidebar, panel) in [
             (
                 ViewerKeybindingAction::ToggleFilesSidebar,
@@ -300,6 +300,7 @@ fn ReadyWorkspace(
             browser::focus_element("viewer-diff-find-input".to_owned());
         }
     });
+    browser::use_window_keydown(move |event| shortcuts.call(event));
     use_effect(move || {
         if path_filter_open() {
             mobile_panel.set(None);

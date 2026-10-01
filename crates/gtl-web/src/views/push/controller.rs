@@ -13,7 +13,7 @@ use gtl_wire::viewer::push::{
 use wasm_bindgen::JsCast as _;
 
 use crate::{
-    app::application_layout::{ViewerContext, ViewerShellLoad},
+    app::application_layout::ViewerContext,
     entities::diffs::viewer_server,
     shared::{
         browser,
@@ -386,7 +386,7 @@ pub(crate) fn PushButton(
     title: Option<String>,
 ) -> Element {
     let language = use_language();
-    let shortcut = push_shortcut_hint(use_context::<ViewerContext>(), &source);
+    let shortcut = push_shortcut_hint(crate::app::user_settings::use_viewer_keybindings(), &source);
     let (presentation, activate) = use_push_trigger(source, disabled, title);
     let PushButtonPresentation {
         label,
@@ -461,17 +461,13 @@ fn use_push_trigger(
 }
 
 pub(crate) fn use_diff_push_shortcut(source: CreateViewerPush, disabled: bool) {
-    let viewer = use_context::<ViewerContext>();
     let (presentation, activate) = use_push_trigger(source, disabled, None);
     let state = presentation.state;
+    let keybindings = crate::app::user_settings::use_viewer_keybindings();
     let onkeydown = use_callback(move |event: web_sys::KeyboardEvent| {
         if event.default_prevented() || event.is_composing() {
             return;
         }
-        let keybindings = viewer.shell().with(|shell| match shell {
-            ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
-            _ => ViewerKeybindings::default(),
-        });
         if !native_keyboard_event_matches(&event, keybindings, ViewerKeybindingAction::PushDiff) {
             return;
         }
@@ -521,16 +517,15 @@ pub(crate) fn use_diff_push_shortcut(source: CreateViewerPush, disabled: bool) {
 }
 
 fn push_shortcut_hint(
-    viewer: ViewerContext,
+    keybindings: ViewerKeybindings,
     source: &CreateViewerPush,
 ) -> Option<(String, String)> {
     if !matches!(source, CreateViewerPush::View { .. }) {
         return None;
     }
-    let keybindings = viewer.shell().with(|shell| match shell {
-        ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
-        _ => ViewerKeybindings::default(),
-    });
+    if keybindings[ViewerKeybindingAction::PushDiff].is_unassigned() {
+        return None;
+    }
     let display = keybindings
         .display_keys(ViewerKeybindingAction::PushDiff)
         .map(|key| key.to_string())
@@ -550,7 +545,7 @@ pub(super) fn PushMenuAction(
     menu_id: String,
     trigger_id: String,
 ) -> Element {
-    let shortcut = push_shortcut_hint(use_context::<ViewerContext>(), &source);
+    let shortcut = push_shortcut_hint(crate::app::user_settings::use_viewer_keybindings(), &source);
     let (presentation, activate) = use_push_trigger(source, disabled, Some(title));
     let PushButtonPresentation {
         label,

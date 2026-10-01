@@ -47,6 +47,10 @@ pub(crate) fn PanelDialog(
         PanelDialogVariant::Table => "dialog-surface m-auto w-[min(72rem,calc(100vw-2rem))] p-0",
         PanelDialogVariant::Form => "dialog-surface dialog-surface-fit m-auto p-0",
     };
+    let body_class = match variant {
+        PanelDialogVariant::Form => "dialog-body dialog-body-fit min-h-0",
+        PanelDialogVariant::Panel | PanelDialogVariant::Table => "dialog-body h-full min-h-0",
+    };
 
     rsx! {
         dialog {
@@ -62,7 +66,7 @@ pub(crate) fn PanelDialog(
                     onclose.call(());
                 }
             },
-            div { class: "dialog-body h-full min-h-0",
+            div { class: body_class,
                 header { class: "dialog-header gap-3 px-4 py-3",
                     h2 { id: title_id, class: "font-semibold text-ink", "{title}" }
                     Button {

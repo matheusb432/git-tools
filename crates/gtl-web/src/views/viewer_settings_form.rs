@@ -1,13 +1,16 @@
 use dioxus::prelude::*;
-use gtl_models::settings::{
-    DiffFilesSort, PushConfirmationPreferences, UserSettingsRevision, ViewerAccessibility,
-    ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
+use gtl_models::{
+    settings::{
+        DiffFilesSort, PushConfirmationPreferences, UserSettingsRevision, ViewerAccessibility,
+        ViewerDateFormat, ViewerLanguage, ViewerScalePercent,
+    },
+    viewer::ViewerKeybindings,
 };
 use gtl_wire::viewer::{
     EditSettingsRequest, FieldUpdate, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
     ViewerTheme, ViewerUserSettings,
 };
-use lucide_dioxus::{Columns2, GitBranch, Languages, Paintbrush};
+use lucide_dioxus::{Columns2, GitBranch, Keyboard, Languages, Paintbrush};
 
 use crate::shared::{
     date_display::date_format_sample,
@@ -32,6 +35,7 @@ pub(crate) enum SettingsField {
     FocusWindowOnDiff,
     PushConfirmationRequired,
     ViewerPushConfirmationRequired,
+    Keybindings,
 }
 
 impl FormField for SettingsField {
@@ -48,6 +52,7 @@ impl FormField for SettingsField {
         Self::FocusWindowOnDiff,
         Self::PushConfirmationRequired,
         Self::ViewerPushConfirmationRequired,
+        Self::Keybindings,
     ];
 
     fn request_field(self) -> &'static str {
@@ -64,6 +69,7 @@ impl FormField for SettingsField {
             Self::FocusWindowOnDiff => "focus_window_on_diff",
             Self::PushConfirmationRequired => "push_confirmation_required",
             Self::ViewerPushConfirmationRequired => "viewer_push_confirmation_required",
+            Self::Keybindings => "keybindings",
         }
     }
 
@@ -74,6 +80,7 @@ impl FormField for SettingsField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewerSettingsSelection {
+    pub(crate) keybindings: ViewerKeybindings,
     pub(crate) language: ViewerLanguage,
     pub(crate) date_format: ViewerDateFormat,
     pub(crate) accessibility: ViewerAccessibility,
@@ -87,6 +94,7 @@ pub(crate) struct ViewerSettingsSelection {
 
 #[derive(Clone, Copy)]
 pub(crate) enum SettingsEdit {
+    Keybindings(ViewerKeybindings),
     Language(ViewerLanguage),
     DateFormat(ViewerDateFormat),
     Theme(Option<ViewerTheme>),
@@ -105,6 +113,7 @@ pub(crate) enum SettingsEdit {
 impl SettingsEdit {
     pub(crate) fn apply(self, selected: &mut ViewerSettingsSelection) {
         match self {
+            Self::Keybindings(value) => selected.keybindings = value,
             Self::Language(value) => selected.language = value,
             Self::DateFormat(value) => selected.date_format = value,
             Self::Theme(value) => selected.theme = value,
@@ -125,6 +134,7 @@ impl SettingsEdit {
 impl From<&ViewerUserSettings> for ViewerSettingsSelection {
     fn from(settings: &ViewerUserSettings) -> Self {
         Self {
+            keybindings: settings.keybindings,
             language: settings.language,
             date_format: settings.date_format,
             accessibility: settings.accessibility,
@@ -145,6 +155,7 @@ pub(crate) enum SettingsSection {
     Locale,
     Snapshots,
     Git,
+    Keybindings,
 }
 
 impl SettingsSection {
@@ -154,6 +165,7 @@ impl SettingsSection {
             Self::Locale => t!(language, "settings-locale"),
             Self::Snapshots => t!(language, "settings-snapshots"),
             Self::Git => t!(language, "settings-git"),
+            Self::Keybindings => t!(language, "settings-keybindings"),
         }
     }
     pub(crate) const fn name(self) -> &'static str {
@@ -162,6 +174,7 @@ impl SettingsSection {
             Self::Locale => "locale",
             Self::Snapshots => "snapshots",
             Self::Git => "git",
+            Self::Keybindings => "keybindings",
         }
     }
 }
@@ -181,6 +194,7 @@ impl std::str::FromStr for SettingsSection {
             "locale" => Ok(Self::Locale),
             "snapshots" => Ok(Self::Snapshots),
             "git" => Ok(Self::Git),
+            "keybindings" => Ok(Self::Keybindings),
             _ => Err("unknown settings section"),
         }
     }
@@ -209,6 +223,7 @@ pub(crate) fn ViewerSettingsForm(
                     SettingsSection::Locale,
                     SettingsSection::Snapshots,
                     SettingsSection::Git,
+                    SettingsSection::Keybindings,
                 ]
                 {
                     button {
@@ -228,6 +243,9 @@ pub(crate) fn ViewerSettingsForm(
                                 },
                                 SettingsSection::Snapshots => rsx! {
                                     Columns2 { size: 17 }
+                                },
+                                SettingsSection::Keybindings => rsx! {
+                                    Keyboard { size: 17 }
                                 },
                                 SettingsSection::Git => rsx! {
                                     GitBranch { size: 17 }
@@ -259,6 +277,13 @@ pub(crate) fn ViewerSettingsForm(
                         }
                     }
                     match section {
+                        SettingsSection::Keybindings => rsx! {
+                            crate::views::keybindings::KeybindingsEditor {
+                                bindings: selected.keybindings,
+                                error: field_errors.message(SettingsField::Keybindings, language),
+                                onchange: move |bindings| onchange.call(SettingsEdit::Keybindings(bindings)),
+                            }
+                        },
                         SettingsSection::Appearance => rsx! {
                             SettingsSelectRow { id: "settings-theme", label: t!(language, "settings-theme"),
                                 Select {
@@ -511,6 +536,7 @@ pub(crate) fn viewer_settings_patch(
 ) -> EditSettingsRequest {
     EditSettingsRequest {
         expected_revision: Some(expected_revision),
+        keybindings: changed_keybindings(current.keybindings, selected.keybindings),
         language: changed_field(&current.language, selected.language),
         date_format: changed_field(&current.date_format, selected.date_format),
         ui_scale_percent: changed_field(
@@ -558,6 +584,19 @@ pub(crate) fn viewer_settings_patch(
 fn changed_field<T: PartialEq>(current: &T, selected: T) -> FieldUpdate<T> {
     if current == &selected {
         FieldUpdate::Unchanged
+    } else {
+        FieldUpdate::Update(selected)
+    }
+}
+
+fn changed_keybindings(
+    current: ViewerKeybindings,
+    selected: ViewerKeybindings,
+) -> FieldUpdate<ViewerKeybindings> {
+    if current == selected {
+        FieldUpdate::Unchanged
+    } else if selected == ViewerKeybindings::for_platform(selected.platform()) {
+        FieldUpdate::Clear
     } else {
         FieldUpdate::Update(selected)
     }
@@ -620,6 +659,7 @@ mod tests {
         push_confirmation_required: bool,
     ) -> ViewerSettingsSelection {
         ViewerSettingsSelection {
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             language: gtl_models::settings::ViewerLanguage::EnUs,
             date_format: gtl_models::settings::ViewerDateFormat::Iso,
             theme,
@@ -686,6 +726,34 @@ mod tests {
             request.viewer_push_confirmation_required,
             FieldUpdate::Unchanged
         );
+    }
+
+    #[test]
+    fn restoring_default_shortcuts_clears_saved_overrides() {
+        use gtl_models::viewer::{ViewerKeybinding, ViewerKeybindingAction};
+
+        let defaults = selection(
+            None,
+            ViewerDiffLayout::Unified,
+            ViewerDiffDensity::Compact,
+            true,
+        );
+        let customized = ViewerSettingsSelection {
+            keybindings: defaults
+                .keybindings
+                .with_binding(
+                    ViewerKeybindingAction::CloseTab,
+                    ViewerKeybinding::unassigned(),
+                )
+                .unwrap(),
+            ..defaults
+        };
+        let request = viewer_settings_patch(
+            customized,
+            defaults,
+            gtl_models::settings::UserSettingsRevision::from_digest([0x47; 32]),
+        );
+        assert_eq!(request.keybindings, FieldUpdate::Clear);
     }
 
     #[test]

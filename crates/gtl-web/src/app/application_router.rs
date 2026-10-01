@@ -415,6 +415,7 @@ mod tests {
             SettingsSection::Locale,
             SettingsSection::Snapshots,
             SettingsSection::Git,
+            SettingsSection::Keybindings,
         ] {
             let route = Route::Settings { section };
             assert_eq!(route.to_string().parse::<Route>().ok(), Some(route));

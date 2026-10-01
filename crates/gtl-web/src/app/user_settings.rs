@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use futures_util::StreamExt as _;
+use gtl_models::viewer::ViewerKeybindings;
 use gtl_wire::viewer::ViewerUserSettings;
 
 use crate::{
@@ -29,6 +30,20 @@ pub(crate) struct UserSettings {
     pub(crate) select: Callback<SettingsEdit>,
     pub(crate) retry: Callback<()>,
     pub(crate) reload: Callback<()>,
+}
+
+pub(crate) fn use_viewer_keybindings() -> ViewerKeybindings {
+    let viewer = use_context::<ViewerContext>();
+    let selected = try_use_context::<UserSettings>().and_then(|settings| (settings.selection)());
+    selected.map_or_else(
+        || {
+            viewer.shell().with(|shell| match shell {
+                ViewerShellLoad::Ready(shell) => shell.preferences.keybindings,
+                _ => ViewerKeybindings::default(),
+            })
+        },
+        |selection| selection.keybindings,
+    )
 }
 
 enum SettingsCommand {
@@ -240,6 +255,11 @@ fn merge_settings(
     loaded: ViewerSettingsSelection,
 ) -> ViewerSettingsSelection {
     // Only untouched fields accept the response; later input stays visible.
+    merge(
+        &mut selected.keybindings,
+        submitted.keybindings,
+        loaded.keybindings,
+    );
     merge(&mut selected.language, submitted.language, loaded.language);
     merge(
         &mut selected.date_format,
@@ -315,6 +335,7 @@ mod tests {
 
     fn selection() -> ViewerSettingsSelection {
         ViewerSettingsSelection {
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             language: ViewerLanguage::EnUs,
             date_format: ViewerDateFormat::Iso,
             theme: None,

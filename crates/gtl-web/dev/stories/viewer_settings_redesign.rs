@@ -105,9 +105,7 @@ fn alternate_preview_keybindings() -> Option<ViewerKeybindings> {
     ViewerKeybindings::try_from_fn(ViewerKeybindingPlatform::Linux, |action| match action {
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
-        ViewerKeybindingAction::ToggleFilesSidebar
-        | ViewerKeybindingAction::ToggleCommitsSidebar
-        | ViewerKeybindingAction::PushDiff => ViewerKeybindings::default()[action],
+        _ => ViewerKeybindings::default()[action],
     })
     .ok()
 }
@@ -125,6 +123,15 @@ fn mobile_viewer() -> Element {
 fn settings_form() -> Element {
     rsx! {
         SettingsMock {}
+    }
+}
+
+#[story(name = "Keyboard shortcuts")]
+fn keyboard_shortcuts() -> Element {
+    rsx! {
+        main { class: "story-settings-preview mx-auto w-full px-4 py-5 sm:px-6",
+            SettingsFormPreview { initial_section: SettingsSection::Keybindings }
+        }
     }
 }
 
@@ -509,8 +516,12 @@ fn SettingsMock() -> Element {
 }
 
 #[component]
-fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
+fn SettingsFormPreview(
+    rejected: Option<SettingsField>,
+    #[props(default)] initial_section: SettingsSection,
+) -> Element {
     let initial = ViewerSettingsSelection {
+        keybindings: gtl_models::viewer::ViewerKeybindings::default(),
         language: gtl_models::settings::ViewerLanguage::EnUs,
         date_format: gtl_models::settings::ViewerDateFormat::Iso,
         theme: Some(gtl_wire::viewer::ViewerTheme::Mirage),
@@ -526,7 +537,7 @@ fn SettingsFormPreview(rejected: Option<SettingsField>) -> Element {
         accessibility: gtl_models::settings::ViewerAccessibility::default(),
     };
     let mut selected = use_signal(|| initial);
-    let mut section = use_signal(SettingsSection::default);
+    let mut section = use_signal(|| initial_section);
     rsx! {
         ViewerSettingsForm {
             selected: selected(),
@@ -575,6 +586,7 @@ const VIEWER_SETTINGS_REDESIGN_STORIES: () = &[
     mobile_viewer,
     settings_form,
     settings_form_rejected,
+    keyboard_shortcuts,
 ];
 
 #[cfg(test)]

@@ -191,16 +191,19 @@ fn shell_codec_round_trips_the_process_neutral_contract() -> TestResult {
                 layout: ViewerDiffLayout::Split,
                 density: ViewerDiffDensity::Full,
             },
-            keybindings: ViewerKeybindings::try_from_fn(
+            keybindings: ViewerKeybindings::try_from_overrides(
                 ViewerKeybindingPlatform::Linux,
                 |action| match action {
-                    ViewerKeybindingAction::SearchFiles => "alt+p".parse().unwrap(),
-                    ViewerKeybindingAction::SearchTextInAllFiles => "ctrl+shift+f".parse().unwrap(),
-                    ViewerKeybindingAction::PushDiff => "alt+enter".parse().unwrap(),
+                    ViewerKeybindingAction::SearchFiles => Some("alt+p".parse().unwrap()),
+                    ViewerKeybindingAction::SearchTextInAllFiles => {
+                        Some("ctrl+shift+f".parse().unwrap())
+                    }
+                    ViewerKeybindingAction::PushDiff => Some("alt+enter".parse().unwrap()),
                     ViewerKeybindingAction::ToggleFilesSidebar
                     | ViewerKeybindingAction::ToggleCommitsSidebar => {
-                        ViewerKeybindings::default()[action]
+                        Some(ViewerKeybindings::default()[action])
                     }
+                    _ => None,
                 },
             )
             .unwrap(),
@@ -554,6 +557,11 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                         density: v1::ViewerDiffDensity::Compact as i32,
                     }),
                     keybindings: Some(v1::ViewerKeybindings {
+                        next_tab: None,
+                        previous_tab: None,
+                        close_tab: None,
+                        pin_tab: None,
+                        close_other_tabs: None,
                         push_diff: None,
                         toggle_files_sidebar: "ctrl+b".to_owned(),
                         toggle_commits_sidebar: "ctrl+alt+b".to_owned(),
@@ -845,6 +853,7 @@ fn history_page_codec_round_trips_navigation_and_identity() {
 #[test]
 fn settings_codec_round_trips_effective_values() {
     let settings = ViewerUserSettings {
+        keybindings: gtl_models::viewer::ViewerKeybindings::default(),
         accessibility: gtl_models::settings::ViewerAccessibility {
             ui_scale_percent: gtl_models::settings::ViewerScalePercent::try_new(200).unwrap(),
             reduce_motion: true,
@@ -875,6 +884,7 @@ fn settings_codec_round_trips_effective_values() {
 
     for focus_window_on_diff in [true, false] {
         let settings = ViewerUserSettings {
+            keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             focus_window_on_diff,
             push_confirmation: gtl_models::settings::PushConfirmationPreferences {
                 viewer_required: focus_window_on_diff,
@@ -909,6 +919,7 @@ fn settings_codec_round_trips_effective_values() {
 #[test]
 fn edit_settings_codec_preserves_unchanged_clear_false_and_empty_updates() {
     let request = EditSettingsRequest {
+        keybindings: FieldUpdate::Unchanged,
         ui_scale_percent: FieldUpdate::Update(
             gtl_models::settings::ViewerScalePercent::try_new(300).unwrap(),
         ),
@@ -1244,4 +1255,39 @@ fn accessibility_patch_preserves_clear_and_rejects_invalid_scale() {
             })
         );
     }
+}
+
+#[test]
+fn keybindings_patch_preserves_tristate_and_rejects_conflicting_input() {
+    for keybindings in [
+        FieldUpdate::Unchanged,
+        FieldUpdate::Clear,
+        FieldUpdate::Update(ViewerKeybindings::default()),
+    ] {
+        let request = EditSettingsRequest {
+            keybindings,
+            ..Default::default()
+        };
+        assert_eq!(
+            decode_edit_settings_request(encode_edit_settings_request(&request)).unwrap(),
+            request
+        );
+    }
+    let mut request = encode_edit_settings_request(&EditSettingsRequest {
+        keybindings: FieldUpdate::Update(ViewerKeybindings::default()),
+        ..Default::default()
+    });
+    if let Some(v1::viewer_keybindings_field_update::Operation::Update(bindings)) = request
+        .keybindings
+        .as_mut()
+        .and_then(|update| update.operation.as_mut())
+    {
+        bindings.close_tab = Some(bindings.search_files.clone());
+    }
+    assert_eq!(
+        decode_edit_settings_request(request),
+        Err(ViewerCodecError::InvalidField {
+            field: "keybindings"
+        })
+    );
 }

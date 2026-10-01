@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use thirtyfour::{By, WebDriver};
+use thirtyfour::{By, Key, WebDriver};
 
 use crate::support::{self, fixture::OneShotFixture};
 
@@ -72,6 +72,106 @@ async fn saved_viewer_settings_apply_and_survive_restart() -> Result<()> {
         })
     })
     .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn keyboard_shortcuts_are_editable_and_survive_restart() -> Result<()> {
+    support::run_test("settings-keybindings", |session| {
+        Box::pin(async move {
+            let fixture = OneShotFixture::create_named(session.data_root(), "shortcut-review")?;
+            fixture.forward()?;
+            let driver = session.driver();
+            support::wait_for_active_diff(driver, "shortcut-review", "alpha-one-shot-marker")
+                .await?;
+            open_settings(driver).await?;
+            support::click(driver, By::Css("[data-settings-section='keybindings']")).await?;
+            let search = support::visible(driver, By::Id("keybindings-search")).await?;
+            search.send_keys("toggle files").await?;
+            support::click(driver, By::Id("keybinding-edit-toggle_files_sidebar")).await?;
+            support::visible(driver, By::Css("#keybinding-recorder[open]")).await?;
+            press_shortcut(driver, Key::Control, "p").await?;
+            support::visible(driver, By::Id("keybinding-replace")).await?;
+            support::evidence::capture(driver, "keybindings-conflict", true).await?;
+            driver
+                .action_chain()
+                .send_keys(Key::Escape)
+                .perform()
+                .await?;
+            support::visible(driver, By::Css(".settings-page-shell:not(:has(dialog[open])) #keybinding-edit-toggle_files_sidebar")).await?;
+            support::click(driver, By::Id("keybinding-edit-toggle_files_sidebar")).await?;
+            support::visible(driver, By::Css("#keybinding-recorder[open]")).await?;
+            press_shortcut(driver, Key::Alt, "x").await?;
+            support::click(driver, By::Id("keybinding-save")).await?;
+            support::visible(driver, By::Css("#keybinding-edit-toggle_files_sidebar[aria-label$='Alt+X']")).await?;
+            support::click(driver, By::Css("button[aria-label='Clear search']")).await?;
+            support::evidence::capture(driver, "keybindings-settings", true).await?;
+            driver.set_window_rect(100, 100, 760, 650).await?;
+            support::evidence::capture(driver, "keybindings-settings-narrow", true).await?;
+            driver.set_window_rect(100, 100, 1280, 900).await?;
+            support::click(driver, By::Id("keybindings-record-search")).await?;
+            press_shortcut(driver, Key::Alt, "x").await?;
+            support::visible(driver, By::Id("keybinding-edit-toggle_files_sidebar")).await?;
+            ensure!(
+                driver
+                    .find_all(By::Css("[data-keybinding-action]"))
+                    .await?
+                    .len()
+                    == 1,
+                "recorded search did not find the assigned command"
+            );
+            support::click(driver, By::Css("button[aria-label='Back']")).await?;
+            support::visible(driver, By::Css("[data-sidebar-panel='files']")).await?;
+            press_shortcut(driver, Key::Alt, "x").await?;
+            support::visible(
+                driver,
+                By::Css("[data-sidebar-toggle='files'][aria-pressed='false']"),
+            )
+            .await?;
+            press_shortcut(driver, Key::Alt, "x").await?;
+            support::visible(driver, By::Css("[data-sidebar-panel='files']")).await?;
+            session.restart().await?;
+            let driver = session.driver();
+            fixture.forward()?;
+            support::wait_for_active_diff(driver, "shortcut-review", "alpha-one-shot-marker")
+                .await?;
+            press_shortcut(driver, Key::Alt, "x").await?;
+            support::visible(
+                driver,
+                By::Css("[data-sidebar-toggle='files'][aria-pressed='false']"),
+            )
+            .await?;
+            open_settings(driver).await?;
+            support::click(driver, By::Css("[data-settings-section='keybindings']")).await?;
+            support::click(
+                driver,
+                By::Css("button[aria-label='Remove shortcut for View: Toggle Files sidebar']"),
+            )
+            .await?;
+            let binding =
+                support::visible(driver, By::Id("keybinding-edit-toggle_files_sidebar")).await?;
+            ensure!(
+                binding.text().await? == "Unassigned",
+                "removed shortcut stayed assigned"
+            );
+            support::click(driver, By::Id("keybindings-reset-all")).await?;
+            support::click(driver, By::Css("button[aria-label='Back']")).await?;
+            press_shortcut(driver, Key::Control, "b").await?;
+            support::visible(driver, By::Css("[data-sidebar-panel='files']")).await?;
+            Ok(())
+        })
+    })
+    .await
+}
+
+async fn press_shortcut(driver: &WebDriver, modifier: Key, key: &str) -> Result<()> {
+    driver
+        .action_chain()
+        .key_down(modifier.clone())
+        .send_keys(key)
+        .key_up(modifier)
+        .perform()
+        .await?;
+    Ok(())
 }
 
 pub(super) async fn open_settings(driver: &WebDriver) -> Result<()> {

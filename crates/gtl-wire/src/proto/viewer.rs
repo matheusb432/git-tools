@@ -778,6 +778,7 @@ pub fn decode_get_viewer_settings_response(
     response: v1::GetViewerSettingsResponse,
 ) -> Result<ViewerUserSettings, ViewerCodecError> {
     Ok(ViewerUserSettings {
+        keybindings: decode_viewer_keybindings(&required(response.keybindings)?)?,
         language: decode_viewer_language(response.language)?,
         date_format: decode_viewer_date_format(response.date_format)?,
         accessibility: decode_viewer_accessibility(required(response.accessibility)?)?,
@@ -817,6 +818,7 @@ pub fn encode_get_viewer_settings_response(
     settings: ViewerUserSettings,
 ) -> v1::GetViewerSettingsResponse {
     v1::GetViewerSettingsResponse {
+        keybindings: Some(encode_viewer_keybindings(settings.keybindings)),
         language: encode_viewer_language(settings.language) as i32,
         date_format: encode_viewer_date_format(settings.date_format) as i32,
         accessibility: Some(encode_viewer_accessibility(settings.accessibility)),
@@ -882,6 +884,7 @@ pub fn encode_edit_settings_request(request: &EditSettingsRequest) -> v1::EditSe
     let wrap_lines = encode_bool_field_update(&request.wrap_lines);
     let push_confirmation_required = encode_bool_field_update(&request.push_confirmation_required);
     v1::EditSettingsRequest {
+        keybindings: encode_viewer_keybindings_update(&request.keybindings),
         ui_scale_percent: encode_viewer_scale_update(&request.ui_scale_percent),
         reduce_motion: encode_bool_field_update(&request.reduce_motion),
         language: encode_viewer_language_update(&request.language),
@@ -910,6 +913,41 @@ pub fn encode_edit_settings_request(request: &EditSettingsRequest) -> v1::EditSe
     }
 }
 
+fn encode_viewer_keybindings_update(
+    update: &FieldUpdate<ViewerKeybindings>,
+) -> Option<v1::ViewerKeybindingsFieldUpdate> {
+    use v1::viewer_keybindings_field_update::Operation;
+    let operation = match update {
+        FieldUpdate::Unchanged => return None,
+        FieldUpdate::Clear => Operation::Clear(v1::ClearSetting {}),
+        FieldUpdate::Update(value) => {
+            Operation::Update(Box::new(encode_viewer_keybindings(*value)))
+        }
+    };
+    Some(v1::ViewerKeybindingsFieldUpdate {
+        operation: Some(operation),
+    })
+}
+
+fn decode_viewer_keybindings_update(
+    update: Option<v1::ViewerKeybindingsFieldUpdate>,
+) -> Result<FieldUpdate<ViewerKeybindings>, ViewerCodecError> {
+    use v1::viewer_keybindings_field_update::Operation;
+    let Some(update) = update else {
+        return Ok(FieldUpdate::Unchanged);
+    };
+    Ok(match required(update.operation)? {
+        Operation::Clear(_) => FieldUpdate::Clear,
+        Operation::Update(value) => {
+            let bindings = decode_viewer_keybindings(&value)?;
+            if bindings.platform() != ViewerKeybindingPlatform::current() {
+                return Err(ViewerCodecError::InvalidMessage);
+            }
+            FieldUpdate::Update(bindings)
+        }
+    })
+}
+
 fn encode_bool_field_update(update: &FieldUpdate<bool>) -> Option<v1::BoolFieldUpdate> {
     let operation = match update {
         FieldUpdate::Unchanged => return None,
@@ -925,6 +963,8 @@ pub fn decode_edit_settings_request(
     request: v1::EditSettingsRequest,
 ) -> Result<EditSettingsRequest, ViewerCodecError> {
     Ok(EditSettingsRequest {
+        keybindings: decode_viewer_keybindings_update(request.keybindings)
+            .map_err(field("keybindings"))?,
         ui_scale_percent: decode_viewer_scale_update(request.ui_scale_percent)
             .map_err(field("ui_scale_percent"))?,
         reduce_motion: decode_bool_field_update(request.reduce_motion)
@@ -1313,6 +1353,12 @@ fn decode_viewer_shell(shell: v1::ViewerShell) -> Result<ViewerShell, ViewerCode
 
 fn encode_viewer_keybindings(keybindings: ViewerKeybindings) -> v1::ViewerKeybindings {
     v1::ViewerKeybindings {
+        next_tab: Some(keybindings[ViewerKeybindingAction::NextTab].to_string()),
+        previous_tab: Some(keybindings[ViewerKeybindingAction::PreviousTab].to_string()),
+        close_tab: Some(keybindings[ViewerKeybindingAction::CloseTab].to_string()),
+        pin_tab: Some(keybindings[ViewerKeybindingAction::PinTab].to_string()),
+        close_other_tabs: Some(keybindings[ViewerKeybindingAction::CloseOtherTabs].to_string()),
+
         push_diff: Some(keybindings[ViewerKeybindingAction::PushDiff].to_string()),
         toggle_files_sidebar: keybindings[ViewerKeybindingAction::ToggleFilesSidebar].to_string(),
         toggle_commits_sidebar: keybindings[ViewerKeybindingAction::ToggleCommitsSidebar]
@@ -1362,14 +1408,48 @@ fn decode_viewer_keybindings(
         .as_deref()
         .map(str::parse::<ViewerKeybinding>)
         .transpose()
-        .map_err(|_| ViewerCodecError::InvalidMessage)?
-        .unwrap_or(ViewerKeybindings::for_platform(platform)[ViewerKeybindingAction::PushDiff]);
-    ViewerKeybindings::try_from_fn(platform, |action| match action {
-        ViewerKeybindingAction::ToggleFilesSidebar => toggle_files_sidebar,
-        ViewerKeybindingAction::ToggleCommitsSidebar => toggle_commits_sidebar,
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let next_tab = keybindings
+        .next_tab
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let previous_tab = keybindings
+        .previous_tab
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let close_tab = keybindings
+        .close_tab
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let pin_tab = keybindings
+        .pin_tab
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let close_other_tabs = keybindings
+        .close_other_tabs
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    ViewerKeybindings::try_from_overrides(platform, |action| match action {
+        ViewerKeybindingAction::ToggleFilesSidebar => Some(toggle_files_sidebar),
+        ViewerKeybindingAction::ToggleCommitsSidebar => Some(toggle_commits_sidebar),
+        ViewerKeybindingAction::SearchFiles => Some(search_files),
+        ViewerKeybindingAction::SearchTextInAllFiles => Some(search_text_in_all_files),
         ViewerKeybindingAction::PushDiff => push_diff,
-        ViewerKeybindingAction::SearchFiles => search_files,
-        ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
+        ViewerKeybindingAction::NextTab => next_tab,
+        ViewerKeybindingAction::PreviousTab => previous_tab,
+        ViewerKeybindingAction::CloseTab => close_tab,
+        ViewerKeybindingAction::PinTab => pin_tab,
+        ViewerKeybindingAction::CloseOtherTabs => close_other_tabs,
     })
     .map_err(|_| ViewerCodecError::InvalidMessage)
 }

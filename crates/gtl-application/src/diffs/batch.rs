@@ -50,26 +50,18 @@ pub(crate) fn render_batch(
             skipped += 1;
             continue;
         }
-        if !skip_empty {
-            let mut response = built?;
-            notes.append(&mut response.notes);
-            let mut view = response.view;
-            view.repo_name.clone_from(&repo.label);
-            views.push(view);
-            continue;
-        }
-
         match built {
-            Ok(mut response) if response.view.has_diff_content() => {
+            Ok(mut response) => {
                 notes.append(&mut response.notes);
+                if skip_empty && !response.view.has_diff_content() {
+                    skipped += 1;
+                    continue;
+                }
                 let mut view = response.view;
                 view.repo_name.clone_from(&repo.label);
                 views.push(view);
             }
-            Ok(mut response) => {
-                notes.append(&mut response.notes);
-                skipped += 1;
-            }
+            Err(error) if !skip_empty => return Err(error.into()),
             Err(error) if matches!(target, DiffTarget::Unpushed { pinned: None }) => {
                 return Err(anyhow::Error::from(error).context(format!("compare {}", repo.label)));
             }

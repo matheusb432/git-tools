@@ -20,12 +20,20 @@
     }
   }
   .dialog-surface-fit {
-    height: auto;
+    height: fit-content;
     max-height: min(42rem,100vh - 2rem);
   }
   .dialog-body {
     grid-template-rows: auto minmax(0,1fr);
     display: grid;
+  }
+  .dialog-body-fit {
+    display: flex;
+    flex-direction: column;
+    max-height: min(42rem - 2px,100vh - 2rem - 2px);
+  }
+  .dialog-body-fit > .dialog-header {
+    flex-shrink: 0;
   }
   .dialog-header {
     border-bottom-style: var(--control-border-style);

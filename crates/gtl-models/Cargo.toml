@@ -23,7 +23,6 @@ uuid = { workspace = true, features = ["js"] }
 [dev-dependencies]
 serde_json.workspace = true
 thiserror.workspace = true
-trybuild = "1.0.121"
 
 [lints]
 workspace = true

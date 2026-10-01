@@ -18,6 +18,8 @@ pub enum UserSettingsFieldUpdate<T> {
 /// A complete typed mutation accepted by the user-settings editor port.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UserSettingsPatch {
+    pub keybindings: UserSettingsFieldUpdate<gtl_models::viewer::ViewerKeybindings>,
+
     pub ui_scale_percent: UserSettingsFieldUpdate<gtl_models::settings::ViewerScalePercent>,
     pub reduce_motion: UserSettingsFieldUpdate<bool>,
     pub language: UserSettingsFieldUpdate<gtl_models::settings::ViewerLanguage>,
