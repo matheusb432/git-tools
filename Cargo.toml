@@ -18,6 +18,7 @@ members = [
   "e2e/gtl-browser-e2e",
   "e2e/gtl-desktop-e2e",
   "xtask",
+  "vendor/error-meta",
 ]
 # Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
 default-members = [
@@ -32,10 +33,12 @@ default-members = [
   "crates/gtl-parser",
   "crates/gtl-artifacts",
   "xtask",
+  "vendor/error-meta",
 ]
 
 [workspace.package]
 edition = "2024"
+license = "MIT"
 publish = false
 
 [workspace.dependencies]
@@ -53,7 +56,7 @@ gtl-infra = { path = "crates/gtl-infra" }
 gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 dx-story = "0.1.0"
-error-meta = { path = "../../shared-libs/error-meta" }
+error-meta = { path = "vendor/error-meta" }
 
 anyhow = "1"
 assert_cmd = "2"
