@@ -1,65 +1,29 @@
 # git-tools
 
-`git-tools` is a Rust toolkit for repetitive Git workflows across one repository, nested repositories, or a managed repository set. It installs the `git-tools` command, its `gtl` alias, the resident `gtl-server`, and the `gtl-viewer` desktop application.
+CLI and desktop app to review diffs and run repetitive Git commands across your projects.
 
-## Core workflows
+This runs locally. The viewer works offline, and generated diffs can be saved as a single HTML
+file to open in a browser or share. Commands that fetch or push need access to your Git remotes.
 
-- Find Git repositories recursively from a chosen folder and add selected projects in the desktop app. Browse managed projects, ordered by their latest render, and open saved local-change or unpushed-commit comparisons.
-- Render unpushed, range, merge, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained HTML document with unified diffs and expandable long lines, readable without JavaScript.
-- Use the desktop viewer and its offline diffs in English (US) or Brazilian Portuguese.
-- Review and confirm pushes of an exact commit from desktop diffs or the Projects dashboard.
-- Inspect status, push changes, fast-forward branches, and manage tags.
-- Run batch workflows across active [managed projects](docs/agents/projects.md), or select one project's repository by ID.
+Examples use `gtl`, the short form of `git-tools`.
 
-Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. ADR statuses are tracked in [docs/adr/adr.toml](docs/adr/adr.toml), and repository automation is indexed by `just --list` and the xtask CLI doc comments.
+## Getting started
 
-## Install
+Open a diff from your repository:
 
-Download the archive or installer for your platform from
-[GitHub Releases](https://github.com/matheusb432/git-tools/releases), verify its accompanying
-SHA-256 checksum, and follow the included [installation instructions](release/INSTALL.md).
-Windows 11 x64 uses a ZIP with a per-user installer, Ubuntu 24.04 x64 uses a `.tar.gz`, and
-macOS uses `.pkg` installers for Apple Silicon and Intel. Git must already be on PATH;
-Windows also requires the WebView2 runtime.
-
-The packages include the CLI, alias, daemon, and standalone viewer. The macOS app uses ad-hoc
-signing and is not notarized; allow installation and first launch in System Settings ->
-Privacy & Security when macOS blocks them.
-
-Ubuntu 24.04 supports the full development and verification toolchain. macOS supports local
-builds and installation through `just update`. Windows 11 is a release target.
-
-On a Mac, install the Xcode Command Line Tools and have Git and Mise available in your shell.
-From this checkout, install the Rust build tools and Zig, then configure the local installation:
-
-```sh
-mise trust
-mise install rust just protoc cargo-binstall cargo:dioxus-cli http:zig
-just setup
+```bash
+cd ~/code/my-app
+gtl diff # unpushed commits
+gtl diff HEAD # staged, unstaged and untracked changes
 ```
 
-`just setup` builds and installs the CLI, server, and standalone viewer in `~/.local/bin`,
-registers the server in `~/Library/LaunchAgents`, and adds the binary directory to `.zshrc`
-when needed. Open a new shell after setup. Subsequent `just update` runs rebuild all three
-binaries and restart the user service. `GIT_TOOLS_BINDIR` can select another absolute install
-directory, and Cargo's configured target directory is respected. Each install records the
-invoking shell's PATH for launchd so the service can find developer tools at login.
+## References
 
-For the full Ubuntu environment:
-
-```sh
-git clone git@github.com:OWNER/git-tools.git
-cd git-tools
-mise trust
-mise bootstrap --yes
-```
-
-Mise converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
-
-On Linux with systemd and on macOS, installation reconciles and starts `gtl-server` through the native user-service manager. Native clients connect through a private Unix-domain socket on Linux and macOS or a per-user named pipe on Windows. Use `gtl server` to manage login startup and the background process, and `gtl doctor` to check installation, settings, Git, database integrity, and RPC health.
-
-Refresh an existing installation with:
-
-```sh
-just update
-```
+- [Installation and updates](wiki/installation-and-update.md)
+- [Projects](wiki/projects.md)
+- [Diffs](wiki/diffs.md)
+- [Desktop viewer](wiki/viewer.md)
+- [Git workflows](wiki/git-workflows.md)
+- [Data export and import](wiki/data.md)
+- [Troubleshooting](wiki/troubleshooting.md)
+- [Design](wiki/design.md)
