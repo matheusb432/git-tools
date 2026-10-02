@@ -6,13 +6,21 @@ use super::ScrollArea;
 use crate::shared::i18n::{t, use_language};
 
 #[component]
-pub(crate) fn DataTable(caption: String, header: Element, children: Element) -> Element {
+pub(crate) fn DataTable(
+    caption: String,
+    header: Element,
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    children: Element,
+) -> Element {
+    let base = attributes!(div {
+        class: "control-data-table min-h-0",
+        role: "region",
+        aria_label: caption.clone(),
+        tabindex: "0",
+    });
+    let attributes = merge_attributes(vec![attributes, base]);
     rsx! {
-        ScrollArea {
-            class: "control-data-table min-h-0",
-            role: "region",
-            aria_label: caption.clone(),
-            tabindex: "0",
+        ScrollArea { attributes,
             table { class: "control-data-table-table w-full text-sm",
                 caption { class: "sr-only", "{caption}" }
                 thead { class: "control-data-table-head text-xs",
@@ -25,9 +33,12 @@ pub(crate) fn DataTable(caption: String, header: Element, children: Element) -> 
 }
 
 #[component]
-pub(crate) fn DataTableActions(children: Element) -> Element {
+pub(crate) fn DataTableActions(
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    children: Element,
+) -> Element {
     rsx! {
-        div { class: "control-table-actions", {children} }
+        div { class: "control-table-actions", ..attributes, {children} }
     }
 }
 

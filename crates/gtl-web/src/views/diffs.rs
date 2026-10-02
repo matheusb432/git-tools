@@ -1,6 +1,6 @@
 pub(crate) mod changes_since;
 mod client_diff_document;
-mod diff_history;
+pub(crate) mod diff_history;
 mod diff_rows;
 pub(crate) mod diff_workspace;
 pub(crate) mod displayed_files;

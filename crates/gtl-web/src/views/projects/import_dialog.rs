@@ -283,7 +283,9 @@ pub(super) fn ImportProjectsDialog() -> Element {
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-col gap-4",
-            div { class: "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end",
+            div {
+                class: "grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end",
+                "data-tour": super::tours::IMPORT_SCAN.value(),
                 TextInput {
                     id: "project-import-root",
                     label: t!(language, "projects-import-folder"),
@@ -353,7 +355,9 @@ pub(super) fn ImportProjectsDialog() -> Element {
                     }
                 }
             }
-            ScrollArea { class: "min-h-0 flex-1 overflow-auto",
+            ScrollArea {
+                class: "min-h-0 flex-1 overflow-auto",
+                "data-tour": super::tours::IMPORT_ROWS.value(),
                 if rows().is_empty() && !scan.pending() {
                     p { class: "py-8 text-center text-sm text-ink-2",
                         if scanned() {
@@ -375,7 +379,9 @@ pub(super) fn ImportProjectsDialog() -> Element {
                     }
                 }
             }
-            div { class: "flex items-center justify-between gap-3 border-t border-line pt-3",
+            div {
+                class: "flex items-center justify-between gap-3 border-t border-line pt-3",
+                "data-tour": super::tours::IMPORT_SUBMIT.value(),
                 p { class: "text-xs text-ink-2", {t!(language, "projects-import-footer")} }
                 Button {
                     state: if busy || selected == 0 { ButtonState::Disabled } else { ButtonState::Enabled },

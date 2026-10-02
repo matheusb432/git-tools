@@ -107,6 +107,7 @@ pub(crate) fn ReviewActionDock(
     rsx! {
         div {
             class: "review-action-dock",
+            "data-tour": super::tours::WORKSPACE_REVIEW.value(),
             "data-collapsed": collapsed.to_string(),
             span { class: "sr-only", role: "status", aria_live: "polite",
                 if unpushed == Some(true) {

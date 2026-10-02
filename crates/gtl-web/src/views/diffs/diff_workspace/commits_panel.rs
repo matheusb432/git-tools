@@ -149,6 +149,7 @@ pub(super) fn WorkspaceCommitsPanel(
                     div { class: "flex flex-none items-center",
                         Button {
                             id: search_trigger_id,
+                            "data-tour": super::tours::COMMITS_SEARCH.value(),
                             class: "commit-search-toggle",
                             variant: ButtonVariant::Ghost,
                             size: ButtonSize::IconCompact,
@@ -166,7 +167,11 @@ pub(super) fn WorkspaceCommitsPanel(
                             },
                             Search { size: 14 }
                         }
-                        {actions}
+                        span {
+                            class: "inline-flex",
+                            "data-tour": super::tours::COMMITS_ACTIONS.value(),
+                            {actions}
+                        }
                     }
                 },
             }
@@ -202,6 +207,7 @@ pub(super) fn WorkspaceCommitsPanel(
             }
             ScrollArea {
                 class: "diff-commits-scroll-panel min-h-0 flex-1",
+                "data-tour": super::tours::COMMITS_LIST.value(),
                 "data-testid": test_id,
                 onmounted: scroll.mount,
                 onresize: move |_| scroll.restore.call(()),
@@ -294,10 +300,11 @@ fn CommitsPanelHeader(actions: Option<Element>) -> Element {
     rsx! {
         header { class: "diff-commits-header px-3 py-2 compact:px-2.5",
             div { class: "flex items-center justify-between gap-2",
-                div {
+                div { class: "guided-tour-heading",
                     h3 { class: "diff-commits-heading m-0 text-sm font-semibold leading-snug",
                         {t!(language, "workspace-commits")}
                     }
+                    crate::shared::ui::guided_tour::GuidedTourButton { tour: super::tours::COMMITS }
                 }
                 {actions}
             }

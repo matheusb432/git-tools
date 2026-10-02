@@ -13,6 +13,9 @@ mod desktop_scroll_baseline;
 #[path = "viewer/desktop_shell.rs"]
 mod desktop_shell;
 
+#[path = "viewer/guided_tour.rs"]
+mod guided_tour;
+
 #[path = "viewer/large_diff.rs"]
 mod large_diff;
 

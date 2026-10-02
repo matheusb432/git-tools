@@ -11,6 +11,7 @@ pub(crate) fn Checkbox(
     checked: bool,
     #[props(default)] disabled: bool,
     onchange: EventHandler<bool>,
+    #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
 ) -> Element {
     let hint_id = format!("{id}-hint");
     let error_id = format!("{id}-error");
@@ -21,7 +22,7 @@ pub(crate) fn Checkbox(
     };
     let invalid = error.is_some();
     rsx! {
-        div { class: "control-checkbox-field",
+        div { class: "control-checkbox-field", ..attributes,
             label { class: "control-choice", r#for: id.clone(),
                 input {
                     id,

@@ -114,13 +114,24 @@ pub(crate) fn element_has_visible_focus(id: &str) -> bool {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn use_window_keydown(handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
+pub(crate) fn use_window_keydown(mut handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(
         || {
             let window = web_sys::window()?;
-            let callback = Rc::new(wasm_bindgen::closure::Closure::wrap(
-                Box::new(handler) as Box<dyn FnMut(web_sys::KeyboardEvent)>
-            ));
+            let callback = Rc::new(wasm_bindgen::closure::Closure::wrap(Box::new(
+                move |event: web_sys::KeyboardEvent| {
+                    if !document().is_some_and(|document| {
+                        document
+                            .query_selector("dialog[data-guided-tour][open]")
+                            .ok()
+                            .flatten()
+                            .is_some()
+                    }) {
+                        handler(event);
+                    }
+                },
+            )
+                as Box<dyn FnMut(web_sys::KeyboardEvent)>));
             window
                 .add_event_listener_with_callback_and_bool(
                     "keydown",

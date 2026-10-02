@@ -13,6 +13,7 @@ pub(crate) mod dialog;
 mod empty_notice;
 mod extension_selection;
 mod field_error;
+pub(crate) mod guided_tour;
 pub(crate) mod icon_popover;
 mod loading_spinner;
 mod menu_action;

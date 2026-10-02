@@ -53,6 +53,7 @@ pub(crate) fn ViewerTabItem(
     tab: ViewerTab,
     #[props(default)] keybindings: ViewerKeybindings,
     active: bool,
+    tour_anchor: Option<super::guided_tour::GuidedTourAnchor>,
     #[props(default)] rows_loading: bool,
     #[props(default)] reorderable: bool,
     onactivate: EventHandler<()>,
@@ -95,6 +96,7 @@ pub(crate) fn ViewerTabItem(
     rsx! {
         div {
             class: "viewer-tab group/viewer-tab",
+            "data-tour": tour_anchor.map(super::guided_tour::GuidedTourAnchor::value),
             style: "anchor-name: {details_anchor};",
             onmouseenter: move |_| {
                 if !editing() {
@@ -526,6 +528,7 @@ mod tests {
         let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            tour_anchor: None,
             keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             onrename: None,
             menu_actions: None,
@@ -575,6 +578,7 @@ mod tests {
         let label = recipe_label("Working tree")?;
         let event_handler_owner = VirtualDom::new(VNode::empty);
         let props = event_handler_owner.in_scope(ScopeId::ROOT, || ViewerTabItemProps {
+            tour_anchor: None,
             keybindings: gtl_models::viewer::ViewerKeybindings::default(),
             onrename: None,
             menu_actions: None,

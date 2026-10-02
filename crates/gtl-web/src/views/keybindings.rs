@@ -76,6 +76,7 @@ pub(crate) fn KeybindingsEditor(
             div { class: "keybindings-search",
                 TextInput {
                     id: "keybindings-search",
+                    "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_SEARCH.value(),
                     label: t!(language, "keybindings-search"),
                     label_visibility: TextInputLabelVisibility::Hidden,
                     placeholder: if recording() { t!(language, "keybindings-record-search") } else { t!(language, "keybindings-search-placeholder") },
@@ -85,6 +86,7 @@ pub(crate) fn KeybindingsEditor(
                 }
                 Button {
                     id: "keybindings-record-search",
+                    "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_RECORD.value(),
                     size: ButtonSize::IconSmall,
                     variant: ButtonVariant::Toggle,
                     aria_pressed: recording().to_string(),
@@ -112,6 +114,7 @@ pub(crate) fn KeybindingsEditor(
             }
             Button {
                 id: "keybindings-reset-all",
+                "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_RESET.value(),
                 variant: ButtonVariant::Outline,
                 size: ButtonSize::Small,
                 state: if bindings == defaults { ButtonState::Disabled } else { ButtonState::Enabled },
@@ -126,6 +129,7 @@ pub(crate) fn KeybindingsEditor(
         div { class: "keybindings-filter-row",
             Checkbox {
                 id: "keybindings-modified",
+                "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_MODIFIED.value(),
                 label: t!(language, "keybindings-modified"),
                 checked: modified(),
                 onchange: move |value| modified.set(value),
@@ -147,7 +151,9 @@ pub(crate) fn KeybindingsEditor(
                 })
                 .or_else(|| reset_error().map(|error| binding_error_message(error, language))),
         }
-        div { class: "keybindings-table-scroll",
+        div {
+            class: "keybindings-table-scroll",
+            "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_TABLE.value(),
             table { class: "keybindings-table",
                 thead {
                     tr {

@@ -36,6 +36,7 @@ pub(super) mod panel_scroll;
 mod path_filter;
 pub(crate) mod sidebars;
 mod titlebar;
+pub(crate) mod tours;
 
 pub(crate) use desktop::DiffWorkspaceView;
 
@@ -168,6 +169,7 @@ fn WorkspaceMobileNavigation(
     rsx! {
         nav {
             class: navigation_classes,
+            "data-tour": tours::WORKSPACE_SIDEBARS.value(),
             aria_label: t!(language, "workspace-panels"),
             Button {
                 id: files_trigger_id,

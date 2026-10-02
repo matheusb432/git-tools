@@ -1,0 +1,18 @@
+@layer components {
+  .guided-tour-trigger { flex: none; }
+  .guided-tour-icon { position: relative; display: grid; place-items: center; }
+  .guided-tour-unseen { position: absolute; right: -3px; top: -3px; width: 5px; height: 5px; border-radius: 50%; background: var(--acc); }
+  .guided-tour-dialog { position: fixed; inset: 0; margin: 0; width: 100%; max-width: none; height: 100%; max-height: none; overflow: hidden; border: 0; padding: 0; background: transparent; color: var(--ink); }
+  .guided-tour-dialog::backdrop { background: transparent; }
+  .guided-tour-spotlight { position: absolute; pointer-events: none; border-radius: var(--r); box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .6); transition: left 160ms ease-out, top 160ms ease-out, width 160ms ease-out, height 160ms ease-out; }
+  .guided-tour-card { position: absolute; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line-2); border-radius: calc(var(--r) * 2); padding: 10px 16px 14px; background: var(--surface); box-shadow: var(--elevation-dialog); }
+  .guided-tour-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; margin-right: -6px; }
+  .guided-tour-progress { font-size: 11px; font-weight: 600; color: var(--ink-3); }
+  .guided-tour-copy { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .guided-tour-title { margin: 4px 0 8px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+  .guided-tour-body { margin: 0; font-size: 13px; line-height: 1.65; color: var(--ink-2); }
+  .guided-tour-actions { display: flex; flex: none; justify-content: flex-end; gap: 8px; padding-top: 14px; }
+  .guided-tour-heading { display: flex; align-items: center; gap: 6px; }
+  @media (prefers-reduced-motion: reduce) { .guided-tour-spotlight { transition: none; } }
+  :root[data-reduce-motion="true"] .guided-tour-spotlight { transition: none; }
+}

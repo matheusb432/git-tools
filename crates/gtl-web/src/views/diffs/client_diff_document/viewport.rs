@@ -307,6 +307,7 @@ pub(super) fn DiffViewport(
             aria_label: t!(use_language(), "diff-rendered-for", title = title.as_str()),
             aria_busy: is_loading.to_string(),
             "data-gtl-diff-document": "",
+            "data-tour": super::tour::READING_DOCUMENT.value(),
             "data-wrap-lines": identity.render_options.wrap_lines.to_string(),
             "data-view-state": if is_loading { "streaming" } else { "complete" },
             "data-chunks-complete": (!is_loading).to_string(),

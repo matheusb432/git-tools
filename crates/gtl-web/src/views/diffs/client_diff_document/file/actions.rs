@@ -23,7 +23,9 @@ pub(super) fn DiffFileActions(
     let (file_id, can_open_in_editor) =
         summary.with(|summary| (summary.id.clone(), summary.can_open_in_editor));
     rsx! {
-        span { class: "diff-file-actions",
+        span {
+            class: "diff-file-actions",
+            "data-tour": super::super::tour::READING_ACTIONS.value(),
             DiffPathCopyMenu { summary, popover_id: copy_popover_id }
             if let Some(onopen) = onopen.filter(|_| can_open_in_editor) {
                 OpenInTextEditorAction { file_id, onopen }

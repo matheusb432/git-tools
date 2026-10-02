@@ -166,7 +166,9 @@ async fn start_driver_attempt(
         .arg(webdriver_port.to_string())
         .arg("--native-port")
         .arg(native_driver_port.to_string())
-        .env("GIT_TOOLS_DATA_DIR", data_root);
+        .env("GIT_TOOLS_DATA_DIR", data_root)
+        .env("XDG_DATA_HOME", data_root.join("webview-data"))
+        .env("XDG_CACHE_HOME", data_root.join("webview-cache"));
     deny_external_proxies(&mut command);
     drop(ports);
     let mut driver_child = command

@@ -95,6 +95,7 @@ pub(super) fn DiffFileCard(
                 onresize: controls.map(|controls| controls.onresize),
                 copy_popover_id,
                 onopen,
+                guide: file_index == 0,
             }
             if let Some(body) = body {
                 {body}
@@ -120,11 +121,13 @@ fn DiffFileHeader(
     onresize: Option<EventHandler<ResizeEvent>>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
+    guide: bool,
 ) -> Element {
     let file_summary = summary.read();
     rsx! {
         summary {
             class: "diff-file-summary",
+            "data-tour": super::tour::READING_HEADER.value(),
             onclick: move |event| {
                 event.prevent_default();
                 onopenchange.call(!*open.peek());
@@ -145,6 +148,13 @@ fn DiffFileHeader(
                 aria_hidden: "true",
             }
             DiffFileActions { summary, copy_popover_id, onopen }
+            if guide {
+                span {
+                    class: "inline-flex",
+                    onclick: move |event: MouseEvent| event.stop_propagation(),
+                    crate::shared::ui::guided_tour::GuidedTourButton { tour: super::tour::READING }
+                }
+            }
             DiffFileStatus { status: file_summary.status }
         }
     }

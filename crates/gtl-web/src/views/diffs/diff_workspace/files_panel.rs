@@ -123,7 +123,9 @@ pub(super) fn FilesPanel(
             onmounted: scroll.mount,
             onresize: move |_| scroll.restore.call(()),
             onscroll: scroll.save,
-            div { class: "p-3 compact:p-2.5",
+            div {
+                class: "p-3 compact:p-2.5",
+                "data-tour": super::tours::FILES_LIST.value(),
                 FilesPanelHeading {
                     file_count: model.file_count,
                     sort_control,
@@ -170,10 +172,19 @@ fn FilesPanelHeading(
                     count: file_count,
                     aria_label: t!(language, "files-count", count = file_count),
                 }
+                crate::shared::ui::guided_tour::GuidedTourButton { tour: super::tours::FILES }
             }
             div { class: "flex flex-none items-center",
-                {sort_control}
-                {filter_control}
+                span {
+                    class: "inline-flex",
+                    "data-tour": super::tours::FILES_SORT.value(),
+                    {sort_control}
+                }
+                span {
+                    class: "inline-flex",
+                    "data-tour": super::tours::FILES_FILTER.value(),
+                    {filter_control}
+                }
             }
         }
     }
@@ -224,7 +235,9 @@ fn FilesHiddenNotice() -> Element {
 #[component]
 fn FilesPanelSummary(totals: WorkspaceLineTotals) -> Element {
     rsx! {
-        div { class: "mx-0.5 mb-3 flex flex-wrap items-center justify-between gap-2",
+        div {
+            class: "mx-0.5 mb-3 flex flex-wrap items-center justify-between gap-2",
+            "data-tour": super::tours::FILES_TOTALS.value(),
             div { class: "flex min-w-0 flex-wrap gap-2",
                 DiffLineChangeBadge {
                     kind: DiffLineChangeKind::Added,

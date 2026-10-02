@@ -53,6 +53,7 @@ pub(super) fn WindowHeader() -> Element {
                     "inert": (!viewer.actions_enabled()).then_some(""),
                     ViewerSettingsButton { onsettings: settings.open }
                     if matches!(route, Route::Diff { .. } | Route::CurrentDiff {}) {
+                        crate::shared::ui::guided_tour::GuidedTourButton { tour: crate::views::diffs::diff_workspace::tours::WORKSPACE }
                         WorkspaceSidebarButtons {}
                     }
                 }
@@ -63,6 +64,7 @@ pub(super) fn WindowHeader() -> Element {
             div {
                 class: "min-w-0 flex-1",
                 hidden: settings_active,
+                "data-tour": crate::views::diffs::diff_workspace::tours::WORKSPACE_TABS.value(),
                 "inert": (!viewer.actions_enabled()).then_some(""),
                 ApplicationNavigation {}
             }

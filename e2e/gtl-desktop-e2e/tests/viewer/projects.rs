@@ -64,7 +64,7 @@ async fn user_imports_repositories_and_restores_their_comparisons() -> Result<()
     .await
 }
 
-async fn import_projects(driver: &WebDriver, root: &std::path::Path) -> Result<()> {
+pub(super) async fn import_projects(driver: &WebDriver, root: &std::path::Path) -> Result<()> {
     support::click(driver, By::Id("project-import-trigger")).await?;
     support::visible(
         driver,

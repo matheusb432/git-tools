@@ -1,3 +1,5 @@
+pub(crate) mod tours;
+
 use dioxus::prelude::*;
 use gtl_models::{
     failure::{Failure, SettingsFailure},
@@ -41,6 +43,7 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
                     size: ButtonSize::IconTouch,
                     variant: ButtonVariant::Ghost,
                     aria_label: t!(language, "settings-back"),
+                    "data-tour": tours::SETTINGS_BACK.value(),
                     onclick: move |_| {
                         if navigator.can_go_back() {
                             navigator.go_back();
@@ -60,9 +63,11 @@ pub(crate) fn UserSettingsView(section: SettingsSection) -> Element {
                     ),
                     {t!(language, "settings-title")}
                 }
+                crate::shared::ui::guided_tour::GuidedTourButton { tour: tours::SETTINGS }
                 if path.is_some() {
                     button {
                         id: "settings-source-link",
+                        "data-tour": tours::SETTINGS_SOURCE.value(),
                         r#type: "button",
                         class: "settings-source-link",
                         onclick: move |_| source.open(()),

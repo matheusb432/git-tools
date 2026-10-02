@@ -349,6 +349,9 @@ pub(super) fn ProjectEditDialog(
             id: "project-edit-dialog",
             trigger_id: super::project_edit_trigger_id(&project),
             title: t!(language, "projects-edit-title", project = name.clone()),
+            title_help: rsx! {
+                crate::shared::ui::guided_tour::GuidedTourButton { tour: super::tours::COMPARISON }
+            },
             variant: PanelDialogVariant::Form,
             open,
             onclose: close,
@@ -402,6 +405,7 @@ fn ProjectEditForm(
             },
             TextInput {
                 id: "project-edit-branch",
+                "data-tour": super::tours::COMPARISON_BRANCH.value(),
                 label: t!(language, "projects-comparison-branch"),
                 value: draft.comparison_branch,
                 readonly: pending,
@@ -416,7 +420,9 @@ fn ProjectEditForm(
                     {t!(language, "projects-comparison-branch-hint")}
                 },
             }
-            div { class: "grid gap-2",
+            div {
+                class: "grid gap-2",
+                "data-tour": super::tours::COMPARISON_PUSH.value(),
                 Checkbox {
                     id: "project-edit-push-no-confirmation",
                     label: t!(language, "projects-viewer-push-no-confirmation"),
@@ -446,6 +452,7 @@ fn ProjectEditForm(
                     size: ButtonSize::Small,
                     variant: ButtonVariant::Ghost,
                     aria_haspopup: "dialog",
+                    "data-tour": super::tours::COMPARISON_HISTORY.value(),
                     icon: rsx! {
                         History { size: 15 }
                     },
@@ -461,6 +468,7 @@ fn ProjectEditForm(
                     }
                     Button {
                         button_type: ButtonType::Submit,
+                        "data-tour": super::tours::COMPARISON_SAVE.value(),
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Primary,
                         state: save_state,

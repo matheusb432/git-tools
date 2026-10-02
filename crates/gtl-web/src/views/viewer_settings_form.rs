@@ -1,3 +1,5 @@
+pub(crate) mod tours;
+
 use dioxus::prelude::*;
 use gtl_models::{
     settings::{
@@ -217,6 +219,7 @@ pub(crate) fn ViewerSettingsForm(
         div { class: "settings-layout",
             nav {
                 class: "settings-navigation",
+                "data-tour": super::user_settings::tours::SETTINGS_NAVIGATION.value(),
                 aria_label: t!(language, "settings-title"),
                 for category in [
                     SettingsSection::Appearance,
@@ -256,10 +259,17 @@ pub(crate) fn ViewerSettingsForm(
                     }
                 }
             }
-            ScrollArea { class: "settings-content overflow-auto",
+            ScrollArea {
+                class: "settings-content overflow-auto",
+                "data-tour": super::user_settings::tours::SETTINGS_CONTENT.value(),
                 div { key: "{section.name()}", class: "settings-content-inner",
                     div { class: "settings-section-heading",
-                        h2 { class: "text-base font-semibold text-ink", {section.label(language)} }
+                        div { class: "guided-tour-heading",
+                            h2 { class: "text-base font-semibold text-ink",
+                                {section.label(language)}
+                            }
+                            crate::shared::ui::guided_tour::GuidedTourButton { tour: tours::for_section(section) }
+                        }
                         p { class: "settings-save-status", {t!(language, "settings-autosave")} }
                     }
                     if let Some(message) = save_error {
@@ -285,7 +295,10 @@ pub(crate) fn ViewerSettingsForm(
                             }
                         },
                         SettingsSection::Appearance => rsx! {
-                            SettingsSelectRow { id: "settings-theme", label: t!(language, "settings-theme"),
+                            SettingsSelectRow {
+                                id: "settings-theme",
+                                label: t!(language, "settings-theme"),
+                                anchor: tours::APPEARANCE_THEME,
                                 Select {
                                     id: "settings-theme",
                                     aria_label: t!(language, "settings-theme"),
@@ -305,7 +318,10 @@ pub(crate) fn ViewerSettingsForm(
                                     },
                                 }
                             }
-                            SettingsSelectRow { id: "settings-ui-scale", label: t!(language, "settings-ui-scale"),
+                            SettingsSelectRow {
+                                id: "settings-ui-scale",
+                                label: t!(language, "settings-ui-scale"),
+                                anchor: tours::APPEARANCE_SCALE,
                                 Select {
                                     id: "settings-ui-scale",
                                     aria_label: t!(language, "settings-ui-scale"),
@@ -329,6 +345,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-reduce-motion",
+                                    "data-tour": tours::APPEARANCE_MOTION.value(),
                                     label: t!(language, "settings-reduce-motion"),
                                     hint: t!(language, "settings-reduce-motion-hint"),
                                     checked: selected.accessibility.reduce_motion,
@@ -342,6 +359,7 @@ pub(crate) fn ViewerSettingsForm(
                         SettingsSection::Locale => rsx! {
                             SettingsRadioGroup {
                                 id: "settings-language",
+                                anchor: tours::LOCALE_LANGUAGE,
                                 label: t!(language, "settings-language"),
                                 error: field_errors.message(SettingsField::Language, language),
                                 for option in ViewerLanguage::ALL.iter().copied() {
@@ -359,6 +377,7 @@ pub(crate) fn ViewerSettingsForm(
                             }
                             SettingsRadioGroup {
                                 id: "settings-date-format",
+                                anchor: tours::LOCALE_DATES,
                                 label: t!(language, "settings-date-format"),
                                 hint: t!(language, "settings-date-format-hint"),
                                 error: field_errors.message(SettingsField::DateFormat, language),
@@ -379,6 +398,7 @@ pub(crate) fn ViewerSettingsForm(
                         SettingsSection::Snapshots => rsx! {
                             SettingsRadioGroup {
                                 id: "settings-layout",
+                                anchor: tours::SNAPSHOTS_LAYOUT,
                                 label: t!(language, "settings-layout"),
                                 error: field_errors.message(SettingsField::Layout, language),
                                 for layout in [ViewerDiffLayout::Unified, ViewerDiffLayout::Split] {
@@ -399,6 +419,7 @@ pub(crate) fn ViewerSettingsForm(
                             }
                             SettingsRadioGroup {
                                 id: "settings-density",
+                                anchor: tours::SNAPSHOTS_DENSITY,
                                 label: t!(language, "settings-density"),
                                 error: field_errors.message(SettingsField::Density, language),
                                 for density in [ViewerDiffDensity::Compact, ViewerDiffDensity::Full] {
@@ -420,6 +441,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-wrap-lines",
+                                    "data-tour": tours::SNAPSHOTS_WRAP.value(),
                                     label: t!(language, "settings-wrap-lines"),
                                     hint: t!(language, "settings-wrap-lines-hint"),
                                     checked: selected.render_options.wrap_lines,
@@ -432,6 +454,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-copy-with-line-context",
+                                    "data-tour": tours::SNAPSHOTS_COPY.value(),
                                     label: t!(language, "settings-copy-with-line-context"),
                                     hint: t!(language, "settings-copy-with-line-context-hint"),
                                     checked: selected.copy_with_line_context,
@@ -446,6 +469,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-focus-window-on-diff",
+                                    "data-tour": tours::GIT_FOCUS.value(),
                                     label: t!(language, "settings-focus-window"),
                                     hint: t!(language, "settings-focus-window-hint"),
                                     checked: selected.focus_window_on_diff,
@@ -458,6 +482,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-push-confirmation",
+                                    "data-tour": tours::GIT_CLI_PUSH.value(),
                                     label: t!(language, "settings-push-confirmation"),
                                     hint: t!(language, "settings-push-confirmation-hint"),
                                     checked: !selected.push_confirmation.cli_required,
@@ -470,6 +495,7 @@ pub(crate) fn ViewerSettingsForm(
                             div { class: "settings-field-row",
                                 Checkbox {
                                     id: "settings-viewer-push-confirmation",
+                                    "data-tour": tours::GIT_VIEWER_PUSH.value(),
                                     label: t!(language, "settings-viewer-push-confirmation"),
                                     hint: t!(language, "settings-viewer-push-confirmation-hint"),
                                     checked: !selected.push_confirmation.viewer_required,
@@ -488,9 +514,16 @@ pub(crate) fn ViewerSettingsForm(
 }
 
 #[component]
-fn SettingsSelectRow(id: String, label: String, children: Element) -> Element {
+fn SettingsSelectRow(
+    id: String,
+    label: String,
+    anchor: crate::shared::ui::guided_tour::GuidedTourAnchor,
+    children: Element,
+) -> Element {
     rsx! {
-        div { class: "settings-field-row settings-select-row",
+        div {
+            class: "settings-field-row settings-select-row",
+            "data-tour": anchor.value(),
             label { r#for: id, class: "text-ink", "{label}" }
             div { class: "settings-select-control", {children} }
         }
@@ -500,6 +533,7 @@ fn SettingsSelectRow(id: String, label: String, children: Element) -> Element {
 #[component]
 fn SettingsRadioGroup(
     id: String,
+    anchor: crate::shared::ui::guided_tour::GuidedTourAnchor,
     label: String,
     hint: Option<String>,
     error: Option<String>,
@@ -517,6 +551,7 @@ fn SettingsRadioGroup(
         fieldset {
             id,
             class: "settings-field-row settings-radio-group",
+            "data-tour": anchor.value(),
             aria_describedby: described_by,
             aria_invalid: invalid.then_some("true"),
             legend { class: "text-ink", "{label}" }

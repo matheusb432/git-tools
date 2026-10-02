@@ -255,6 +255,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 Link {
                     to: Route::Projects {},
                     class: "viewer-tab-pinned",
+                    "data-tour": crate::views::diffs::diff_workspace::tours::WORKSPACE_PROJECTS.value(),
                     draggable: "false",
                     aria_label: t!(language, "navigation-projects"),
                     aria_current: projects_active.then_some("page"),
@@ -287,6 +288,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         tab: tab.clone(),
                                         keybindings,
                                         active,
+                                        tour_anchor: active.then_some(crate::views::diffs::diff_workspace::tours::WORKSPACE_DETAILS),
                                         menu_actions,
                                         warning_details: tab.live.then(|| warnings.get(&tab_id).cloned()).flatten(),
                                         onrename: move |submission| rename_snapshot.call((tab_id, submission)),

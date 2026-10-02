@@ -1,3 +1,5 @@
+pub(crate) mod tour;
+
 use dioxus::prelude::*;
 use gtl_models::viewer::RenderHistoryId;
 use gtl_web_contracts::test_ids;
@@ -127,7 +129,9 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
     };
     rsx! {
         div { class: "history-shell h-full min-h-0",
-            div { class: "flex items-center gap-3 pb-4",
+            div {
+                class: "flex items-center gap-3 pb-4",
+                "data-tour": tour::HISTORY_FILTER.value(),
                 label { class: "shrink-0", r#for: "snapshot-project-filter",
                     {t!(language, "history-project")}
                 }
@@ -163,6 +167,7 @@ pub(crate) fn SnapshotHistory(initial_filter: ViewerHistoryFilter) -> Element {
             }
             section {
                 class: "history-content min-h-0",
+                "data-tour": tour::HISTORY_LIST.value(),
                 aria_label: t!(language, "history-renders"),
                 div { class: "grid min-h-0 grid-rows-[auto_minmax(0,1fr)]",
                     div {
@@ -308,7 +313,9 @@ fn HistoryRow(
                 }
             }
             TableColumn {
-                div { class: "flex items-center justify-end gap-1",
+                div {
+                    class: "flex items-center justify-end gap-1",
+                    "data-tour": tour::HISTORY_ACTIONS.value(),
                     Button {
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Outline,

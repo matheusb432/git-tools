@@ -1,4 +1,5 @@
 pub(crate) mod time;
+pub(crate) mod tour;
 
 use std::time::Duration;
 
@@ -92,6 +93,7 @@ pub(crate) fn CommitSearchInput(
                 }
                 TextInput {
                     id,
+                    "data-tour": tour::FINDER_QUERY.value(),
                     label: t!(language, "commit-search-label"),
                     label_visibility: TextInputLabelVisibility::Hidden,
                     class: if snapshot { "pl-8 pr-14" } else { "pl-8 pr-9" },
@@ -188,7 +190,9 @@ fn CommitSearchTimeFields(
     let from_input = input.clone();
     let until_input = input.clone();
     rsx! {
-        div { class: "commit-search-time",
+        div {
+            class: "commit-search-time",
+            "data-tour": tour::FINDER_TIME.value(),
             TextInput {
                 id: format!("{id}-from"),
                 label: t!(language, "commit-search-time-from"),
@@ -334,7 +338,10 @@ pub(crate) fn CommitSearchResults(
     let commits = result.as_ref().and_then(|result| result.as_ref().ok());
     let count = commits.map_or(0, |result| result.commits.len());
     rsx! {
-        div { class: "commit-search-results", aria_busy: loading.to_string(),
+        div {
+            class: "commit-search-results",
+            aria_busy: loading.to_string(),
+            "data-tour": tour::FINDER_RESULTS.value(),
             p {
                 class: "commit-search-status flex items-center justify-between gap-2",
                 role: "status",

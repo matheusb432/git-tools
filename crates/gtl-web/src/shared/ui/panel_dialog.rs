@@ -26,6 +26,7 @@ pub(crate) fn PanelDialog(
     trigger_id: String,
     open: bool,
     title: String,
+    title_help: Option<Element>,
     #[props(default)] variant: PanelDialogVariant,
     onclose: EventHandler<()>,
     onclosed: Option<EventHandler<()>>,
@@ -68,7 +69,10 @@ pub(crate) fn PanelDialog(
             },
             div { class: body_class,
                 header { class: "dialog-header gap-3 px-4 py-3",
-                    h2 { id: title_id, class: "font-semibold text-ink", "{title}" }
+                    div { class: "guided-tour-heading min-w-0 flex-1",
+                        h2 { id: title_id, class: "font-semibold text-ink", "{title}" }
+                        {title_help}
+                    }
                     Button {
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,

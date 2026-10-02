@@ -5,6 +5,7 @@ mod commit_search;
 mod data_table;
 mod empty_notice;
 mod file_filters;
+mod guided_tour;
 mod icon_popover;
 mod loading_spinner;
 mod page_notice;

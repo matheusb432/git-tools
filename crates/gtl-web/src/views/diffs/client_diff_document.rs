@@ -4,6 +4,7 @@ use crate::shared::{
 };
 mod copy_context;
 mod file;
+mod tour;
 #[cfg(feature = "component-preview")]
 use file::DiffFileCard;
 mod find;

@@ -39,6 +39,7 @@ pub(super) fn ProjectTable(
     let language = use_language();
     rsx! {
         DataTable {
+            "data-tour": super::tours::PROJECTS_TABLE.value(),
             caption: t!(language, "projects-table-caption"),
             header: rsx! {
                 TableHeading { class: "w-8",
@@ -171,7 +172,7 @@ fn ProjectTableRow(project: ViewerProject, disabled: bool) -> Element {
                 }
             }
             TableColumn { class: "text-right",
-                DataTableActions {
+                DataTableActions { "data-tour": super::tours::PROJECTS_ACTIONS.value(),
                     super::CommitSearchButton { project: project.clone(), disabled }
                     ProjectPauseToggle { project: project.clone(), disabled }
                     super::ProjectEditButton { project: project.clone(), disabled }

@@ -8,6 +8,7 @@ mod preferences;
 mod presentation;
 mod status;
 mod table;
+mod tours;
 
 pub(crate) use comparison_editor::ComparisonBranchEditor;
 use dioxus::prelude::*;
@@ -155,9 +156,11 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     class: "projects-title text-xl font-semibold tracking-tight",
                     {t!(language, "navigation-projects")}
                 }
+                crate::shared::ui::guided_tour::GuidedTourButton { tour: tours::PROJECTS }
                 div { class: "projects-header-actions ml-auto gap-3",
                     Button {
                         id: "project-import-trigger",
+                        "data-tour": tours::PROJECTS_ADD.value(),
                         variant: ButtonVariant::Outline,
                         size: ButtonSize::Small,
                         state: if disabled { crate::shared::ui::ButtonState::Disabled } else { crate::shared::ui::ButtonState::Enabled },
@@ -192,6 +195,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     id: "project-snapshots-dialog",
                     trigger_id: trigger,
                     title: t!(language, "projects-snapshots-title"),
+                    title_help: rsx! {
+                        crate::shared::ui::guided_tour::GuidedTourButton { tour: crate::views::diffs::diff_history::tour::HISTORY }
+                    },
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
                     open: snapshots.is_open(),
                     onclose: move |()| snapshots.close(),
@@ -204,6 +210,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     id: "project-commit-search-dialog",
                     trigger_id: format!("project-commit-search-{}", project.id),
                     title: t!(language, "commit-search-project-title", project = project.name.to_string()),
+                    title_help: rsx! {
+                        crate::shared::ui::guided_tour::GuidedTourButton { tour: crate::views::commit_search::tour::FINDER }
+                    },
                     open: searching.is_open(),
                     onclose: move |()| searching.close(),
                     onclosed: move |()| searching.release(),
@@ -215,6 +224,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                     id: "project-import-dialog",
                     trigger_id: "project-import-trigger",
                     title: t!(language, "projects-add"),
+                    title_help: rsx! {
+                        crate::shared::ui::guided_tour::GuidedTourButton { tour: tours::IMPORT }
+                    },
                     variant: crate::shared::ui::panel_dialog::PanelDialogVariant::Table,
                     open: importing.is_open(),
                     onclose: move |()| importing.close(),
@@ -227,7 +239,9 @@ pub(crate) fn ProjectsView(route_active: Memo<bool>) -> Element {
                 "data-testid": "projects-content",
                 id: "projects-content",
                 div { class: "mx-auto max-w-7xl",
-                    div { class: "projects-toolbar mb-3 gap-3",
+                    div {
+                        class: "projects-toolbar mb-3 gap-3",
+                        "data-tour": tours::PROJECTS_FILTER.value(),
                         ProjectStatusFilterSelect { status, onchange: filter_projects }
                         if items.is_some() {
                             p { class: "projects-count",
@@ -434,6 +448,7 @@ fn ProjectDiffAllButton(disabled: bool) -> Element {
     rsx! {
         Button {
             id: "project-diff-all-trigger",
+            "data-tour": tours::PROJECTS_BATCH.value(),
             variant: ButtonVariant::Outline,
             size: ButtonSize::Small,
             state: if disabled { ButtonState::Disabled } else if pending { ButtonState::Loading } else { ButtonState::Enabled },
@@ -455,6 +470,7 @@ fn AllSnapshotsButton(onopen: EventHandler<String>) -> Element {
     rsx! {
         Button {
             "data-testid": gtl_web_contracts::test_ids::VIEWER_HISTORY_OPEN.value(),
+            "data-tour": tours::PROJECTS_HISTORY.value(),
             id,
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,

@@ -18,3 +18,6 @@ mod component_preview_registry;
 
 #[path = "browser/review_controls.rs"]
 mod review_controls;
+
+#[path = "browser/guided_tour.rs"]
+mod guided_tour;

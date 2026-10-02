@@ -185,6 +185,7 @@ pub(super) fn SidebarButtons(
     rsx! {
         div {
             class: "hidden items-center gap-0.5 workspace:flex",
+            "data-tour": super::tours::WORKSPACE_SIDEBARS.value(),
             role: "group",
             aria_label: t!(language, "sidebar-visibility"),
             for (sidebar, visible) in [(Sidebar::Files, visibility.files), (Sidebar::Commits, visibility.commits)] {
