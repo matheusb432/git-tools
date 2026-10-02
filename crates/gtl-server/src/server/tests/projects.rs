@@ -1,4 +1,5 @@
 use gtl_infra::{app_state::SqliteAppState, testing::TestRepository};
+use gtl_models::paths::RepositoryRoot;
 use gtl_wire::v1::{self, project_service_client::ProjectServiceClient};
 use serial_test::serial;
 
@@ -12,6 +13,7 @@ async fn viewer_discovers_and_imports_repositories_with_independent_row_results(
     for name in ["active", "paused", "unmanaged", "new", "bad"] {
         std::fs::create_dir_all(root.join(name).join(".git"))?;
     }
+    let root = RepositoryRoot::try_new(root.canonicalize()?)?.to_path_buf();
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut projects = ProjectServiceClient::new(server.native_channel());
     for (id, name) in [("ACT", "active"), ("PAU", "paused"), ("UNM", "unmanaged")] {

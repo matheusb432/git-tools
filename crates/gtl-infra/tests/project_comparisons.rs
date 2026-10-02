@@ -41,7 +41,11 @@ impl Fixture {
             .prefix(".gtl-comparison-")
             .tempdir()
             .unwrap();
-        let repository = TestRepository::init(directory.path().join("repository"));
+        let repository = TestRepository::init(
+            dunce::canonicalize(directory.path())
+                .unwrap()
+                .join("repository"),
+        );
         repository.write("base.txt", "base\n");
         repository.commit_all("base");
         repository.git(&["checkout", "-qb", "feature"]);
@@ -162,7 +166,7 @@ fn persisted_settings_inherit_across_worktrees_and_explicit_registration_wins() 
     fixture.set_branch("project", "main", "develop");
     let linked = fixture.directory.path().join("linked");
     repository.git(&["worktree", "add", "-qb", "review", linked.to_str().unwrap()]);
-    let linked = RepositoryRoot::try_new(linked).unwrap();
+    let linked = RepositoryRoot::try_new(linked.canonicalize().unwrap()).unwrap();
     assert_eq!(
         comparison::configured_comparison(&linked, &HybridGitClient, &fixture.database).unwrap(),
         comparison::ConfiguredComparison {
