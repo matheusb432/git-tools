@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+import "gtl/v1/diff.proto";
+import "gtl/v1/viewer.proto";
+
+service TerminalDiffService {
+  // A finite snapshot: header, files with compact then full rows, completed.
+  // Reading does not create artifacts, history entries, or desktop tabs.
+  rpc ReadTerminalDiff(ReadTerminalDiffRequest) returns (stream ReadTerminalDiffResponse);
+}
+
+message ReadTerminalDiffRequest {
+  string working_directory = 1;
+  DiffTarget target = 2;
+}
+
+message ReadTerminalDiffResponse {
+  oneof event {
+    TerminalDiffHeader header = 1;
+    TerminalDiffFile file = 2;
+    TerminalDiffRows rows = 3;
+    Empty completed = 4;
+  }
+}
+
+message TerminalDiffHeader {
+  string title = 1;
+  repeated string notes = 2;
+}
+
+message TerminalDiffFile {
+  string path = 1;
+  uint64 added = 2;
+  uint64 removed = 3;
+}
+
+message TerminalDiffRows {
+  bool full_context = 1;
+  repeated TerminalDiffRow rows = 2;
+}
+
+enum TerminalDiffRowKind {
+  TERMINAL_DIFF_ROW_KIND_UNSPECIFIED = 0;
+  TERMINAL_DIFF_ROW_KIND_META = 1;
+  TERMINAL_DIFF_ROW_KIND_HUNK = 2;
+  TERMINAL_DIFF_ROW_KIND_CONTEXT = 3;
+  TERMINAL_DIFF_ROW_KIND_ADDED = 4;
+  TERMINAL_DIFF_ROW_KIND_REMOVED = 5;
+}
+
+message TerminalDiffRow {
+  TerminalDiffRowKind kind = 1;
+  string text = 2;
+  optional uint32 old_line_number = 3;
+  optional uint32 new_line_number = 4;
+  repeated ViewerCodeSpan syntax = 5;
+}

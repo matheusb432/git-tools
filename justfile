@@ -81,6 +81,13 @@ bench-scroll-fixture-update:
 bench-scroll update="" quick="":
     cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ update }} {{ quick }}
 
+# Compare release terminal clicks, wheel bursts, and refreshes against a local baseline.
+[arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
+[group('performance')]
+[unix]
+bench-tui update="":
+    GTL_TUI_BENCH_UPDATE="{{ update }}" cargo test --locked --release -p gtl-cli --test diff_tui_benchmark -- --ignored --nocapture
+
 # Compare release server highlighting against the local baseline. Use --update to replace it.
 [arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
 [group('performance')]

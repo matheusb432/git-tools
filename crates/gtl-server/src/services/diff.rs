@@ -379,7 +379,7 @@ fn diff_target(target: Option<v1::DiffTarget>) -> Result<DiffTargetRequest, Stat
     Ok(DiffTargetRequest::from(&target))
 }
 
-fn validated_diff_target(target: Option<v1::DiffTarget>) -> Result<DiffTarget, Status> {
+pub(super) fn validated_diff_target(target: Option<v1::DiffTarget>) -> Result<DiffTarget, Status> {
     let selection = required(required(target, "target")?.selection, "target.selection")?;
     let request = match selection {
         v1::diff_target::Selection::Unpushed(_) => DiffTargetRequest::Unpushed,

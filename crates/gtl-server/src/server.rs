@@ -8,6 +8,7 @@ use gtl_wire::{
         diff_service_server::DiffServiceServer, project_service_server::ProjectServiceServer,
         repository_service_server::RepositoryServiceServer,
         settings_service_server::SettingsServiceServer, tag_service_server::TagServiceServer,
+        terminal_diff_service_server::TerminalDiffServiceServer,
         viewer_service_server::ViewerServiceServer,
     },
     viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
@@ -25,7 +26,7 @@ use tower_http::{
 use crate::{
     services::{
         DiffGrpcService, ProjectGrpcService, RepositoryGrpcService, SettingsGrpcService,
-        TagGrpcService, ViewerGrpcService, ViewerServerInfo,
+        TagGrpcService, TerminalDiffGrpcService, ViewerGrpcService, ViewerServerInfo,
     },
     state::AppState,
 };
@@ -37,8 +38,9 @@ const VIEWER_MAX_RESPONSE_MESSAGE_SIZE: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 6
 
 const HEALTH_SERVICE_NAME: &str = "grpc.health.v1.Health";
 const REFLECTION_SERVICE_NAME: &str = "grpc.reflection.v1.ServerReflection";
-const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 6] = [
+const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 7] = [
     DiffServiceServer::<DiffGrpcService>::NAME,
+    TerminalDiffServiceServer::<TerminalDiffGrpcService>::NAME,
     ProjectServiceServer::<ProjectGrpcService>::NAME,
     RepositoryServiceServer::<RepositoryGrpcService>::NAME,
     SettingsServiceServer::<SettingsGrpcService>::NAME,
@@ -79,6 +81,10 @@ pub(crate) async fn serve(
     let diff_server = DiffServiceServer::new(DiffGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let terminal_diff_server =
+        TerminalDiffServiceServer::new(TerminalDiffGrpcService::new(state.clone()))
+            .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_encoding_message_size(gtl_wire::terminal_diff::MESSAGE_BYTES_MAX);
     let project_server = ProjectServiceServer::new(ProjectGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
@@ -118,6 +124,7 @@ pub(crate) async fn serve(
         .add_service(health_server)
         .add_service(reflection_server)
         .add_service(diff_server)
+        .add_service(terminal_diff_server)
         .add_service(project_server)
         .add_service(repository_server)
         .add_service(settings_server)

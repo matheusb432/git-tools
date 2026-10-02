@@ -20,6 +20,7 @@ pub mod open_diff_file_in_configured_editor;
 pub mod present_diff;
 mod range;
 mod range_view;
+pub mod read_terminal_diff;
 pub mod render_diff;
 pub mod render_diff_subrepos;
 pub mod render_merge_diff;

@@ -2,6 +2,8 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 mod request_failure;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod terminal_diff;
 mod viewer;
 pub mod window;
 

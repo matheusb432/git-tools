@@ -7,6 +7,7 @@ use crate::{commands::diff::DiffOutcome, server_client::ServerClient};
 pub mod data;
 pub mod diff;
 pub mod diff_subrepos;
+pub(crate) mod diff_tui;
 pub mod doctor;
 pub mod managed;
 pub mod merge_diff;

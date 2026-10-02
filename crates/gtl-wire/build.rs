@@ -3,6 +3,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "proto/gtl/v1/common.proto",
         "proto/gtl/v1/diff.proto",
+        "proto/gtl/v1/terminal_diff.proto",
         "proto/gtl/v1/diff_presentation.proto",
         "proto/gtl/v1/failure.proto",
         "proto/gtl/v1/project.proto",

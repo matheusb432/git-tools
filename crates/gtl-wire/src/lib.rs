@@ -3,6 +3,7 @@
 #[cfg(feature = "protobuf")]
 pub mod proto;
 
+pub mod terminal_diff;
 pub mod viewer;
 pub mod window;
 

@@ -171,6 +171,8 @@ pub struct DiffArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum DiffSub {
+    /// Read a single repository diff in an interactive terminal pager.
+    Tui(DiffTuiArgs),
     /// Render a merge diff artifact (three-dot diff) against a base branch.
     Merge(MergeArgs),
 }
@@ -382,21 +384,8 @@ fn parse_tag_bump_level(value: &str) -> Result<TagBumpLevel, String> {
 pub struct DiffTargetArgs {
     #[command(flatten)]
     pub scope: DiffScopeArgs,
-    /// Diff unpushed commits, or committed branch changes against the project comparison
-    /// branch (default: local main) when no upstream exists. This is the default target.
-    #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
-    pub unpushed: bool,
-    /// Base commit (including staged, unstaged, and untracked changes), a
-    /// `<start>..<end>` committed range, `<rev>^!` for that single commit, or
-    /// omitted for unpushed work.
-    #[arg(conflicts_with_all = ["last", "recursive"])]
-    pub target: Option<String>,
-    /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
-    #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
-    pub last: Option<NonZeroU32>,
-    /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
-    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
-    pub merge: Option<String>,
+    #[command(flatten)]
+    pub revision: DiffRevisionArgs,
     /// Name the generated diff in the viewer history label.
     ///
     /// Only valid for the single-repo diff modes.
@@ -413,9 +402,39 @@ pub struct DiffTargetArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(
+    after_long_help = "Examples:\n  gtl diff tui               Unpushed commits\n  gtl diff tui HEAD          Staged, unstaged and untracked changes\n  gtl diff tui --last 5      Last five commits\n  gtl diff tui --merge main  Merge comparison\n\nKeys: f files, / search, [ ] hunks, w wrap, c context, r refresh, ? help, q quit.\nMouse: click files and controls, scroll either pane, drag scrollbars.\nSyntax highlighting uses the shared diff parser; NO_COLOR disables colors.\nRequires an interactive terminal and the local gtl-server."
+)]
+pub struct DiffTuiArgs {
+    #[command(flatten)]
+    pub repository: RepositoryArgs,
+    #[command(flatten)]
+    pub revision: DiffRevisionArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct DiffRevisionArgs {
+    /// Diff unpushed commits, or committed branch changes against the project comparison
+    /// branch (default: local main) when no upstream exists. This is the default target.
+    #[arg(long, conflicts_with_all = ["target", "last"])]
+    pub unpushed: bool,
+    /// Base commit (including staged, unstaged, and untracked changes), a
+    /// `<start>..<end>` committed range, `<rev>^!` for that single commit, or
+    /// omitted for unpushed work.
+    #[arg(conflicts_with_all = ["last"])]
+    pub target: Option<String>,
+    /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
+    #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
+    pub last: Option<NonZeroU32>,
+    /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
+    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed"])]
+    pub merge: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub struct DiffScopeArgs {
     /// Render one HTML document with a section for every git repo under the current directory.
-    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["target", "merge", "name"])]
+    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["target", "merge", "name", "unpushed"])]
     pub recursive: bool,
     /// Include nested linked worktrees in a recursive diff scan.
     #[arg(short = 'w', long = "worktrees", requires = "recursive")]

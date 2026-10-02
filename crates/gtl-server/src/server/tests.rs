@@ -4,6 +4,7 @@ mod live_views;
 mod projects;
 mod repositories;
 mod row_sessions;
+mod terminal_diff;
 mod viewer_push;
 mod viewer_tabs;
 
@@ -644,6 +645,7 @@ async fn assert_health_serving(channel: Channel) -> TestResult {
         "gtl.v1.RepositoryService",
         "gtl.v1.SettingsService",
         "gtl.v1.TagService",
+        "gtl.v1.TerminalDiffService",
         "gtl.v1.ViewerService",
     ] {
         let response = client
@@ -706,6 +708,7 @@ async fn assert_reflection_describes_gtl_contract(channel: Channel) -> TestResul
             "gtl.v1.RepositoryService",
             "gtl.v1.SettingsService",
             "gtl.v1.TagService",
+            "gtl.v1.TerminalDiffService",
             "gtl.v1.ViewerService",
         ]
     );

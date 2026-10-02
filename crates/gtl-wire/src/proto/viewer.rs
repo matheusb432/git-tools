@@ -1963,7 +1963,9 @@ fn encode_viewer_split_cell(
     })
 }
 
-fn encode_viewer_code_line(line: ViewerCodeLine) -> Result<v1::ViewerCodeLine, ViewerCodecError> {
+pub(super) fn encode_viewer_code_line(
+    line: ViewerCodeLine,
+) -> Result<v1::ViewerCodeLine, ViewerCodecError> {
     let mut next_byte = 0_usize;
     let spans = line
         .spans
@@ -2077,7 +2079,9 @@ fn decode_viewer_split_cell(
     })
 }
 
-fn decode_viewer_code_line(line: v1::ViewerCodeLine) -> Result<ViewerCodeLine, ViewerCodecError> {
+pub(super) fn decode_viewer_code_line(
+    line: v1::ViewerCodeLine,
+) -> Result<ViewerCodeLine, ViewerCodecError> {
     let mut next_byte = 0_usize;
     let mut spans = Vec::with_capacity(line.spans.len().max(1));
     for span in line.spans {

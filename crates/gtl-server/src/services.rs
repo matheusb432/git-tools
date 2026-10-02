@@ -4,6 +4,7 @@ mod repository;
 mod settings;
 mod status;
 mod tag;
+mod terminal_diff;
 mod viewer;
 
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ pub(crate) use repository::RepositoryGrpcService;
 pub(crate) use settings::SettingsGrpcService;
 use status::invalid_request;
 pub(crate) use tag::TagGrpcService;
+pub(crate) use terminal_diff::TerminalDiffGrpcService;
 use tonic::Status;
 pub(crate) use viewer::{ViewerGrpcService, ViewerServerInfo};
 

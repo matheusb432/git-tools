@@ -3,8 +3,8 @@ use gtl_wire::v1;
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, DataArgs, DataCommand, DiffArgs, DiffSub, DiffTarget,
-        DiffTargetArgs, DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs,
+        Cli, ColorChoice, Command, DataArgs, DataCommand, DiffArgs, DiffRevisionArgs, DiffSub,
+        DiffTarget, DiffTargetArgs, DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs,
         ProjectCommand, ProjectStatusArgs, PullArgs, PushArgs, ServerArgs, ServerCommand,
         StatusArgs, Theme,
     },
@@ -95,6 +95,7 @@ fn run_data(command: &DataCommand) -> ExitCode {
 
 fn run_diff(args: DiffArgs) -> ExitCode {
     match args.sub {
+        Some(DiffSub::Tui(args)) => run_diff_tui(args),
         Some(DiffSub::Merge(MergeArgs {
             repo_path,
             base,
@@ -109,7 +110,7 @@ fn run_diff(args: DiffArgs) -> ExitCode {
                 return run_recursive_diff(&args.target, raw, args.repository.id.as_ref());
             }
             let name = args.target.name.clone();
-            match diff_target(args.target) {
+            match diff_target(args.target.revision) {
                 Ok(target) => diff_exit(
                     commands::repository_path(args.repository.id.as_ref())
                         .and_then(|root| commands::diff::run(&root, &target, name.as_deref(), raw)),
@@ -123,9 +124,30 @@ fn run_diff(args: DiffArgs) -> ExitCode {
     }
 }
 
+fn run_diff_tui(args: cli::DiffTuiArgs) -> ExitCode {
+    use std::io::IsTerminal as _;
+    let target = match diff_target(args.revision) {
+        Ok(target) => target,
+        Err(error) => {
+            eprintln!("diff tui: {error}");
+            return ExitCode::Usage;
+        }
+    };
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!("diff tui: requires an interactive terminal on stdin and stdout");
+        return ExitCode::Usage;
+    }
+    match commands::repository_path(args.repository.id.as_ref())
+        .and_then(|root| commands::diff_tui::run(&root, &target))
+    {
+        Ok(()) => ExitCode::Ok,
+        Err(error) => fail("diff tui", &error),
+    }
+}
+
 fn run_recursive_diff(target: &DiffTargetArgs, raw: bool, id: Option<&ProjectId>) -> ExitCode {
     diff_exit(commands::repository_path(id).and_then(|root| {
-        commands::diff_subrepos::run_scan(root, target.last, target.scope.worktrees, raw)
+        commands::diff_subrepos::run_scan(root, target.revision.last, target.scope.worktrees, raw)
     }))
 }
 
@@ -231,7 +253,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
     }
 }
 
-fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError> {
+fn diff_target(args: DiffRevisionArgs) -> Result<DiffTarget, DiffTargetParseError> {
     if args.unpushed {
         Ok(DiffTarget::Unpushed { pinned: None })
     } else if let Some(base) = args.merge {
@@ -568,18 +590,12 @@ fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
 mod tests {
     use super::*;
 
-    fn target_args(target: Option<&str>) -> DiffTargetArgs {
-        DiffTargetArgs {
-            scope: crate::cli::DiffScopeArgs {
-                recursive: false,
-                worktrees: false,
-            },
+    fn target_args(target: Option<&str>) -> DiffRevisionArgs {
+        DiffRevisionArgs {
             unpushed: false,
             target: target.map(str::to_owned),
             last: None,
             merge: None,
-            name: None,
-            set_theme: None,
         }
     }
 

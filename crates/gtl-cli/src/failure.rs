@@ -150,6 +150,18 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn terminal_diff_preserves_the_rpc_failure_category() {
+        let status = encode_status(Failure::Busy.class(), &Failure::Busy);
+        let error = gtl_client::terminal_diff::TerminalDiffError::from(
+            gtl_client::ClientError::from(status),
+        );
+        assert_eq!(
+            CommandFailure::from_error(&error.into()).exit(),
+            ExitCode::Unavailable
+        );
+    }
+
     fn rpc_error(failure: &Failure) -> anyhow::Error {
         gtl_client::ClientError::from(encode_status(failure.class(), failure)).into()
     }

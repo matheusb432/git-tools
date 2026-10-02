@@ -53,6 +53,34 @@ as repositories. Each repository gets its own section in a raw document.
 
 Use `gtl project diff --all` for [managed projects](projects.md) instead of a directory scan.
 
+## Terminal pager
+
+```bash
+gtl diff tui # unpushed commits
+gtl diff tui HEAD # staged, unstaged and untracked changes
+gtl diff tui --last 5
+gtl diff tui --merge main
+gtl diff tui HEAD --id MY # select one managed project
+```
+
+The terminal pager shows a continuous unified diff for one repository, with syntax highlighting
+from the same parser as the desktop viewer. Added and removed lines keep distinct backgrounds
+and markers. Lines wrap by default;
+`w` toggles wrapping and the left/right arrows scroll unwrapped lines. `f` opens the file picker,
+`[` and `]` jump between hunks, and `{` and `}` jump between files. Use `/` to search and `n`/`N`
+for the next/previous match. `?` opens scrollable help; `q` exits.
+
+Wide terminals show a file sidebar with filenames, directories, and change counts. On narrow
+terminals, `f` opens the file browser across the screen. Press `/` there to filter filenames.
+Click a file to open it, click any toolbar control to activate it, or use the mouse wheel over
+either pane. Both scrollbars support clicking and dragging. Mouse support depends on the
+terminal forwarding mouse events; keyboard controls remain available. `NO_COLOR` disables colors.
+
+`c` toggles full context. The comparison stays fixed until `r` refreshes it, retaining your
+position where possible. The pager uses the local server and the saved repository extension
+filter. Its session is independent of desktop tabs and history. It requires an interactive
+terminal; recursive scans and managed-project batches use the existing diff commands.
+
 ## Offline HTML
 
 ```bash

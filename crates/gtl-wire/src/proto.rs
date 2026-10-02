@@ -2,4 +2,5 @@
 
 pub mod failure;
 pub mod row_ipc;
+pub mod terminal_diff;
 pub mod viewer;
