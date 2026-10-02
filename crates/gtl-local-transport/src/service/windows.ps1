@@ -69,5 +69,6 @@ $taskAction = New-ScheduledTaskAction -Execute $powershell -Argument "-NoLogo -N
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity.Name
 $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-$description = 'gtl:' + (ConvertTo-Json -Compress -Depth 4 @{ program = $program; environment = $environment })
+# Rebuild the array to discard PowerShell 5's JSON pipeline metadata.
+$description = 'gtl:' + (ConvertTo-Json -Compress -Depth 4 @{ program = $program; environment = @($environment) })
 Register-ScheduledTask -TaskName $taskName -Description $description -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null

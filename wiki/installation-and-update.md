@@ -1,17 +1,19 @@
 # Installation and updates
 
-Download the archive or installer for your platform from
+Download the installer for your platform from
 [GitHub Releases](https://github.com/matheusb432/git-tools/releases), verify its accompanying
 SHA-256 checksum, then follow the included [installation instructions](../release/INSTALL.md).
 
-The packages include `git-tools`, its `gtl` alias, `gtl-server` and `gtl-viewer`. Git must already
-be on PATH.
+The packages include `git-tools`, its `gtl` alias, `gtl-server` and `gtl-viewer`.
+Windows and macOS need Git on PATH; the Ubuntu package installs Git as a dependency.
 
 | Platform | Package |
 | -- | -- |
-| Ubuntu 24.04 x64 | `.tar.gz` with `install.sh` |
-| Windows 11 x64 | ZIP with `install.cmd`; requires WebView2 |
-| macOS | `.pkg` for Apple Silicon or Intel |
+| Ubuntu 24.04 or newer, x64 | `.deb`; open Git Tools from the application menu |
+| Windows 11 x64 | `-setup.exe`; open Git Tools from the Start menu |
+| macOS on Apple Silicon | `-arm64.pkg`; open `/Applications/gtl-viewer.app` |
+
+The Windows installer is unsigned, so Windows may ask you to confirm the publisher.
 
 The macOS app is ad-hoc signed and is not notarized. Allow installation and first launch in
 System Settings → Privacy & Security when macOS blocks them.
@@ -31,8 +33,7 @@ gtl server status
 Ubuntu 24.04 supports the full development and verification toolchain. macOS supports local
 builds and installation through `just update`. Windows 11 is a release target.
 
-Cargo also needs the `error-meta` checkout at `../../shared-libs/error-meta`, relative to this
-repository. Keep that directory layout when building from source.
+The `error-meta` derive is included in the repository. No sibling checkout is required.
 
 With Mise installed, run these from this checkout on Ubuntu:
 

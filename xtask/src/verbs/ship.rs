@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 
 use super::{cargo_target_directory, desktop_release, dioxus_web, repository_root};
 use crate::{process, task::Step};
@@ -34,6 +34,23 @@ fn release_artifact_path(target: &Path, executable: &str) -> std::path::PathBuf 
 /// Cross-build the Windows shippables. Smoke mode uses the debug Rust profile and skips artifact
 /// verification; both modes stage the complete offline frontend first.
 pub fn run(smoke: bool, force: bool) -> Result<()> {
+    let build_home = std::env::var("HOME").context("Windows cross-build requires HOME")?;
+    ensure!(
+        Path::new(&build_home).is_absolute(),
+        "HOME must be absolute"
+    );
+    let remap_configuration = format!(
+        "target.{WIN_TARGET}.rustflags={}",
+        serde_json::to_string(&[format!("--remap-path-prefix={build_home}=/build/home")])?
+    );
+    let compiler_flags_c = format!(
+        "{} /clang:-ffile-prefix-map={build_home}=/build/home",
+        std::env::var("TARGET_CFLAGS").unwrap_or_default()
+    );
+    let compiler_flags_cpp = format!(
+        "{} /clang:-ffile-prefix-map={build_home}=/build/home",
+        std::env::var("TARGET_CXXFLAGS").unwrap_or_default()
+    );
     dioxus_web::build_release().context("ship Dioxus Web release bundle failed")?;
 
     if !force {
@@ -49,15 +66,24 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     server_args.extend_from_slice(profile);
     server_args.extend_from_slice(&["-p", "gtl-server", "--target", WIN_TARGET]);
 
-    let viewer_args = viewer_build_arguments(smoke);
+    let mut viewer_args: Vec<&str> = viewer_build_arguments(smoke);
+    for arguments in [&mut cli_args, &mut server_args, &mut viewer_args] {
+        arguments.extend(["--config", &remap_configuration]);
+    }
     let root = repository_root();
 
     process::run_step(
-        &Step::new("cross-build-cli", "cargo", cli_args).with_current_directory(&root),
+        &Step::new("cross-build-cli", "cargo", cli_args)
+            .with_current_directory(&root)
+            .with_environment("TARGET_CFLAGS", &compiler_flags_c)
+            .with_environment("TARGET_CXXFLAGS", &compiler_flags_cpp),
     )
     .context("cross-build the Windows CLI")?;
     process::run_step(
-        &Step::new("cross-build-server", "cargo", server_args).with_current_directory(&root),
+        &Step::new("cross-build-server", "cargo", server_args)
+            .with_current_directory(&root)
+            .with_environment("TARGET_CFLAGS", &compiler_flags_c)
+            .with_environment("TARGET_CXXFLAGS", &compiler_flags_cpp),
     )
     .context("cross-build the Windows server")?;
     desktop_release::run_cargo("cross-build-viewer", &viewer_args)

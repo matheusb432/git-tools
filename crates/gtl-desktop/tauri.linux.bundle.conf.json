@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Git Tools",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Local Git workflows and diff review",
+    "externalBin": [
+      "binaries/git-tools",
+      "binaries/gtl",
+      "binaries/gtl-server"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "git",
+          "systemd",
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0t64",
+          "libayatana-appindicator3-1",
+          "libxdo3"
+        ],
+        "desktopTemplate": "../../release/linux/bundle.desktop",
+        "postInstallScript": "../../release/linux/postinst",
+        "preRemoveScript": "../../release/linux/prerm",
+        "files": {
+          "/usr/bin/git-tools-launch": "../../release/linux/launch.sh",
+          "/usr/share/doc/git-tools/copyright": "../../LICENSE",
+          "/usr/share/applications/dev.gittools.viewer.desktop": "../../release/linux/git-tools.desktop",
+          "/usr/share/icons/hicolor/1024x1024/apps/dev.gittools.viewer.png": "icons/icon.png",
+          "/usr/share/icons/hicolor/scalable/apps/dev.gittools.viewer.svg": "icons/icon.svg",
+          "/usr/lib/systemd/user/gtl-server.service": "../../release/linux/gtl-server.service"
+        }
+      }
+    },
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "publisher": "Matheus Bastos",
+    "homepage": "https://github.com/matheusb432/git-tools"
+  }
+}

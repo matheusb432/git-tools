@@ -23,20 +23,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libayatana-appindicator3-dev libdbus-1-dev \
             libgtk-3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
-            llvm-18 clang-18 lld-18 pkg-config zip
+            llvm-18 clang-18 lld-18 nsis pkg-config zip
       - uses: jdx/mise-action@v4
         with:
           version: 2026.7.18
-          install_args: rust just protoc cargo-binstall cargo:dioxus-cli cargo:cargo-nextest cargo:cargo-xwin http:zig
+          install_args: rust just protoc cargo-binstall cargo:dioxus-cli cargo:tauri-cli cargo:cargo-nextest cargo:cargo-xwin http:zig
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
           cache-on-failure: true
       - name: Build application and native test archive
         run: |
+          just archive-windows-tests
           just ship --force
           just check-windows
-          just archive-windows-tests
           just package windows
       - name: Upload candidates for native verification
         uses: actions/upload-artifact@v7
@@ -76,12 +76,29 @@ jobs:
       - name: Exercise installation, daemon, CLI, and viewer
         shell: cmd
         run: call release\windows\smoke.cmd "%CD%\.artifacts\install"
-      - name: Upload verified release archive
+      - name: Exercise the setup executable
+        shell: pwsh
+        run: |
+          $installer = Get-Item .artifacts/windows/*-setup.exe
+          $directory = Join-Path $env:RUNNER_TEMP 'Git Tools installed'
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList '/S', "/D=$directory" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
+          try {
+            & "$directory/gtl.exe" doctor
+            if ($LASTEXITCODE -ne 0) { throw 'Installed application diagnostics failed' }
+            & "$directory/gtl.exe" server restart
+            if ($LASTEXITCODE -ne 0) { throw 'Installed server restart failed' }
+          } finally {
+            $uninstaller = Get-Item "$directory/uninstall.exe"
+            $process = Start-Process -FilePath $uninstaller.FullName -ArgumentList '/S', "_?=$directory" -Wait -PassThru
+            if ($process.ExitCode -ne 0) { throw "Uninstaller exited with $($process.ExitCode)" }
+          }
+      - name: Upload verified Windows installer
         uses: actions/upload-artifact@v7
         with:
           name: git-tools-windows-x86_64-${{ github.sha }}
           path: |
-            .artifacts/windows/*.zip
-            .artifacts/windows/*.sha256
+            .artifacts/windows/*-setup.exe
+            .artifacts/windows/*-setup.exe.sha256
           if-no-files-found: error
           retention-days: 14

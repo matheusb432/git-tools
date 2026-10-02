@@ -274,7 +274,7 @@ archive-windows-tests:
         -p gtl-application -p gtl-models -p gtl-artifacts -p gtl-parser -p gtl-wire \
         --archive-file .artifacts/windows/tests.tar.zst
 
-# Package prebuilt Linux or Windows binaries with installation instructions and checksums.
+# Package Linux or Windows installers, verification archives, and checksums.
 [group('release')]
 [arg('platform', pattern='linux|windows')]
 [linux]

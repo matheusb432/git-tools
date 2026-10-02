@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Git Tools
+Comment=Local Git workflows and diff review
+Exec=/usr/bin/git-tools-launch
+Icon=dev.gittools.viewer
+Terminal=false
+Categories=Development;
+StartupWMClass=Gtl-viewer

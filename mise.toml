@@ -74,6 +74,7 @@ macos-arm64 = { url = "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.1
 "apt:libwebkit2gtk-4.1-dev" = "latest"
 "apt:libxdo-dev" = "latest"
 "apt:llvm" = "latest"
+"apt:nsis" = "latest"
 "apt:openbox" = "latest"
 "apt:pkg-config" = "latest"
 "apt:stalonetray" = "latest"

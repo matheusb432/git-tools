@@ -45,6 +45,7 @@ pub(crate) fn run(platform: ReleasePlatform) -> Result<()> {
     fs::create_dir(&payload)?;
     stage_binaries(&release, &payload, suffix)?;
     fs::copy(root.join("release/INSTALL.md"), payload.join("INSTALL.md"))?;
+    fs::copy(root.join("LICENSE"), payload.join("LICENSE"))?;
     match platform {
         ReleasePlatform::Linux => {
             fs::copy(
@@ -85,6 +86,85 @@ pub(crate) fn run(platform: ReleasePlatform) -> Result<()> {
     writeln!(checksum, "  {filename}")?;
     fs::write(output.join(format!("{filename}.sha256")), checksum)?;
     println!("Release archive: {}", archive.display());
+    package_installer(platform, &root, &target, &release, &output, &version)?;
+    Ok(())
+}
+
+fn package_installer(
+    platform: ReleasePlatform,
+    root: &Path,
+    target: &Path,
+    release: &Path,
+    output: &Path,
+    version: &str,
+) -> Result<()> {
+    let (triple, platform_name, suffix, bundle, extension) = match platform {
+        ReleasePlatform::Linux => ("x86_64-unknown-linux-gnu", "linux", "", "deb", "deb"),
+        ReleasePlatform::Windows => ("x86_64-pc-windows-msvc", "windows", ".exe", "nsis", "exe"),
+    };
+    let sidecars = root.join("crates/gtl-desktop/binaries");
+    fs::create_dir_all(&sidecars)?;
+    for binary in ["git-tools", "gtl", "gtl-server"] {
+        let source = if binary == "gtl" { "git-tools" } else { binary };
+        fs::copy(
+            release.join(format!("{source}{suffix}")),
+            sidecars.join(format!("{binary}-{triple}{suffix}")),
+        )?;
+    }
+    let staging = tempfile::tempdir_in(target)?;
+    let bundle_target = staging.path().join("target");
+    let bundle_release = bundle_target.join(triple).join("release");
+    fs::create_dir_all(&bundle_release)?;
+    fs::copy(
+        release.join(format!("gtl-viewer{suffix}")),
+        bundle_release.join(format!("gtl-viewer{suffix}")),
+    )?;
+    process::run_step(
+        &Step::new(
+            "bundle-release-installer",
+            "cargo",
+            [
+                "tauri",
+                "bundle",
+                "--ci",
+                "--target",
+                triple,
+                "--features",
+                "custom-protocol",
+                "--config",
+                "tauri.production.conf.json",
+                "--config",
+                &format!("tauri.{platform_name}.bundle.conf.json"),
+            ],
+        )
+        .with_current_directory(root.join("crates/gtl-desktop"))
+        .with_environment("CARGO_TARGET_DIR", bundle_target.display().to_string()),
+    )?;
+    let candidates = fs::read_dir(bundle_release.join("bundle").join(bundle))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    let installers = candidates
+        .iter()
+        .filter(|path| path.extension().is_some_and(|value| value == extension))
+        .collect::<Vec<_>>();
+    ensure!(
+        installers.len() == 1,
+        "expected one {platform_name} installer"
+    );
+    let filename = match platform {
+        ReleasePlatform::Linux => format!("git-tools-{version}-linux-x86_64.deb"),
+        ReleasePlatform::Windows => format!("git-tools-{version}-windows-x86_64-setup.exe"),
+    };
+    let installer = output.join(&filename);
+    fs::copy(installers[0], &installer)?;
+    let digest = Sha256::digest(fs::read(&installer)?);
+    let mut checksum = String::new();
+    for byte in digest {
+        write!(checksum, "{byte:02x}")?;
+    }
+    writeln!(checksum, "  {filename}")?;
+    fs::write(output.join(format!("{filename}.sha256")), checksum)?;
+    println!("Release installer: {}", installer.display());
     Ok(())
 }
 

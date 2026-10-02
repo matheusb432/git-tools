@@ -42,17 +42,20 @@ jobs:
         run: |
           just build
           just package linux
-      - name: Exercise the extracted executables outside the checkout
+      - name: Install and exercise the Debian package
         run: |
+          sudo apt-get install -y ./.artifacts/linux/git-tools-*-linux-x86_64.deb
+          /usr/bin/gtl server start
+          /usr/bin/gtl doctor
           mkdir -p .artifacts/extracted
           tar -xzf .artifacts/linux/git-tools-*-linux-x86_64.tar.gz -C .artifacts/extracted
           bash release/linux/smoke.sh .artifacts/extracted/git-tools-*-linux-x86_64
-      - name: Upload release archive
+      - name: Upload verified Ubuntu installer
         uses: actions/upload-artifact@v7
         with:
           name: git-tools-linux-x86_64-${{ github.sha }}
           path: |
-            .artifacts/linux/*.tar.gz
-            .artifacts/linux/*.sha256
+            .artifacts/linux/*.deb
+            .artifacts/linux/*.deb.sha256
           if-no-files-found: error
           retention-days: 14

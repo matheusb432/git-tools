@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Git Tools
+Exec=/usr/bin/git-tools-launch
+Icon={{icon}}
+# The visible entry uses the native application's identifier as its filename.
+NoDisplay=true

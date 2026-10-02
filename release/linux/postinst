@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    systemctl --global enable gtl-server.service
+    for runtime in /run/user/[0-9]*; do
+        [ -S "$runtime/bus" ] || continue
+        user=$(getent passwd "${runtime##*/}" | cut -d: -f1)
+        [ -n "$user" ] || continue
+        unit=$(runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" systemctl --user show \
+            --property=FragmentPath --value gtl-server.service 2>/dev/null) || continue
+        case "$unit" in
+            /usr/lib/systemd/user/gtl-server.service|/lib/systemd/user/gtl-server.service)
+                runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" systemctl --user daemon-reload
+                runuser -u "$user" -- env XDG_RUNTIME_DIR="$runtime" systemctl --user try-restart gtl-server.service
+                ;;
+        esac
+    done
+fi

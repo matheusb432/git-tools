@@ -1,0 +1,14 @@
+[Unit]
+Description=Git Tools local gRPC server
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gtl-server
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=12s
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

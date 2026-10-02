@@ -2,25 +2,17 @@ name: macos
 
 on:
   workflow_dispatch:
-    inputs:
-      runner:
-        description: Mac architecture to build and exercise
-        type: choice
-        default: macos-15
-        options:
-          - macos-15
-          - macos-15-intel
 
 permissions:
   contents: read
 
 concurrency:
-  group: macos-${{ github.ref }}-${{ inputs.runner }}
+  group: macos-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   package:
-    runs-on: ${{ inputs.runner }}
+    runs-on: macos-15
     timeout-minutes: 90
     env:
       NEXTEST_PROFILE: ci
@@ -50,11 +42,13 @@ jobs:
         run: |
           just test
           just test -p gtl-desktop
-      - name: Upload verified installer and launch evidence
+      - name: Upload verified Apple Silicon installer
         uses: actions/upload-artifact@v7
         with:
-          name: git-tools-${{ inputs.runner }}-${{ github.sha }}
-          path: .artifacts/macos/
+          name: git-tools-macos-arm64-${{ github.sha }}
+          path: |
+            .artifacts/macos/*-arm64.pkg
+            .artifacts/macos/*-arm64.pkg.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Clean up the launch agent and viewer

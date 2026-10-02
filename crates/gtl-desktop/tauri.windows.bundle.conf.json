@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Git Tools",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Local Git workflows and diff review",
+    "externalBin": [
+      "binaries/git-tools",
+      "binaries/gtl",
+      "binaries/gtl-server"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "../../release/windows/installer-hooks.nsh"
+      }
+    },
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "publisher": "Matheus Bastos",
+    "homepage": "https://github.com/matheusb432/git-tools"
+  }
+}
