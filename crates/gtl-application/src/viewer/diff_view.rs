@@ -89,16 +89,14 @@ fn source_digests(view: &View, density: ViewerDiffDensity) -> ([u8; 32], Vec<[u8
         .iter()
         .map(|file| {
             let mut digest = Sha256::new();
-            digest.update(b"gtl.viewer.file-source.v1\0");
+            digest.update(b"gtl.viewer.file-source.v2\0");
             hash_frame(
                 &mut digest,
                 file.path.as_path().as_os_str().as_encoded_bytes(),
             );
             let lines = selected_lines(file, density);
             digest.update((lines.len() as u64).to_be_bytes());
-            for line in lines {
-                hash_frame(&mut digest, line.as_bytes());
-            }
+            digest.update(lines.fingerprint());
             digest.finalize().into()
         })
         .collect::<Vec<[u8; 32]>>();
@@ -501,6 +499,8 @@ mod tests {
         first.files.truncate(1);
         let mut second = first.clone();
         for (left, right) in [
+            (vec![], vec![""]),
+            (vec!["+a"], vec!["+a", ""]),
             (vec!["+ab", "c"], vec!["+a", "bc"]),
             (vec!["+a", "+b"], vec!["+b", "+a"]),
             (vec!["+a\n+b"], vec!["+a", "+b"]),

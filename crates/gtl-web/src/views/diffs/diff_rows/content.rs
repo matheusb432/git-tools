@@ -38,11 +38,13 @@ pub(super) fn code_cell_content(
             }
         };
     }
-    rsx! {
-        if let Some(marker) = marker {
+    let content = semantic_text(code, changed_text_tone, copy_text);
+    match marker {
+        Some(marker) => rsx! {
             span { "{marker}" }
-        }
-        {semantic_text(code, changed_text_tone, copy_text)}
+            {content}
+        },
+        None => content,
     }
 }
 
@@ -59,22 +61,20 @@ fn semantic_text(
         };
     }
 
-    let content = if spans.is_empty() {
-        rsx! { "\u{00a0}" }
+    if spans.is_empty() {
+        return rsx! { "\u{00a0}" };
+    }
+    let tokens = spans
+        .iter()
+        .map(|semantic_span| semantic_token(&code.text, semantic_span, changed_text_tone));
+    if copy_text {
+        rsx! {
+            span { "data-gtl-copy-text": "", {tokens} }
+        }
     } else {
-        let tokens = spans
-            .iter()
-            .map(|semantic_span| semantic_token(&code.text, semantic_span, changed_text_tone));
         rsx! {
             {tokens}
         }
-    };
-    if copy_text {
-        rsx! {
-            span { "data-gtl-copy-text": "", {content} }
-        }
-    } else {
-        content
     }
 }
 
@@ -122,12 +122,8 @@ const fn syntax_classes(syntax_class: Option<ViewerSyntaxClass>) -> &'static str
     }
 }
 
-pub(super) fn non_breaking_if_empty(text: &str) -> String {
-    if text.is_empty() {
-        "\u{00a0}".to_owned()
-    } else {
-        text.to_owned()
-    }
+pub(super) fn non_breaking_if_empty(text: &str) -> &str {
+    if text.is_empty() { "\u{00a0}" } else { text }
 }
 
 #[cfg(test)]

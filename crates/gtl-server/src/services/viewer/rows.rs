@@ -381,6 +381,17 @@ fn send_bounded<Row>(
 where
     Row: prost::Message,
 {
+    if rows.len() <= VIEWER_ROW_BATCH_MAX_ROWS
+        && bounded_rows_encoded_len(&rows)
+            .and_then(|bytes| batch_encoded_bytes(writer, bytes, &event))
+            .is_some_and(|bytes| bytes <= VIEWER_ROW_BATCH_MAX_ENCODED_BYTES)
+    {
+        return if rows.is_empty() || writer.send(event(rows, writer.next_row)) {
+            BatchResult::Sent
+        } else {
+            BatchResult::Cancelled
+        };
+    }
     let mut batch = Vec::new();
     let mut rows_encoded_len = 0;
     for row in rows {
@@ -396,6 +407,19 @@ where
         return BatchResult::Cancelled;
     }
     BatchResult::Sent
+}
+
+fn bounded_rows_encoded_len<Row: prost::Message>(rows: &[Row]) -> Option<usize> {
+    rows.iter().try_fold(0_usize, |bytes, row| {
+        let row_bytes = row.encoded_len();
+        if row_bytes > VIEWER_ROW_MAX_ENCODED_BYTES {
+            return None;
+        }
+        bytes
+            .checked_add(prost::encoding::key_len(2))?
+            .checked_add(prost::length_delimiter_len(row_bytes))?
+            .checked_add(row_bytes)
+    })
 }
 
 fn append_bounded_row<Row>(
@@ -521,44 +545,71 @@ mod tests {
     }
 
     #[test]
-    fn incremental_row_batch_size_matches_protobuf_encoding() {
-        let rows = vec![
-            v1::ViewerUnifiedRow {
-                row: Some(v1::viewer_unified_row::Row::Meta("short".to_owned())),
-            },
-            v1::ViewerUnifiedRow {
-                row: Some(v1::viewer_unified_row::Row::Meta("x".repeat(200))),
-            },
-        ];
-        let empty_event = v1::ViewerUnifiedRows {
-            start_row: 0,
-            file_id: "file-0".to_owned(),
-            rows: Vec::new(),
-        };
-        let response = |rows| v1::StreamViewerRowsResponse {
-            identity: Some(v1::ViewerViewIdentity::default()),
-            sequence: 7,
-            event: Some(v1::stream_viewer_rows_response::Event::UnifiedRows(
-                v1::ViewerUnifiedRows {
-                    start_row: 0,
-                    file_id: empty_event.file_id.clone(),
+    fn row_batch_sizes_match_protobuf_across_layouts_and_varint_boundaries() {
+        let cases = [0, 127, 128, 16_383, 16_384, 262_144]
+            .into_iter()
+            .flat_map(|text_bytes| {
+                [0, 127, 128, 16_383, 16_384].map(|offset| (text_bytes, offset))
+            });
+        for (text_bytes, offset) in cases {
+            let unified = vec![
+                v1::ViewerUnifiedRow {
+                    row: Some(v1::viewer_unified_row::Row::Meta("x".repeat(text_bytes))),
+                };
+                2
+            ];
+            let split = vec![
+                v1::ViewerSplitRow {
+                    row: Some(v1::viewer_split_row::Row::Meta("x".repeat(text_bytes))),
+                };
+                2
+            ];
+            assert_row_batch_size(&unified, offset, |rows| {
+                v1::stream_viewer_rows_response::Event::UnifiedRows(v1::ViewerUnifiedRows {
+                    file_id: "file-0".to_owned(),
+                    start_row: offset,
                     rows,
-                },
-            )),
-        };
-        let empty_response_encoded_len = response(Vec::new()).encoded_len();
-        let rows_encoded_len = rows
-            .iter()
-            .map(|row| prost::encoding::message::encoded_len(2, row))
-            .sum();
+                })
+            });
+            assert_row_batch_size(&split, offset, |rows| {
+                v1::stream_viewer_rows_response::Event::SplitRows(v1::ViewerSplitRows {
+                    file_id: "file-0".to_owned(),
+                    start_row: offset,
+                    rows,
+                })
+            });
+        }
+    }
 
+    fn assert_row_batch_size<Row: prost::Message + Clone>(
+        rows: &[Row],
+        sequence: u32,
+        event: impl Fn(Vec<Row>) -> v1::stream_viewer_rows_response::Event,
+    ) {
+        let empty = event(Vec::new());
+        let event_bytes = row_event_encoded_len(&empty).unwrap();
+        let response = |event| v1::StreamViewerRowsResponse {
+            identity: Some(v1::ViewerViewIdentity::default()),
+            sequence: u64::from(sequence),
+            event: Some(event),
+        };
         assert_eq!(
             row_batch_response_encoded_len(
-                empty_response_encoded_len,
-                empty_event.encoded_len(),
-                rows_encoded_len,
+                response(empty).encoded_len(),
+                event_bytes,
+                bounded_rows_encoded_len(rows).unwrap(),
             ),
-            Some(response(rows).encoded_len())
+            Some(response(event(rows.to_vec())).encoded_len()),
         );
+    }
+
+    #[test]
+    fn batch_sizing_rejects_a_row_over_the_individual_limit() {
+        let row = v1::ViewerUnifiedRow {
+            row: Some(v1::viewer_unified_row::Row::Meta(
+                "x".repeat(VIEWER_ROW_MAX_ENCODED_BYTES),
+            )),
+        };
+        assert!(bounded_rows_encoded_len(&[row]).is_none());
     }
 }

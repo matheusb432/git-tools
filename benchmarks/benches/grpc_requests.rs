@@ -22,6 +22,7 @@ use gtl_wire::{
     viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
 };
 use prost::Message as _;
+use sha2::{Digest as _, Sha256};
 use tonic::transport::Channel;
 
 const TOKIO_WORKER_THREADS: usize = 2;
@@ -33,6 +34,7 @@ const GET_REPOSITORY_STATUS_BENCHMARK_NAME: &str = "grpc-requests/get-repository
 const PRESENT_DIFF_UNPUSHED_BENCHMARK_NAME: &str = "grpc-requests/present-diff-unpushed";
 const GET_VIEWER_SHELL_BENCHMARK_NAME: &str = "grpc-requests/get-viewer-shell";
 const STREAM_VIEWER_ROWS_BENCHMARK_NAME: &str = "grpc-requests/stream-viewer-rows/2k-rust";
+const STREAM_VIEWER_TEXT_ROWS_BENCHMARK_NAME: &str = "grpc-requests/stream-viewer-rows/2k-text";
 const VIEWER_READY_ATTEMPTS: usize = 500;
 const VIEWER_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
 
@@ -51,7 +53,8 @@ fn grpc_requests(criterion: &mut Criterion) {
         "writing the benchmark settings",
     );
     let repository = repository_fixture();
-    let viewer_repository = viewer_repository_fixture();
+    let viewer_repository = viewer_repository_fixture("src/benchmark.rs");
+    let text_repository = viewer_repository_fixture("benchmark.txt");
     let runtime = require(
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(TOKIO_WORKER_THREADS)
@@ -84,8 +87,29 @@ fn grpc_requests(criterion: &mut Criterion) {
         wait_for_ready_view(&viewer_client).await
     });
     benchmark_get_viewer_shell(criterion, &runtime, &viewer_client);
-    benchmark_stream_viewer_rows(criterion, &runtime, &viewer_client, identity);
+    benchmark_stream_viewer_rows(
+        criterion,
+        &runtime,
+        &viewer_client,
+        identity,
+        STREAM_VIEWER_ROWS_BENCHMARK_NAME,
+    );
     benchmark_native_row_windows(criterion, &runtime, server.endpoint(), identity);
+
+    let identity = runtime.block_on(async {
+        require(
+            server.open_viewer_recipe_batch(viewer_recipe_batch(&text_repository.path)),
+            "opening the benchmark text recipe",
+        );
+        wait_for_ready_view(&viewer_client).await
+    });
+    benchmark_stream_viewer_rows(
+        criterion,
+        &runtime,
+        &viewer_client,
+        identity,
+        STREAM_VIEWER_TEXT_ROWS_BENCHMARK_NAME,
+    );
 
     runtime.block_on(async {
         require(server.stop().await, "stopping the benchmark gRPC server");
@@ -217,6 +241,7 @@ fn benchmark_stream_viewer_rows(
     runtime: &tokio::runtime::Runtime,
     client: &BenchmarkViewerClient,
     identity: v1::ViewerViewIdentity,
+    label: &str,
 ) {
     let request = StreamViewerRowsRequest {
         identity: Some(identity),
@@ -229,9 +254,11 @@ fn benchmark_stream_viewer_rows(
         "warming the stream-viewer-rows request",
     ));
     assert!(message_count > 2);
-    report_output_size(STREAM_VIEWER_ROWS_BENCHMARK_NAME, output_bytes);
+    report_output_size(label, output_bytes);
+    let fingerprint = runtime.block_on(viewer_rows_fingerprint(client.clone(), request.clone()));
+    eprintln!("{label} messages={message_count} sha256={fingerprint}");
 
-    criterion.bench_function(STREAM_VIEWER_ROWS_BENCHMARK_NAME, |bencher| {
+    criterion.bench_function(label, |bencher| {
         bencher.to_async(runtime).iter(|| {
             consume_viewer_rows(
                 client.clone(),
@@ -240,6 +267,30 @@ fn benchmark_stream_viewer_rows(
             )
         });
     });
+}
+
+async fn viewer_rows_fingerprint(
+    mut client: BenchmarkViewerClient,
+    request: StreamViewerRowsRequest,
+) -> String {
+    let mut stream = require(
+        client.stream_viewer_rows(request).await,
+        "verify viewer rows",
+    )
+    .into_inner();
+    let mut digest = Sha256::new();
+    while let Some(message) = require(stream.message().await, "verify viewer row frame") {
+        let bytes = message.encode_to_vec();
+        digest.update((bytes.len() as u64).to_be_bytes());
+        digest.update(bytes);
+    }
+    digest
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut hex, byte| {
+            require(write!(hex, "{byte:02x}"), "formatting the row fingerprint");
+            hex
+        })
 }
 
 fn benchmark_native_row_windows(
@@ -375,7 +426,7 @@ fn repository_fixture() -> RepositoryFixture {
     repository_fixture_with_change("unpushed.txt", "unpushed commit\n")
 }
 
-fn viewer_repository_fixture() -> RepositoryFixture {
+fn viewer_repository_fixture(path: &str) -> RepositoryFixture {
     let mut source = String::new();
     for line in 0..2_000 {
         require(
@@ -386,7 +437,7 @@ fn viewer_repository_fixture() -> RepositoryFixture {
             "building the benchmark viewer source",
         );
     }
-    repository_fixture_with_change("src/benchmark.rs", &source)
+    repository_fixture_with_change(path, &source)
 }
 
 fn repository_fixture_with_change(relative_path: &str, contents: &str) -> RepositoryFixture {

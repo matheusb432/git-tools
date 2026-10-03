@@ -25,6 +25,10 @@ name = "viewer_render"
 harness = false
 
 [[bench]]
+name = "web_rows"
+harness = false
+
+[[bench]]
 name = "parser_syntax"
 harness = false
 
@@ -75,10 +79,12 @@ tonic = { workspace = true, features = ["transport"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
+dioxus-ssr = "0.7.10"
 dx-story = { workspace = true, features = ["benchmark-support"] }
 gtl-server = { workspace = true, features = ["benchmark-support"] }
 gtl-artifacts.workspace = true
 gtl-parser = { workspace = true, features = ["syntax"] }
+gtl-web = { workspace = true, features = ["benchmark-support"] }
 
 [lints]
 workspace = true

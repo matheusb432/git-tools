@@ -75,6 +75,7 @@ workspace = true
 
 [features]
 default = ["web"]
+benchmark-support = []
 component-preview = ["dep:dx-story", "dx-story/catalog", "web"]
 web = ["dioxus/launch", "dioxus/web"]
 

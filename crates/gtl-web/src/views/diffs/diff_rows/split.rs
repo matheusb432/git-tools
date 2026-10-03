@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use gtl_models::settings::ViewerLanguage;
+use gtl_wire::viewer::ViewerSplitCell;
 
 use super::{
     HeaderTone,
@@ -26,56 +28,6 @@ enum SplitCellPresentation {
     Added,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum SplitCellSource {
-    Context(ReadStore<ViewerSplitRow>),
-    Old(ReadStore<ViewerSplitRow>),
-    New(ReadStore<ViewerSplitRow>),
-}
-
-impl SplitCellSource {
-    fn with<R>(self, read: impl FnOnce(Option<&ViewerCodeLine>) -> R) -> R {
-        match self {
-            Self::Context(row) => {
-                let row = row.read();
-                let code = match &*row {
-                    ViewerSplitRow::Context { code, .. } => Some(code),
-                    ViewerSplitRow::Meta(_)
-                    | ViewerSplitRow::Hunk(_)
-                    | ViewerSplitRow::Pair { .. } => None,
-                };
-                read(code)
-            }
-            Self::Old(row) => {
-                let row = row.read();
-                let code = match &*row {
-                    ViewerSplitRow::Pair {
-                        old: Some(cell), ..
-                    } => Some(&cell.code),
-                    ViewerSplitRow::Meta(_)
-                    | ViewerSplitRow::Hunk(_)
-                    | ViewerSplitRow::Context { .. }
-                    | ViewerSplitRow::Pair { old: None, .. } => None,
-                };
-                read(code)
-            }
-            Self::New(row) => {
-                let row = row.read();
-                let code = match &*row {
-                    ViewerSplitRow::Pair {
-                        new: Some(cell), ..
-                    } => Some(&cell.code),
-                    ViewerSplitRow::Meta(_)
-                    | ViewerSplitRow::Hunk(_)
-                    | ViewerSplitRow::Context { .. }
-                    | ViewerSplitRow::Pair { new: None, .. } => None,
-                };
-                read(code)
-            }
-        }
-    }
-}
-
 #[component]
 pub(crate) fn SplitDiffRowBatch(file: ReadStore<ClientDiffFile>, batch_index: usize) -> Element {
     let rows = file.rows().split().index(batch_index);
@@ -86,112 +38,54 @@ pub(crate) fn SplitDiffRowBatch(file: ReadStore<ClientDiffFile>, batch_index: us
 
 #[component]
 fn SplitRows(rows: ReadStore<Vec<ViewerSplitRow>>, #[props(default)] first_row: usize) -> Element {
+    let language = use_language();
+    let rows = rows.read();
     rsx! {
         for (index, row) in rows.iter().enumerate() {
             div {
                 key: "{index}",
                 "data-row-index": (first_row + index).to_string(),
-                SplitDiffRowView { row }
+                {split_row(row, language)}
             }
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SplitRowPresentation {
-    Header {
-        tone: HeaderTone,
-        text: String,
-    },
-    Context {
-        old_line_number: u32,
-        new_line_number: u32,
-    },
-    Pair {
-        old_line_number: Option<u32>,
-        new_line_number: Option<u32>,
-    },
-}
-
-#[component]
-fn SplitDiffRowView(row: ReadStore<ViewerSplitRow>) -> Element {
-    let presentation = {
-        let row = row.read();
-        match &*row {
-            ViewerSplitRow::Meta(text) => SplitRowPresentation::Header {
-                tone: HeaderTone::Meta,
-                text: non_breaking_if_empty(text),
-            },
-            ViewerSplitRow::Hunk(text) => SplitRowPresentation::Header {
-                tone: HeaderTone::Hunk,
-                text: text.clone(),
-            },
-            ViewerSplitRow::Context {
-                old_line_number,
-                new_line_number,
-                ..
-            } => SplitRowPresentation::Context {
-                old_line_number: *old_line_number,
-                new_line_number: *new_line_number,
-            },
-            ViewerSplitRow::Pair { old, new } => SplitRowPresentation::Pair {
-                old_line_number: old.as_ref().map(|cell| cell.line_number),
-                new_line_number: new.as_ref().map(|cell| cell.line_number),
-            },
+fn split_row(row: &ViewerSplitRow, language: ViewerLanguage) -> Element {
+    match row {
+        ViewerSplitRow::Meta(text) => {
+            split_header_row(HeaderTone::Meta, non_breaking_if_empty(text))
         }
-    };
-
-    match presentation {
-        SplitRowPresentation::Header { tone, text } => rsx! {
-            SplitHeaderRow { tone, text }
-        },
-        SplitRowPresentation::Context {
+        ViewerSplitRow::Hunk(text) => split_header_row(HeaderTone::Hunk, text),
+        ViewerSplitRow::Context {
             old_line_number,
             new_line_number,
+            code,
         } => rsx! {
-            SplitRowShell {
-                SplitContextCell {
-                    row,
-                    side: SplitSide::Old,
-                    line_number: old_line_number,
-
-                    copy_line_number: None,
-                }
-                SplitContextCell {
-                    row,
-                    side: SplitSide::New,
-                    line_number: new_line_number,
-
-                    copy_line_number: Some(new_line_number),
+            div { class: "diff-row-split", "data-gtl-diff-row": "",
+                {split_gutter(SplitSide::Old, Some(*old_line_number))}
+                {split_code_cell(SplitCellPresentation::OldContext, code, None, language)}
+                {split_gutter(SplitSide::New, Some(*new_line_number))}
+                {
+                    split_code_cell(
+                        SplitCellPresentation::NewContext,
+                        code,
+                        Some(*new_line_number),
+                        language,
+                    )
                 }
             }
         },
-        SplitRowPresentation::Pair {
-            old_line_number,
-            new_line_number,
-        } => rsx! {
-            SplitRowShell {
-                SplitCell {
-                    row,
-                    line_number: old_line_number,
-                    side: SplitSide::Old,
-
-                    copy_line_number: None,
-                }
-                SplitCell {
-                    row,
-                    line_number: new_line_number,
-                    side: SplitSide::New,
-
-                    copy_line_number: new_line_number,
-                }
+        ViewerSplitRow::Pair { old, new } => rsx! {
+            div { class: "diff-row-split", "data-gtl-diff-row": "",
+                {split_cell(old.as_ref(), SplitSide::Old, language)}
+                {split_cell(new.as_ref(), SplitSide::New, language)}
             }
         },
     }
 }
 
-#[component]
-fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
+fn split_header_row(tone: HeaderTone, text: &str) -> Element {
     let tone = match tone {
         HeaderTone::Meta => "meta",
         HeaderTone::Hunk => "hunk",
@@ -206,72 +100,25 @@ fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
     }
 }
 
-#[component]
-fn SplitRowShell(children: Element) -> Element {
-    rsx! {
-        div { class: "diff-row-split", "data-gtl-diff-row": "", {children} }
-    }
-}
-
-#[component]
-fn SplitContextCell(
-    row: ReadStore<ViewerSplitRow>,
+fn split_cell(
+    cell: Option<&ViewerSplitCell>,
     side: SplitSide,
-    line_number: u32,
-    copy_line_number: Option<u32>,
+    language: ViewerLanguage,
 ) -> Element {
-    rsx! {
-        SplitGutter { side, number: Some(line_number) }
-        SplitCodeCell {
-            presentation: match side {
-                SplitSide::Old => SplitCellPresentation::OldContext,
-                SplitSide::New => SplitCellPresentation::NewContext,
-            },
-            source: SplitCellSource::Context(row),
-
-            copy_line_number,
-        }
-    }
-}
-
-#[component]
-fn SplitCell(
-    row: ReadStore<ViewerSplitRow>,
-    line_number: Option<u32>,
-    side: SplitSide,
-    copy_line_number: Option<u32>,
-) -> Element {
-    let presentation = match side {
-        SplitSide::Old => SplitCellPresentation::Removed,
-        SplitSide::New => SplitCellPresentation::Added,
+    let Some(cell) = cell else {
+        return split_pad(side);
     };
-    match (side, line_number) {
-        (SplitSide::Old, Some(line_number)) => rsx! {
-            SplitGutter { side, number: Some(line_number) }
-            SplitCodeCell {
-                presentation,
-                source: SplitCellSource::Old(row),
-
-                copy_line_number,
-            }
-        },
-        (SplitSide::New, Some(line_number)) => rsx! {
-            SplitGutter { side, number: Some(line_number) }
-            SplitCodeCell {
-                presentation,
-                source: SplitCellSource::New(row),
-
-                copy_line_number,
-            }
-        },
-        (_, None) => rsx! {
-            SplitPad { side }
-        },
+    let (presentation, copy_line_number) = match side {
+        SplitSide::Old => (SplitCellPresentation::Removed, None),
+        SplitSide::New => (SplitCellPresentation::Added, Some(cell.line_number)),
+    };
+    rsx! {
+        {split_gutter(side, Some(cell.line_number))}
+        {split_code_cell(presentation, &cell.code, copy_line_number, language)}
     }
 }
 
-#[component]
-fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
+fn split_gutter(side: SplitSide, number: Option<u32>) -> Element {
     let line_number = number.map(|value| value.to_string());
     let side = match side {
         SplitSide::Old => "old",
@@ -282,64 +129,46 @@ fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
     }
 }
 
-#[component]
-fn SplitCodeCell(
+fn split_code_cell(
     presentation: SplitCellPresentation,
-    source: SplitCellSource,
+    code: &ViewerCodeLine,
     copy_line_number: Option<u32>,
+    language: ViewerLanguage,
 ) -> Element {
-    let marker = Some(match presentation {
-        SplitCellPresentation::OldContext | SplitCellPresentation::NewContext => ' ',
-        SplitCellPresentation::Removed => '-',
-        SplitCellPresentation::Added => '+',
-    });
-    let changed_text_tone = match presentation {
-        SplitCellPresentation::OldContext | SplitCellPresentation::NewContext => {
-            ChangedTextTone::None
-        }
-        SplitCellPresentation::Removed => ChangedTextTone::Removed,
-        SplitCellPresentation::Added => ChangedTextTone::Added,
-    };
-    let presentation = match presentation {
-        SplitCellPresentation::OldContext => "old-context",
-        SplitCellPresentation::NewContext => "new-context",
-        SplitCellPresentation::Removed => "removed",
-        SplitCellPresentation::Added => "added",
+    let (marker, changed_text_tone, presentation) = match presentation {
+        SplitCellPresentation::OldContext => (' ', ChangedTextTone::None, "old-context"),
+        SplitCellPresentation::NewContext => (' ', ChangedTextTone::None, "new-context"),
+        SplitCellPresentation::Removed => ('-', ChangedTextTone::Removed, "removed"),
+        SplitCellPresentation::Added => ('+', ChangedTextTone::Added, "added"),
     };
     let copy_line = copy_line_number.map(|_| "");
     let new_line_number = copy_line_number.map(|number| number.to_string());
-    let language = use_language();
-    let content = source.with(|code| {
-        code.map(|code| {
-            code_cell_content(
-                code,
-                marker,
-                changed_text_tone,
-                copy_line_number.is_some(),
-                language,
-            )
-        })
-    });
-
     rsx! {
         code {
             class: "diff-row-split-code diff-row-code",
             "data-diff-cell": presentation,
             "data-gtl-copy-line": copy_line,
             "data-gtl-new-line": new_line_number,
-            {content}
+            {
+                code_cell_content(
+                    code,
+                    Some(marker),
+                    changed_text_tone,
+                    copy_line_number.is_some(),
+                    language,
+                )
+            }
         }
     }
 }
 
-#[component]
-fn SplitPad(side: SplitSide) -> Element {
+fn split_pad(side: SplitSide) -> Element {
     let cell = match side {
         SplitSide::Old => "pad-old",
         SplitSide::New => "pad-new",
     };
     rsx! {
-        SplitGutter { side, number: None }
+        {split_gutter(side, None)}
         code {
             class: "diff-row-split-code diff-row-code",
             "data-diff-cell": cell,
@@ -357,9 +186,60 @@ mod tests {
     #[component]
     fn SplitBatchFixture(rows: Vec<ViewerSplitRow>) -> Element {
         let rows = use_store(move || rows);
+        use_context_provider(|| rows);
+        let language = use_signal(|| gtl_models::settings::ViewerLanguage::EnUs);
+        use_context_provider(|| language);
+        crate::shared::i18n::use_language_provider(language.into());
         rsx! {
-            SplitRows { rows }
+            SplitRows { rows, first_row: 64 }
         }
+    }
+
+    #[test]
+    fn row_replacement_eviction_and_language_changes_update_the_mounted_batch() {
+        use dioxus::dioxus_core::NoOpMutations;
+        use gtl_models::settings::ViewerLanguage;
+
+        let mut dom = VirtualDom::new_with_props(
+            SplitBatchFixture,
+            SplitBatchFixtureProps {
+                rows: vec![ViewerSplitRow::Meta("previous header".to_owned())],
+            },
+        );
+        dom.rebuild_in_place();
+        let mut rows = dom
+            .runtime()
+            .consume_context::<Store<Vec<ViewerSplitRow>>>(ScopeId::APP)
+            .unwrap();
+        let mut language = dom
+            .runtime()
+            .consume_context::<Signal<ViewerLanguage>>(ScopeId::APP)
+            .unwrap();
+        rows.set(vec![ViewerSplitRow::Context {
+            old_line_number: 3,
+            new_line_number: 4,
+            code: code_line("replacement source", Some(4)),
+        }]);
+        dom.render_immediate(&mut NoOpMutations);
+        let html = dioxus_ssr::render(&dom);
+        assert!(!html.contains("previous header"));
+        assert_eq!(html.matches("replacement source").count(), 2);
+        assert_eq!(html.matches("(+4 characters omitted)").count(), 2);
+        assert!(html.contains(r#"data-row-index="64""#));
+        assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
+
+        language.set(ViewerLanguage::PtBr);
+        dom.render_immediate(&mut NoOpMutations);
+        let html = dioxus_ssr::render(&dom);
+        assert!(!html.contains("characters omitted"));
+        assert!(html.contains("caracteres omitidos"));
+
+        rows.set(Vec::new());
+        dom.render_immediate(&mut NoOpMutations);
+        assert!(!dioxus_ssr::render(&dom).contains("replacement source"));
+        rows.set(vec![ViewerSplitRow::Hunk("reloaded header".to_owned())]);
+        dom.render_immediate(&mut NoOpMutations);
+        assert!(dioxus_ssr::render(&dom).contains("reloaded header"));
     }
 
     #[test]
@@ -387,9 +267,7 @@ mod tests {
         let html = dioxus_ssr::render_element(rsx! {
             SplitBatchFixture { rows }
         });
-        let absent_gutter = dioxus_ssr::render_element(rsx! {
-            SplitGutter { side: SplitSide::New, number: None }
-        });
+        let absent_gutter = dioxus_ssr::render_element(split_gutter(SplitSide::New, None));
 
         assert!(html.contains(">9999</span>"));
         assert!(html.contains(">10000</span>"));

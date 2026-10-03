@@ -75,6 +75,10 @@ impl DiffSourceLines {
         &self.storage.index
     }
 
+    pub(crate) fn fingerprint(&self) -> &[u8; 32] {
+        &self.storage.fingerprint
+    }
+
     pub(crate) fn line(&self, index: usize) -> &str {
         let start = index
             .checked_sub(1)

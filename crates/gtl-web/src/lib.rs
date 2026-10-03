@@ -1,4 +1,6 @@
 mod app;
+#[cfg(feature = "benchmark-support")]
+pub mod benchmark;
 #[cfg(feature = "component-preview")]
 #[path = "../dev/lib.rs"]
 mod component_preview;
