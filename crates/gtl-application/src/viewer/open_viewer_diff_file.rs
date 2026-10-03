@@ -3,6 +3,7 @@ use gtl_wire::viewer::OpenViewerDiffFile;
 
 use super::{
     ViewerState,
+    diff_view::file_by_id,
     source::{self, ViewerSourceError},
 };
 use crate::{
@@ -32,14 +33,8 @@ pub fn execute(
     text_editor: &impl TextEditorClient,
 ) -> Result<(), OpenViewerDiffFileError> {
     let snapshot = source::current(request.identity, state, settings)?;
-    let file = snapshot
-        .view()
-        .files
-        .iter()
-        .enumerate()
-        .find(|(index, _)| gtl_wire::viewer::ViewerDiffFileId::for_index(*index) == request.file)
-        .map(|(_, file)| file)
-        .ok_or(OpenViewerDiffFileError::MissingFile)?;
+    let file =
+        file_by_id(snapshot.view(), &request.file).ok_or(OpenViewerDiffFileError::MissingFile)?;
     open_diff_file_in_configured_editor::execute(
         &file.path,
         snapshot.view(),

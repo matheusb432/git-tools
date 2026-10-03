@@ -1,6 +1,9 @@
 //! Application operations for validated user-settings edits.
 
-use gtl_models::settings::SettingKey;
+use crate::{
+    ports::{UserSettingsEditError, UserSettingsEditor},
+    viewer::{ViewerState, ViewerStateError},
+};
 
 pub mod edit_settings;
 pub mod get_user_settings;
@@ -16,8 +19,22 @@ pub struct UserSettingChange {
     pub viewer_rows_changed: bool,
 }
 
-const fn setting_changes_viewer_rows(key: SettingKey) -> bool {
-    matches!(key, SettingKey::Layout | SettingKey::Density)
+fn apply_settings_patch<Error>(
+    patch: UserSettingsPatch,
+    settings_editor: &mut impl UserSettingsEditor,
+    viewer_state: &ViewerState,
+) -> Result<UserSettingChange, Error>
+where
+    Error: From<UserSettingsEditError> + From<ViewerStateError>,
+{
+    let viewer_rows_selected = patch.changes_viewer_rows();
+    let outcome = settings_editor.edit(patch)?;
+    if outcome.changed() {
+        viewer_state.mark_shell_changed()?;
+    }
+    Ok(UserSettingChange {
+        viewer_rows_changed: outcome.changed() && viewer_rows_selected,
+    })
 }
 
 #[cfg(test)]

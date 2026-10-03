@@ -1,7 +1,7 @@
 use gtl_models::{failure::ErrorMeta, settings::SettingKey};
 use thiserror::Error;
 
-use super::{UserSettingChange, setting_changes_viewer_rows};
+use super::{UserSettingChange, UserSettingsPatch, apply_settings_patch};
 use crate::{
     ports::{UserSettingsEditError, UserSettingsEditor},
     viewer::{ViewerState, ViewerStateError},
@@ -30,14 +30,7 @@ pub fn execute(
     settings_editor: &mut impl UserSettingsEditor,
     viewer_state: &ViewerState,
 ) -> Result<UserSettingChange, RemoveSettingKeyError> {
-    let outcome = settings_editor.edit(super::UserSettingsPatch::clear(key))?;
-    if outcome.changed() {
-        viewer_state.mark_shell_changed()?;
-    }
-
-    Ok(UserSettingChange {
-        viewer_rows_changed: outcome.changed() && setting_changes_viewer_rows(key),
-    })
+    apply_settings_patch(UserSettingsPatch::clear(key), settings_editor, viewer_state)
 }
 
 #[cfg(test)]

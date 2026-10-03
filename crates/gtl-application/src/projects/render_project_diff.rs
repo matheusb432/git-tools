@@ -1,19 +1,17 @@
 //! Renders selected project comparisons into one artifact, reporting unavailable bases.
 
-use gtl_models::{
-    artifacts::ArtifactDiffIdentity, diffs::ExtensionFilter, failure::ErrorMeta,
-    paths::RepositoryRoot,
-};
+use gtl_models::{failure::ErrorMeta, paths::RepositoryRoot};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget, artifacts,
-        batch::{RepoRef, dated_title, render_batch},
+        DiffTarget,
+        artifacts::place_tabbed_artifact,
+        batch::{RepoRef, render_batch},
     },
     ports::{
-        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
-        RepositoryPreferenceReader, UserSettingsLoadError, UserSettingsReader,
+        ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact, RepositoryPreferenceReader,
+        UserSettingsLoadError, UserSettingsReader,
     },
     shared::notes::Note,
 };
@@ -56,7 +54,6 @@ pub fn execute(
     preferences: &impl RepositoryPreferenceReader,
 ) -> Result<RenderProjectDiffOk, RenderProjectDiffError> {
     let RenderProjectDiff { root, repos } = req;
-    let store_root = artifacts::root(&root);
     let settings = app_settings.load()?;
     let mut notes = Vec::new();
     let batch = render_batch(
@@ -76,24 +73,15 @@ pub fn execute(
         });
     }
 
-    let generated_at = clock.now().map_err(anyhow::Error::from)?;
-    let title = dated_title(&generated_at, "diff-artifact all");
-    let render_options = settings
-        .viewer_render_options()
-        .with_layout(gtl_models::viewer::DiffLayout::Unified);
-    let theme = settings.theme();
-    let language = settings.language();
-    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme, language)?;
-    let meta = ArtifactMeta {
-        repo_root: root,
-        identity: ArtifactDiffIdentity::WorkTree,
-        generated_at,
-        render_options,
-        theme,
-        language,
-        extension_filter: ExtensionFilter::default(),
-    };
-    let placed = store.place(&store_root, &meta, &html)?;
+    let placed = place_tabbed_artifact(
+        root,
+        &batch.views,
+        "diff-artifact all",
+        &settings,
+        store,
+        renderer,
+        clock,
+    )?;
 
     notes.push(Note::info(format!(
         "diff-all: {} repo(s)",

@@ -4,6 +4,7 @@ use gtl_models::{diffs::ExtensionFilter, timestamps::MachineTimestamp};
 
 use super::{
     ActiveContentIdentity, CachedView, CommitSelection, CommitSelectionSnapshot, ViewerSession,
+    tab_by_id_mut,
 };
 use crate::{
     diffs::View,
@@ -37,7 +38,7 @@ impl ViewerSession {
         id: ViewerTabId,
         changes_since: Option<MachineTimestamp>,
     ) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return false;
         };
         tab.changes_since = changes_since;
@@ -100,7 +101,7 @@ impl ViewerSession {
             self.cache.insert(id, previous);
             return Err(FileFiltersError::TooLarge);
         }
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return Err(FileFiltersError::Changed);
         };
         tab.extension_filter = Some(filter);

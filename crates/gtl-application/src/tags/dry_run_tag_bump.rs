@@ -7,11 +7,11 @@ use gtl_models::{
     failure::ErrorMeta,
     git::{GitHead, GitRevision, RemoteName, RemoteUrl, TagName},
     paths::RepositoryRoot,
-    tags::{Tag, TagPatternName, TagSlot, TagTemplate},
+    tags::{TagPatternName, TagSlot, TagTemplate},
 };
 
-use super::{BumpLevel, git_command_error::GitCommandError, version::decide_tag_version};
-use crate::ports::{GitClient, GitEffect, UserSettingsLoadError, UserSettingsReader};
+use super::{BumpLevel, git_command_error::GitCommandError, refs, version::decide_tag_version};
+use crate::ports::{GitClient, UserSettingsLoadError, UserSettingsReader};
 
 /// Requests a tag-bump proposal without changing Git state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +188,7 @@ fn read_preview(
     push: bool,
     git: &impl GitClient,
 ) -> Result<Result<TagBumpPreview, String>, GitCommandError> {
-    let local_tags = local_tags(git, repo_path)?;
+    let local_tags = refs::local_refs(git, repo_path)?;
     let decision = match decide_tag_version(local_tags.keys().map(AsRef::as_ref), template, level) {
         Ok(decision) => decision,
         Err(rejection) => return Ok(Err(rejection.to_string())),
@@ -213,18 +213,6 @@ fn read_preview(
         message: message.to_owned(),
         push,
     }))
-}
-
-fn local_tags(
-    git: &impl GitClient,
-    repo_path: &RepositoryRoot,
-) -> Result<std::collections::BTreeMap<TagName, Tag>, GitCommandError> {
-    match git.local_tags(repo_path)? {
-        GitEffect::Applied(tags) => Ok(tags),
-        GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
-            "git for-each-ref failed: {detail}"
-        ))),
-    }
 }
 
 #[cfg(test)]

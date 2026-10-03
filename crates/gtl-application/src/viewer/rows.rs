@@ -312,7 +312,7 @@ fn project_code_line(text: &str, spans: &[SemanticTextSpan]) -> ViewerCodeLine {
     }
 }
 
-const fn project_syntax_class(class: SyntaxTokenClass) -> ViewerSyntaxClass {
+pub(crate) const fn project_syntax_class(class: SyntaxTokenClass) -> ViewerSyntaxClass {
     match class {
         SyntaxTokenClass::Keyword => ViewerSyntaxClass::Keyword,
         SyntaxTokenClass::String => ViewerSyntaxClass::String,

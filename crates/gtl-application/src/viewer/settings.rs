@@ -22,6 +22,30 @@ fn application_field_update<Input, Output>(
     }
 }
 
+const fn application_theme(theme: ViewerTheme) -> Theme {
+    match theme {
+        ViewerTheme::Dark => Theme::Dark,
+        ViewerTheme::Mirage => Theme::Mirage,
+        ViewerTheme::Glacier => Theme::Glacier,
+        ViewerTheme::Graphite => Theme::Graphite,
+        ViewerTheme::Carbon => Theme::Carbon,
+    }
+}
+
+const fn application_layout(layout: ViewerDiffLayout) -> DiffLayout {
+    match layout {
+        ViewerDiffLayout::Unified => DiffLayout::Unified,
+        ViewerDiffLayout::Split => DiffLayout::Split,
+    }
+}
+
+const fn application_density(density: ViewerDiffDensity) -> DiffDensity {
+    match density {
+        ViewerDiffDensity::Compact => DiffDensity::Compact,
+        ViewerDiffDensity::Full => DiffDensity::Full,
+    }
+}
+
 #[must_use]
 pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
     UserSettingsPatch {
@@ -47,21 +71,9 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
         projects_sort: application_field_update(request.projects_sort, |value| value),
         diff_files_sort: application_field_update(request.diff_files_sort, |value| value),
         projects_page_size: application_field_update(request.projects_page_size, |value| value),
-        theme: application_field_update(request.theme, |value| match value {
-            ViewerTheme::Dark => Theme::Dark,
-            ViewerTheme::Mirage => Theme::Mirage,
-            ViewerTheme::Glacier => Theme::Glacier,
-            ViewerTheme::Graphite => Theme::Graphite,
-            ViewerTheme::Carbon => Theme::Carbon,
-        }),
-        layout: application_field_update(request.layout, |value| match value {
-            ViewerDiffLayout::Unified => DiffLayout::Unified,
-            ViewerDiffLayout::Split => DiffLayout::Split,
-        }),
-        density: application_field_update(request.density, |value| match value {
-            ViewerDiffDensity::Compact => DiffDensity::Compact,
-            ViewerDiffDensity::Full => DiffDensity::Full,
-        }),
+        theme: application_field_update(request.theme, application_theme),
+        layout: application_field_update(request.layout, application_layout),
+        density: application_field_update(request.density, application_density),
         viewer_push_no_confirmation_projects: application_field_update(
             request.viewer_push_no_confirmation_projects,
             |projects| projects.into_iter().collect(),
@@ -80,21 +92,11 @@ pub fn settings_patch(request: EditSettingsRequest) -> UserSettingsPatch {
 #[must_use]
 pub fn preference_setting(preference: SetViewerPreference) -> SettingKeyValue {
     match preference {
-        SetViewerPreference::Layout(layout) => SettingKeyValue::Layout(match layout {
-            ViewerDiffLayout::Unified => DiffLayout::Unified,
-            ViewerDiffLayout::Split => DiffLayout::Split,
-        }),
-        SetViewerPreference::Density(density) => SettingKeyValue::Density(match density {
-            ViewerDiffDensity::Compact => DiffDensity::Compact,
-            ViewerDiffDensity::Full => DiffDensity::Full,
-        }),
-        SetViewerPreference::Theme(theme) => SettingKeyValue::Theme(match theme {
-            ViewerTheme::Dark => Theme::Dark,
-            ViewerTheme::Mirage => Theme::Mirage,
-            ViewerTheme::Glacier => Theme::Glacier,
-            ViewerTheme::Graphite => Theme::Graphite,
-            ViewerTheme::Carbon => Theme::Carbon,
-        }),
+        SetViewerPreference::Layout(layout) => SettingKeyValue::Layout(application_layout(layout)),
+        SetViewerPreference::Density(density) => {
+            SettingKeyValue::Density(application_density(density))
+        }
+        SetViewerPreference::Theme(theme) => SettingKeyValue::Theme(application_theme(theme)),
     }
 }
 

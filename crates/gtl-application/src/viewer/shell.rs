@@ -218,13 +218,8 @@ pub fn diff_file_for_identity(
 ) -> Result<Option<(Arc<crate::diffs::View>, RepositoryRelativePath)>, ViewerStateError> {
     Ok(
         content_snapshot_for_identity(state, identity, options)?.and_then(|snapshot| {
-            snapshot
-                .view()
-                .files
-                .iter()
-                .enumerate()
-                .find(|(index, _)| ViewerDiffFileId::for_index(*index) == *file_id)
-                .map(|(_, file)| (snapshot.shared_view(), file.path.clone()))
+            super::diff_view::file_by_id(snapshot.view(), file_id)
+                .map(|file| (snapshot.shared_view(), file.path.clone()))
         }),
     )
 }

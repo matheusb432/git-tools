@@ -2,17 +2,20 @@ use std::path::{Path, PathBuf};
 
 use gtl_models::failure::{ErrorMeta, Failure, ViewerFailure};
 use gtl_parser::{
-    DiffRowKind, ParseOptions, SyntaxLanguage, SyntaxTokenClass,
+    DiffRowKind, ParseOptions, SyntaxLanguage,
     cancellation::ParseCancellation,
     index::{DiffRowLayout, ParsedDiffWindowRows},
 };
 use gtl_wire::{
     terminal_diff::{File, Row, RowKind, SnapshotBudget, SnapshotError, TerminalDiff},
-    viewer::{ViewerCodeSpan, ViewerSyntaxClass},
+    viewer::ViewerCodeSpan,
 };
 
 use super::{DiffTarget, diff_computation, fetch_full_context_diff, source_lines::DiffSourceLines};
-use crate::ports::{GitClient, RepositoryPreferenceReader};
+use crate::{
+    ports::{GitClient, RepositoryPreferenceReader},
+    viewer::rows::project_syntax_class,
+};
 
 pub struct ReadTerminalDiff {
     pub cwd: PathBuf,
@@ -145,7 +148,7 @@ fn project_rows(
                     .map(|span| ViewerCodeSpan {
                         byte_start: span.byte_start(),
                         byte_end: span.byte_end(),
-                        syntax_class: span.syntax_class().map(syntax_class),
+                        syntax_class: span.syntax_class().map(project_syntax_class),
                         changed: false,
                     })
                     .collect(),
@@ -155,19 +158,4 @@ fn project_rows(
         }
     }
     Ok(rows)
-}
-
-const fn syntax_class(class: SyntaxTokenClass) -> ViewerSyntaxClass {
-    match class {
-        SyntaxTokenClass::Keyword => ViewerSyntaxClass::Keyword,
-        SyntaxTokenClass::String => ViewerSyntaxClass::String,
-        SyntaxTokenClass::Comment => ViewerSyntaxClass::Comment,
-        SyntaxTokenClass::Type => ViewerSyntaxClass::Type,
-        SyntaxTokenClass::Function => ViewerSyntaxClass::Function,
-        SyntaxTokenClass::Number => ViewerSyntaxClass::Number,
-        SyntaxTokenClass::Constant => ViewerSyntaxClass::Constant,
-        SyntaxTokenClass::Operator => ViewerSyntaxClass::Operator,
-        SyntaxTokenClass::Tag => ViewerSyntaxClass::Tag,
-        SyntaxTokenClass::Variable => ViewerSyntaxClass::Variable,
-    }
 }

@@ -85,7 +85,7 @@ pub(super) fn load_local(
     Ok(TagRefs::new(local_refs(git, repo_path)?, None))
 }
 
-fn local_refs(
+pub(super) fn local_refs(
     git: &impl GitClient,
     repo_path: &RepositoryRoot,
 ) -> Result<BTreeMap<TagName, Tag>, GitCommandError> {

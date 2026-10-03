@@ -105,6 +105,15 @@ enum CommitSelection {
     },
 }
 
+impl CommitSelection {
+    fn take_pending(&mut self) -> Option<Commit> {
+        match std::mem::replace(self, Self::None) {
+            Self::Pending { commit } => Some(commit),
+            Self::None | Self::Ready { .. } | Self::Error { .. } => None,
+        }
+    }
+}
+
 fn selected_view(
     cache: &mut WeightedViewCache,
     id: ViewerTabId,
@@ -193,6 +202,21 @@ pub struct SessionTab {
 }
 
 impl SessionTab {
+    fn compute_ticket(&self) -> ComputeTicket {
+        ComputeTicket {
+            tab_id: self.tab.id(),
+            generation: self.generation,
+        }
+    }
+
+    fn commit_patch_ticket(&self) -> CommitPatchTicket {
+        CommitPatchTicket {
+            tab_id: self.tab.id(),
+            range_generation: self.generation,
+            selection_generation: self.selection_generation,
+        }
+    }
+
     /// Whether opening `recipe` shows it in this tab: the same content, or the same intent in a
     /// tab whose content is neither pinned for review nor followed live against a pinned request.
     fn opens(&self, recipe: &Recipe) -> bool {
@@ -208,6 +232,10 @@ impl SessionTab {
             self.tab.live() || !self.pinned
         }
     }
+}
+
+fn tab_by_id_mut(tabs: &mut [SessionTab], id: ViewerTabId) -> Option<&mut SessionTab> {
+    tabs.iter_mut().find(|tab| tab.tab.id() == id)
 }
 
 #[derive(Clone, Copy)]
@@ -335,7 +363,7 @@ impl ViewerSession {
     }
 
     pub fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
-        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
+        let tab = tab_by_id_mut(&mut self.tabs, id)?;
         self.cache.remove(id);
         tab.modified_files_active = false;
         tab.live_head = None;
@@ -359,12 +387,9 @@ impl ViewerSession {
             tab.tab.live(),
             ViewerTabState::Pending,
         );
-        let generation = tab.generation;
+        let ticket = tab.compute_ticket();
         self.bump_version();
-        Some(ComputeTicket {
-            tab_id: id,
-            generation,
-        })
+        Some(ticket)
     }
 
     pub(super) fn publish_labeled_if_current(
@@ -373,16 +398,11 @@ impl ViewerSession {
         value: CachedView,
         label: RecipeLabel,
     ) -> PublishOutcome {
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id)
+            .filter(|tab| tab.compute_ticket() == ticket)
         else {
             return PublishOutcome::Stale;
         };
-        if tab.generation != ticket.generation {
-            return PublishOutcome::Stale;
-        }
 
         if let CommitSelection::Ready { commit, .. } = &tab.selection
             && !value.view.commits.iter().any(|entry| entry.id == commit.id)
@@ -407,16 +427,11 @@ impl ViewerSession {
         ticket: ComputeTicket,
         state: ViewerTabState,
     ) -> PublishOutcome {
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id)
+            .filter(|tab| tab.compute_ticket() == ticket)
         else {
             return PublishOutcome::Stale;
         };
-        if tab.generation != ticket.generation {
-            return PublishOutcome::Stale;
-        }
         let label = tab.tab.label().clone();
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.live(), state);
         self.bump_version();
@@ -435,10 +450,7 @@ impl ViewerSession {
             return None;
         }
         Some(super::refresh_live_view::LiveViewRefresh {
-            ticket: ComputeTicket {
-                tab_id: id,
-                generation: tab.generation,
-            },
+            ticket: tab.compute_ticket(),
             recipe: tab.recipe.unpinned(),
             head: tab.live_head.clone(),
             changes_since: tab.changes_since.clone(),
@@ -450,7 +462,7 @@ impl ViewerSession {
         id: ViewerTabId,
         name: Option<gtl_models::git::GitRevision>,
     ) {
-        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) {
+        if let Some(tab) = tab_by_id_mut(&mut self.tabs, id) {
             tab.comparison_name = name;
         }
     }
@@ -460,7 +472,7 @@ impl ViewerSession {
         id: ViewerTabId,
         history_id: Option<super::RenderHistoryId>,
     ) {
-        if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) {
+        if let Some(tab) = tab_by_id_mut(&mut self.tabs, id) {
             tab.history_id = history_id;
         }
     }
@@ -470,10 +482,8 @@ impl ViewerSession {
         ticket: ComputeTicket,
         record: &crate::history::RecentRenderRecord,
     ) {
-        if let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id && tab.generation == ticket.generation)
+        if let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id)
+            .filter(|tab| tab.compute_ticket() == ticket)
         {
             tab.history_id = Some(record.id);
             if tab.recipe.name.is_some() || record.recipe.name.is_none() {
@@ -513,11 +523,7 @@ impl ViewerSession {
     }
 
     pub(super) fn retain_snapshot_recipe(&mut self, ticket: ComputeTicket, recipe: &Recipe) {
-        if let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
-        {
+        if let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id) {
             let name = tab.recipe.name.clone();
             tab.recipe = recipe.clone();
             tab.recipe.name = name;
@@ -529,10 +535,8 @@ impl ViewerSession {
         ticket: ComputeTicket,
         head: Option<super::refresh_live_view::LiveViewState>,
     ) {
-        if let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id && tab.generation == ticket.generation)
+        if let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id)
+            .filter(|tab| tab.compute_ticket() == ticket)
         {
             tab.live_head = head;
         }
@@ -567,11 +571,7 @@ impl ViewerSession {
                 .map(|commit| (commit, view)),
             _ => None,
         };
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
-        else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id) else {
             return PublishOutcome::Stale;
         };
         tab.generation = tab.generation.next();
@@ -650,11 +650,7 @@ impl ViewerSession {
             .find(|commit| &commit.id == commit_id)
             .cloned()
             .ok_or(BeginCommitSelectionError::UnknownCommit)?;
-        let tab = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == id)
-            .ok_or(BeginCommitSelectionError::UnknownTab)?;
+        let tab = tab_by_id_mut(&mut self.tabs, id).ok_or(BeginCommitSelectionError::UnknownTab)?;
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(BeginCommitSelectionError::StaleRange);
         }
@@ -663,11 +659,7 @@ impl ViewerSession {
         tab.selection = CommitSelection::Pending {
             commit: commit.clone(),
         };
-        let ticket = CommitPatchTicket {
-            tab_id: id,
-            range_generation: tab.generation,
-            selection_generation: tab.selection_generation,
-        };
+        let ticket = tab.commit_patch_ticket();
         let repo_root = cached.view.repo_root.clone();
         self.bump_version();
         Ok((ticket, repo_root, commit))
@@ -696,16 +688,10 @@ impl ViewerSession {
             } else {
                 None
             };
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
-        else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id) else {
             return PublishOutcome::Stale;
         };
-        let CommitSelection::Pending { commit } =
-            std::mem::replace(&mut tab.selection, CommitSelection::None)
-        else {
+        let Some(commit) = tab.selection.take_pending() else {
             return PublishOutcome::Stale;
         };
         debug_assert_eq!(commit.id, selected_id);
@@ -722,16 +708,10 @@ impl ViewerSession {
         if !self.commit_patch_is_current(ticket) {
             return PublishOutcome::Stale;
         }
-        let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == ticket.tab_id)
-        else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id) else {
             return PublishOutcome::Stale;
         };
-        let CommitSelection::Pending { commit } =
-            std::mem::replace(&mut tab.selection, CommitSelection::None)
-        else {
+        let Some(commit) = tab.selection.take_pending() else {
             return PublishOutcome::Stale;
         };
         tab.selection = CommitSelection::Error { commit, failure };
@@ -743,16 +723,12 @@ impl ViewerSession {
         &mut self,
         id: ViewerTabId,
     ) -> Option<(CommitPatchTicket, Recipe)> {
-        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
+        let tab = tab_by_id_mut(&mut self.tabs, id)?;
         if matches!(tab.selection, CommitSelection::Pending { .. }) {
             return None;
         }
         tab.selection_generation = tab.selection_generation.next();
-        let ticket = CommitPatchTicket {
-            tab_id: id,
-            range_generation: tab.generation,
-            selection_generation: tab.selection_generation,
-        };
+        let ticket = tab.commit_patch_ticket();
         let recipe = tab.recipe.clone();
         self.bump_version();
         Some((ticket, recipe))
@@ -763,11 +739,9 @@ impl ViewerSession {
         ticket: CommitPatchTicket,
         view: ViewerDiffSnapshot,
     ) -> PublishOutcome {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| {
-            tab.tab.id() == ticket.tab_id
-                && tab.generation == ticket.range_generation
-                && tab.selection_generation == ticket.selection_generation
-        }) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, ticket.tab_id)
+            .filter(|tab| tab.commit_patch_ticket() == ticket)
+        else {
             return PublishOutcome::Stale;
         };
         tab.modified_files_active = true;
@@ -789,7 +763,7 @@ impl ViewerSession {
     }
 
     pub(super) fn hide_modified_files(&mut self, id: ViewerTabId) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return false;
         };
         tab.modified_files_active = false;
@@ -827,7 +801,7 @@ impl ViewerSession {
     }
 
     pub fn clear_commit_selection(&mut self, id: ViewerTabId) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return false;
         };
         tab.modified_files_active = false;
@@ -871,10 +845,8 @@ impl ViewerSession {
     }
 
     fn commit_patch_is_current(&self, ticket: CommitPatchTicket) -> bool {
-        self.tabs.iter().any(|tab| {
-            tab.tab.id() == ticket.tab_id
-                && tab.generation == ticket.range_generation
-                && tab.selection_generation == ticket.selection_generation
+        self.tab(ticket.tab_id).is_some_and(|tab| {
+            tab.commit_patch_ticket() == ticket
                 && matches!(tab.selection, CommitSelection::Pending { .. })
         })
     }
@@ -922,7 +894,7 @@ impl ViewerSession {
 
     /// Makes a tab follow its source, or keeps its current snapshot from then on.
     pub(crate) fn set_live(&mut self, id: ViewerTabId, live: bool) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return false;
         };
         if tab.tab.live() != live {
@@ -933,7 +905,7 @@ impl ViewerSession {
     }
 
     pub(crate) fn set_pinned(&mut self, id: ViewerTabId, pinned: bool) -> bool {
-        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+        let Some(tab) = tab_by_id_mut(&mut self.tabs, id) else {
             return false;
         };
         tab.pinned = pinned;
@@ -1189,7 +1161,7 @@ impl ViewerSession {
         }
 
         self.cache.insert(tab_id, cached.without_selected());
-        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == tab_id)?;
+        let tab = tab_by_id_mut(&mut self.tabs, tab_id)?;
         let CommitSelection::Ready { transient, .. } = &mut tab.selection else {
             return None;
         };
@@ -1203,7 +1175,7 @@ impl ViewerSession {
         expected: &Arc<View>,
         replacement: ViewerDiffSnapshot,
     ) -> Option<Arc<View>> {
-        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == tab_id)?;
+        let tab = tab_by_id_mut(&mut self.tabs, tab_id)?;
         let CommitSelection::Ready {
             transient: Some(transient),
             ..
@@ -1325,13 +1297,7 @@ impl ViewerSession {
 
     #[must_use]
     pub fn current_ticket(&self, id: ViewerTabId) -> Option<ComputeTicket> {
-        self.tabs
-            .iter()
-            .find(|tab| tab.tab.id() == id)
-            .map(|tab| ComputeTicket {
-                tab_id: id,
-                generation: tab.generation,
-            })
+        self.tab(id).map(SessionTab::compute_ticket)
     }
 }
 

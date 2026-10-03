@@ -304,7 +304,10 @@ fn project_file(
     }
 }
 
-fn file_by_id<'view>(view: &'view View, id: &ViewerDiffFileId) -> Option<&'view FileDiff> {
+pub(super) fn file_by_id<'view>(
+    view: &'view View,
+    id: &ViewerDiffFileId,
+) -> Option<&'view FileDiff> {
     let index = id.as_str().strip_prefix("file-")?.parse::<usize>().ok()?;
     if ViewerDiffFileId::for_index(index) != *id {
         return None;
