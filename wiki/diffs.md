@@ -53,6 +53,45 @@ as repositories. Each repository gets its own section in a raw document.
 
 Use `gtl project diff --all` for [managed projects](projects.md) instead of a directory scan.
 
+## Diff text
+
+```bash
+gtl diff --patch review.diff # a saved Git diff, without a repository
+git diff main | gtl diff --patch - # standard input
+gtl diff --patch review.diff --raw
+gtl diff tui --patch review.diff
+```
+
+The text must contain `diff --git` file sections, as `git diff`, `git show` and GitHub `.diff`
+URLs produce. Text before the first section and after the last change is ignored, so a review
+file with a summary header works. Each file can appear once, and the text can be up to 64 MiB.
+
+The viewer keeps the text, so its tab and history entry reopen after a restart. Without a
+repository, these diffs cannot load full context, update live, push, open files in an editor or
+search branch commits. Review marks are shared by all diff text: a file with the same path and
+changes stays reviewed in a newer copy.
+
+## GitHub comparisons
+
+```bash
+gtl diff --remote https://github.com/owner/repo v1.0.0...v1.1.0
+gtl diff --remote git@github.com:owner/repo.git 1a2b3c4...5d6e7f8 --raw
+gtl diff tui --remote ssh://git@github.com/owner/repo.git v1.0.0...v1.1.0
+gtl diff --remote https://github.com/owner/repo v1.0.0...main --refresh
+```
+
+`--remote` takes the HTTPS or SSH origin of a github.com repository and a `BASE...HEAD` range of
+branches, tags or commits. GitHub compares HEAD with the merge base of both revisions, which
+matches `BASE..HEAD` whenever BASE is an ancestor of HEAD, so two-dot ranges are rejected.
+
+When gtl-server has no copy of the comparison, `gtl` sends one `gh api` request with the GitHub
+CLI from your `PATH` and its credentials, so a signed-in `gh` is required. gtl-server caches the
+diff by repository and range: repeating a comparison sends nothing to GitHub, even from another
+origin URL of the same repository. A cached branch range can fall behind its branch; `--refresh`
+fetches it again. The cache keeps the 64 most recently used comparisons.
+
+The fetched diff then behaves like [diff text](#diff-text).
+
 ## Terminal pager
 
 ```bash
@@ -95,6 +134,9 @@ gtl project diff --all --raw
 
 The file contains its styles and diff content and needs no JavaScript, server or internet
 connection to read. You can copy it elsewhere and open it directly in a browser.
+
+Offline HTML for diff text is saved under the application data directory, which keeps the 64
+most recent documents.
 
 Offline diffs always use unified layout. Theme, language, density, line wrapping and extension
 filters come from the saved settings when the document is generated. File sections and long

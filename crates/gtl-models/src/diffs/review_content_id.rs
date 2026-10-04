@@ -2,9 +2,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths::{RepositoryRelativePath, RepositoryRoot};
 
+/// Where review marks for identical file content are shared.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum DiffReviewScope {
+    Repository(RepositoryRoot),
+    /// Every diff supplied as text outside a repository.
+    Text,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DiffFileReviewReference {
-    pub repository: RepositoryRoot,
+    pub scope: DiffReviewScope,
     pub path: RepositoryRelativePath,
     pub content_id: DiffReviewContentId,
 }

@@ -92,9 +92,11 @@ impl Fixture {
 
     fn recipe(&self) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(self.repository.root()),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
+            source: RecipeSource::LocalRepo {
+                root: self.repository.root(),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             name: None,
         }
@@ -110,6 +112,7 @@ impl Fixture {
             &HybridGitClient,
             &self.database,
             &self.database,
+            &gtl_application::utils::StoredDiffTexts::default(),
         );
         assert!(matches!(
             work::publish_recipe(viewer, computed).unwrap(),
@@ -232,10 +235,10 @@ fn live_tabs_follow_setting_and_base_tip_changes_while_other_tabs_stay_pinned() 
         .inspect(|session| session.tab(snapshot_tab).unwrap().recipe.clone())
         .unwrap();
     assert!(matches!(
-        pinned.op,
-        RecipeOp::Diff {
+        pinned.op(),
+        Some(RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: Some(_) }
-        }
+        })
     ));
     let prepare = || {
         refresh_live_view::prepare(
@@ -245,6 +248,7 @@ fn live_tabs_follow_setting_and_base_tip_changes_while_other_tabs_stay_pinned() 
             &HybridGitClient,
             &fixture.database,
             &fixture.database,
+            &gtl_application::utils::StoredDiffTexts::default(),
         )
         .unwrap()
     };
@@ -289,6 +293,7 @@ fn live_tabs_follow_setting_and_base_tip_changes_while_other_tabs_stay_pinned() 
         &HybridGitClient,
         &fixture.database,
         &fixture.database,
+        &gtl_application::utils::StoredDiffTexts::default(),
     );
     work::publish_recipe(&snapshot, computed).unwrap();
     let rebuilt = snapshot

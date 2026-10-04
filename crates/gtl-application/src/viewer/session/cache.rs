@@ -7,7 +7,7 @@ use gtl_models::{
 use lru::LruCache;
 
 use crate::{
-    diffs::{FileDiff, FullContextDiffState, View},
+    diffs::{FileDiff, FullContextDiffState, View, ViewOrigin},
     viewer::{ViewerDiffSnapshot, ViewerTabId},
 };
 
@@ -210,11 +210,22 @@ impl WeightedViewCache {
     }
 }
 
+fn origin_weight(origin: &ViewOrigin) -> ViewCacheWeight {
+    match origin {
+        ViewOrigin::Repository(repository) => {
+            ViewCacheWeight::new(repository.name.as_str().len())
+                + path_weight(repository.root.as_ref())
+                + head_weight(&repository.branch)
+                + revision_weight(&repository.upstream)
+        }
+        ViewOrigin::Text(text) => {
+            ViewCacheWeight::new(text.label.as_str().len() + text.id.as_ref().len())
+        }
+    }
+}
+
 fn view_weight(view: &View) -> ViewCacheWeight {
-    ViewCacheWeight::new(view.repo_name.as_str().len())
-        + path_weight(view.repo_root.as_ref())
-        + head_weight(&view.branch)
-        + revision_weight(&view.upstream)
+    origin_weight(&view.origin)
         + view
             .commits
             .iter()
@@ -346,10 +357,12 @@ mod tests {
         CachedView::new(Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
-            repo_name: project_name("repo"),
-            repo_root: repository_root("//fixture.invalid/repositories/repo"),
-            branch: GitHead::Detached,
-            upstream: GitRevision::head(),
+            origin: crate::diffs::ViewOrigin::Repository(crate::diffs::RepositoryOrigin {
+                name: project_name("repo"),
+                root: repository_root("//fixture.invalid/repositories/repo"),
+                branch: GitHead::Detached,
+                upstream: GitRevision::head(),
+            }),
             commits: Vec::new(),
             files: Vec::new(),
             title: crate::utils::diffs::view_title(title),
@@ -442,10 +455,12 @@ mod tests {
         let view = Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
-            repo_name: project_name("benchmark"),
-            repo_root: repository_root("//fixture.invalid/repositories/fixtures/benchmark"),
-            branch: git_head("main"),
-            upstream: git_revision("origin/main"),
+            origin: crate::diffs::ViewOrigin::Repository(crate::diffs::RepositoryOrigin {
+                name: project_name("benchmark"),
+                root: repository_root("//fixture.invalid/repositories/fixtures/benchmark"),
+                branch: git_head("main"),
+                upstream: git_revision("origin/main"),
+            }),
             commits: vec![],
             files: vec![FileDiff {
                 path: repository_relative_path("src/large.rs"),

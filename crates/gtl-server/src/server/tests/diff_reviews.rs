@@ -31,6 +31,7 @@ async fn terminal(server: &ServerHarness, repository: &TestRepository) -> TestRe
             target: Some(v1::DiffTarget {
                 selection: Some(v1::diff_target::Selection::BaseRevision("main".into())),
             }),
+            text: None,
         })
         .await?
         .into_inner();
@@ -60,11 +61,13 @@ async fn diff_reviews_share_exact_versions_across_frontends_refresh_and_restart(
     let data = directory.path().join("data");
     let database = SqliteAppState::open(&data)?;
     let mut recipe = super::working_tree_recipe(repository.root());
-    recipe.op = gtl_application::recipes::RecipeOp::Diff {
-        target: gtl_application::recipes::RecipeTarget::Base {
-            rev: gtl_models::git::GitRevision::main(),
-        },
-    };
+    if let gtl_application::recipes::RecipeSource::LocalRepo { op, .. } = &mut recipe.source {
+        *op = gtl_application::recipes::RecipeOp::Diff {
+            target: gtl_application::recipes::RecipeTarget::Base {
+                rev: gtl_models::git::GitRevision::main(),
+            },
+        };
+    }
     super::seed_live_tabs(&database, [recipe])?;
     let server = ServerHarness::start(&data, Some(data.join("settings.toml"))).await?;
     let mut client = Client::new(server.native_channel());

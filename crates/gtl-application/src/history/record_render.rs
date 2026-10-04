@@ -180,7 +180,7 @@ fn start_render(
     let columns = RecipeColumns::from_recipe(&request.recipe);
     let transaction = connection.transaction()?;
     let source_id = touch_render_source(&transaction, &columns, rendered_at)?;
-    let repo_name = request.recipe.cwd().project_name();
+    let repo_name = request.recipe.source_name();
     let render_id: i64 = transaction
         .prepare_cached(
             "INSERT INTO recent_renders
@@ -469,9 +469,11 @@ mod tests {
 
     fn recipe(repo: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(crate::utils::repository_root(repo)),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
+            source: RecipeSource::LocalRepo {
+                root: crate::utils::repository_root(repo),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             name: None,
         }
@@ -479,10 +481,12 @@ mod tests {
 
     fn pinned_recipe(repo: &str, base: &str, head: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(crate::utils::repository_root(repo)),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed {
-                    pinned: Some(crate::utils::pinned_range(base, head)),
+            source: RecipeSource::LocalRepo {
+                root: crate::utils::repository_root(repo),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed {
+                        pinned: Some(crate::utils::pinned_range(base, head)),
+                    },
                 },
             },
             name: None,

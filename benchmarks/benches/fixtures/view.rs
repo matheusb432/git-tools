@@ -1,4 +1,4 @@
-use gtl_application::diffs::{Cmd, FileDiff, Foot, View};
+use gtl_application::diffs::{Cmd, FileDiff, Foot, RepositoryOrigin, View, ViewOrigin};
 use gtl_benchmarks::require;
 use gtl_models::git::{BranchName, GitHead, GitRevision, RemoteName};
 
@@ -18,16 +18,18 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
     View {
         file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
         extension_filter: None,
-        repo_name: require(
-            gtl_models::paths::ProjectName::try_from("benchmark"),
-            "creating the benchmark project name",
-        ),
-        repo_root: require(
-            gtl_models::paths::RepositoryRoot::try_new("/fixtures/benchmark".into()),
-            "creating the benchmark repository root",
-        ),
-        branch: GitHead::Branch(BranchName::main()),
-        upstream: GitRevision::remote_tracking(&RemoteName::origin(), &BranchName::main()),
+        origin: ViewOrigin::Repository(RepositoryOrigin {
+            name: require(
+                gtl_models::paths::ProjectName::try_from("benchmark"),
+                "creating the benchmark project name",
+            ),
+            root: require(
+                gtl_models::paths::RepositoryRoot::try_new("/fixtures/benchmark".into()),
+                "creating the benchmark repository root",
+            ),
+            branch: GitHead::Branch(BranchName::main()),
+            upstream: GitRevision::remote_tracking(&RemoteName::origin(), &BranchName::main()),
+        }),
         commits: vec![],
         files: vec![FileDiff {
             path: require(

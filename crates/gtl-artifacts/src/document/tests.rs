@@ -112,8 +112,10 @@ fn diff_rows_omit_change_markers_but_preserve_source_characters() {
 #[test]
 fn repository_content_is_escaped_in_text_and_attributes() {
     let mut view = sample_view();
-    view.repo_name =
-        gtl_models::paths::ProjectName::try_new("<script>repository</script>").unwrap();
+    rename(
+        &mut view,
+        gtl_models::paths::ProjectName::try_new("<script>repository</script>").unwrap(),
+    );
     view.files[0].path = gtl_models::paths::RepositoryRelativePath::try_new(
         "src/\" onmouseover=\"attack&<file>.rs".into(),
     )
@@ -191,7 +193,10 @@ fn unified_layout_preserves_syntax_density_wrapping_and_theme() {
 fn every_repository_is_reachable_and_file_anchors_are_unique() {
     let first = sample_view();
     let mut second = sample_view();
-    second.repo_name = gtl_models::paths::ProjectName::try_from("worker").unwrap();
+    rename(
+        &mut second,
+        gtl_models::paths::ProjectName::try_from("worker").unwrap(),
+    );
     let html = build_tabbed_html(
         "Repositories",
         &[first, second],
@@ -345,4 +350,10 @@ fn stylesheet(html: &str) -> &str {
         .split_once("</style>")
         .unwrap()
         .0
+}
+
+fn rename(view: &mut View, name: gtl_models::paths::ProjectName) {
+    if let Some(repository) = view.origin.repository_mut() {
+        repository.name = name;
+    }
 }

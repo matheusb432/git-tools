@@ -18,6 +18,15 @@ impl DiffFileFilter {
         }
     }
 
+    /// Diff text has no source to read again, so it keeps the files `filter` hides.
+    pub(crate) fn text(filter: ExtensionFilter, hidden_files: Vec<FileDiff>) -> Self {
+        Self {
+            source: None,
+            filter,
+            hidden_files,
+        }
+    }
+
     #[must_use]
     pub fn filter(&self) -> &ExtensionFilter {
         &self.filter

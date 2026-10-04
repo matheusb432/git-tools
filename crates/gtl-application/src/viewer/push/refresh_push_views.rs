@@ -14,7 +14,7 @@ pub fn execute(
     let tabs = viewer.inspect(|session| {
         session
             .tabs()
-            .filter(|tab| tab.tab.live() && tab.recipe.cwd() == *path)
+            .filter(|tab| tab.tab.live() && tab.recipe.cwd() == Some(path))
             .map(|tab| tab.tab.id())
             .collect::<Vec<_>>()
     })?;

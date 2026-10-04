@@ -1,7 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
 use gtl_application::diffs::read_terminal_diff::{self, ReadTerminalDiff};
-use gtl_models::failure::{Failure, ViewerFailure};
+use gtl_models::{
+    diffs::DiffTextId,
+    failure::{Failure, ViewerFailure},
+    paths::ProjectName,
+};
 use gtl_wire::{
     proto::terminal_diff::encode_row,
     terminal_diff::{BATCH_ROWS_MAX, MESSAGE_BYTES_MAX, Row, TerminalDiff},
@@ -15,7 +19,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use super::{
-    status::{GrpcResultExt as _, status},
+    status::{GrpcResultExt as _, invalid_request, status},
     unexpected,
 };
 use crate::state::AppState;
@@ -42,11 +46,7 @@ impl TerminalDiffService for TerminalDiffGrpcService {
         &self,
         request: Request<v1::ReadTerminalDiffRequest>,
     ) -> Result<Response<Self::ReadTerminalDiffStream>, Status> {
-        let request = request.into_inner();
-        let request = ReadTerminalDiff {
-            cwd: super::absolute_path(request.working_directory, "working_directory")?,
-            target: super::diff::validated_diff_target(request.target)?,
-        };
+        let request = read_request(request.into_inner())?;
         let permit = self
             .workers
             .clone()
@@ -60,6 +60,7 @@ impl TerminalDiffService for TerminalDiffGrpcService {
                     read_terminal_diff::execute(
                         &request,
                         &state.git,
+                        &state.database,
                         &state.database,
                         &state.database,
                     )
@@ -80,6 +81,22 @@ impl TerminalDiffService for TerminalDiffGrpcService {
         });
         Ok(Response::new(ReceiverStream::new(receiver)))
     }
+}
+
+fn read_request(request: v1::ReadTerminalDiffRequest) -> Result<ReadTerminalDiff, Status> {
+    let Some(text) = request.text else {
+        return Ok(ReadTerminalDiff::Repository {
+            cwd: super::absolute_path(request.working_directory, "working_directory")?,
+            target: super::diff::validated_diff_target(request.target)?,
+        });
+    };
+    if !request.working_directory.is_empty() || request.target.is_some() {
+        return Err(invalid_request("text"));
+    }
+    Ok(ReadTerminalDiff::Text {
+        id: DiffTextId::try_new(text.text_id).map_err(|_| invalid_request("text.text_id"))?,
+        label: ProjectName::try_new(text.label).map_err(|_| invalid_request("text.label"))?,
+    })
 }
 
 async fn send(

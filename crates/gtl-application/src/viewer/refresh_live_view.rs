@@ -48,15 +48,19 @@ pub(super) fn inspect_recipe(
     git: &impl GitClient,
     comparisons: &impl crate::ports::ProjectComparisonReader,
 ) -> Result<LiveViewState, RefreshLiveViewError> {
-    let path = recipe.cwd();
-    let head = git.head_state(&path)?;
+    let (Some(path), Some(op)) = (recipe.cwd(), recipe.op()) else {
+        return Err(RefreshLiveViewError::Refused(
+            ViewerFailure::SourceUnavailable.into(),
+        ));
+    };
+    let head = git.head_state(path)?;
     let comparison = if matches!(
-        recipe.op,
+        op,
         crate::recipes::RecipeOp::Diff {
             target: crate::recipes::RecipeTarget::Unpushed { pinned: None }
         }
     ) {
-        match crate::projects::comparison::resolve(&path, git, comparisons)? {
+        match crate::projects::comparison::resolve(path, git, comparisons)? {
             value @ crate::projects::comparison::ResolvedComparison::Branch { .. } => Some(value),
             crate::projects::comparison::ResolvedComparison::Upstream { .. } => None,
         }
@@ -106,6 +110,7 @@ pub fn prepare(
     git: &impl GitClient,
     filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
+    texts: &impl crate::ports::DiffTextReader,
 ) -> Result<LiveViewCheck, RefreshLiveViewError> {
     let Some(request) = state.inspect(|session| session.live_refresh_request(tab_id))? else {
         return Ok(LiveViewCheck::Inactive);
@@ -126,6 +131,7 @@ pub fn prepare(
         git,
         &filters,
         comparisons,
+        texts,
     )?;
     if inspect_recipe(&request.recipe, git, comparisons)? != head {
         return Ok(LiveViewCheck::ChangedDuringComputation);

@@ -147,9 +147,9 @@ fn every_recipe_label() -> TestResult<Vec<RecipeLabel>> {
 fn tab(id: u64, label: RecipeLabel) -> TestResult<ViewerTab> {
     Ok(ViewerTab {
         details: Some(gtl_wire::viewer::ViewerTabDetails {
-            repository: gtl_models::paths::RepositoryRoot::try_new(
+            repository: Some(gtl_models::paths::RepositoryRoot::try_new(
                 "//fixture.invalid/repositories/repos/git-tools".into(),
-            )?,
+            )?),
             comparison: label.clone(),
             range: Some(gtl_models::diffs::PinnedRange {
                 base: gtl_models::diffs::CommitId::try_from("a".repeat(40))?,
@@ -293,7 +293,7 @@ fn tab_details_decoding_rejects_invalid_sources_and_ranges() -> TestResult {
         .clone()
         .ok_or("missing fixture details")?;
     let mut invalid = details.clone();
-    invalid.repository = "relative/repo".to_owned();
+    invalid.repository = Some("relative/repo".to_owned());
     assert_eq!(
         decode_with_details(invalid),
         Err(ViewerCodecError::InvalidMessage)
@@ -375,6 +375,7 @@ fn shell_decoding_rejects_missing_or_invalid_recipe_label_parts() -> TestResult 
 fn raw_active_view() -> TestResult<v1::ViewerActiveView> {
     Ok(v1::ViewerActiveView {
         modified_files: false,
+        source: v1::ViewerViewSource::Repository as i32,
         row_source: v1::ViewerRowSourceState::Ready as i32,
         identity: Some(encode_viewer_view_identity(viewer_identity()?)),
         content_id: Some(vec![42; 32]),
@@ -382,9 +383,6 @@ fn raw_active_view() -> TestResult<v1::ViewerActiveView> {
             title: Some(v1::viewer_diff_view_title::Title::Diff(v1::Empty {})),
         }),
         commit_count: 17,
-        repository_name: "repo".into(),
-        branch: "main".into(),
-        upstream: "HEAD".into(),
         command: Some(v1::ViewerCommandLine::default()),
         commit_selection: Some(v1::ViewerCommitSelection {
             state: v1::ViewerCommitSelectionState::None as i32,
@@ -485,11 +483,13 @@ fn file_review_metadata_round_trips_and_rejects_another_file_or_repository() -> 
     active.files.push(v1::ViewerFileSummary {
         id: "file-0".into(),
         path: "src/a.rs".into(),
-        absolute_path: format!("{root}/src/a.rs"),
+        absolute_path: Some(format!("{root}/src/a.rs")),
         status: v1::ViewerFileStatus::Modified as i32,
         review: Some(v1::DiffFileReview {
             reference: Some(v1::DiffFileReviewReference {
-                repository_root: root.into(),
+                scope: Some(v1::diff_file_review_reference::Scope::RepositoryRoot(
+                    root.into(),
+                )),
                 file_path: "src/a.rs".into(),
                 content_id: vec![3; 32],
             }),
@@ -509,7 +509,9 @@ fn file_review_metadata_round_trips_and_rejects_another_file_or_repository() -> 
         let mut invalid = active.clone();
         invalid.files[0].review = Some(v1::DiffFileReview {
             reference: Some(v1::DiffFileReviewReference {
-                repository_root: repository,
+                scope: Some(v1::diff_file_review_reference::Scope::RepositoryRoot(
+                    repository,
+                )),
                 file_path: path.into(),
                 content_id: vec![3; 32],
             }),

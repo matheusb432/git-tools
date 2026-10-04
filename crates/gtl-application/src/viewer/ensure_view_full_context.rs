@@ -103,14 +103,13 @@ fn prepare_source(
     git: &impl GitClient,
 ) -> Result<EnsureViewFullContextOk, EnsureViewFullContextError> {
     let expected = snapshot.shared_view();
-    let source = match &expected.full_context {
-        FullContextDiffState::Deferred(source) => source,
-        FullContextDiffState::Unavailable | FullContextDiffState::Loaded => {
-            return Ok(EnsureViewFullContextOk::Ready(expected));
-        }
+    let (FullContextDiffState::Deferred(source), Some(repository)) =
+        (&expected.full_context, expected.origin.repository())
+    else {
+        return Ok(EnsureViewFullContextOk::Ready(expected));
     };
 
-    let request = FetchFullContextDiff::new(&expected.repo_root, source);
+    let request = FetchFullContextDiff::new(&repository.root, source);
     let full_context = fetch_full_context_diff::execute(&request, git)?;
     let replacement = state.prepare_snapshot(Arc::new(
         (*expected).clone().with_full_context(full_context)?,

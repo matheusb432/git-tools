@@ -1,6 +1,5 @@
 use gtl_models::{
     diffs::{CommitId, ExtensionFilter, ExtensionFilterMode, FileExtensions},
-    git::{BranchName, GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::{
@@ -37,17 +36,6 @@ fn page_position(number: u32, count: u32) -> TestResult<HistoryPagePosition> {
         page_number(number)?,
         HistoryPageCount::try_new(count)?,
     )?))
-}
-
-fn revision(value: &str) -> TestResult<GitRevision> {
-    Ok(GitRevision::try_new(value.to_owned())?)
-}
-
-fn head(value: &str) -> TestResult<GitHead> {
-    if value == "HEAD" {
-        return Ok(GitHead::Detached);
-    }
-    Ok(GitHead::Branch(BranchName::try_new(value.to_owned())?))
 }
 
 fn project_name(value: &str) -> TestResult<ProjectName> {
@@ -239,15 +227,13 @@ fn semantic_shell() -> TestResult<ViewerShell> {
         active: ViewerActiveState::Ready {
             view: Box::new(ViewerActiveView {
                 modified_files: false,
+                source: gtl_wire::viewer::ViewerViewSource::Repository,
                 row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
                 identity,
                 content_id: ViewerRowContentId::from_digest([42; 32]),
                 title: gtl_models::diffs::DiffViewTitle::Named {
                     name: project_name("feature vs main")?,
                 },
-                repository_name: project_name("git-tools")?,
-                branch: head("feature")?,
-                upstream: revision("origin/main")?,
                 command: ViewerCommandLine {
                     lead: "git diff ".into(),
                     range: "main...HEAD".into(),
@@ -258,9 +244,9 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                     source_id: None,
                     id: ViewerDiffFileId::for_index(0),
                     path: relative_path("src/lib.rs")?,
-                    absolute_path: absolute_file_path(
+                    absolute_path: Some(absolute_file_path(
                         "//fixture.invalid/repositories/repos/git-tools/src/lib.rs",
-                    )?,
+                    )?),
                     anchor_id: "file-src-lib-rs".into(),
                     added: gtl_models::diffs::DiffLineCount::new(4),
                     removed: gtl_models::diffs::DiffLineCount::new(2),

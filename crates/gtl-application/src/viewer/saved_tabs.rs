@@ -225,11 +225,12 @@ mod tests {
     }
 
     fn saved(path: &str, pinned: bool, live: bool, active: bool) -> SavedViewerTab {
-        let recipe = crate::recipes::Recipe {
-            source: crate::recipes::RecipeSource::LocalRepo(utils::repository_root(path)),
-            ..utils::viewer::recipe(RecipeOp::Diff {
+        let recipe = {
+            let mut recipe = utils::viewer::recipe(RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
-            })
+            });
+            crate::utils::viewer::set_root(&mut recipe, utils::repository_root(path));
+            recipe
         };
         SavedViewerTab {
             history_id: None,
@@ -342,7 +343,15 @@ mod tests {
                 assert_eq!(project(session), tabs);
                 let order = work
                     .iter()
-                    .map(|work| session.tab(work.ticket().tab_id).unwrap().recipe.cwd())
+                    .map(|work| {
+                        session
+                            .tab(work.ticket().tab_id)
+                            .unwrap()
+                            .recipe
+                            .cwd()
+                            .cloned()
+                            .unwrap()
+                    })
                     .collect::<Vec<_>>();
                 assert_eq!(
                     order,

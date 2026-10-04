@@ -62,7 +62,7 @@ pub(super) fn parse(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
 }
 
 /// Reads the new-side path from the names after `diff --git `.
-fn header_new_path(names: &str) -> anyhow::Result<Option<String>> {
+pub(super) fn header_new_path(names: &str) -> anyhow::Result<Option<String>> {
     let new_side = if names.ends_with('"') {
         // A quoted name escapes its own quotes, so ` "b/` only starts the new-side name.
         let Some(start) = names.rfind(" \"b/") else {

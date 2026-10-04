@@ -44,9 +44,9 @@ fn snapshot_unpushed(
         .map_err(crate::viewer::source::ViewerSourceError::from)?
         .ok_or(crate::viewer::source::ViewerSourceError::Changed)?;
     let view = &snapshot.view;
-    let Some(commit) = view.commits.first() else {
+    let (Some(commit), Some(origin)) = (view.commits.first(), view.origin.repository()) else {
         return Ok(false);
     };
-    let repository = git.inspect_push(&view.repo_root)?;
-    Ok(git.count_commits(&view.repo_root, &repository.upstream, &commit.id)? > 0)
+    let repository = git.inspect_push(&origin.root)?;
+    Ok(git.count_commits(&origin.root, &repository.upstream, &commit.id)? > 0)
 }

@@ -58,7 +58,9 @@ pub(crate) fn render_batch(
                     continue;
                 }
                 let mut view = response.view;
-                view.repo_name.clone_from(&repo.label);
+                if let Some(repository) = view.origin.repository_mut() {
+                    repository.name.clone_from(&repo.label);
+                }
                 views.push(view);
             }
             Err(error) if !skip_empty => return Err(error.into()),
@@ -143,7 +145,7 @@ mod tests {
 
         assert_eq!(batch.views.len(), 1);
         assert_eq!(batch.skipped, 1);
-        assert_eq!(batch.views[0].repo_name.as_str(), "repo-b");
+        assert_eq!(batch.views[0].origin.name().as_str(), "repo-b");
     }
 
     #[test]

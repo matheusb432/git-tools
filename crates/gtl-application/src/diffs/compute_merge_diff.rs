@@ -146,7 +146,9 @@ index 333..444 100644\n\
         let response = execute_default_settings(request, &source).unwrap();
 
         assert_eq!(
-            response.view.repo_root.as_ref(),
+            crate::utils::diffs::repository_origin(&response.view)
+                .root
+                .as_ref(),
             std::path::Path::new("//fixture.invalid/repositories/repo")
         );
         assert_eq!(
@@ -226,8 +228,9 @@ index 333..444 100644\n\
         )
         .unwrap();
 
-        assert_eq!(response.view.upstream.as_ref(), "main");
-        assert_eq!(response.view.branch.to_string(), "feature");
+        let repository = crate::utils::diffs::repository_origin(&response.view);
+        assert_eq!(repository.upstream.as_ref(), "main");
+        assert_eq!(repository.branch.to_string(), "feature");
         assert_eq!(response.view.files.len(), 1);
     }
 

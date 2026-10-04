@@ -1,5 +1,8 @@
 use gtl_models::{
-    diffs::{AppliedExtensionFilter, Commit, DiffViewTitle, ExtensionSelection},
+    diffs::{
+        AppliedExtensionFilter, Commit, DiffReviewScope, DiffTextId, DiffViewTitle,
+        ExtensionSelection,
+    },
     git::{GitDiffSpec, GitHead, GitRevision},
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
 };
@@ -78,13 +81,66 @@ pub enum FullContextDiffTransitionError {
     AlreadyLoaded,
 }
 
+/// The repository checkout a view compares.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepositoryOrigin {
+    pub name: ProjectName,
+    pub root: RepositoryRoot,
+    pub branch: GitHead,
+    pub upstream: GitRevision,
+}
+
+/// Stored diff text a view shows without a repository.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextOrigin {
+    pub label: ProjectName,
+    pub id: DiffTextId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewOrigin {
+    Repository(RepositoryOrigin),
+    Text(TextOrigin),
+}
+
+impl ViewOrigin {
+    /// The repository name, or the label of stored text.
+    #[must_use]
+    pub fn name(&self) -> &ProjectName {
+        match self {
+            Self::Repository(repository) => &repository.name,
+            Self::Text(text) => &text.label,
+        }
+    }
+
+    #[must_use]
+    pub fn repository(&self) -> Option<&RepositoryOrigin> {
+        match self {
+            Self::Repository(repository) => Some(repository),
+            Self::Text(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn review_scope(&self) -> DiffReviewScope {
+        match self {
+            Self::Repository(repository) => DiffReviewScope::Repository(repository.root.clone()),
+            Self::Text(_) => DiffReviewScope::Text,
+        }
+    }
+
+    pub fn repository_mut(&mut self) -> Option<&mut RepositoryOrigin> {
+        match self {
+            Self::Repository(repository) => Some(repository),
+            Self::Text(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub file_filter: super::file_filter::DiffFileFilter,
-    pub repo_name: ProjectName,
-    pub repo_root: RepositoryRoot,
-    pub branch: GitHead,
-    pub upstream: GitRevision,
+    pub origin: ViewOrigin,
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
     pub title: DiffViewTitle,

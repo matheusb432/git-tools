@@ -29,27 +29,32 @@ impl RecipeLabelParts {
     /// Takes the facts `recipe`'s label shows from its computed `view`.
     #[must_use]
     pub fn from_view(recipe: &Recipe, view: &View) -> Self {
-        match &recipe.op {
-            RecipeOp::Diff {
+        match recipe.op() {
+            Some(RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { .. },
-            } => Self::UnpushedCommits {
+            }) => Self::UnpushedCommits {
                 count: CommitCount::new(view.commits.len() as u64),
             },
-            RecipeOp::Diff {
-                target: RecipeTarget::Merge { .. },
-            }
-            | RecipeOp::MergeDiff { .. } => Self::Merge {
-                branch: view.branch.clone(),
-                upstream: view.upstream.clone(),
-            },
-            RecipeOp::Diff { .. } => Self::None,
+            Some(
+                RecipeOp::Diff {
+                    target: RecipeTarget::Merge { .. },
+                }
+                | RecipeOp::MergeDiff { .. },
+            ) => view
+                .origin
+                .repository()
+                .map_or(Self::None, |repository| Self::Merge {
+                    branch: repository.branch.clone(),
+                    upstream: repository.upstream.clone(),
+                }),
+            Some(RecipeOp::Diff { .. }) | None => Self::None,
         }
     }
 }
 
 /// Names `recipe` before its render is computed.
 pub(crate) fn pending(recipe: &Recipe) -> RecipeLabel {
-    rendered(recipe, recipe.cwd().project_name(), RecipeLabelParts::None)
+    rendered(recipe, recipe.source_name(), RecipeLabelParts::None)
 }
 
 /// Names a render of `recipe` in `repository` with the `parts` its computation found.
@@ -58,12 +63,13 @@ pub(crate) fn rendered(
     repository: ProjectName,
     parts: RecipeLabelParts,
 ) -> RecipeLabel {
-    match &recipe.name {
-        Some(name) => RecipeLabel::Named { name: name.clone() },
-        None => RecipeLabel::Changes {
+    match (&recipe.name, recipe.op()) {
+        (Some(name), _) => RecipeLabel::Named { name: name.clone() },
+        (None, Some(op)) => RecipeLabel::Changes {
             repository,
-            changes: changes(&recipe.op, parts),
+            changes: changes(op, parts),
         },
+        (None, None) => RecipeLabel::Repository { repository },
     }
 }
 
@@ -72,7 +78,7 @@ pub(crate) fn pending_tab(recipe: &Recipe) -> RecipeLabel {
     match &recipe.name {
         Some(name) => RecipeLabel::Named { name: name.clone() },
         None => RecipeLabel::Repository {
-            repository: recipe.cwd().project_name(),
+            repository: recipe.source_name(),
         },
     }
 }
@@ -88,16 +94,21 @@ pub(crate) fn compared(
     if let Some(name) = &recipe.name {
         return RecipeLabel::Named { name: name.clone() };
     }
-    let branch = || RecipeLabelHead::Revision {
-        revision: head_revision(&view.branch),
+    let (Some(op), Some(repository)) = (recipe.op(), view.origin.repository()) else {
+        return RecipeLabel::Repository {
+            repository: view.origin.name().clone(),
+        };
     };
-    let (base, head) = match &recipe.op {
+    let branch = || RecipeLabelHead::Revision {
+        revision: head_revision(&repository.branch),
+    };
+    let (base, head) = match op {
         RecipeOp::Diff { target } => match target {
             RecipeTarget::Unpushed { pinned } => (
                 comparison
                     .cloned()
                     .or_else(|| pinned.as_ref().map(|pin| short_commit(&pin.base)))
-                    .unwrap_or_else(|| view.upstream.clone()),
+                    .unwrap_or_else(|| repository.upstream.clone()),
                 branch(),
             ),
             RecipeTarget::Base { rev } => (short_revision(rev), RecipeLabelHead::WorkingTree),
@@ -125,7 +136,7 @@ pub(crate) fn compared(
         }
     };
     RecipeLabel::Compared {
-        repository: view.repo_name.clone(),
+        repository: repository.name.clone(),
         base,
         head,
     }
@@ -212,13 +223,10 @@ mod tests {
     use std::num::NonZeroU32;
 
     use super::*;
-    use crate::{
-        recipes::RecipeSource,
-        utils::{
-            diffs::commit,
-            git_range, git_revision, project_name, repository_root,
-            viewer::{empty_view, recipe},
-        },
+    use crate::utils::{
+        diffs::commit,
+        git_range, git_revision, project_name, repository_root,
+        viewer::{empty_view, recipe},
     };
 
     fn changes_label(changes: RecipeLabelChanges) -> RecipeLabel {
@@ -301,8 +309,10 @@ mod tests {
         let mut view = empty_view();
         view.commits = vec![commit("abc1234")];
         let merge = RecipeLabelChanges::Merge {
-            branch: view.branch.clone(),
-            upstream: view.upstream.clone(),
+            branch: crate::utils::diffs::repository_origin(&view).branch.clone(),
+            upstream: crate::utils::diffs::repository_origin(&view)
+                .upstream
+                .clone(),
         };
         let expected = [
             RecipeLabelChanges::UnpushedCommits {
@@ -327,7 +337,7 @@ mod tests {
             let parts = RecipeLabelParts::from_view(&recipe, &view);
 
             assert_eq!(
-                rendered(&recipe, view.repo_name.clone(), parts),
+                rendered(&recipe, view.origin.name().clone(), parts),
                 changes_label(expected)
             );
         }
@@ -356,8 +366,10 @@ mod tests {
             base: None,
             pinned: None,
         });
-        root.source =
-            RecipeSource::LocalRepo(repository_root(if cfg!(windows) { r"C:\" } else { "/" }));
+        crate::utils::viewer::set_root(
+            &mut root,
+            repository_root(if cfg!(windows) { r"C:\" } else { "/" }),
+        );
 
         assert_eq!(
             pending(&root),

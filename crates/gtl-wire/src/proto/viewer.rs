@@ -6,9 +6,8 @@ pub mod text;
 use std::path::PathBuf;
 
 use gtl_models::{
-    diffs::{CommitId, CommitTimeRange, DiffLineCount, DiffViewTitle},
+    diffs::{CommitId, CommitTimeRange, DiffLineCount, DiffReviewScope, DiffViewTitle},
     failure::Failure,
-    git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::{
@@ -192,7 +191,9 @@ pub fn encode_viewer_shell(shell: ViewerShell) -> Result<v1::ViewerShell, Viewer
 fn encode_viewer_tab(tab: ViewerTab) -> v1::ViewerTab {
     v1::ViewerTab {
         details: tab.details.map(|details| v1::ViewerTabDetails {
-            repository: details.repository.to_string_lossy().into_owned(),
+            repository: details
+                .repository
+                .map(|repository| repository.to_string_lossy().into_owned()),
             comparison: Some(recipe_label::encode(details.comparison)),
             range: details.range.map(|range| v1::ViewerTabRange {
                 base: range.base.to_string(),
@@ -250,6 +251,10 @@ fn encode_viewer_active_view(
 ) -> Result<v1::ViewerActiveView, ViewerCodecError> {
     Ok(v1::ViewerActiveView {
         modified_files: view.modified_files,
+        source: match view.source {
+            crate::viewer::ViewerViewSource::Repository => v1::ViewerViewSource::Repository,
+            crate::viewer::ViewerViewSource::Text => v1::ViewerViewSource::Text,
+        } as i32,
         identity: Some(encode_viewer_view_identity(view.identity)),
         content_id: Some(view.content_id.into_digest().to_vec()),
         row_source: match view.row_source {
@@ -258,9 +263,6 @@ fn encode_viewer_active_view(
             crate::viewer::ViewerRowSourceState::Failed => v1::ViewerRowSourceState::Failed,
         } as i32,
         view_title: Some(encode_diff_view_title(view.title)),
-        repository_name: view.repository_name.to_string(),
-        branch: view.branch.to_string(),
-        upstream: view.upstream.to_string(),
         command: Some(v1::ViewerCommandLine {
             lead: view.command.lead,
             range: view.command.range,
@@ -275,7 +277,9 @@ fn encode_viewer_active_view(
                     source_id: file.source_id.map(|value| value.into_digest().to_vec()),
                     id: file.id.as_str().to_owned(),
                     path: file.path.to_string_lossy().into_owned(),
-                    absolute_path: file.absolute_path.as_path().to_string_lossy().into_owned(),
+                    absolute_path: file
+                        .absolute_path
+                        .map(|path| path.as_path().to_string_lossy().into_owned()),
                     anchor_id: file.anchor_id,
                     added: u32::try_from(file.added.value())
                         .map_err(|_| ViewerCodecError::Unrepresentable)?,
@@ -578,6 +582,7 @@ pub fn encode_list_viewer_history_response(
                     kind: match entry.kind {
                         ViewerRecipeKind::Diff => v1::ViewerRecipeKind::Diff,
                         ViewerRecipeKind::MergeDiff => v1::ViewerRecipeKind::MergeDiff,
+                        ViewerRecipeKind::Text => v1::ViewerRecipeKind::Text,
                     } as i32,
                     range_label: entry.range_label,
                     rendered_at: entry.rendered_at.as_ref().to_owned(),
@@ -1489,8 +1494,13 @@ fn decode_viewer_tab_details(
     details: v1::ViewerTabDetails,
 ) -> Result<crate::viewer::ViewerTabDetails, ViewerCodecError> {
     Ok(crate::viewer::ViewerTabDetails {
-        repository: gtl_models::paths::RepositoryRoot::try_new(details.repository.into())
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        repository: details
+            .repository
+            .map(|repository| {
+                gtl_models::paths::RepositoryRoot::try_new(repository.into())
+                    .map_err(|_| ViewerCodecError::InvalidMessage)
+            })
+            .transpose()?,
         comparison: recipe_label::decode(required(details.comparison)?)?,
         range: details
             .range
@@ -1545,6 +1555,13 @@ fn decode_viewer_active_view(
 ) -> Result<ViewerActiveView, ViewerCodecError> {
     Ok(ViewerActiveView {
         modified_files: view.modified_files,
+        source: match v1::ViewerViewSource::try_from(view.source)
+            .map_err(|_| ViewerCodecError::InvalidMessage)?
+        {
+            v1::ViewerViewSource::Repository => crate::viewer::ViewerViewSource::Repository,
+            v1::ViewerViewSource::Text => crate::viewer::ViewerViewSource::Text,
+            v1::ViewerViewSource::Unspecified => return Err(ViewerCodecError::InvalidMessage),
+        },
         identity: decode_viewer_view_identity(required(view.identity)?)?,
         row_source: match v1::ViewerRowSourceState::try_from(view.row_source)
             .map_err(|_| ViewerCodecError::InvalidMessage)?
@@ -1560,11 +1577,6 @@ fn decode_viewer_active_view(
                 .map_err(|_| ViewerCodecError::InvalidMessage)?,
         ),
         title: decode_diff_view_title(required(view.view_title)?)?,
-        repository_name: ProjectName::try_new(view.repository_name)
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        branch: GitHead::try_from(view.branch).map_err(|_| ViewerCodecError::InvalidMessage)?,
-        upstream: GitRevision::try_new(view.upstream)
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
         command: decode_viewer_command_line(required(view.command)?),
         files: view
             .files
@@ -1596,14 +1608,25 @@ fn decode_viewer_file_summary(
 ) -> Result<ViewerFileSummary, ViewerCodecError> {
     let path = RepositoryRelativePath::try_new(PathBuf::from(file.path))
         .map_err(|_| ViewerCodecError::InvalidMessage)?;
-    let absolute_path = AbsoluteFilePath::try_new(PathBuf::from(file.absolute_path))
-        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let absolute_path = file
+        .absolute_path
+        .map(|absolute_path| {
+            AbsoluteFilePath::try_new(PathBuf::from(absolute_path))
+                .map_err(|_| ViewerCodecError::InvalidMessage)
+        })
+        .transpose()?;
     let review = file
         .review
         .map(super::diff_review::decode_review)
         .transpose()?;
     if review.as_ref().is_some_and(|review| {
-        review.reference.path != path || review.reference.repository.join(&path) != absolute_path
+        review.reference.path != path
+            || match &review.reference.scope {
+                DiffReviewScope::Repository(repository) => {
+                    Some(repository.join(&path)) != absolute_path
+                }
+                DiffReviewScope::Text => absolute_path.is_some(),
+            }
     }) {
         return Err(ViewerCodecError::InvalidMessage);
     }
@@ -1849,6 +1872,7 @@ fn decode_viewer_history_entry(
         kind: match v1::ViewerRecipeKind::try_from(entry.kind) {
             Ok(v1::ViewerRecipeKind::Diff) => ViewerRecipeKind::Diff,
             Ok(v1::ViewerRecipeKind::MergeDiff) => ViewerRecipeKind::MergeDiff,
+            Ok(v1::ViewerRecipeKind::Text) => ViewerRecipeKind::Text,
             Ok(v1::ViewerRecipeKind::Unspecified) | Err(_) => {
                 return Err(ViewerCodecError::InvalidMessage);
             }

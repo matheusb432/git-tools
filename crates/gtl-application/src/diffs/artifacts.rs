@@ -11,6 +11,10 @@ pub(crate) fn root(repo_root: &Path) -> PathBuf {
     repo_root.join(".artifacts").join("gtl")
 }
 
+pub(crate) fn text_root(data_root: &Path) -> PathBuf {
+    data_root.join("artifacts").join("diff-text")
+}
+
 pub(crate) fn place_tabbed_artifact(
     repo_root: RepositoryRoot,
     views: &[super::View],

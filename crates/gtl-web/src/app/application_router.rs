@@ -436,7 +436,7 @@ mod tests {
         for active in [
             ViewerActiveState::Pending { tab_id },
             ViewerActiveState::Ready {
-                view: Box::new(viewer_active_view(tab_id)?),
+                view: Box::new(viewer_active_view(tab_id)),
             },
             ViewerActiveState::Error {
                 tab_id,

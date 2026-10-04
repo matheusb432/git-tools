@@ -4,8 +4,7 @@ use dioxus::prelude::*;
 use dx_story::{stories, story};
 use gtl_models::{
     diffs::{CommitId, DiffLineCount},
-    git::{BranchName, GitHead, GitRevision},
-    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
+    paths::{AbsoluteFilePath, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::{
         ViewerKeybindingAction, ViewerKeybindingPlatform, ViewerKeybindings, ViewerRangeGeneration,
@@ -254,13 +253,11 @@ fn preview_fixture() -> PreviewResult<PreviewFixture> {
     let commits = preview_commits()?;
     let view = ViewerActiveView {
         modified_files: false,
+        source: gtl_wire::viewer::ViewerViewSource::Repository,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity,
         title: gtl_models::diffs::DiffViewTitle::Diff,
-        repository_name: ProjectName::try_from("git-tools")?,
-        branch: GitHead::Branch(BranchName::main()),
-        upstream: GitRevision::main(),
         command: ViewerCommandLine {
             lead: "git diff ".to_owned(),
             range: "main..9f904e7331".to_owned(),
@@ -390,7 +387,9 @@ fn preview_file(
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: RepositoryRelativePath::try_new(PathBuf::from(path))?,
-        absolute_path: AbsoluteFilePath::try_new(PathBuf::from(format!("/repo/{path}")))?,
+        absolute_path: Some(AbsoluteFilePath::try_new(PathBuf::from(format!(
+            "/repo/{path}"
+        )))?),
         anchor_id: format!("preview-file-{index}"),
         added: DiffLineCount::new(added),
         removed: DiffLineCount::new(removed),

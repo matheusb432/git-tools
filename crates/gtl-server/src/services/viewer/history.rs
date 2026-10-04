@@ -102,9 +102,10 @@ pub(super) fn project_history_page(
                 id: record.id,
                 label: record.label(),
                 repository_name: record.repo_name,
-                kind: match record.recipe.op {
-                    RecipeOp::Diff { .. } => ViewerRecipeKind::Diff,
-                    RecipeOp::MergeDiff { .. } => ViewerRecipeKind::MergeDiff,
+                kind: match record.recipe.op() {
+                    Some(RecipeOp::Diff { .. }) => ViewerRecipeKind::Diff,
+                    Some(RecipeOp::MergeDiff { .. }) => ViewerRecipeKind::MergeDiff,
+                    None => ViewerRecipeKind::Text,
                 },
                 range_label: record.range_label,
                 rendered_at: record.rendered_at,

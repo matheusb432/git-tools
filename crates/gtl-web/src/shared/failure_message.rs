@@ -7,8 +7,8 @@
 use gtl_models::{
     diffs::CommitIdAbbreviation,
     failure::{
-        Failure, ProjectFailure, PushFailure, PushRefRejection, RepositoryFailure, Resource,
-        ScanFolderProblem, SettingsFailure, ViewerFailure,
+        DiffTextFailure, Failure, ProjectFailure, PushFailure, PushRefRejection, RemoteDiffFailure,
+        RepositoryFailure, Resource, ScanFolderProblem, SettingsFailure, ViewerFailure,
     },
     settings::ViewerLanguage,
 };
@@ -31,6 +31,8 @@ pub(crate) fn failure_message(failure: &Failure, language: ViewerLanguage) -> St
         Failure::Viewer(failure) => viewer_message(failure, language),
         Failure::Project(failure) => project_message(failure, language),
         Failure::Repository(failure) => repository_message(failure, language),
+        Failure::DiffText(failure) => diff_text_message(failure, language),
+        Failure::RemoteDiff(failure) => remote_diff_message(failure, language),
         Failure::Unrecognized { class } => {
             t!(language, "failure-unrecognized", class = class.to_string())
         }
@@ -230,6 +232,45 @@ fn repository_message(failure: &RepositoryFailure, language: ViewerLanguage) -> 
             "failure-repository-search-failed",
             path = path.display().to_string()
         ),
+    }
+}
+
+fn remote_diff_message(failure: &RemoteDiffFailure, language: ViewerLanguage) -> String {
+    match failure {
+        RemoteDiffFailure::UnsupportedOrigin => {
+            t!(language, "failure-remote-diff-unsupported-origin")
+        }
+        RemoteDiffFailure::InvalidRange => t!(language, "failure-remote-diff-invalid-range"),
+        RemoteDiffFailure::Unauthenticated => {
+            t!(language, "failure-remote-diff-unauthenticated")
+        }
+        RemoteDiffFailure::NotFound => t!(language, "failure-remote-diff-not-found"),
+        RemoteDiffFailure::RateLimited => t!(language, "failure-remote-diff-rate-limited"),
+        RemoteDiffFailure::Rejected { status, .. } => t!(
+            language,
+            "failure-remote-diff-rejected",
+            status = status.to_string()
+        ),
+    }
+}
+
+fn diff_text_message(failure: &DiffTextFailure, language: ViewerLanguage) -> String {
+    match failure {
+        DiffTextFailure::TooLarge { bytes_max } => t!(
+            language,
+            "failure-diff-text-too-large",
+            mebibytes_max = (bytes_max / (1024 * 1024)).to_string()
+        ),
+        DiffTextFailure::NoFiles => t!(language, "failure-diff-text-no-files"),
+        DiffTextFailure::InvalidFileHeader { .. } => {
+            t!(language, "failure-diff-text-invalid-file-header")
+        }
+        DiffTextFailure::DuplicatePath { path } => t!(
+            language,
+            "failure-diff-text-duplicate-path",
+            path = path.as_str()
+        ),
+        DiffTextFailure::Missing => t!(language, "failure-diff-text-missing"),
     }
 }
 

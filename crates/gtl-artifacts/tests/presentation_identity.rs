@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use gtl_application::{
-    diffs::{Cmd, FileDiff, Foot, View},
+    diffs::{Cmd, FileDiff, Foot, RepositoryOrigin, View, ViewOrigin},
     ports::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, HtmlRenderer},
 };
 use gtl_artifacts::ArtifactRenderer;
@@ -32,10 +32,12 @@ fn pinned_range() -> PinnedRange {
 fn view(repo_root: &RepositoryRoot) -> View {
     View {
         file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
-        repo_name: ProjectName::try_from("git-tools").unwrap(),
-        repo_root: repo_root.clone(),
-        branch: GitHead::Branch(BranchName::try_new("feature").unwrap()),
-        upstream: GitRevision::try_new("origin/main").unwrap(),
+        origin: ViewOrigin::Repository(RepositoryOrigin {
+            name: ProjectName::try_from("git-tools").unwrap(),
+            root: repo_root.clone(),
+            branch: GitHead::Branch(BranchName::try_new("feature").unwrap()),
+            upstream: GitRevision::try_new("origin/main").unwrap(),
+        }),
         commits: Vec::new(),
         files: vec![FileDiff {
             path: RepositoryRelativePath::try_new("src/lib.rs".into()).unwrap(),

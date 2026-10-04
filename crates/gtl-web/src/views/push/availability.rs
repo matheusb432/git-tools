@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn background_results_cannot_update_another_tab_or_generation() -> TestResult {
-        let identity = viewer_active_view(viewer_tab_id(1)?)?.identity;
+        let identity = viewer_active_view(viewer_tab_id(1)?).identity;
         let loaded = status(identity);
         let mut snapshot = ViewSnapshotPushStatus::default();
         snapshot.observe(&loaded);
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn snapshot_status_survives_commit_selection_while_eligibility_loads() -> TestResult {
-        let identity = viewer_active_view(viewer_tab_id(1)?)?.identity;
+        let identity = viewer_active_view(viewer_tab_id(1)?).identity;
         let loaded = status(identity);
         let mut snapshot = ViewSnapshotPushStatus::default();
         snapshot.observe(&loaded);
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn unknown_results_retain_snapshot_status_until_a_confirmed_change() -> TestResult {
-        let identity = viewer_active_view(viewer_tab_id(1)?)?.identity;
+        let identity = viewer_active_view(viewer_tab_id(1)?).identity;
         let mut snapshot = ViewSnapshotPushStatus::default();
         assert_eq!(snapshot.current(identity, "server"), None);
         let mut loaded = status(identity);

@@ -18,6 +18,8 @@ message Failure {
     ViewerFailure viewer = 22;
     ProjectFailure project = 23;
     RepositoryFailure repository = 24;
+    DiffTextFailure diff_text = 25;
+    RemoteDiffFailure remote_diff = 26;
   }
 }
 
@@ -299,5 +301,59 @@ message RepositoryFailureNoRepositories {
 
 message RepositoryFailureSearchFailed {
   string path = 1;
+  string diagnostic = 2;
+}
+
+message DiffTextFailure {
+  oneof reason {
+    DiffTextFailureTooLarge too_large = 1;
+    DiffTextFailureNoFiles no_files = 2;
+    DiffTextFailureInvalidFileHeader invalid_file_header = 3;
+    DiffTextFailureDuplicatePath duplicate_path = 4;
+    DiffTextFailureMissing missing = 5;
+  }
+}
+
+message DiffTextFailureTooLarge {
+  uint64 bytes_max = 1;
+}
+
+message DiffTextFailureNoFiles {}
+
+message DiffTextFailureInvalidFileHeader {
+  string diagnostic = 1;
+}
+
+message DiffTextFailureDuplicatePath {
+  string path = 1;
+}
+
+message DiffTextFailureMissing {}
+
+message RemoteDiffFailure {
+  oneof reason {
+    RemoteDiffFailureUnsupportedOrigin unsupported_origin = 1;
+    RemoteDiffFailureInvalidRange invalid_range = 2;
+    RemoteDiffFailureUnauthenticated unauthenticated = 4;
+    RemoteDiffFailureNotFound not_found = 5;
+    RemoteDiffFailureRateLimited rate_limited = 6;
+    RemoteDiffFailureRejected rejected = 8;
+  }
+  reserved 3, 7;
+  reserved "client_missing", "timed_out";
+}
+
+message RemoteDiffFailureUnsupportedOrigin {}
+
+message RemoteDiffFailureInvalidRange {}
+
+message RemoteDiffFailureUnauthenticated {}
+
+message RemoteDiffFailureNotFound {}
+
+message RemoteDiffFailureRateLimited {}
+
+message RemoteDiffFailureRejected {
+  uint32 status = 1;
   string diagnostic = 2;
 }

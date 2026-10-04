@@ -201,7 +201,7 @@ mod tests {
         );
         assert_eq!(
             active_view_dom_state(&ViewerActiveState::Ready {
-                view: Box::new(viewer_active_view(tab_id)?),
+                view: Box::new(viewer_active_view(tab_id)),
             }),
             "ready"
         );
@@ -429,6 +429,7 @@ fn ReadyWorkspace(
         .files
         .with(|files| (files.file_count(), files.commit_count()));
     let push_disabled = view.read().modified_files || view.read().commit_count == 0;
+    let has_working_tree = view.read().source == gtl_wire::viewer::ViewerViewSource::Repository;
     let commits_actions = rsx! {
         div { class: "flex flex-none items-center",
             crate::views::push::ViewPushButton {
@@ -436,7 +437,9 @@ fn ReadyWorkspace(
                 identity,
                 disabled: push_disabled,
             }
-            ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+            if has_working_tree {
+                ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+            }
         }
     };
     let mobile_navigation = rsx! {
@@ -448,7 +451,9 @@ fn ReadyWorkspace(
             file_count,
             commit_count,
             commits_actions: rsx! {
-                ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+                if has_working_tree {
+                    ModifiedFilesButton { tab_id, visible: view.read().modified_files }
+                }
             },
             files_open: mobile_panel() == Some(MobilePanel::Files),
             commits_open: mobile_panel() == Some(MobilePanel::Commits),

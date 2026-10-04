@@ -82,6 +82,16 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         html: &str,
     ) -> anyhow::Result<PlacedArtifact>;
 
+    /// Place `html` under `store_root` by content hash without range metadata, then remove the
+    /// oldest standalone artifacts beyond `retained_max`.
+    fn place_standalone(
+        &self,
+        store_root: &Path,
+        generated_at: &MachineTimestamp,
+        html: &str,
+        retained_max: usize,
+    ) -> anyhow::Result<PlacedArtifact>;
+
     /// Find an existing artifact for a validated immutable commit range rendered under the same
     /// renderer layout, density, theme, language, and extension filter, or `None` on a miss.
     fn lookup_by_range(

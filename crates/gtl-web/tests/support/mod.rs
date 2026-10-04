@@ -2,8 +2,6 @@ use std::error::Error;
 
 use gtl_models::{
     diffs::CommitId,
-    git::{BranchName, GitHead, GitRevision},
-    paths::ProjectName,
     timestamps::MachineTimestamp,
     viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
 };
@@ -27,6 +25,7 @@ pub fn viewer_commit_summary() -> TestResult<ViewerCommitSummary> {
 pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<ViewerActiveView> {
     Ok(ViewerActiveView {
         modified_files: false,
+        source: gtl_wire::viewer::ViewerViewSource::Repository,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         content_id: gtl_wire::viewer::ViewerRowContentId::from_digest([0; 32]),
         identity: ViewerViewIdentity {
@@ -40,9 +39,6 @@ pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<Viewe
             },
         },
         title: gtl_models::diffs::DiffViewTitle::Diff,
-        repository_name: ProjectName::try_from("git-tools")?,
-        branch: GitHead::Branch(BranchName::main()),
-        upstream: GitRevision::main(),
         command: ViewerCommandLine {
             lead: "git diff ".to_owned(),
             range: "HEAD~1..HEAD".to_owned(),

@@ -9,7 +9,7 @@ use gtl_models::{
 use super::{EMPTY_TREE_ABBREVIATED_ID, EMPTY_TREE_ID};
 use crate::{
     diffs::{
-        Cmd, Foot, View,
+        Cmd, Foot, RepositoryOrigin, View, ViewOrigin,
         assemble::{DiffData, assemble},
         fetch_full_context_diff,
         view::sort_files_tree_order,
@@ -69,10 +69,12 @@ pub fn execute(
     let abbreviated_id = commit.id.abbreviated(abbreviation);
     let view = View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::new(diff_spec, filter.clone()),
-        repo_name,
-        repo_root: repo_path.clone(),
-        branch: git.current_branch(&repo_path)?,
-        upstream: base_abbreviated.clone(),
+        origin: ViewOrigin::Repository(RepositoryOrigin {
+            name: repo_name,
+            root: repo_path.clone(),
+            branch: git.current_branch(&repo_path)?,
+            upstream: base_abbreviated.clone(),
+        }),
         title: DiffViewTitle::Commit {
             id: commit.id.clone(),
         },
@@ -157,7 +159,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(view.upstream.as_ref(), "4b825dc642");
+        assert_eq!(
+            crate::utils::diffs::repository_origin(&view)
+                .upstream
+                .as_ref(),
+            "4b825dc642"
+        );
         assert_eq!(view.cmd.range, "4b825dc642..1111111111");
     }
 }

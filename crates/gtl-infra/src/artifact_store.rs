@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use gtl_application::ports::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, PlacedArtifact};
-use gtl_models::paths::RepositoryRoot;
+use gtl_models::{paths::RepositoryRoot, timestamps::MachineTimestamp};
 
 /// The default store adapter: places artifacts into and looks them up out of the
 /// on-disk content-addressed store.
@@ -35,6 +35,16 @@ impl ArtifactStore for StoreArtifacts {
             extension_filter: meta.extension_filter.clone(),
         };
         crate::store::place(store_root, &repo_id, html, &meta.generated_at, &metadata)
+    }
+
+    fn place_standalone(
+        &self,
+        store_root: &Path,
+        generated_at: &MachineTimestamp,
+        html: &str,
+        retained_max: usize,
+    ) -> anyhow::Result<PlacedArtifact> {
+        crate::store::place_standalone(store_root, generated_at, html, retained_max)
     }
 
     fn lookup_by_range(

@@ -206,3 +206,106 @@ async fn restored_and_reopened_tabs_reuse_history_and_its_comparison_branch() ->
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn text_tabs_restore_from_stored_text_without_repository_actions() -> TestResult {
+    use gtl_application::{
+        diffs::store_diff_text,
+        recipes::{Recipe, RecipeSource, TextRecipeSource},
+        viewer::saved_tabs::{self, SavedViewerTab},
+    };
+
+    let directory = tempfile::tempdir()?;
+    let database = SqliteAppState::open(directory.path())?;
+    let text = gtl_models::diffs::DiffText::try_new(
+        "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-draft\n+final\n"
+            .to_owned(),
+    )?;
+    store_diff_text::execute(&text, &mut *database.connection_lock()?)?;
+    let label = gtl_models::paths::ProjectName::try_new("review.diff".to_owned())?;
+    saved_tabs::save(
+        &mut *database.connection_lock()?,
+        &[SavedViewerTab {
+            history_id: None,
+            comparison_name: None,
+            label: RecipeLabel::Repository {
+                repository: label.clone(),
+            },
+            recipe: Recipe {
+                source: RecipeSource::Text(TextRecipeSource {
+                    id: text.id().clone(),
+                    label,
+                }),
+                name: None,
+            },
+            pinned: false,
+            live: false,
+            active: true,
+        }],
+    )?;
+    drop(database);
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client = v1::viewer_service_client::ViewerServiceClient::new(server.native_channel());
+
+    let shell = tokio::time::timeout(Duration::from_secs(10), ready_shell(&mut client)).await??;
+
+    let tab = &shell.tabs[0];
+    assert_eq!(repository_name(tab), "review.diff");
+    assert_eq!(
+        tab.details
+            .as_ref()
+            .and_then(|details| details.repository.clone()),
+        None
+    );
+    let ViewerActiveState::Ready { view } = &shell.active else {
+        return Err("expected a ready text view".into());
+    };
+    assert_eq!(view.source, gtl_wire::viewer::ViewerViewSource::Text);
+    let [file] = view.files.as_slice() else {
+        return Err("expected one file".into());
+    };
+    assert_eq!(file.path.to_string_lossy(), "notes.md");
+    assert_eq!(file.absolute_path, None);
+    assert!(!file.can_open_in_editor);
+    assert_eq!(
+        file.review.as_ref().map(|review| &review.reference.scope),
+        Some(&gtl_models::diffs::DiffReviewScope::Text)
+    );
+    assert_eq!(
+        client
+            .set_viewer_tab_live(v1::SetViewerTabLiveRequest {
+                tab_id: tab.id.into(),
+                live: true,
+            })
+            .await
+            .err()
+            .map(|status| status.code()),
+        Some(tonic::Code::InvalidArgument)
+    );
+    super::wait_for_history(&mut client).await?;
+    let history = gtl_wire::proto::viewer::decode_list_viewer_history_response(
+        client
+            .list_viewer_history(v1::ListViewerHistoryRequest {
+                filter: Some(v1::list_viewer_history_request::Filter::AllProjects(
+                    v1::Empty {},
+                )),
+                cursor: Some(v1::list_viewer_history_request::Cursor::Newest(
+                    v1::Empty {},
+                )),
+            })
+            .await?
+            .into_inner(),
+    )?;
+    assert_eq!(
+        history
+            .entries
+            .iter()
+            .map(|entry| (entry.kind, entry.repository_name.to_string()))
+            .collect::<Vec<_>>(),
+        [(
+            gtl_wire::viewer::ViewerRecipeKind::Text,
+            "review.diff".to_owned()
+        )]
+    );
+    Ok(())
+}

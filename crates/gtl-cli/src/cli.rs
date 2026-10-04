@@ -165,14 +165,59 @@ pub struct DiffArgs {
     /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
+    /// Read a Git diff from PATH, or from standard input when PATH is `-`, instead of a
+    /// repository.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = patch_source,
+        conflicts_with_all = ["id", "unpushed", "target", "last", "merge", "recursive", "worktrees", "set_theme"],
+    )]
+    pub patch: Option<PatchSource>,
+    /// Diff the `BASE...HEAD` TARGET of the github.com repository at ORIGIN, an HTTPS or SSH URL,
+    /// instead of a local repository. Runs the GitHub CLI `gh` only when gtl-server has no cached
+    /// copy.
+    #[arg(
+        long,
+        value_name = "ORIGIN",
+        requires = "target",
+        conflicts_with_all = ["id", "patch", "unpushed", "last", "merge", "recursive", "set_theme"],
+    )]
+    pub remote: Option<String>,
+    /// Fetch the `--remote` diff from GitHub again instead of reusing the cached copy.
+    #[arg(long, requires = "remote")]
+    pub refresh: bool,
     #[command(flatten)]
     pub target: DiffTargetArgs,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchSource {
+    Stdin,
+    File(PathBuf),
+}
+
+fn patch_file(value: &str) -> Result<PathBuf, String> {
+    match patch_source(value)? {
+        PatchSource::File(path) => Ok(path),
+        PatchSource::Stdin => {
+            Err("the pager reads keys from standard input; pass a file path".to_owned())
+        }
+    }
+}
+
+fn patch_source(value: &str) -> Result<PatchSource, String> {
+    match value {
+        "" => Err("patch path must not be empty".to_owned()),
+        "-" => Ok(PatchSource::Stdin),
+        path => Ok(PatchSource::File(PathBuf::from(path))),
+    }
 }
 
 #[derive(Debug, Subcommand)]
 pub enum DiffSub {
     /// Read a single repository diff in an interactive terminal pager.
-    Tui(DiffTuiArgs),
+    Tui(Box<DiffTuiArgs>),
     /// Render a merge diff artifact (three-dot diff) against a base branch.
     Merge(MergeArgs),
 }
@@ -403,11 +448,31 @@ pub struct DiffTargetArgs {
 
 #[derive(Debug, Args)]
 #[command(
-    after_long_help = "Examples:\n  gtl diff tui               Unpushed commits\n  gtl diff tui HEAD          Staged, unstaged and untracked changes\n  gtl diff tui --last 5      Last five commits\n  gtl diff tui --merge main  Merge comparison\n\nKeys: f files, / search, [ ] hunks, w wrap, c context, r refresh, ? help, q quit.\nMouse: click files and controls, scroll either pane, drag scrollbars.\nSyntax highlighting uses the shared diff parser; NO_COLOR disables colors.\nRequires an interactive terminal and the local gtl-server."
+    after_long_help = "Examples:\n  gtl diff tui               Unpushed commits\n  gtl diff tui HEAD          Staged, unstaged and untracked changes\n  gtl diff tui --last 5      Last five commits\n  gtl diff tui --merge main  Merge comparison\n  gtl diff tui --patch review.diff  Diff text from a file\n  gtl diff tui --remote git@github.com:owner/repo.git v1.0.0...v1.1.0  GitHub comparison\n\nKeys: f files, / search, [ ] hunks, w wrap, c context, r refresh, ? help, q quit.\nMouse: click files and controls, scroll either pane, drag scrollbars.\nSyntax highlighting uses the shared diff parser; NO_COLOR disables colors.\nRequires an interactive terminal and the local gtl-server."
 )]
 pub struct DiffTuiArgs {
     #[command(flatten)]
     pub repository: RepositoryArgs,
+    /// Read a Git diff from PATH instead of a repository.
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_parser = patch_file,
+        conflicts_with_all = ["id", "unpushed", "target", "last", "merge"],
+    )]
+    pub patch: Option<PathBuf>,
+    /// Diff the `BASE...HEAD` TARGET of the github.com repository at ORIGIN instead of a local
+    /// repository. Runs the GitHub CLI `gh` only when gtl-server has no cached copy.
+    #[arg(
+        long,
+        value_name = "ORIGIN",
+        requires = "target",
+        conflicts_with_all = ["id", "patch", "unpushed", "last", "merge"],
+    )]
+    pub remote: Option<String>,
+    /// Fetch the `--remote` diff from GitHub again instead of reusing the cached copy.
+    #[arg(long, requires = "remote")]
+    pub refresh: bool,
     #[command(flatten)]
     pub revision: DiffRevisionArgs,
 }
@@ -420,7 +485,7 @@ pub struct DiffRevisionArgs {
     pub unpushed: bool,
     /// Base commit (including staged, unstaged, and untracked changes), a
     /// `<start>..<end>` committed range, `<rev>^!` for that single commit, or
-    /// omitted for unpushed work.
+    /// omitted for unpushed work. With `--remote`, the `BASE...HEAD` comparison to fetch.
     #[arg(conflicts_with_all = ["last"])]
     pub target: Option<String>,
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
@@ -652,6 +717,114 @@ mod tests {
                 ..
             }) if name == "eod"
         ));
+    }
+
+    #[test]
+    fn parse_args_diff_patch_reads_stdin_for_a_dash_and_rejects_repository_targets() {
+        let cli = Cli::parse_args(&["diff".into(), "--patch".into(), "-".into(), "--raw".into()])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                patch: Some(PatchSource::Stdin),
+                ..
+            })
+        ));
+        for conflicting in [
+            &["HEAD"][..],
+            &["-l"],
+            &["-m", "main"],
+            &["-r"],
+            &["--id", "GT"],
+        ] {
+            let mut args = vec![
+                "diff".into(),
+                "--patch".into(),
+                "review.diff".into(),
+                "--raw".into(),
+            ];
+            args.extend(conflicting.iter().map(|arg| (*arg).to_owned()));
+            assert!(Cli::parse_args(&args).is_err(), "{conflicting:?}");
+        }
+    }
+
+    #[test]
+    fn parse_args_diff_remote_takes_its_range_from_the_target_and_rejects_other_sources() {
+        let parse = |args: &[&str]| {
+            Cli::parse_args(&args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+        };
+        let origin = "git@github.com:example-org/widget.git";
+
+        let cli = parse(&["diff", "--remote", origin, "v1...v2", "--refresh", "--raw"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                remote: Some(ref remote),
+                refresh: true,
+                target: DiffTargetArgs {
+                    revision: DiffRevisionArgs {
+                        target: Some(ref range),
+                        ..
+                    },
+                    ..
+                },
+                ..
+            }) if remote == origin && range == "v1...v2"
+        ));
+        let cli = parse(&["diff", "tui", "--remote", origin, "v1...v2"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Tui(args)),
+                ..
+            }) if args.remote.as_deref() == Some(origin)
+        ));
+        for invalid in [
+            &["diff", "--remote", origin][..],
+            &["diff", "--refresh", "HEAD"],
+            &["diff", "--remote", origin, "v1...v2", "--id", "GT"],
+            &["diff", "--remote", origin, "v1...v2", "--patch", "a.diff"],
+            &["diff", "--remote", origin, "-l"],
+            &["diff", "--remote", origin, "--unpushed"],
+            &["diff", "--remote", origin, "-m", "main"],
+            &["diff", "--remote", origin, "-r"],
+            &["diff", "tui", "--remote", origin],
+            &["diff", "tui", "--remote", origin, "-l"],
+            &["diff", "tui", "--refresh", "HEAD"],
+        ] {
+            assert!(parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn parse_args_diff_tui_patch_requires_a_file_and_rejects_revisions() {
+        let cli = Cli::parse_args(&[
+            "diff".into(),
+            "tui".into(),
+            "--patch".into(),
+            "a.diff".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Tui(args)),
+                ..
+            }) if args.patch.is_some()
+        ));
+        assert!(
+            Cli::parse_args(&["diff".into(), "tui".into(), "--patch".into(), "-".into()]).is_err()
+        );
+        assert!(
+            Cli::parse_args(&[
+                "diff".into(),
+                "tui".into(),
+                "--patch".into(),
+                "a.diff".into(),
+                "HEAD".into()
+            ])
+            .is_err()
+        );
     }
 
     #[test]

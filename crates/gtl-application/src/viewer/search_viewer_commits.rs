@@ -33,6 +33,9 @@ pub enum SearchViewerCommitsError {
     #[error(transparent)]
     #[meta(transparent)]
     Source(#[from] ViewerSourceError),
+    #[error("the snapshot has no repository")]
+    #[meta(failure = Failure::InvalidRequest { field: "scope".to_owned() })]
+    NoRepository,
     #[error("commit search query is too long")]
     #[meta(failure = Failure::InvalidRequest { field: "query".to_owned() })]
     QueryTooLong,
@@ -72,8 +75,12 @@ pub fn execute(
         }
         ViewerCommitSearchScope::ActiveBranchSnapshot(identity) => {
             let snapshot = commit_source(*identity, state, settings)?;
+            let repository = snapshot
+                .origin
+                .repository()
+                .ok_or(SearchViewerCommitsError::NoRepository)?;
             Some(
-                git.visit_commits(&snapshot.repo_root, deadline, &mut |commit| {
+                git.visit_commits(&repository.root, deadline, &mut |commit| {
                     matches.visit(&commit);
                 })?,
             )

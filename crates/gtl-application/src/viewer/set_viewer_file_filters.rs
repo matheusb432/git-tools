@@ -30,7 +30,7 @@ pub fn prepare(
     })
 }
 
-/// Applies the filter to the tab's snapshots, then saves it for the tab's repository.
+/// Applies the filter to the tab's snapshots, then saves it for the tab's repository, if any.
 #[cqrsy::command]
 pub fn execute(
     request: PreparedFileFilterChange,
@@ -39,7 +39,11 @@ pub fn execute(
     filters: &impl ExtensionFilterWriter,
 ) -> Result<(), FileFiltersError> {
     let PreparedFileFilterChange { mut views, filter } = request;
-    let repository = views.expected.repo_root.clone();
+    let repository = views
+        .expected
+        .origin
+        .repository()
+        .map(|repository| repository.root.clone());
     if views.expected.file_filter.filter() != &filter {
         let update = |view: ViewerDiffSnapshot| -> Result<ViewerDiffSnapshot, FileFiltersError> {
             let view = set_diff_extension_filter::execute(
@@ -56,6 +60,8 @@ pub fn execute(
         views.modified = views.modified.map(update).transpose()?;
         state.update(|session| session.publish_file_filters(views, filter.clone()))??;
     }
-    filters.save_extension_filter(&repository, &filter)?;
+    if let Some(repository) = repository {
+        filters.save_extension_filter(&repository, &filter)?;
+    }
     Ok(())
 }

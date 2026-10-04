@@ -1,7 +1,6 @@
 use std::error::Error;
 
 use gtl_models::{
-    git::{BranchName, GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::{
@@ -25,9 +24,10 @@ pub(crate) fn render_history_id(value: i64) -> TestResult<RenderHistoryId> {
     Ok(RenderHistoryId::try_new(value)?)
 }
 
-pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActiveView> {
-    Ok(ViewerActiveView {
+pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> ViewerActiveView {
+    ViewerActiveView {
         modified_files: false,
+        source: gtl_wire::viewer::ViewerViewSource::Repository,
         identity: ViewerViewIdentity {
             tab_id,
             range_generation: ViewerRangeGeneration::new(1),
@@ -41,9 +41,6 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
         content_id: ViewerRowContentId::from_digest([7; 32]),
         row_source: ViewerRowSourceState::Ready,
         title: gtl_models::diffs::DiffViewTitle::Diff,
-        repository_name: project_name("project")?,
-        branch: GitHead::Branch(BranchName::main()),
-        upstream: GitRevision::main(),
         command: ViewerCommandLine {
             lead: "git diff ".to_owned(),
             range: "main..HEAD".to_owned(),
@@ -58,7 +55,7 @@ pub(crate) fn viewer_active_view(tab_id: ViewerTabId) -> TestResult<ViewerActive
         },
         extension_filter: None,
         changes_since: None,
-    })
+    }
 }
 
 pub(crate) fn viewer_file_summary(
@@ -73,7 +70,7 @@ pub(crate) fn viewer_file_summary(
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: repository_relative_path(path)?,
-        absolute_path: absolute_file_path(format!("/repo/{path}"))?,
+        absolute_path: Some(absolute_file_path(format!("/repo/{path}"))?),
         anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
         added: gtl_models::diffs::DiffLineCount::new(added),
         removed: gtl_models::diffs::DiffLineCount::new(removed),

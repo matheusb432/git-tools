@@ -3,7 +3,6 @@
 use gtl_models::{
     diffs::{CommitId, DiffLineCount, DiffViewTitle, ExtensionFilter, PinnedRange},
     failure::Failure,
-    git::{GitHead, GitRevision},
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
     recipes::RecipeLabel,
     settings::UserSettingsRevision,
@@ -21,7 +20,7 @@ pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 62;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 66;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -155,7 +154,8 @@ pub struct ViewerTab {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTabDetails {
-    pub repository: RepositoryRoot,
+    /// Absent for a diff supplied as text outside a repository.
+    pub repository: Option<RepositoryRoot>,
     /// The source comparison, independent of a custom tab name.
     pub comparison: RecipeLabel,
     pub range: Option<PinnedRange>,
@@ -224,7 +224,8 @@ pub struct ViewerFileSummary {
     pub source_id: Option<ViewerRowContentId>,
     pub id: ViewerDiffFileId,
     pub path: RepositoryRelativePath,
-    pub absolute_path: AbsoluteFilePath,
+    /// Absent when the diff has no repository checkout.
+    pub absolute_path: Option<AbsoluteFilePath>,
     pub anchor_id: String,
     pub added: DiffLineCount,
     pub removed: DiffLineCount,
@@ -309,17 +310,26 @@ pub enum ViewerRowSourceState {
     Failed,
 }
 
+/// What a diff view compares, which decides the repository actions it offers.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerViewSource {
+    #[default]
+    Repository,
+    /// Diff text supplied outside a repository: no working tree, commits, or live updates.
+    Text,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerActiveView {
     #[serde(default)]
     pub modified_files: bool,
+    #[serde(default)]
+    pub source: ViewerViewSource,
     pub identity: ViewerViewIdentity,
     pub content_id: ViewerRowContentId,
     pub row_source: ViewerRowSourceState,
     pub title: DiffViewTitle,
-    pub repository_name: ProjectName,
-    pub branch: GitHead,
-    pub upstream: GitRevision,
     pub command: ViewerCommandLine,
     pub files: Vec<ViewerFileSummary>,
     #[serde(default)]
@@ -457,6 +467,7 @@ pub struct ListViewerHistory {
 pub enum ViewerRecipeKind {
     Diff,
     MergeDiff,
+    Text,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

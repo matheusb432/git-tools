@@ -20,6 +20,31 @@ CREATE TABLE diff_file_reviews (
     UNIQUE (repository_root, file_path, content_id)
 ) STRICT;
 
+CREATE TABLE diff_text_file_reviews (
+    id INTEGER PRIMARY KEY,
+    file_path TEXT NOT NULL CHECK (length(file_path) > 0),
+    content_id BLOB NOT NULL CHECK (length(content_id) = 32),
+    UNIQUE (file_path, content_id)
+) STRICT;
+
+CREATE TABLE diff_texts (
+    id INTEGER PRIMARY KEY,
+    text_id TEXT NOT NULL UNIQUE
+        CHECK (length(text_id) = 64 AND text_id NOT GLOB '*[^0-9a-f]*'),
+    content TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE github_compare_diffs (
+    id INTEGER PRIMARY KEY,
+    repository TEXT NOT NULL CHECK (length(repository) > 0),
+    base TEXT NOT NULL CHECK (length(base) > 0),
+    head TEXT NOT NULL CHECK (length(head) > 0),
+    text_id TEXT NOT NULL
+        CHECK (length(text_id) = 64 AND text_id NOT GLOB '*[^0-9a-f]*'),
+    used_order INTEGER NOT NULL,
+    UNIQUE (repository, base, head)
+) STRICT;
+
 CREATE TABLE project_groups (
     [project_id] TEXT NOT NULL
         REFERENCES projects ([id]) ON DELETE CASCADE,
@@ -156,7 +181,7 @@ CREATE TABLE render_operations (
 
 CREATE TABLE "render_sources" (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote')),
+  kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote', 'text')),
   value      TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT,

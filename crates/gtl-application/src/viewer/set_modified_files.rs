@@ -40,21 +40,19 @@ pub fn execute(
             .then_some(())
             .ok_or(SetModifiedFilesError::Unavailable);
     }
-    let (ticket, mut recipe) = state
+    let (ticket, root) = state
         .update(|session| session.begin_modified_files(request.tab_id))?
         .ok_or(SetModifiedFilesError::Unavailable)?;
-    recipe.op = RecipeOp::Diff {
-        target: RecipeTarget::Base {
-            rev: gtl_models::git::GitRevision::head(),
-        },
-    };
     let tab_filter = state.inspect(|session| session.tab_extension_filter(request.tab_id))?;
     let filters = super::settings::TabExtensionFilters::new(filters, tab_filter);
-    let view = compute_recipe::execute(
-        compute_recipe::ComputeRecipe {
-            recipe,
-            changes_since: None,
+    let view = compute_recipe::repository_view(
+        root,
+        RecipeOp::Diff {
+            target: RecipeTarget::Base {
+                rev: gtl_models::git::GitRevision::head(),
+            },
         },
+        None,
         settings,
         git,
         &filters,

@@ -52,7 +52,8 @@ mod tests {
 
     fn label(op: RecipeOp, comparison_name: Option<&str>) -> RecipeLabel {
         let mut view = empty_view();
-        view.branch = GitHead::try_from("feature".to_owned()).unwrap();
+        crate::utils::diffs::repository_origin_mut(&mut view).branch =
+            GitHead::try_from("feature".to_owned()).unwrap();
         complete_recipe_computation::execute(CompleteRecipeComputation {
             recipe: recipe(op),
             view,

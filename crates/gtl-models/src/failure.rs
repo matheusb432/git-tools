@@ -6,8 +6,10 @@
 //! resulting [`ErrorClass`] and [`Failure`] once.
 
 mod diagnostic;
+mod diff_text;
 mod project;
 mod push;
+mod remote_diff;
 mod repository;
 mod settings;
 mod viewer;
@@ -15,9 +17,11 @@ mod viewer;
 use std::fmt;
 
 pub use diagnostic::ExternalDiagnostic;
+pub use diff_text::DiffTextFailure;
 pub use error_meta::ErrorMeta;
 pub use project::{ProjectFailure, ScanFolderProblem};
 pub use push::{PushFailure, PushRefRejection, RejectedPushRef};
+pub use remote_diff::RemoteDiffFailure;
 pub use repository::RepositoryFailure;
 use serde::{Deserialize, Serialize};
 pub use settings::SettingsFailure;
@@ -133,6 +137,8 @@ pub enum Failure {
     Viewer(ViewerFailure),
     Project(ProjectFailure),
     Repository(RepositoryFailure),
+    DiffText(DiffTextFailure),
+    RemoteDiff(RemoteDiffFailure),
     /// The peer sent a reason this build does not recognize.
     Unrecognized {
         class: ErrorClass,
@@ -154,6 +160,8 @@ impl Failure {
             Self::Viewer(failure) => failure.class(),
             Self::Project(failure) => failure.class(),
             Self::Repository(failure) => failure.class(),
+            Self::DiffText(failure) => failure.class(),
+            Self::RemoteDiff(failure) => failure.class(),
             Self::Unrecognized { class } => *class,
         }
     }
@@ -167,6 +175,8 @@ impl Failure {
             Self::Viewer(failure) => failure.diagnostic(),
             Self::Project(failure) => failure.diagnostic(),
             Self::Repository(failure) => failure.diagnostic(),
+            Self::DiffText(failure) => failure.diagnostic(),
+            Self::RemoteDiff(failure) => failure.diagnostic(),
             _ => None,
         }
     }
@@ -213,6 +223,8 @@ impl fmt::Display for Failure {
             Self::Viewer(failure) => failure.fmt(formatter),
             Self::Project(failure) => failure.fmt(formatter),
             Self::Repository(failure) => failure.fmt(formatter),
+            Self::DiffText(failure) => failure.fmt(formatter),
+            Self::RemoteDiff(failure) => failure.fmt(formatter),
             Self::Unrecognized { class } => write!(
                 formatter,
                 "The server reported a {class} failure that this version does not recognize."

@@ -141,31 +141,34 @@ pub(super) fn WorkspaceCommitsPanel(
     );
     let onselect =
         onselect.filter(|_| view.modified_files || commit_selection_enabled(view.commit_count));
+    let searchable = view.source == gtl_wire::viewer::ViewerViewSource::Repository;
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-col",
             CommitsPanelHeader {
                 actions: rsx! {
                     div { class: "flex flex-none items-center",
-                        Button {
-                            id: search_trigger_id,
-                            "data-tour": super::tours::COMMITS_SEARCH.value(),
-                            class: "commit-search-toggle",
-                            variant: ButtonVariant::Ghost,
-                            size: ButtonSize::IconCompact,
-                            aria_label: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
-                            title: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
-                            aria_expanded: search_visible().to_string(),
-                            aria_controls: search_region_id.clone(),
-                            onclick: move |_| {
-                                if search_visible() {
-                                    dismiss.call(());
-                                } else {
-                                    search_visible.set(true);
-                                    browser::focus_element(search_focus_id.clone());
-                                }
-                            },
-                            Search { size: 14 }
+                        if searchable {
+                            Button {
+                                id: search_trigger_id,
+                                "data-tour": super::tours::COMMITS_SEARCH.value(),
+                                class: "commit-search-toggle",
+                                variant: ButtonVariant::Ghost,
+                                size: ButtonSize::IconCompact,
+                                aria_label: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
+                                title: if search_visible() { t!(language, "commit-search-close") } else { t!(language, "commit-search-label") },
+                                aria_expanded: search_visible().to_string(),
+                                aria_controls: search_region_id.clone(),
+                                onclick: move |_| {
+                                    if search_visible() {
+                                        dismiss.call(());
+                                    } else {
+                                        search_visible.set(true);
+                                        browser::focus_element(search_focus_id.clone());
+                                    }
+                                },
+                                Search { size: 14 }
+                            }
                         }
                         span {
                             class: "inline-flex",

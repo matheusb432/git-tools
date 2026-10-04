@@ -40,7 +40,7 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::diffs::{Cmd, FileDiff, Foot, View};
+    use gtl_application::diffs::{Cmd, FileDiff, Foot, RepositoryOrigin, View, ViewOrigin};
     use gtl_models::{
         diffs::DiffLineCount,
         git::{BranchName, GitHead, GitRevision},
@@ -50,13 +50,15 @@ mod tests {
         View {
             file_filter: gtl_application::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
-            repo_name: gtl_models::paths::ProjectName::try_from("api").unwrap(),
-            repo_root: gtl_models::paths::RepositoryRoot::try_new(
-                "//fixture.invalid/repositories/repo/api".into(),
-            )
-            .unwrap(),
-            branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
-            upstream: GitRevision::try_new("origin/main").unwrap(),
+            origin: ViewOrigin::Repository(RepositoryOrigin {
+                name: gtl_models::paths::ProjectName::try_from("api").unwrap(),
+                root: gtl_models::paths::RepositoryRoot::try_new(
+                    "//fixture.invalid/repositories/repo/api".into(),
+                )
+                .unwrap(),
+                branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
+                upstream: GitRevision::try_new("origin/main").unwrap(),
+            }),
             commits: Vec::new(),
             files: vec![FileDiff {
                 path: gtl_models::paths::RepositoryRelativePath::try_new("src/lib.rs".into())

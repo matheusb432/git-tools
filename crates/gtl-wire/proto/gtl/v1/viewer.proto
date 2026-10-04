@@ -205,7 +205,8 @@ message ViewerTab {
 }
 
 message ViewerTabDetails {
-  string repository = 1;
+  // Absent for a diff supplied as text outside a repository.
+  optional string repository = 1;
   ViewerRecipeLabel comparison = 2;
   ViewerTabRange range = 3;
 }
@@ -268,7 +269,8 @@ message ViewerFileSummary {
   optional bytes source_id = 11;
   string id = 1;
   string path = 2;
-  string absolute_path = 3;
+  // Absent when the diff has no repository checkout.
+  optional string absolute_path = 3;
   string anchor_id = 4;
   uint32 added = 5;
   uint32 removed = 6;
@@ -279,7 +281,11 @@ message ViewerFileSummary {
 }
 
 message DiffFileReviewReference {
-  string repository_root = 1;
+  oneof scope {
+    string repository_root = 1;
+    // Shared by every diff supplied as text outside a repository.
+    Empty text = 4;
+  }
   string file_path = 2;
   bytes content_id = 3;
 }
@@ -349,13 +355,10 @@ enum ViewerRowSourceState {
 }
 
 message ViewerActiveView {
-  reserved 2, 8;
-  reserved "title", "commits_label";
+  reserved 2, 3, 4, 5, 8;
+  reserved "title", "repository_name", "branch", "upstream", "commits_label";
 
   ViewerViewIdentity identity = 1;
-  string repository_name = 3;
-  string branch = 4;
-  string upstream = 5;
   ViewerCommandLine command = 6;
   repeated ViewerFileSummary files = 7;
   uint32 commit_count = 9;
@@ -367,6 +370,13 @@ message ViewerActiveView {
   bool modified_files = 15;
   ViewerDiffViewTitle view_title = 16;
   optional string changes_since = 17;
+  ViewerViewSource source = 18;
+}
+
+enum ViewerViewSource {
+  VIEWER_VIEW_SOURCE_UNSPECIFIED = 0;
+  VIEWER_VIEW_SOURCE_REPOSITORY = 1;
+  VIEWER_VIEW_SOURCE_TEXT = 2;
 }
 
 // Names what one diff view shows, in parts the viewer localizes.
@@ -819,6 +829,7 @@ enum ViewerRecipeKind {
   VIEWER_RECIPE_KIND_UNSPECIFIED = 0;
   VIEWER_RECIPE_KIND_DIFF = 1;
   VIEWER_RECIPE_KIND_MERGE_DIFF = 2;
+  VIEWER_RECIPE_KIND_TEXT = 3;
 }
 
 message ViewerHistoryEntry {

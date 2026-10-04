@@ -39,11 +39,11 @@ fn repository_root(path: &Path) -> RepositoryRoot {
 
 fn unpushed_diff_recipe() -> Recipe {
     Recipe {
-        source: RecipeSource::LocalRepo(repository_root(Path::new(
-            "//fixture.invalid/repositories/repos/alpha",
-        ))),
-        op: RecipeOp::Diff {
-            target: RecipeTarget::Unpushed { pinned: None },
+        source: RecipeSource::LocalRepo {
+            root: repository_root(Path::new("//fixture.invalid/repositories/repos/alpha")),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
         },
         name: None,
     }
@@ -54,7 +54,7 @@ fn saved_tab(recipe: Recipe) -> SavedViewerTab {
         history_id: None,
         comparison_name: None,
         label: gtl_models::recipes::RecipeLabel::Repository {
-            repository: recipe.cwd().project_name(),
+            repository: recipe.source_name(),
         },
         recipe,
         pinned: false,
@@ -227,6 +227,7 @@ fn project_comparisons_reopen_their_tab() -> anyhow::Result<()> {
         &HybridGitClient,
         &gtl_application::utils::SavedExtensionFilters::default(),
         &gtl_application::utils::ProjectComparisons::default(),
+        &gtl_application::utils::StoredDiffTexts::default(),
     );
     let work::RecipePublication::Published { history } =
         work::publish_recipe(&viewer, computed).unwrap()

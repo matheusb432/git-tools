@@ -55,10 +55,10 @@ fn summary(row_count: usize) -> ViewerFileSummary {
             RepositoryRelativePath::try_new("src/render.rs".into()),
             "fixture path",
         ),
-        absolute_path: require(
+        absolute_path: Some(require(
             AbsoluteFilePath::try_new(std::env::temp_dir().join("src/render.rs")),
             "absolute fixture path",
-        ),
+        )),
         anchor_id: "f-render".to_owned(),
         added: DiffLineCount::new(64),
         removed: DiffLineCount::new(64),

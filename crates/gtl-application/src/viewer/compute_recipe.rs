@@ -1,4 +1,9 @@
-use gtl_models::{failure::ErrorMeta, timestamps::MachineTimestamp};
+use gtl_models::{
+    diffs::DiffTextId,
+    failure::{DiffTextFailure, ErrorMeta},
+    paths::RepositoryRoot,
+    timestamps::MachineTimestamp,
+};
 
 #[cfg(test)]
 use crate::recipes;
@@ -8,8 +13,8 @@ use crate::{
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
     },
-    ports::{ExtensionFilterReader, GitClient, UserSettingsReader},
-    recipes::{Recipe, RecipeOp, RecipeTarget},
+    ports::{DiffTextReader, ExtensionFilterReader, GitClient, UserSettingsReader},
+    recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
 };
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]
@@ -20,6 +25,15 @@ pub enum ComputeRecipeError {
     #[error(transparent)]
     #[meta(transparent)]
     MergeDiff(#[from] compute_merge_diff::ComputeMergeDiffError),
+    #[error("diff text {0} is no longer stored")]
+    #[meta(failure = DiffTextFailure::Missing)]
+    TextMissing(DiffTextId),
+    #[error(transparent)]
+    #[meta(failure)]
+    Text(#[from] DiffTextFailure),
+    #[error(transparent)]
+    #[meta(private(Internal))]
+    Unexpected(#[from] anyhow::Error),
 }
 
 /// Requests one recipe's view, narrowed to changes committed after `changes_since`.
@@ -36,17 +50,49 @@ pub fn execute(
     git: &impl GitClient,
     filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
+    texts: &impl DiffTextReader,
 ) -> Result<View, ComputeRecipeError> {
     let ComputeRecipe {
         recipe,
         changes_since,
     } = request;
-    let cwd = recipe.cwd();
-    let view = match recipe.op {
+    match recipe.source {
+        RecipeSource::LocalRepo { root, op } => repository_view(
+            root,
+            op,
+            changes_since,
+            user_settings,
+            git,
+            filters,
+            comparisons,
+        ),
+        RecipeSource::Text(text) => {
+            let stored = texts
+                .diff_text(&text.id)?
+                .ok_or(ComputeRecipeError::TextMissing(text.id))?;
+            Ok(crate::diffs::text_diff::view(
+                &stored,
+                text.label,
+                &filters.text_extension_filter(),
+            )?)
+        }
+    }
+}
+
+pub(super) fn repository_view(
+    root: RepositoryRoot,
+    op: RecipeOp,
+    changes_since: Option<MachineTimestamp>,
+    user_settings: &impl UserSettingsReader,
+    git: &impl GitClient,
+    filters: &impl ExtensionFilterReader,
+    comparisons: &impl crate::ports::ProjectComparisonReader,
+) -> Result<View, ComputeRecipeError> {
+    Ok(match op {
         RecipeOp::Diff { target } => {
             compute_diff::execute(
                 ComputeDiff {
-                    repo_root: cwd,
+                    repo_root: root,
                     target: diff_target(target),
                     changes_since,
                 },
@@ -60,7 +106,7 @@ pub fn execute(
         RecipeOp::MergeDiff { base, pinned } => {
             compute_merge_diff::execute(
                 ComputeMergeDiff {
-                    repo_root: cwd,
+                    repo_root: root,
                     base,
                     pinned,
                     changes_since,
@@ -71,9 +117,7 @@ pub fn execute(
             )?
             .view
         }
-    };
-
-    Ok(view)
+    })
 }
 
 fn diff_target(target: RecipeTarget) -> DiffTarget {
@@ -135,12 +179,14 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
-        assert_eq!(response.repo_name.as_str(), "project");
-        assert_eq!(response.branch.to_string(), "feature");
-        assert_eq!(response.upstream.as_ref(), "main");
+        let repository = crate::utils::diffs::repository_origin(&response);
+        assert_eq!(repository.name.as_str(), "project");
+        assert_eq!(repository.branch.to_string(), "feature");
+        assert_eq!(repository.upstream.as_ref(), "main");
     }
 
     #[test]
@@ -194,12 +240,18 @@ mod tests {
                 &source,
                 &crate::utils::SavedExtensionFilters::default(),
                 &crate::utils::ProjectComparisons::default(),
+                &crate::utils::StoredDiffTexts::default(),
             )
             .unwrap();
 
             assert_eq!(response.title, title);
             assert_eq!(response.cmd.range, range);
-            assert_eq!(response.upstream.as_ref(), upstream);
+            assert_eq!(
+                crate::utils::diffs::repository_origin(&response)
+                    .upstream
+                    .as_ref(),
+                upstream
+            );
         }
     }
 
@@ -229,12 +281,18 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
         assert_eq!(response.title, gtl_models::diffs::DiffViewTitle::Diff);
         assert_eq!(response.cmd.range, "aaaaaaaaaa..1111111111");
-        assert_eq!(response.upstream.as_ref(), "aaaaaaaaaa..1111111111");
+        assert_eq!(
+            crate::utils::diffs::repository_origin(&response)
+                .upstream
+                .as_ref(),
+            "aaaaaaaaaa..1111111111"
+        );
     }
 
     #[test]
@@ -259,6 +317,7 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
@@ -284,6 +343,7 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
@@ -311,6 +371,7 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap_err();
         let merge = compute_recipe::execute(
@@ -325,6 +386,7 @@ mod tests {
             &source,
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap_err();
         assert!(matches!(diff, ComputeRecipeError::Diff(_)));

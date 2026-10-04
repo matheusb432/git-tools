@@ -307,10 +307,12 @@ impl ViewerSession {
     /// showing the same repository, so tabs from one project stay adjacent; otherwise the
     /// front of the strip, as for the first tab opened from a project.
     fn grouped_insertion_index(&self, recipe: &Recipe) -> usize {
-        let repo = recipe.cwd();
+        let Some(repo) = recipe.cwd() else {
+            return 0;
+        };
         self.tabs
             .iter()
-            .position(|tab| !tab.pinned && tab.recipe.cwd() == repo)
+            .position(|tab| !tab.pinned && tab.recipe.cwd() == Some(repo))
             .unwrap_or(0)
     }
 
@@ -650,6 +652,13 @@ impl ViewerSession {
             .find(|commit| &commit.id == commit_id)
             .cloned()
             .ok_or(BeginCommitSelectionError::UnknownCommit)?;
+        let repo_root = cached
+            .view
+            .origin
+            .repository()
+            .ok_or(BeginCommitSelectionError::UnknownCommit)?
+            .root
+            .clone();
         let tab = tab_by_id_mut(&mut self.tabs, id).ok_or(BeginCommitSelectionError::UnknownTab)?;
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(BeginCommitSelectionError::StaleRange);
@@ -660,7 +669,6 @@ impl ViewerSession {
             commit: commit.clone(),
         };
         let ticket = tab.commit_patch_ticket();
-        let repo_root = cached.view.repo_root.clone();
         self.bump_version();
         Ok((ticket, repo_root, commit))
     }
@@ -722,16 +730,16 @@ impl ViewerSession {
     pub(super) fn begin_modified_files(
         &mut self,
         id: ViewerTabId,
-    ) -> Option<(CommitPatchTicket, Recipe)> {
+    ) -> Option<(CommitPatchTicket, gtl_models::paths::RepositoryRoot)> {
         let tab = tab_by_id_mut(&mut self.tabs, id)?;
         if matches!(tab.selection, CommitSelection::Pending { .. }) {
             return None;
         }
+        let root = tab.recipe.cwd()?.clone();
         tab.selection_generation = tab.selection_generation.next();
         let ticket = tab.commit_patch_ticket();
-        let recipe = tab.recipe.clone();
         self.bump_version();
-        Some((ticket, recipe))
+        Some((ticket, root))
     }
 
     pub(super) fn publish_modified_files(
@@ -1277,8 +1285,8 @@ impl ViewerSession {
                 )
             },
         );
-        let range = match &recipe.op {
-            crate::recipes::RecipeOp::Diff { target } => match target {
+        let range = match recipe.op() {
+            Some(crate::recipes::RecipeOp::Diff { target }) => match target {
                 crate::recipes::RecipeTarget::Unpushed { pinned }
                 | crate::recipes::RecipeTarget::Range { pinned, .. }
                 | crate::recipes::RecipeTarget::Merge { pinned, .. }
@@ -1286,10 +1294,11 @@ impl ViewerSession {
                 crate::recipes::RecipeTarget::Base { .. }
                 | crate::recipes::RecipeTarget::Commit { .. } => None,
             },
-            crate::recipes::RecipeOp::MergeDiff { pinned, .. } => pinned.clone(),
+            Some(crate::recipes::RecipeOp::MergeDiff { pinned, .. }) => pinned.clone(),
+            None => None,
         };
         gtl_wire::viewer::ViewerTabDetails {
-            repository: recipe.cwd(),
+            repository: recipe.cwd().cloned(),
             comparison,
             range,
         }
@@ -1325,10 +1334,12 @@ mod tests {
 
     fn recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/repo")),
-            op: RecipeOp::MergeDiff {
-                base: None,
-                pinned: None,
+            source: RecipeSource::LocalRepo {
+                root: repository_root("//fixture.invalid/repositories/repo"),
+                op: RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
             },
             name: None,
         }
@@ -1338,10 +1349,12 @@ mod tests {
         Arc::new(View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
             extension_filter: None,
-            repo_name: project_name("repo"),
-            repo_root: repository_root("//fixture.invalid/repositories/repo"),
-            branch: git_head("feature"),
-            upstream: git_revision("main"),
+            origin: crate::diffs::ViewOrigin::Repository(crate::diffs::RepositoryOrigin {
+                name: project_name("repo"),
+                root: repository_root("//fixture.invalid/repositories/repo"),
+                branch: git_head("feature"),
+                upstream: git_revision("main"),
+            }),
             commits: Vec::new(),
             files: Vec::new(),
             title: crate::utils::diffs::view_title(title),
@@ -1402,7 +1415,7 @@ mod tests {
         let details = session.tab_details(session.tab(id).unwrap());
         assert_eq!(
             details.repository,
-            repository_root("//fixture.invalid/repositories/repo")
+            Some(repository_root("//fixture.invalid/repositories/repo"))
         );
         assert_eq!(
             details.comparison,
@@ -1418,7 +1431,7 @@ mod tests {
         let details = session.tab_details(session.tab(id).unwrap());
         assert_eq!(
             details.repository,
-            repository_root("//fixture.invalid/repositories/repo")
+            Some(repository_root("//fixture.invalid/repositories/repo"))
         );
         assert!(matches!(details.comparison, RecipeLabel::Changes { .. }));
     }
@@ -1520,9 +1533,10 @@ mod tests {
         session.publish_commit_patch_if_current(ticket, ViewerDiffSnapshot::new(patch.clone()));
         let identity = session.active_content_identity();
         let mut other_recipe = recipe();
-        other_recipe.source = RecipeSource::LocalRepo(crate::utils::repository_root(
-            "//fixture.invalid/repositories/other",
-        ));
+        crate::utils::viewer::set_root(
+            &mut other_recipe,
+            crate::utils::repository_root("//fixture.invalid/repositories/other"),
+        );
         let other = session.open(other_recipe, batch_id(2)).unwrap();
         assert_ne!(id, other);
         assert_eq!(session.content_identity(id), identity);
@@ -1998,7 +2012,7 @@ mod tests {
 
     fn open_snapshot(session: &mut ViewerSession, repository: &str, batch: u64) -> ComputeTicket {
         let mut recipe = recipe();
-        recipe.source = RecipeSource::LocalRepo(repository_root(repository));
+        crate::utils::viewer::set_root(&mut recipe, repository_root(repository));
         let id = session.open(recipe, batch_id(batch)).unwrap();
         session.begin_compute(id).unwrap()
     }
@@ -2162,8 +2176,10 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let first = session.open(recipe(), batch_id(1)).unwrap();
         let mut other = recipe();
-        other.source =
-            RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/other"));
+        crate::utils::viewer::set_root(
+            &mut other,
+            repository_root("//fixture.invalid/repositories/other"),
+        );
         let second = session.open(other, batch_id(1)).unwrap();
 
         assert!(session.activate(first));
@@ -2182,7 +2198,7 @@ mod tests {
         ]
         .map(|path| {
             let mut next = recipe();
-            next.source = RecipeSource::LocalRepo(repository_root(path));
+            crate::utils::viewer::set_root(&mut next, repository_root(path));
             session.open(next, batch_id(1)).unwrap()
         });
         assert_eq!(
@@ -2202,11 +2218,13 @@ mod tests {
     fn opening_a_new_tab_groups_it_next_to_its_project_siblings() {
         let mut session = ViewerSession::new(cache_weight(1024));
         let range_recipe = |repo: &str, range: &str| Recipe {
-            source: RecipeSource::LocalRepo(repository_root(repo)),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Range {
-                    range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
-                    pinned: None,
+            source: RecipeSource::LocalRepo {
+                root: repository_root(repo),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Range {
+                        range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
+                        pinned: None,
+                    },
                 },
             },
             name: None,
@@ -2242,8 +2260,10 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let oldest = session.open(recipe(), batch_id(1)).unwrap();
         let mut next = recipe();
-        next.source =
-            RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/next"));
+        crate::utils::viewer::set_root(
+            &mut next,
+            repository_root("//fixture.invalid/repositories/next"),
+        );
         let active = session.open(next, batch_id(1)).unwrap();
         assert_eq!(session.close(oldest), Some(CloseOutcome::ActiveUnchanged));
         assert_eq!(session.active(), Some(active));
@@ -2257,12 +2277,12 @@ mod tests {
 
     fn pinned_unpushed_recipe(head: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root(
-                "//fixture.invalid/repositories/repos/gt",
-            )),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed {
-                    pinned: Some(crate::utils::pinned_range("a", head)),
+            source: RecipeSource::LocalRepo {
+                root: repository_root("//fixture.invalid/repositories/repos/gt"),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed {
+                        pinned: Some(crate::utils::pinned_range("a", head)),
+                    },
                 },
             },
             name: None,
@@ -2292,13 +2312,13 @@ mod tests {
     fn open_keeps_distinct_symbolic_intents_as_distinct_tabs() {
         let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let range_recipe = |range: &str| Recipe {
-            source: RecipeSource::LocalRepo(repository_root(
-                "//fixture.invalid/repositories/repos/gt",
-            )),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Range {
-                    range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
-                    pinned: None,
+            source: RecipeSource::LocalRepo {
+                root: repository_root("//fixture.invalid/repositories/repos/gt"),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Range {
+                        range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
+                        pinned: None,
+                    },
                 },
             },
             name: None,
@@ -2313,13 +2333,13 @@ mod tests {
         let mut session = ViewerSession::new(cache_weight(1024));
         let open = |session: &mut ViewerSession, range: &str, batch| {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo(repository_root(
-                    "//fixture.invalid/repositories/repo",
-                )),
-                op: RecipeOp::Diff {
-                    target: RecipeTarget::Range {
-                        range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
-                        pinned: None,
+                source: RecipeSource::LocalRepo {
+                    root: repository_root("//fixture.invalid/repositories/repo"),
+                    op: RecipeOp::Diff {
+                        target: RecipeTarget::Range {
+                            range: gtl_models::git::GitRange::try_new(range.to_owned()).unwrap(),
+                            pinned: None,
+                        },
                     },
                 },
                 name: None,

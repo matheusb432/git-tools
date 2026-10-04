@@ -82,6 +82,7 @@ presentation_conversion!(v1::PresentDiffResponse);
 presentation_conversion!(v1::PresentMergeDiffResponse);
 presentation_conversion!(v1::PresentSubrepositoryDiffsResponse);
 presentation_conversion!(v1::PresentProjectRepositoryDiffsResponse);
+presentation_conversion!(v1::PresentTextDiffResponse);
 
 impl From<v1::RenderDiffResponse> for RenderedDiffResult {
     fn from(response: v1::RenderDiffResponse) -> Self {
@@ -93,6 +94,15 @@ impl From<v1::RenderDiffResponse> for RenderedDiffResult {
                 }
                 v1::render_diff_response::Outcome::Empty(_) => RenderedDiffOutcome::Empty,
             }),
+        }
+    }
+}
+
+impl From<v1::RenderTextDiffResponse> for RenderedDiffResult {
+    fn from(response: v1::RenderTextDiffResponse) -> Self {
+        Self {
+            notes: response.notes,
+            outcome: response.rendered.map(RenderedDiffOutcome::Rendered),
         }
     }
 }

@@ -90,6 +90,31 @@ fn reviews_refreshes_and_restores_the_terminal_through_the_cli() -> Result<()> {
     session.expect("\u{1b}[?1006l")?;
     session.expect("\u{1b}[?1049l")?;
     session.expect(expectrl::Eof)?;
+    assert_terminal_restored(&mut session)?;
+    reads_patch_text_without_a_repository(directory.path())
+}
+
+fn reads_patch_text_without_a_repository(directory: &Path) -> Result<()> {
+    let patch = directory.join("review.diff");
+    std::fs::write(
+        &patch,
+        "# Review\ndiff --git a/plan.md b/plan.md\n--- a/plan.md\n+++ b/plan.md\n@@ -1 +1 @@\n-status: draft\n+status: final_from_patch\n",
+    )?;
+    let mut command = Command::new(common::cli_binary());
+    command
+        .args(["diff", "tui", "--patch"])
+        .arg(&patch)
+        .current_dir(directory)
+        .env("TERM", "xterm-256color");
+    let mut session = expectrl::Session::spawn(command)?;
+    let mut parser = vt100::Parser::new(12, 60, 0);
+    session.set_expect_timeout(Some(Duration::from_secs(15)));
+    session.get_process_mut().set_window_size(60, 12)?;
+    wait_screen(&mut session, &mut parser, "final_from_patch")?;
+    session.send("v")?;
+    wait_screen(&mut session, &mut parser, "File marked reviewed")?;
+    session.send("q")?;
+    session.expect(expectrl::Eof)?;
     assert_terminal_restored(&mut session)
 }
 

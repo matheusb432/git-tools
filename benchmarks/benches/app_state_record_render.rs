@@ -26,12 +26,14 @@ fn request() -> RecordRender {
     RecordRender {
         comparison_name: None,
         recipe: gtl_application::recipes::Recipe {
-            source: gtl_application::recipes::RecipeSource::LocalRepo(require(
-                gtl_models::paths::RepositoryRoot::try_new("/repos/gt".into()),
-                "creating the benchmark repository root",
-            )),
-            op: gtl_application::recipes::RecipeOp::Diff {
-                target: gtl_application::recipes::RecipeTarget::Unpushed { pinned: None },
+            source: gtl_application::recipes::RecipeSource::LocalRepo {
+                root: require(
+                    gtl_models::paths::RepositoryRoot::try_new("/repos/gt".into()),
+                    "creating the benchmark repository root",
+                ),
+                op: gtl_application::recipes::RecipeOp::Diff {
+                    target: gtl_application::recipes::RecipeTarget::Unpushed { pinned: None },
+                },
             },
             name: None,
         },

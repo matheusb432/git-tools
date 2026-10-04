@@ -62,7 +62,7 @@ pub fn build_html(
     let labels = Labels::new(language);
     let title = format!(
         "{} - {} · {}",
-        view.repo_name,
+        view.origin.name(),
         Labels::title(&view.title),
         labels.commit_count(view.commits.len())
     );
@@ -106,7 +106,7 @@ fn build_document(
             write!(
                 html,
                 "<li><a href=\"#repository-{index}\">{}</a></li>",
-                Escaped(view.repo_name.as_str())
+                Escaped(view.origin.name().as_str())
             )?;
         }
         html.push_str("</ul></nav>");
@@ -128,11 +128,21 @@ fn render_repository(
 ) -> fmt::Result {
     write!(
         html,
-        "<section id=\"repository-{index}\" class=\"repository\"><header class=\"repository-heading\"><h2>{}</h2><p class=\"range\">{} · <code>{}</code> → <code>{}</code></p><p class=\"command\"><code>{}</code></p></header><div class=\"repository-grid\"><aside class=\"files-sidebar\"><details class=\"sidebar-content\"><summary>{} <span class=\"count\">{}</span></summary>",
-        Escaped(view.repo_name.as_str()),
+        "<section id=\"repository-{index}\" class=\"repository\"><header class=\"repository-heading\"><h2>{}</h2><p class=\"range\">{}",
+        Escaped(view.origin.name().as_str()),
         Escaped(&Labels::title(&view.title)),
-        Escaped(&view.branch.to_string()),
-        Escaped(view.upstream.as_str()),
+    )?;
+    if let Some(repository) = view.origin.repository() {
+        write!(
+            html,
+            " · <code>{}</code> → <code>{}</code>",
+            Escaped(&repository.branch.to_string()),
+            Escaped(repository.upstream.as_str()),
+        )?;
+    }
+    write!(
+        html,
+        "</p><p class=\"command\"><code>{}</code></p></header><div class=\"repository-grid\"><aside class=\"files-sidebar\"><details class=\"sidebar-content\"><summary>{} <span class=\"count\">{}</span></summary>",
         Escaped(&view.foot.cmd),
         labels.files,
         view.files.len()

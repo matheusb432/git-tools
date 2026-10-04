@@ -16,11 +16,15 @@ use gtl_models::{
 use rusqlite::Connection;
 
 use crate::recipes::{
-    PinnedRange, Recipe, RecipeLabelParts, RecipeOp, RecipeSource, RecipeTarget, recipe_label,
+    PinnedRange, Recipe, RecipeLabelParts, RecipeOp, RecipeSource, RecipeTarget, TextRecipeSource,
+    recipe_label,
 };
 
 /// The `render_sources.kind` value for a repository addressed by directory.
 pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
+/// The `render_sources.kind` value for stored diff text addressed by its identity.
+pub(super) const SOURCE_KIND_TEXT: &str = "text";
+const OPERATION_TEXT: &str = "text";
 
 /// One persisted render recipe with its stable row identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,8 +114,23 @@ pub(super) struct RecipeColumns {
 
 impl RecipeColumns {
     pub(super) fn from_recipe(recipe: &Recipe) -> Self {
-        let RecipeSource::LocalRepo(path) = &recipe.source;
-        let (operation, target, argument, pinned) = match &recipe.op {
+        let (source_kind, source_value, op) = match &recipe.source {
+            RecipeSource::LocalRepo { root, op } => {
+                (SOURCE_KIND_DIRECTORY, root.display().to_string(), op)
+            }
+            RecipeSource::Text(text) => {
+                return Self {
+                    source_kind: SOURCE_KIND_TEXT,
+                    source_value: text.id.to_string(),
+                    operation: OPERATION_TEXT,
+                    target: None,
+                    argument: None,
+                    pinned: None,
+                    recipe_name: recipe.name.clone(),
+                };
+            }
+        };
+        let (operation, target, argument, pinned) = match op {
             RecipeOp::Diff { target } => {
                 let (target_name, argument, pinned) = target_columns(target);
                 ("diff", Some(target_name), argument, pinned)
@@ -124,8 +143,8 @@ impl RecipeColumns {
             ),
         };
         Self {
-            source_kind: SOURCE_KIND_DIRECTORY,
-            source_value: path.display().to_string(),
+            source_kind,
+            source_value,
             operation,
             target,
             argument,
@@ -256,11 +275,28 @@ impl RecentRenderRow {
     }
 
     fn decode_recipe(&self) -> Result<Recipe, String> {
-        let source = match self.source_kind.as_str() {
-            SOURCE_KIND_DIRECTORY => RecipeSource::LocalRepo(
+        let name = self
+            .recipe_name
+            .clone()
+            .map(ProjectName::try_new)
+            .transpose()
+            .map_err(|error| format!("recipe name is invalid: {error}"))?;
+        let root = match self.source_kind.as_str() {
+            SOURCE_KIND_DIRECTORY => {
                 gtl_models::paths::RepositoryRoot::try_new(self.source_value.clone().into())
-                    .map_err(|error| format!("source repository root is invalid: {error}"))?,
-            ),
+                    .map_err(|error| format!("source repository root is invalid: {error}"))?
+            }
+            SOURCE_KIND_TEXT if self.operation == OPERATION_TEXT => {
+                return Ok(Recipe {
+                    source: RecipeSource::Text(TextRecipeSource {
+                        id: gtl_models::diffs::DiffTextId::try_new(self.source_value.clone())
+                            .map_err(|error| format!("source text identity is invalid: {error}"))?,
+                        label: ProjectName::try_new(self.repo_name.clone())
+                            .map_err(|error| format!("text label is invalid: {error}"))?,
+                    }),
+                    name,
+                });
+            }
             other => return Err(format!("unknown project-source kind '{other}'")),
         };
         let pinned = match (&self.pinned_base, &self.pinned_head) {
@@ -293,14 +329,8 @@ impl RecentRenderRow {
             other => return Err(format!("unknown render operation '{other}'")),
         };
         Ok(Recipe {
-            source,
-            op,
-            name: self
-                .recipe_name
-                .clone()
-                .map(ProjectName::try_new)
-                .transpose()
-                .map_err(|error| format!("recipe name is invalid: {error}"))?,
+            source: RecipeSource::LocalRepo { root, op },
+            name,
         })
     }
 
@@ -568,10 +598,10 @@ mod tests {
             ]);
         for (index, op) in ops.enumerate() {
             assert_round_trips(&Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root(
-                    "//fixture.invalid/repositories/repos/gt",
-                )),
-                op,
+                source: RecipeSource::LocalRepo {
+                    root: crate::utils::repository_root("//fixture.invalid/repositories/repos/gt"),
+                    op,
+                },
                 name: (index % 2 == 0).then(|| crate::utils::project_name("named")),
             });
         }

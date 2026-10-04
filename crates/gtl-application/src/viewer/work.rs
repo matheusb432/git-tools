@@ -305,6 +305,7 @@ pub fn compute_recipe(
     git: &impl GitClient,
     filters: &impl ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
+    texts: &impl crate::ports::DiffTextReader,
 ) -> ComputedRecipeWork {
     let ReservedRecipeWork {
         history_id: _,
@@ -330,6 +331,7 @@ pub fn compute_recipe(
         git,
         &filters,
         comparisons,
+        texts,
     );
     let head = head_before.filter(|before| {
         super::refresh_live_view::inspect_recipe(&recipe, git, comparisons)
@@ -525,19 +527,22 @@ mod tests {
 
     fn recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repository_root("//fixture.invalid/repositories/repo")),
-            op: RecipeOp::MergeDiff {
-                base: Some(git_revision("main")),
-                pinned: None,
+            source: RecipeSource::LocalRepo {
+                root: repository_root("//fixture.invalid/repositories/repo"),
+                op: RecipeOp::MergeDiff {
+                    base: Some(git_revision("main")),
+                    pinned: None,
+                },
             },
             name: None,
         }
     }
 
     fn recipe_at(path: &str) -> Recipe {
-        Recipe {
-            source: RecipeSource::LocalRepo(repository_root(path)),
-            ..recipe()
+        {
+            let mut recipe = recipe();
+            crate::utils::viewer::set_root(&mut recipe, repository_root(path));
+            recipe
         }
     }
 
@@ -569,6 +574,7 @@ mod tests {
             },
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         );
 
         let publication = publish_recipe(&state, work).unwrap();
@@ -640,13 +646,13 @@ mod tests {
     #[test]
     fn refresh_reloads_the_displayed_commits_while_update_and_live_tabs_resolve_them_again() {
         let state = ViewerState::new();
-        let pinned = Recipe {
-            op: RecipeOp::MergeDiff {
+        let mut pinned = recipe();
+        if let RecipeSource::LocalRepo { op, .. } = &mut pinned.source {
+            *op = RecipeOp::MergeDiff {
                 base: Some(git_revision("main")),
                 pinned: Some(crate::utils::pinned_range("a", "b")),
-            },
-            ..recipe()
-        };
+            };
+        }
         let tab_id = reserve_open(&state, pinned.clone(), RecipeBatchId::generate())
             .unwrap()
             .ticket()

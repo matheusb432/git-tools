@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use gtl_models::{
     failure::{
-        ExternalDiagnostic, Failure, ProjectFailure, PushFailure, PushRefRejection,
-        RejectedPushRef, RepositoryFailure, Resource, ScanFolderProblem, SettingsFailure,
-        ViewerFailure,
+        DiffTextFailure, ExternalDiagnostic, Failure, ProjectFailure, PushFailure,
+        PushRefRejection, RejectedPushRef, RemoteDiffFailure, RepositoryFailure, Resource,
+        ScanFolderProblem, SettingsFailure, ViewerFailure,
     },
     paths::RepositoryRoot,
 };
@@ -41,6 +41,10 @@ pub fn encode_failure(failure: &Failure) -> v1::Failure {
         Failure::Repository(failure) => {
             Some(Reason::Repository(encode_repository_failure(failure)))
         }
+        Failure::DiffText(failure) => Some(Reason::DiffText(encode_diff_text_failure(failure))),
+        Failure::RemoteDiff(failure) => {
+            Some(Reason::RemoteDiff(encode_remote_diff_failure(failure)))
+        }
         // A relayed unknown reason stays unknown; receivers fall back to the status code.
         Failure::Unrecognized { .. } => None,
     };
@@ -67,6 +71,8 @@ pub fn decode_failure(failure: v1::Failure) -> Option<Failure> {
         Reason::Viewer(failure) => Failure::Viewer(decode_viewer_failure(failure)?),
         Reason::Project(failure) => Failure::Project(decode_project_failure(failure)?),
         Reason::Repository(failure) => Failure::Repository(decode_repository_failure(failure)?),
+        Reason::DiffText(failure) => Failure::DiffText(decode_diff_text_failure(failure)?),
+        Reason::RemoteDiff(failure) => Failure::RemoteDiff(decode_remote_diff_failure(failure)?),
     })
 }
 
@@ -518,13 +524,97 @@ pub fn decode_repository_failure(failure: v1::RepositoryFailure) -> Option<Repos
     })
 }
 
+#[must_use]
+pub fn encode_diff_text_failure(failure: &DiffTextFailure) -> v1::DiffTextFailure {
+    use v1::diff_text_failure::Reason;
+    let reason = match failure {
+        DiffTextFailure::TooLarge { bytes_max } => Reason::TooLarge(v1::DiffTextFailureTooLarge {
+            bytes_max: *bytes_max,
+        }),
+        DiffTextFailure::NoFiles => Reason::NoFiles(v1::DiffTextFailureNoFiles {}),
+        DiffTextFailure::InvalidFileHeader { diagnostic } => {
+            Reason::InvalidFileHeader(v1::DiffTextFailureInvalidFileHeader {
+                diagnostic: diagnostic.to_string(),
+            })
+        }
+        DiffTextFailure::DuplicatePath { path } => {
+            Reason::DuplicatePath(v1::DiffTextFailureDuplicatePath { path: path.clone() })
+        }
+        DiffTextFailure::Missing => Reason::Missing(v1::DiffTextFailureMissing {}),
+    };
+    v1::DiffTextFailure {
+        reason: Some(reason),
+    }
+}
+
+/// Returns `None` when the reason is absent or unknown to this build.
+#[must_use]
+pub fn decode_diff_text_failure(failure: v1::DiffTextFailure) -> Option<DiffTextFailure> {
+    use v1::diff_text_failure::Reason;
+    Some(match failure.reason? {
+        Reason::TooLarge(value) => DiffTextFailure::TooLarge {
+            bytes_max: value.bytes_max,
+        },
+        Reason::NoFiles(_) => DiffTextFailure::NoFiles,
+        Reason::InvalidFileHeader(value) => DiffTextFailure::InvalidFileHeader {
+            diagnostic: ExternalDiagnostic::from(value.diagnostic),
+        },
+        Reason::DuplicatePath(value) => DiffTextFailure::DuplicatePath { path: value.path },
+        Reason::Missing(_) => DiffTextFailure::Missing,
+    })
+}
+
+#[must_use]
+pub fn encode_remote_diff_failure(failure: &RemoteDiffFailure) -> v1::RemoteDiffFailure {
+    use v1::remote_diff_failure::Reason;
+    let reason = match failure {
+        RemoteDiffFailure::UnsupportedOrigin => {
+            Reason::UnsupportedOrigin(v1::RemoteDiffFailureUnsupportedOrigin {})
+        }
+        RemoteDiffFailure::InvalidRange => {
+            Reason::InvalidRange(v1::RemoteDiffFailureInvalidRange {})
+        }
+        RemoteDiffFailure::Unauthenticated => {
+            Reason::Unauthenticated(v1::RemoteDiffFailureUnauthenticated {})
+        }
+        RemoteDiffFailure::NotFound => Reason::NotFound(v1::RemoteDiffFailureNotFound {}),
+        RemoteDiffFailure::RateLimited => Reason::RateLimited(v1::RemoteDiffFailureRateLimited {}),
+        RemoteDiffFailure::Rejected { status, diagnostic } => {
+            Reason::Rejected(v1::RemoteDiffFailureRejected {
+                status: u32::from(*status),
+                diagnostic: diagnostic.to_string(),
+            })
+        }
+    };
+    v1::RemoteDiffFailure {
+        reason: Some(reason),
+    }
+}
+
+/// Returns `None` when the reason is absent, unknown to this build, or malformed.
+#[must_use]
+pub fn decode_remote_diff_failure(failure: v1::RemoteDiffFailure) -> Option<RemoteDiffFailure> {
+    use v1::remote_diff_failure::Reason;
+    Some(match failure.reason? {
+        Reason::UnsupportedOrigin(_) => RemoteDiffFailure::UnsupportedOrigin,
+        Reason::InvalidRange(_) => RemoteDiffFailure::InvalidRange,
+        Reason::Unauthenticated(_) => RemoteDiffFailure::Unauthenticated,
+        Reason::NotFound(_) => RemoteDiffFailure::NotFound,
+        Reason::RateLimited(_) => RemoteDiffFailure::RateLimited,
+        Reason::Rejected(value) => RemoteDiffFailure::Rejected {
+            status: u16::try_from(value.status).ok()?,
+            diagnostic: ExternalDiagnostic::from(value.diagnostic),
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use gtl_models::{
         failure::{
-            ErrorClass, ExternalDiagnostic, Failure, ProjectFailure, PushFailure, PushRefRejection,
-            RejectedPushRef, RepositoryFailure, Resource, ScanFolderProblem, SettingsFailure,
-            ViewerFailure,
+            DiffTextFailure, ErrorClass, ExternalDiagnostic, Failure, ProjectFailure, PushFailure,
+            PushRefRejection, RejectedPushRef, RemoteDiffFailure, RepositoryFailure, Resource,
+            ScanFolderProblem, SettingsFailure, ViewerFailure,
         },
         paths::RepositoryRoot,
     };
@@ -610,6 +700,26 @@ mod tests {
                 path: "//fixture.invalid/repositories/work".into(),
                 diagnostic: ExternalDiagnostic::new("permission denied"),
             }),
+            Failure::DiffText(DiffTextFailure::TooLarge {
+                bytes_max: 64 * 1024 * 1024,
+            }),
+            Failure::DiffText(DiffTextFailure::NoFiles),
+            Failure::DiffText(DiffTextFailure::InvalidFileHeader {
+                diagnostic: ExternalDiagnostic::new("diff --git a/x /etc/passwd"),
+            }),
+            Failure::DiffText(DiffTextFailure::DuplicatePath {
+                path: "src/lib.rs".into(),
+            }),
+            Failure::DiffText(DiffTextFailure::Missing),
+            Failure::RemoteDiff(RemoteDiffFailure::UnsupportedOrigin),
+            Failure::RemoteDiff(RemoteDiffFailure::InvalidRange),
+            Failure::RemoteDiff(RemoteDiffFailure::Unauthenticated),
+            Failure::RemoteDiff(RemoteDiffFailure::NotFound),
+            Failure::RemoteDiff(RemoteDiffFailure::RateLimited),
+            Failure::RemoteDiff(RemoteDiffFailure::Rejected {
+                status: 406,
+                diagnostic: ExternalDiagnostic::new("Sorry, this diff is unavailable."),
+            }),
         ]
     }
 
@@ -642,7 +752,18 @@ mod tests {
                 )),
             })),
         };
+        let remote_status_overflow = v1::Failure {
+            reason: Some(v1::failure::Reason::RemoteDiff(v1::RemoteDiffFailure {
+                reason: Some(v1::remote_diff_failure::Reason::Rejected(
+                    v1::RemoteDiffFailureRejected {
+                        status: 70_000,
+                        diagnostic: String::new(),
+                    },
+                )),
+            })),
+        };
 
         assert_eq!(decode_failure(failure), None);
+        assert_eq!(decode_failure(remote_status_overflow), None);
     }
 }

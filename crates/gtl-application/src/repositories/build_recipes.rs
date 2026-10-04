@@ -142,13 +142,13 @@ mod tests {
         assert_eq!(
             recipes[0],
             crate::recipes::Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root(
-                    "//fixture.invalid/repositories/real/api"
-                )),
-                op: RecipeOp::Diff {
-                    target: RecipeTarget::Last {
-                        count: NonZeroU32::new(2).unwrap(),
-                        pinned: Some(crate::utils::pinned_range("api-base", "api-head",)),
+                source: RecipeSource::LocalRepo {
+                    root: crate::utils::repository_root("//fixture.invalid/repositories/real/api"),
+                    op: RecipeOp::Diff {
+                        target: RecipeTarget::Last {
+                            count: NonZeroU32::new(2).unwrap(),
+                            pinned: Some(crate::utils::pinned_range("api-base", "api-head",)),
+                        }
                     }
                 },
                 name: Some(crate::utils::project_name("api")),
@@ -224,7 +224,7 @@ mod tests {
         .unwrap()
         .recipes;
 
-        assert!(recipes.iter().all(|recipe| recipe.op
+        assert!(recipes.iter().all(|recipe| recipe.op().cloned().unwrap()
             == RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None }
             }));

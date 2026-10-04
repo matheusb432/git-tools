@@ -15,9 +15,11 @@ pub mod project_add;
 pub mod project_status;
 pub mod pull;
 pub mod push_subrepos;
+pub mod remote_diff;
 pub mod server_ctl;
 pub mod sync;
 pub mod tag;
+pub mod text_diff;
 
 pub(crate) fn repository_path(
     id: Option<&gtl_models::projects::catalogue::ProjectId>,

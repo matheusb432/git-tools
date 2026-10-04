@@ -259,7 +259,7 @@ pub(crate) fn ViewerTabItem(
                             editing.set(true);
                         })),
                     onupdate,
-                    onlive,
+                    onlive: onlive.filter(|_| follows_source(&tab)),
                     onpin,
                     onclose,
                     oncloseothers,
@@ -333,6 +333,12 @@ fn ViewerTabCloseButton(
     }
 }
 
+fn follows_source(tab: &ViewerTab) -> bool {
+    tab.details
+        .as_ref()
+        .is_none_or(|details| details.repository.is_some())
+}
+
 pub(crate) fn viewer_tab_element_id(tab_id: ViewerTabId) -> String {
     format!("viewer-tab-{tab_id}")
 }
@@ -351,7 +357,9 @@ fn ViewerTabDetails(tab: ViewerTab, warning_details: Option<Element>) -> Element
                         {recipe_label_text(&details.comparison, language)}
                     }
                 }
-                p { class: "text-ink-3 break-all", "{details.repository.to_string_lossy()}" }
+                if let Some(repository) = &details.repository {
+                    p { class: "text-ink-3 break-all", "{repository.to_string_lossy()}" }
+                }
                 if let Some(range) = &details.range {
                     dl { class: "mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-ink-3",
                         dt { {t!(language, "tab-details-base")} }

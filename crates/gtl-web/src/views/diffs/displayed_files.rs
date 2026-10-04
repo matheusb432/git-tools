@@ -123,7 +123,7 @@ mod tests {
     };
 
     fn view() -> TestResult<ViewerActiveView> {
-        let mut view = viewer_active_view(viewer_tab_id(1)?)?;
+        let mut view = viewer_active_view(viewer_tab_id(1)?);
         view.files = vec![
             viewer_file_summary(0, "src/a.rs", ViewerFileStatus::Modified, 1, 1)?,
             viewer_file_summary(1, "src/b.rs", ViewerFileStatus::Added, 40, 0)?,
@@ -177,11 +177,11 @@ mod tests {
         let mut view = view()?;
         view.files[0].review = Some(DiffFileReview {
             reference: DiffFileReviewReference {
-                repository: RepositoryRoot::try_new(
+                scope: gtl_models::diffs::DiffReviewScope::Repository(RepositoryRoot::try_new(
                     crate::test_support::absolute_file_path("/repo")?
                         .as_path()
                         .to_path_buf(),
-                )?,
+                )?),
                 path: view.files[0].path.clone(),
                 content_id: DiffReviewContentId::from_digest([1; 32]),
             },

@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use gtl_models::failure::{ErrorMeta, Failure, ViewerFailure};
+use gtl_models::{
+    diffs::DiffTextId,
+    failure::{DiffTextFailure, ErrorMeta, Failure, ViewerFailure},
+    paths::ProjectName,
+};
 use gtl_parser::{
     DiffRowKind, ParseOptions, SyntaxLanguage,
     cancellation::ParseCancellation,
@@ -13,13 +17,13 @@ use gtl_wire::{
 
 use super::{DiffTarget, diff_computation, fetch_full_context_diff, source_lines::DiffSourceLines};
 use crate::{
-    ports::{GitClient, RepositoryPreferenceReader},
+    ports::{DiffTextReader, GitClient, RepositoryPreferenceReader},
     viewer::rows::project_syntax_class,
 };
 
-pub struct ReadTerminalDiff {
-    pub cwd: PathBuf,
-    pub target: DiffTarget,
+pub enum ReadTerminalDiff {
+    Repository { cwd: PathBuf, target: DiffTarget },
+    Text { id: DiffTextId, label: ProjectName },
 }
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]
@@ -30,6 +34,12 @@ pub enum ReadTerminalDiffError {
     #[error(transparent)]
     #[meta(failure = ViewerFailure::RangeTooLarge)]
     Snapshot(#[from] SnapshotError),
+    #[error("diff text {0} is no longer stored")]
+    #[meta(failure = DiffTextFailure::Missing)]
+    TextMissing(DiffTextId),
+    #[error(transparent)]
+    #[meta(failure)]
+    InvalidText(#[from] DiffTextFailure),
     #[error("repository changed while capturing full context")]
     #[meta(failure = Failure::Changed)]
     Changed,
@@ -44,31 +54,48 @@ pub fn execute(
     git: &impl GitClient,
     preferences: &impl RepositoryPreferenceReader,
     reviews: &impl crate::ports::DiffReviewReader,
+    texts: &impl DiffTextReader,
 ) -> Result<TerminalDiff, ReadTerminalDiffError> {
-    let root = git.top_level(&request.cwd)?;
-    let filter = preferences.extension_filter(&root)?;
-    let computed =
-        diff_computation::build(git, &root, &request.target, &filter, preferences, None)?;
-    let view = fetch_full_context_diff::load_for_density(
-        computed.view,
-        gtl_models::viewer::DiffDensity::Full,
-        git,
-    )?;
-    let title = format!(
-        "{} · {} · {}",
-        view.repo_name, view.branch, computed.summary
-    );
-    let notes = computed
-        .notes
-        .into_iter()
-        .map(|note| note.text)
-        .collect::<Vec<_>>();
+    let (view, title, notes) = match request {
+        ReadTerminalDiff::Repository { cwd, target } => {
+            let root = git.top_level(cwd)?;
+            let filter = preferences.extension_filter(&root)?;
+            let computed = diff_computation::build(git, &root, target, &filter, preferences, None)?;
+            let view = fetch_full_context_diff::load_for_density(
+                computed.view,
+                gtl_models::viewer::DiffDensity::Full,
+                git,
+            )?;
+            let title = match view.origin.repository() {
+                Some(repository) => format!(
+                    "{} · {} · {}",
+                    repository.name, repository.branch, computed.summary
+                ),
+                None => format!("{} · {}", view.origin.name(), computed.summary),
+            };
+            let notes = computed.notes.into_iter().map(|note| note.text).collect();
+            (view, title, notes)
+        }
+        ReadTerminalDiff::Text { id, label } => {
+            let text = texts
+                .diff_text(id)?
+                .ok_or_else(|| ReadTerminalDiffError::TextMissing(id.clone()))?;
+            let view = super::text_diff::view(
+                &text,
+                label.clone(),
+                &gtl_models::diffs::ExtensionFilter::default(),
+            )?;
+            let title = format!("{label} · {} file(s)", view.files.len());
+            (view, title, Vec::new())
+        }
+    };
     let mut budget = SnapshotBudget::default();
     budget.add_header(&title, &notes)?;
+    let scope = view.origin.review_scope();
     let references = view
         .files
         .iter()
-        .map(|file| super::review::file_review(&view.repo_root, file).reference)
+        .map(|file| super::review::file_review(&scope, file).reference)
         .collect::<Vec<_>>();
     let reviewed = reviews.reviewed_files(&references)?;
     let mut files = Vec::new();

@@ -11,9 +11,13 @@ pub enum SetViewerTabLiveError {
     #[error("viewer tab is not available")]
     #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
+    #[error("a diff supplied as text has no source to follow")]
+    #[meta(failure = Failure::InvalidRequest { field: "live".to_owned() })]
+    NoSource,
 }
 
-/// Makes a tab follow its source, or keeps its current snapshot from then on.
+/// Makes a tab follow its source, or keeps its current snapshot from then on. Stored text has no
+/// source to follow.
 ///
 /// A tab that goes live updates on the next live check unless its content already reflects the
 /// source's current state.
@@ -22,11 +26,19 @@ pub fn execute(
     request: SetViewerTabLive,
     state: &ViewerState,
 ) -> Result<(), SetViewerTabLiveError> {
-    if state.update(|session| session.set_live(request.tab_id, request.live))? {
+    state.update(|session| {
+        let followable = session
+            .tab(request.tab_id)
+            .ok_or(SetViewerTabLiveError::UnknownTab)?
+            .recipe
+            .cwd()
+            .is_some();
+        if request.live && !followable {
+            return Err(SetViewerTabLiveError::NoSource);
+        }
+        session.set_live(request.tab_id, request.live);
         Ok(())
-    } else {
-        Err(SetViewerTabLiveError::UnknownTab)
-    }
+    })?
 }
 
 #[cfg(test)]

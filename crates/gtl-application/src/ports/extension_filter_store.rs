@@ -6,6 +6,11 @@ use gtl_models::{diffs::ExtensionFilter, paths::RepositoryRoot};
 pub trait ExtensionFilterReader {
     /// Returns the saved filter, or the inactive default when the repository has none.
     fn extension_filter(&self, repository: &RepositoryRoot) -> anyhow::Result<ExtensionFilter>;
+
+    /// Returns the filter for a diff without a repository, which never has a saved filter.
+    fn text_extension_filter(&self) -> ExtensionFilter {
+        ExtensionFilter::default()
+    }
 }
 
 /// Saves the extension filter for one repository root.

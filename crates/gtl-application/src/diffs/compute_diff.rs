@@ -128,8 +128,9 @@ mod tests {
         let response =
             execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source).unwrap();
 
-        assert_eq!(response.view.repo_name.as_str(), "repo");
-        assert_eq!(response.view.branch.to_string(), "feature");
+        let repository = crate::utils::diffs::repository_origin(&response.view);
+        assert_eq!(repository.name.as_str(), "repo");
+        assert_eq!(repository.branch.to_string(), "feature");
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.files[0].path.to_string_lossy(), "f.txt");
         assert_eq!(response.summary, "1 unpushed commit(s)");
@@ -268,7 +269,12 @@ mod tests {
         );
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(response.view.foot.cmd, "git diff aaaaaaaaaa..1111111111");
-        assert_eq!(response.view.upstream.as_ref(), "aaaaaaaaaa");
+        assert_eq!(
+            crate::utils::diffs::repository_origin(&response.view)
+                .upstream
+                .as_ref(),
+            "aaaaaaaaaa"
+        );
         assert_eq!(response.summary, "1 unpushed commit(s)");
     }
 

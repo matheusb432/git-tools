@@ -224,13 +224,16 @@ pub(super) fn project_diff_view_with_content_id(
 ) -> ViewerActiveView {
     ViewerActiveView {
         modified_files: false,
+        source: match view.origin {
+            crate::diffs::ViewOrigin::Repository(_) => {
+                gtl_wire::viewer::ViewerViewSource::Repository
+            }
+            crate::diffs::ViewOrigin::Text(_) => gtl_wire::viewer::ViewerViewSource::Text,
+        },
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity,
         content_id,
         title: view.title.clone(),
-        repository_name: view.repo_name.clone(),
-        branch: view.branch.clone(),
-        upstream: view.upstream.clone(),
         command: ViewerCommandLine {
             lead: view.cmd.lead.clone(),
             range: view.cmd.range.clone(),
@@ -283,17 +286,21 @@ fn project_file(
     file: &FileDiff,
 ) -> ViewerFileSummary {
     let status = file.status();
+    let repository = view.origin.repository();
     ViewerFileSummary {
-        review: Some(crate::diffs::review::file_review(&view.repo_root, file)),
+        review: Some(crate::diffs::review::file_review(
+            &view.origin.review_scope(),
+            file,
+        )),
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: file.path.clone(),
-        absolute_path: view.repo_root.join(&file.path),
+        absolute_path: repository.map(|repository| repository.root.join(&file.path)),
         anchor_id: diff_file_anchor_id(&file.path),
         added: file.added,
         removed: file.removed,
         status: viewer_file_status(status),
-        can_open_in_editor: status != FileStatus::Deleted,
+        can_open_in_editor: repository.is_some() && status != FileStatus::Deleted,
         row_count: super::rows::viewer_file_row_count(
             selected_lines(file, identity.render_options.density),
             identity.render_options.layout,
@@ -382,7 +389,10 @@ mod tests {
     fn view() -> View {
         View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            repo_name: utils::project_name("git-tools"),
+            origin: crate::diffs::ViewOrigin::Repository(crate::diffs::RepositoryOrigin {
+                name: utils::project_name("git-tools"),
+                ..utils::diffs::repository_origin(&utils::diffs::view()).clone()
+            }),
             commits: vec![utils::diffs::commit_with(
                 "0123456789abcdef0123456789abcdef01234567",
                 "subject",
@@ -445,7 +455,7 @@ mod tests {
         renamed.cmd.lead = "gtl live ".into();
         renamed.cmd.range = "0123456..abcdef0".into();
         renamed.foot.cmd = "different command".into();
-        renamed.repo_root =
+        utils::diffs::repository_origin_mut(&mut renamed).root =
             utils::repository_root("//fixture.invalid/repositories/another-checkout");
         renamed.commits.clear();
         let mut other_identity = identity(ViewerDiffDensity::Compact);

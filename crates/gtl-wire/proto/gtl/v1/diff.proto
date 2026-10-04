@@ -14,6 +14,11 @@ service DiffService {
   rpc RenderMergeDiff(RenderMergeDiffRequest) returns (RenderMergeDiffResponse);
   rpc RenderSubrepositoryDiffs(RenderSubrepositoryDiffsRequest) returns (RenderSubrepositoryDiffsResponse);
   rpc RenderProjectRepositoryDiffs(RenderProjectRepositoryDiffsRequest) returns (RenderProjectRepositoryDiffsResponse);
+  rpc StoreDiffText(stream StoreDiffTextRequest) returns (StoreDiffTextResponse);
+  rpc RenderTextDiff(RenderTextDiffRequest) returns (RenderTextDiffResponse);
+  rpc PresentTextDiff(PresentTextDiffRequest) returns (PresentTextDiffResponse);
+  rpc ResolveRemoteDiff(ResolveRemoteDiffRequest) returns (ResolveRemoteDiffResponse);
+  rpc StoreRemoteDiff(stream StoreRemoteDiffRequest) returns (StoreRemoteDiffResponse);
 }
 
 message DiffTarget {
@@ -119,4 +124,81 @@ message RenderProjectRepositoryDiffsResponse {
     Artifact rendered = 2;
     Empty empty = 3;
   }
+}
+
+// One piece of UTF-8 diff text; the server concatenates pieces in order.
+message StoreDiffTextRequest {
+  bytes chunk = 1;
+}
+
+message StoreDiffTextResponse {
+  string text_id = 1;
+}
+
+message RenderTextDiffRequest {
+  string text_id = 1;
+  string label = 2;
+  optional string name = 3;
+}
+
+message RenderTextDiffResponse {
+  repeated Note notes = 1;
+  Artifact rendered = 2;
+}
+
+message PresentTextDiffRequest {
+  string text_id = 1;
+  string label = 2;
+  optional string name = 3;
+}
+
+message PresentTextDiffResponse {
+  DiffPresentation presentation = 1;
+}
+
+// Names the diff between two revisions of a hosted repository; a cached copy answers it unless
+// `refresh` is set.
+message ResolveRemoteDiffRequest {
+  string origin = 1;
+  string range = 2;
+  bool refresh = 3;
+}
+
+message ResolveRemoteDiffResponse {
+  oneof resolution {
+    StoredRemoteDiff stored = 1;
+    // The caller sends this request once and passes GitHub's answer to StoreRemoteDiff.
+    GitHubApiRequest fetch = 2;
+  }
+}
+
+message StoredRemoteDiff {
+  string text_id = 1;
+  string label = 2;
+}
+
+// One GET request to the github.com REST API.
+message GitHubApiRequest {
+  string path = 1;
+  string accept = 2;
+}
+
+// The first message carries `head`; the rest carry the response body in order.
+message StoreRemoteDiffRequest {
+  oneof part {
+    GitHubApiResponseHead head = 1;
+    bytes body_chunk = 2;
+  }
+}
+
+message StoreRemoteDiffResponse {
+  StoredRemoteDiff stored = 1;
+}
+
+// GitHub's answer to the request a ResolveRemoteDiffResponse named, including refusals.
+message GitHubApiResponseHead {
+  string origin = 1;
+  string range = 2;
+  uint32 status = 3;
+  optional uint64 rate_limit_remaining = 4;
 }

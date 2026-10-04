@@ -44,9 +44,8 @@ fn DiffPathCopyMenu(summary: ReadSignal<ViewerFileSummary>, popover_id: String) 
             summary.path.to_string_lossy().into_owned(),
             summary
                 .absolute_path
-                .as_path()
-                .to_string_lossy()
-                .into_owned(),
+                .as_ref()
+                .map(|path| path.as_path().to_string_lossy().into_owned()),
         )
     });
 
@@ -67,10 +66,12 @@ fn DiffPathCopyMenu(summary: ReadSignal<ViewerFileSummary>, popover_id: String) 
                         payload: relative_path,
                         popover_id: popover_id.clone(),
                     }
-                    DiffPathCopyAction {
-                        kind: DiffPathCopyKind::Absolute,
-                        payload: absolute_path,
-                        popover_id,
+                    if let Some(absolute_path) = absolute_path {
+                        DiffPathCopyAction {
+                            kind: DiffPathCopyKind::Absolute,
+                            payload: absolute_path,
+                            popover_id,
+                        }
                     }
                 }
             }

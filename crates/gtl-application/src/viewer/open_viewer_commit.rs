@@ -19,6 +19,9 @@ pub enum OpenViewerCommitError {
     #[error("commit is no longer on the active branch")]
     #[meta(failure = Failure::Changed)]
     Changed,
+    #[error("the snapshot has no repository")]
+    #[meta(failure = Failure::InvalidRequest { field: "scope".to_owned() })]
+    NoRepository,
     #[error(transparent)]
     #[meta(transparent)]
     Source(#[from] super::source::ViewerSourceError),
@@ -42,11 +45,18 @@ pub fn execute(
         ViewerCommitSearchScope::ActiveBranch(path) => path,
         ViewerCommitSearchScope::ActiveBranchSnapshot(identity) => {
             super::search_viewer_commits::commit_source(identity, state, settings)?
-                .repo_root
+                .origin
+                .repository()
+                .ok_or(OpenViewerCommitError::NoRepository)?
+                .root
                 .clone()
         }
         ViewerCommitSearchScope::Snapshot(identity) => {
             let snapshot = super::search_viewer_commits::commit_source(identity, state, settings)?;
+            let repository = snapshot
+                .origin
+                .repository()
+                .ok_or(OpenViewerCommitError::NoRepository)?;
             if !snapshot
                 .commits
                 .iter()
@@ -57,9 +67,11 @@ pub fn execute(
             return Ok(work::reserve_open(
                 state,
                 Recipe {
-                    source: RecipeSource::LocalRepo(snapshot.repo_root.clone()),
-                    op: RecipeOp::Diff {
-                        target: RecipeTarget::Commit { rev: revision },
+                    source: RecipeSource::LocalRepo {
+                        root: repository.root.clone(),
+                        op: RecipeOp::Diff {
+                            target: RecipeTarget::Commit { rev: revision },
+                        },
                     },
                     name: None,
                 },
@@ -75,9 +87,11 @@ pub fn execute(
     Ok(work::reserve_open(
         state,
         Recipe {
-            source: RecipeSource::LocalRepo(path),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Commit { rev: revision },
+            source: RecipeSource::LocalRepo {
+                root: path,
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Commit { rev: revision },
+                },
             },
             name: None,
         },

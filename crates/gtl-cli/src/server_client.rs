@@ -22,6 +22,50 @@ impl ServerClient {
         Ok(self.runtime.block_on(self.client.render_diff(request))?)
     }
 
+    pub(crate) fn store_diff_text(
+        &self,
+        text: &gtl_models::diffs::DiffText,
+    ) -> anyhow::Result<v1::StoreDiffTextResponse> {
+        Ok(self.runtime.block_on(self.client.store_diff_text(text))?)
+    }
+
+    pub(crate) fn render_text_diff(
+        &self,
+        request: v1::RenderTextDiffRequest,
+    ) -> anyhow::Result<v1::RenderTextDiffResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.render_text_diff(request))?)
+    }
+
+    pub(crate) fn present_text_diff(
+        &self,
+        request: v1::PresentTextDiffRequest,
+    ) -> anyhow::Result<v1::PresentTextDiffResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.present_text_diff(request))?)
+    }
+
+    pub(crate) fn resolve_remote_diff(
+        &self,
+        request: v1::ResolveRemoteDiffRequest,
+    ) -> anyhow::Result<v1::ResolveRemoteDiffResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.resolve_remote_diff(request))?)
+    }
+
+    pub(crate) fn store_remote_diff(
+        &self,
+        head: v1::GitHubApiResponseHead,
+        body: &[u8],
+    ) -> anyhow::Result<v1::StoreRemoteDiffResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.store_remote_diff(head, body))?)
+    }
+
     pub(crate) fn present_diff(
         &self,
         request: v1::PresentDiffRequest,

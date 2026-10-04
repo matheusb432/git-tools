@@ -658,6 +658,7 @@ pub struct StoredArtifact {
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryArtifactStore {
     pub artifacts: Arc<Mutex<HashMap<PathBuf, StoredArtifact>>>,
+    pub standalone: Arc<Mutex<HashMap<PathBuf, String>>>,
     pub range_hits: RangeHits,
 }
 
@@ -692,6 +693,20 @@ impl ArtifactStore for InMemoryArtifactStore {
             path: AbsoluteFilePath::try_new(path)?,
         })
     }
+    fn place_standalone(
+        &self,
+        store_root: &Path,
+        _generated_at: &MachineTimestamp,
+        html: &str,
+        _retained_max: usize,
+    ) -> anyhow::Result<PlacedArtifact> {
+        let path = store_root.join("standalone.html");
+        lock_or_recover(&self.standalone).insert(path.clone(), html.to_owned());
+        Ok(PlacedArtifact::Created {
+            path: AbsoluteFilePath::try_new(path)?,
+        })
+    }
+
     fn lookup_by_range(
         &self,
         _store_root: &Path,
@@ -737,7 +752,7 @@ impl HtmlRenderer for StubRenderer {
             .map(|view| {
                 format!(
                     "{}:{}:{}:{}:{}:{}",
-                    view.repo_name,
+                    view.origin.name(),
                     language,
                     theme,
                     options.layout(),
@@ -1448,5 +1463,18 @@ impl crate::ports::ProjectComparisonReader for ProjectComparisons {
         path: &gtl_models::paths::RepositoryRoot,
     ) -> anyhow::Result<Option<gtl_models::projects::comparison::ComparisonBranch>> {
         Ok(self.0.get(path).cloned())
+    }
+}
+
+/// Stored diff texts keyed by identity, standing in for the app-state database.
+#[derive(Debug, Default, Clone)]
+pub struct StoredDiffTexts(pub HashMap<gtl_models::diffs::DiffTextId, gtl_models::diffs::DiffText>);
+
+impl crate::ports::DiffTextReader for StoredDiffTexts {
+    fn diff_text(
+        &self,
+        id: &gtl_models::diffs::DiffTextId,
+    ) -> anyhow::Result<Option<gtl_models::diffs::DiffText>> {
+        Ok(self.0.get(id).cloned())
     }
 }

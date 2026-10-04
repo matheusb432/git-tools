@@ -18,7 +18,8 @@ use crate::SourceLineNumber;
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnifiedDiffLineKind {
-    /// A file header, mode change, rename marker, binary notice, or no-newline marker.
+    /// A file header, mode change, rename or copy marker, binary notice or patch, or no-newline
+    /// marker.
     Meta,
     /// A valid hunk header and its absolute old and new starting line numbers.
     Hunk {
@@ -54,11 +55,15 @@ pub enum UnifiedDiffLineKind {
 #[derive(Debug, Default)]
 pub struct UnifiedDiffLineClassifier {
     hunk_started: bool,
+    binary_patch_started: bool,
 }
 
 impl UnifiedDiffLineClassifier {
     /// Classifies `raw` and advances hunk state when it is a valid hunk header.
     pub fn classify(&mut self, raw: &str) -> UnifiedDiffLineKind {
+        if self.binary_patch_started {
+            return UnifiedDiffLineKind::Meta;
+        }
         if let Some((line_number_old, line_number_new)) = hunk_line_numbers(raw) {
             self.hunk_started = true;
             return UnifiedDiffLineKind::Hunk {
@@ -68,6 +73,8 @@ impl UnifiedDiffLineClassifier {
         }
 
         if raw.starts_with('\\') || (!self.hunk_started && is_file_metadata(raw)) {
+            // Encoded binary data follows the marker until the file ends.
+            self.binary_patch_started = raw == BINARY_PATCH_MARKER;
             return UnifiedDiffLineKind::Meta;
         }
 
@@ -79,6 +86,8 @@ impl UnifiedDiffLineClassifier {
     }
 }
 
+const BINARY_PATCH_MARKER: &str = "GIT binary patch";
+
 fn is_file_metadata(raw: &str) -> bool {
     raw.starts_with("index ")
         || raw.starts_with("--- ")
@@ -88,8 +97,12 @@ fn is_file_metadata(raw: &str) -> bool {
         || raw.starts_with("old mode")
         || raw.starts_with("new mode")
         || raw.starts_with("similarity ")
+        || raw.starts_with("dissimilarity ")
         || raw.starts_with("rename ")
+        || raw.starts_with("copy from ")
+        || raw.starts_with("copy to ")
         || raw.starts_with("Binary ")
+        || raw == BINARY_PATCH_MARKER
 }
 
 fn hunk_line_numbers(raw: &str) -> Option<(SourceLineNumber, SourceLineNumber)> {
@@ -135,6 +148,36 @@ mod tests {
             classifier.classify("--- heading"),
             UnifiedDiffLineKind::Removed
         );
+    }
+
+    #[test]
+    fn copy_and_dissimilarity_headers_are_metadata() {
+        let mut classifier = UnifiedDiffLineClassifier::default();
+
+        for header in [
+            "dissimilarity index 90%",
+            "copy from src/old.rs",
+            "copy to src/new.rs",
+        ] {
+            assert_eq!(classifier.classify(header), UnifiedDiffLineKind::Meta);
+        }
+    }
+
+    #[test]
+    fn binary_patch_data_is_metadata() {
+        let mut classifier = UnifiedDiffLineClassifier::default();
+
+        for line in [
+            "index 1111111..2222222 100644",
+            "GIT binary patch",
+            "literal 12",
+            "zcmZ?wbhEHbRA2y$+5oEnC",
+            "",
+            "@@ -1 +1 @@",
+            "+looks added",
+        ] {
+            assert_eq!(classifier.classify(line), UnifiedDiffLineKind::Meta);
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@ use gtl_models::{
 };
 
 use crate::{
-    diffs::{Cmd, Foot, View},
+    diffs::{Cmd, Foot, RepositoryOrigin, View, ViewOrigin},
     utils::commit_id_fixture,
 };
 
@@ -46,10 +46,12 @@ pub(crate) fn commit_with(id: &str, subject: &str, parents: &[&str]) -> Commit {
 pub(crate) fn view() -> View {
     View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-        repo_name: crate::utils::project_name("repo"),
-        repo_root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
-        branch: GitHead::Branch(crate::utils::branch_name("feature")),
-        upstream: crate::utils::git_revision("origin/main"),
+        origin: ViewOrigin::Repository(RepositoryOrigin {
+            name: crate::utils::project_name("repo"),
+            root: crate::utils::repository_root("//fixture.invalid/repositories/repo"),
+            branch: GitHead::Branch(crate::utils::branch_name("feature")),
+            upstream: crate::utils::git_revision("origin/main"),
+        }),
         commits: Vec::new(),
         files: Vec::new(),
         title: DiffViewTitle::Diff,
@@ -64,4 +66,12 @@ pub(crate) fn view() -> View {
         full_context: crate::diffs::FullContextDiffState::Unavailable,
         extension_filter: None,
     }
+}
+
+pub(crate) fn repository_origin(view: &View) -> &RepositoryOrigin {
+    view.origin.repository().unwrap()
+}
+
+pub(crate) fn repository_origin_mut(view: &mut View) -> &mut RepositoryOrigin {
+    view.origin.repository_mut().unwrap()
 }

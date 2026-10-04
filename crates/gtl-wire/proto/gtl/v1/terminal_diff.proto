@@ -15,6 +15,13 @@ service TerminalDiffService {
 message ReadTerminalDiffRequest {
   string working_directory = 1;
   DiffTarget target = 2;
+  // Reads stored diff text instead of a repository; the repository fields stay empty.
+  optional TerminalTextDiff text = 3;
+}
+
+message TerminalTextDiff {
+  string text_id = 1;
+  string label = 2;
 }
 
 message ReadTerminalDiffResponse {

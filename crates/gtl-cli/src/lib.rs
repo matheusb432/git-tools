@@ -20,6 +20,7 @@ pub mod preprocess;
 mod confirm;
 mod diff_viewer_client;
 mod failure;
+mod github_cli;
 mod output;
 mod server_client;
 #[cfg(test)]
@@ -95,7 +96,7 @@ fn run_data(command: &DataCommand) -> ExitCode {
 
 fn run_diff(args: DiffArgs) -> ExitCode {
     match args.sub {
-        Some(DiffSub::Tui(args)) => run_diff_tui(args),
+        Some(DiffSub::Tui(args)) => run_diff_tui(*args),
         Some(DiffSub::Merge(MergeArgs {
             repo_path,
             base,
@@ -103,6 +104,20 @@ fn run_diff(args: DiffArgs) -> ExitCode {
         })) => diff_exit(commands::merge_diff::run(repo_path, base.as_deref(), raw)),
         None => {
             let raw = args.raw;
+            if let Some(patch) = &args.patch {
+                return diff_exit(commands::text_diff::run(
+                    patch,
+                    args.target.name.as_deref(),
+                    raw,
+                ));
+            }
+            if let Some(origin) = args.remote {
+                return diff_exit(commands::remote_diff::run(
+                    &remote_diff_request(origin, args.target.revision.target, args.refresh),
+                    args.target.name.as_deref(),
+                    raw,
+                ));
+            }
             if let Some(theme) = args.target.set_theme {
                 return run_set_theme(theme);
             }
@@ -124,10 +139,50 @@ fn run_diff(args: DiffArgs) -> ExitCode {
     }
 }
 
+enum TerminalDiffSource {
+    Repository {
+        id: Option<ProjectId>,
+        target: DiffTarget,
+    },
+    Patch(std::path::PathBuf),
+    Remote(v1::ResolveRemoteDiffRequest),
+}
+
+fn terminal_diff_source(
+    args: cli::DiffTuiArgs,
+) -> Result<TerminalDiffSource, DiffTargetParseError> {
+    if let Some(path) = args.patch {
+        return Ok(TerminalDiffSource::Patch(path));
+    }
+    if let Some(origin) = args.remote {
+        return Ok(TerminalDiffSource::Remote(remote_diff_request(
+            origin,
+            args.revision.target,
+            args.refresh,
+        )));
+    }
+    Ok(TerminalDiffSource::Repository {
+        id: args.repository.id,
+        target: diff_target(args.revision)?,
+    })
+}
+
+fn remote_diff_request(
+    origin: String,
+    range: Option<String>,
+    refresh: bool,
+) -> v1::ResolveRemoteDiffRequest {
+    v1::ResolveRemoteDiffRequest {
+        origin,
+        range: range.unwrap_or_default(),
+        refresh,
+    }
+}
+
 fn run_diff_tui(args: cli::DiffTuiArgs) -> ExitCode {
     use std::io::IsTerminal as _;
-    let target = match diff_target(args.revision) {
-        Ok(target) => target,
+    let source = match terminal_diff_source(args) {
+        Ok(source) => source,
         Err(error) => {
             eprintln!("diff tui: {error}");
             return ExitCode::Usage;
@@ -137,9 +192,13 @@ fn run_diff_tui(args: cli::DiffTuiArgs) -> ExitCode {
         eprintln!("diff tui: requires an interactive terminal on stdin and stdout");
         return ExitCode::Usage;
     }
-    match commands::repository_path(args.repository.id.as_ref())
-        .and_then(|root| commands::diff_tui::run(&root, &target))
-    {
+    let request = match source {
+        TerminalDiffSource::Patch(path) => commands::diff_tui::text_request(&path),
+        TerminalDiffSource::Remote(request) => commands::diff_tui::remote_request(&request),
+        TerminalDiffSource::Repository { id, target } => commands::repository_path(id.as_ref())
+            .map(|root| commands::diff_tui::repository_request(&root, &target)),
+    };
+    match request.and_then(commands::diff_tui::run) {
         Ok(()) => ExitCode::Ok,
         Err(error) => fail("diff tui", &error),
     }

@@ -84,7 +84,7 @@ fn seed_live_tabs(
         history_id: None,
         comparison_name: None,
         label: gtl_models::recipes::RecipeLabel::Repository {
-            repository: recipe.cwd().project_name(),
+            repository: recipe.source_name(),
         },
         recipe,
         pinned: false,
@@ -104,10 +104,12 @@ fn working_tree_recipe(
 ) -> gtl_application::recipes::Recipe {
     use gtl_application::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
     Recipe {
-        source: RecipeSource::LocalRepo(repository),
-        op: RecipeOp::Diff {
-            target: RecipeTarget::Base {
-                rev: gtl_models::git::GitRevision::head(),
+        source: RecipeSource::LocalRepo {
+            root: repository,
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Base {
+                    rev: gtl_models::git::GitRevision::head(),
+                },
             },
         },
         name: None,
@@ -120,9 +122,11 @@ fn unpushed_recipe(
 ) -> gtl_application::recipes::Recipe {
     use gtl_application::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
     Recipe {
-        source: RecipeSource::LocalRepo(repository),
-        op: RecipeOp::Diff {
-            target: RecipeTarget::Unpushed { pinned: None },
+        source: RecipeSource::LocalRepo {
+            root: repository,
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
         },
         name: None,
     }

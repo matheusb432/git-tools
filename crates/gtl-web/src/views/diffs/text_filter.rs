@@ -243,7 +243,7 @@ mod tests {
     use crate::test_support::{TestResult, viewer_active_view, viewer_file_summary, viewer_tab_id};
 
     fn source() -> TestResult<ViewerActiveView> {
-        let mut view = viewer_active_view(viewer_tab_id(3)?)?;
+        let mut view = viewer_active_view(viewer_tab_id(3)?);
         view.files = vec![
             viewer_file_summary(0, "src/a.rs", ViewerFileStatus::Modified, 1, 1)?,
             viewer_file_summary(1, "src/b.rs", ViewerFileStatus::Added, 2, 0)?,

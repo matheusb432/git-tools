@@ -138,6 +138,7 @@ fn run_recipe(state: &AppState, mut work: ReservedRecipeWork) {
         &state.git,
         &state.database,
         &state.database,
+        &state.database,
     );
     match work::publish_recipe(&state.viewer, work) {
         Ok(RecipePublication::Published { history }) => {

@@ -7,7 +7,7 @@ use gtl_models::{
 
 use crate::{
     diffs::{
-        PinnedRange, View,
+        PinnedRange, RepositoryOrigin, View, ViewOrigin,
         assemble::{DiffData, assemble},
         range::DiffRanges,
         range_view::RangeView,
@@ -65,10 +65,12 @@ pub(super) fn build(
 
     let view = View {
         file_filter: crate::diffs::file_filter::DiffFileFilter::new(spec.clone(), filter.clone()),
-        repo_name,
-        repo_root: top.clone(),
-        branch,
-        upstream: base.clone(),
+        origin: ViewOrigin::Repository(RepositoryOrigin {
+            name: repo_name,
+            root: top.clone(),
+            branch,
+            upstream: base.clone(),
+        }),
         title: range_view.title,
         cmd: range_view.cmd,
         foot: range_view.foot,

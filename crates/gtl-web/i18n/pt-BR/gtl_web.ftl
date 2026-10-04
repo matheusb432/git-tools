@@ -181,6 +181,17 @@ failure-project-commit-count-unavailable = O Git não conseguiu contar os commit
 failure-repository-not-a-repository = { $path } não está dentro de um repositório Git.
 failure-repository-no-repositories = Nenhum repositório Git foi encontrado em { $root }.
 failure-repository-search-failed = Não foi possível procurar repositórios em { $path }.
+failure-diff-text-too-large = O texto do diff tem mais de { $mebibytes_max } MiB.
+failure-diff-text-no-files = O texto do diff não tem seções de arquivo `diff --git`.
+failure-diff-text-invalid-file-header = O texto do diff tem um cabeçalho de arquivo ilegível.
+failure-diff-text-duplicate-path = O texto do diff lista { $path } mais de uma vez.
+failure-diff-text-missing = Este texto de diff não está mais armazenado.
+failure-remote-diff-unsupported-origin = A origem deve ser uma URL HTTPS ou SSH de um repositório do github.com.
+failure-remote-diff-invalid-range = O intervalo deve ser `BASE...HEAD`; o GitHub compara HEAD com a base de merge das duas revisões.
+failure-remote-diff-unauthenticated = A CLI do GitHub não está autenticada. Execute `gh auth login` e tente novamente.
+failure-remote-diff-not-found = O GitHub não encontrou esse repositório ou essas revisões para a conta autenticada.
+failure-remote-diff-rate-limited = O limite de requisições da API do GitHub se esgotou. Tente novamente mais tarde.
+failure-remote-diff-rejected = O GitHub recusou a comparação (HTTP { $status }).
 
 ## Viewer client errors
 
@@ -566,6 +577,7 @@ diff-rows-invalid = O servidor retornou linhas de diff inválidas. Tente carrega
 
 history-kind-diff = Diff
 history-kind-merge-diff = Diff de merge
+history-kind-text = Texto
 history-filter-all = Todos os projetos
 history-filter-unassociated = Sem projeto
 history-project = Projeto

@@ -58,6 +58,7 @@ pub fn execute(
     git: &impl GitClient,
     filters: &impl crate::ports::ExtensionFilterReader,
     comparisons: &impl crate::ports::ProjectComparisonReader,
+    texts: &impl crate::ports::DiffTextReader,
 ) -> Result<PrepareRecipeOk, PrepareRecipeError> {
     let PrepareRecipe {
         mut recipe,
@@ -74,19 +75,23 @@ pub fn execute(
         return Ok(PrepareRecipeOk::Broken { state });
     }
 
-    if let crate::recipes::RecipeOp::Diff {
-        target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
-    } = &recipe.op
+    if let crate::recipes::RecipeSource::LocalRepo {
+        root,
+        op:
+            op @ crate::recipes::RecipeOp::Diff {
+                target: crate::recipes::RecipeTarget::Unpushed { pinned: None },
+            },
+    } = &mut recipe.source
     {
-        let comparison = crate::projects::comparison::resolve(&recipe.cwd(), git, comparisons)
+        let comparison = crate::projects::comparison::resolve(root, git, comparisons)
             .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
             .map_err(compute_recipe::ComputeRecipeError::from)?;
         let pin = comparison
-            .pin(&recipe.cwd(), git)
+            .pin(root, git)
             .map_err(crate::diffs::compute_diff::ComputeDiffError::from)
             .map_err(compute_recipe::ComputeRecipeError::from)?;
         comparison_name = Some(comparison.name());
-        recipe.op = crate::recipes::RecipeOp::Diff {
+        *op = crate::recipes::RecipeOp::Diff {
             target: crate::recipes::RecipeTarget::Unpushed { pinned: Some(pin) },
         };
     }
@@ -99,10 +104,13 @@ pub fn execute(
         git,
         filters,
         comparisons,
+        texts,
     )?;
     if let Some(name) = &comparison_name {
         // The titlebar names the compared branch as the tab label does, not the pinned commit.
-        view.upstream = name.clone();
+        if let Some(repository) = view.origin.repository_mut() {
+            repository.upstream = name.clone();
+        }
     }
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
@@ -114,7 +122,7 @@ pub fn execute(
         comparison_name,
         label_parts: RecipeLabelParts::from_view(&recipe, &view),
         recipe,
-        repo_name: view.repo_name.clone(),
+        repo_name: view.origin.name().clone(),
         range_label: view.cmd.range.clone(),
     });
     Ok(PrepareRecipeOk::Publish {
@@ -160,6 +168,7 @@ mod tests {
             },
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
@@ -180,13 +189,14 @@ mod tests {
             &source(),
             &crate::utils::SavedExtensionFilters::default(),
             &crate::utils::ProjectComparisons::default(),
+            &crate::utils::StoredDiffTexts::default(),
         )
         .unwrap();
 
         assert!(matches!(
             response,
             PrepareRecipeOk::Publish { view, history, .. }
-                if history.recipe.is_pinned() && view.upstream.as_ref() == "main"
+                if history.recipe.is_pinned() && crate::utils::diffs::repository_origin(&view).upstream.as_ref() == "main"
         ));
     }
 }

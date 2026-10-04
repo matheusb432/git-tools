@@ -409,7 +409,7 @@ mod tests {
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path(path)?,
-            absolute_path: absolute_file_path(format!("/repo/{path}"))?,
+            absolute_path: Some(absolute_file_path(format!("/repo/{path}"))?),
             anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
             added: DiffLineCount::new(added),
             removed: DiffLineCount::new(removed),

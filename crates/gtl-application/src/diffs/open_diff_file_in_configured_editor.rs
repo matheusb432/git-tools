@@ -123,9 +123,13 @@ pub fn execute(
         return Err(OpenDiffFileInConfiguredEditorError::DiffFileDeleted);
     }
 
+    let repository = current_view
+        .origin
+        .repository()
+        .ok_or(OpenDiffFileInConfiguredEditorError::DiffFileUnavailable)?;
     let repository_root = RepositoryRoot::try_new(canonicalize_required(
         file_system,
-        current_view.repo_root.as_ref(),
+        repository.root.as_ref(),
     )?)
     .map_err(|error| OpenDiffFileInConfiguredEditorError::FileSystem(error.to_string()))?;
     let candidate_file_path = repository_root.join(diff_file_path);
@@ -322,7 +326,10 @@ mod tests {
     fn view<'path>(paths_and_statuses: impl IntoIterator<Item = (&'path str, FileStatus)>) -> View {
         View {
             file_filter: crate::diffs::file_filter::DiffFileFilter::default(),
-            repo_root: utils::repository_root("//fixture.invalid/repositories/repos/git-tools"),
+            origin: crate::diffs::ViewOrigin::Repository(crate::diffs::RepositoryOrigin {
+                root: utils::repository_root("//fixture.invalid/repositories/repos/git-tools"),
+                ..utils::diffs::repository_origin(&utils::diffs::view()).clone()
+            }),
             files: paths_and_statuses
                 .into_iter()
                 .map(|(path, status)| FileDiff {

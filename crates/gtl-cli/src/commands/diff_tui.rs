@@ -28,11 +28,39 @@ use ratatui::{
 
 use crate::cli::DiffTarget;
 
-pub(crate) fn run(root: &Path, target: &DiffTarget) -> anyhow::Result<()> {
-    let request = v1::ReadTerminalDiffRequest {
+pub(crate) fn repository_request(root: &Path, target: &DiffTarget) -> v1::ReadTerminalDiffRequest {
+    v1::ReadTerminalDiffRequest {
         working_directory: root.to_string_lossy().into_owned(),
         target: Some(super::diff::grpc_target(target)),
-    };
+        text: None,
+    }
+}
+
+/// Uploads the diff text at `path` and requests it instead of a repository.
+pub(crate) fn text_request(path: &Path) -> anyhow::Result<v1::ReadTerminalDiffRequest> {
+    let input = super::text_diff::read(&crate::cli::PatchSource::File(path.to_path_buf()))?;
+    let stored = crate::server_client::ServerClient::connect()?.store_diff_text(&input.text)?;
+    Ok(stored_text_request(stored.text_id, input.label))
+}
+
+/// Resolves a remote diff and requests it instead of a repository.
+pub(crate) fn remote_request(
+    request: &v1::ResolveRemoteDiffRequest,
+) -> anyhow::Result<v1::ReadTerminalDiffRequest> {
+    let client = crate::server_client::ServerClient::connect()?;
+    let stored = super::remote_diff::resolve(&client, request)?;
+    Ok(stored_text_request(stored.text_id, stored.label))
+}
+
+fn stored_text_request(text_id: String, label: String) -> v1::ReadTerminalDiffRequest {
+    v1::ReadTerminalDiffRequest {
+        working_directory: String::new(),
+        target: None,
+        text: Some(v1::TerminalTextDiff { text_id, label }),
+    }
+}
+
+pub(crate) fn run(request: v1::ReadTerminalDiffRequest) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;

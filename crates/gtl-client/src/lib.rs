@@ -208,6 +208,80 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
+    /// Uploads `text` in bounded pieces and returns the identity the server stored it under.
+    pub async fn store_diff_text(
+        &self,
+        text: &gtl_models::diffs::DiffText,
+    ) -> Result<v1::StoreDiffTextResponse, ClientError> {
+        let chunks = text
+            .as_str()
+            .as_bytes()
+            .chunks(gtl_wire::diff_text::CHUNK_BYTES_MAX)
+            .map(|chunk| v1::StoreDiffTextRequest {
+                chunk: chunk.to_vec(),
+            })
+            .collect::<Vec<_>>();
+        self.diff_client()
+            .store_diff_text(tokio_stream::iter(chunks))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn render_text_diff(
+        &self,
+        request: v1::RenderTextDiffRequest,
+    ) -> Result<v1::RenderTextDiffResponse, ClientError> {
+        self.diff_client()
+            .render_text_diff(request)
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn present_text_diff(
+        &self,
+        request: v1::PresentTextDiffRequest,
+    ) -> Result<v1::PresentTextDiffResponse, ClientError> {
+        self.diff_client()
+            .present_text_diff(request)
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn resolve_remote_diff(
+        &self,
+        request: v1::ResolveRemoteDiffRequest,
+    ) -> Result<v1::ResolveRemoteDiffResponse, ClientError> {
+        self.diff_client()
+            .resolve_remote_diff(request)
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    /// Uploads GitHub's answer in bounded pieces after its `head`.
+    pub async fn store_remote_diff(
+        &self,
+        head: v1::GitHubApiResponseHead,
+        body: &[u8],
+    ) -> Result<v1::StoreRemoteDiffResponse, ClientError> {
+        use v1::store_remote_diff_request::Part;
+        let parts = std::iter::once(Part::Head(head))
+            .chain(
+                body.chunks(gtl_wire::diff_text::CHUNK_BYTES_MAX)
+                    .map(|chunk| Part::BodyChunk(chunk.to_vec())),
+            )
+            .map(|part| v1::StoreRemoteDiffRequest { part: Some(part) })
+            .collect::<Vec<_>>();
+        self.diff_client()
+            .store_remote_diff(tokio_stream::iter(parts))
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
     pub async fn present_diff(
         &self,
         request: v1::PresentDiffRequest,
@@ -755,6 +829,41 @@ mod tests {
 
     #[tonic::async_trait]
     impl DiffService for TestDiff {
+        async fn store_diff_text(
+            &self,
+            _request: Request<tonic::Streaming<v1::StoreDiffTextRequest>>,
+        ) -> Result<Response<v1::StoreDiffTextResponse>, Status> {
+            Err(Status::unimplemented("store_diff_text"))
+        }
+
+        async fn render_text_diff(
+            &self,
+            _request: Request<v1::RenderTextDiffRequest>,
+        ) -> Result<Response<v1::RenderTextDiffResponse>, Status> {
+            Err(Status::unimplemented("render_text_diff"))
+        }
+
+        async fn present_text_diff(
+            &self,
+            _request: Request<v1::PresentTextDiffRequest>,
+        ) -> Result<Response<v1::PresentTextDiffResponse>, Status> {
+            Err(Status::unimplemented("present_text_diff"))
+        }
+
+        async fn resolve_remote_diff(
+            &self,
+            _request: Request<v1::ResolveRemoteDiffRequest>,
+        ) -> Result<Response<v1::ResolveRemoteDiffResponse>, Status> {
+            Err(Status::unimplemented("resolve_remote_diff"))
+        }
+
+        async fn store_remote_diff(
+            &self,
+            _request: Request<tonic::Streaming<v1::StoreRemoteDiffRequest>>,
+        ) -> Result<Response<v1::StoreRemoteDiffResponse>, Status> {
+            Err(Status::unimplemented("store_remote_diff"))
+        }
+
         async fn present_diff(
             &self,
             _request: Request<PresentDiffRequest>,

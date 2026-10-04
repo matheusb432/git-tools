@@ -63,6 +63,59 @@ pub fn place(
     })
 }
 
+/// Write `html` directly under the store root without a sidecar, reusing an artifact with the same
+/// content hash, then remove the oldest standalone artifacts beyond `retained_max`.
+pub fn place_standalone(
+    store_root: &Path,
+    generated_at: &MachineTimestamp,
+    html: &str,
+    retained_max: usize,
+) -> anyhow::Result<PlacedArtifact> {
+    ensure_gitignore(store_root)?;
+    let hash = content_hash(html);
+    let mut stored = standalone_html_paths(store_root)?;
+    if let Some(path) = stored
+        .iter()
+        .find(|path| html_content_hash(path).as_ref() == Some(&hash))
+    {
+        return Ok(PlacedArtifact::Reused {
+            path: AbsoluteFilePath::try_new(path.clone())
+                .context("stored artifact path is not absolute")?,
+        });
+    }
+    let html_path = store_root.join(format!("{}-{hash}.html", filename_datetime(generated_at)));
+    atomic_write(&html_path, html.as_bytes())?;
+    stored.push(html_path.clone());
+    stored.sort();
+    let excess = stored.len().saturating_sub(retained_max);
+    for path in stored
+        .iter()
+        .take(excess)
+        .filter(|path| **path != html_path)
+    {
+        fs::remove_file(path).with_context(|| format!("remove {}", path.display()))?;
+    }
+    Ok(PlacedArtifact::Created {
+        path: AbsoluteFilePath::try_new(html_path).context("artifact path is not absolute")?,
+    })
+}
+
+fn standalone_html_paths(store_root: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    Ok(fs::read_dir(store_root)
+        .with_context(|| format!("read {}", store_root.display()))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| html_content_hash(path).is_some())
+        .collect())
+}
+
+fn html_content_hash(path: &Path) -> Option<ArtifactContentHash> {
+    path.extension()
+        .is_some_and(|extension| extension == "html")
+        .then_some(())?;
+    content_hash_from_stem(path.file_stem()?.to_str()?)
+}
+
 fn filename_datetime(generated_at: &MachineTimestamp) -> String {
     let datetime: String = generated_at
         .as_ref()
@@ -301,6 +354,30 @@ mod tests {
 
     fn commit_id_text(prefix: &str) -> String {
         prefix.chars().cycle().take(40).collect()
+    }
+
+    #[test]
+    fn standalone_placement_reuses_identical_html_and_keeps_the_newest_artifacts()
+    -> anyhow::Result<()> {
+        let store = tempfile::tempdir()?;
+        let place = |html: &str, generated_at: &str| {
+            place_standalone(
+                store.path(),
+                &MachineTimestamp::try_from(generated_at)?,
+                html,
+                2,
+            )
+        };
+
+        let first = place("<p>first</p>", "2026-07-03T00:01:00Z")?;
+        assert!(place("<p>first</p>", "2026-07-03T00:02:00Z")?.is_reused());
+        let second = place("<p>second</p>", "2026-07-03T00:03:00Z")?;
+        let third = place("<p>third</p>", "2026-07-03T00:04:00Z")?;
+
+        assert!(!first.path().exists());
+        assert!(second.path().exists() && third.path().exists());
+        assert_eq!(fs::read_to_string(third.path().as_path())?, "<p>third</p>");
+        Ok(())
     }
 
     #[test]

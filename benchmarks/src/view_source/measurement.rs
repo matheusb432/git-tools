@@ -255,7 +255,11 @@ fn fetch_deferred_full_context(view: View, git: HybridGitClient) -> Result<View>
             return Err(anyhow!("full-context source is already loaded"));
         }
     };
-    let request = FetchFullContextDiff::new(&view.repo_root, source);
+    let repository = view
+        .origin
+        .repository()
+        .ok_or_else(|| anyhow!("full-context source has no repository"))?;
+    let request = FetchFullContextDiff::new(&repository.root, source);
     let full_context = fetch_full_context_diff::execute(&request, &git)?;
     view.with_full_context(full_context).map_err(Into::into)
 }

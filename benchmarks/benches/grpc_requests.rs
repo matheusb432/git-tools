@@ -406,12 +406,14 @@ fn viewer_recipe_batch(repository_path: &str) -> RecipeBatch {
     RecipeBatch {
         batch_id: RecipeBatchId::generate(),
         recipes: vec![Recipe {
-            source: RecipeSource::LocalRepo(require(
-                RepositoryRoot::try_new(PathBuf::from(repository_path)),
-                "creating the benchmark viewer repository root",
-            )),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
+            source: RecipeSource::LocalRepo {
+                root: require(
+                    RepositoryRoot::try_new(PathBuf::from(repository_path)),
+                    "creating the benchmark viewer repository root",
+                ),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             name: None,
         }],

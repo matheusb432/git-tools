@@ -24,10 +24,11 @@ pub(super) fn prepare(
                 .ok_or(PushFailure::NothingToPush)?
                 .id
                 .clone();
+            let origin = view.origin.repository().ok_or(PushFailure::NothingToPush)?;
             (
-                view.repo_root.clone(),
+                origin.root.clone(),
                 Some(commit),
-                Some(view.branch.clone()),
+                Some(origin.branch.clone()),
             )
         }
     };

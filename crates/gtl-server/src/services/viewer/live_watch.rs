@@ -103,6 +103,7 @@ async fn check(state: &AppState, tab_id: ViewerTabId) -> Result<bool, LiveCheckE
             &worker.git,
             &worker.database,
             &worker.database,
+            &worker.database,
         )
     })
     .await??;

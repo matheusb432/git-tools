@@ -46,8 +46,9 @@ pub(super) fn load_for_density(
 ) -> anyhow::Result<View> {
     if density == DiffDensity::Full
         && let FullContextDiffState::Deferred(source) = &view.full_context
+        && let Some(repository) = view.origin.repository()
     {
-        let request = FetchFullContextDiff::new(&view.repo_root, source);
+        let request = FetchFullContextDiff::new(&repository.root, source);
         let full_context = fetch_full_context_diff::execute(&request, git)?;
         return Ok(view.with_full_context(full_context)?);
     }

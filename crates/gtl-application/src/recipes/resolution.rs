@@ -17,9 +17,9 @@ pub(crate) fn build_resolved(
     name: Option<ProjectName>,
     git: &impl GitClient,
 ) -> Recipe {
+    let op = pin_operation(&repo_top, operation, git);
     Recipe {
-        op: pin_operation(&repo_top, operation, git),
-        source: RecipeSource::LocalRepo(repo_top),
+        source: RecipeSource::LocalRepo { root: repo_top, op },
         name,
     }
 }

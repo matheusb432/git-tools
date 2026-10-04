@@ -49,7 +49,7 @@ fn loaded_file() -> TestResult<ClientDiffFile> {
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/rows.rs")?,
-            absolute_path: absolute_file_path("/repo/src/rows.rs")?,
+            absolute_path: Some(absolute_file_path("/repo/src/rows.rs")?),
             anchor_id: "f-src-rows-rs".to_owned(),
             added: DiffLineCount::new(u64::try_from(ROW_COUNT)?),
             removed: DiffLineCount::default(),

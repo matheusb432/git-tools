@@ -66,7 +66,7 @@ mod tests {
     use super::BuildProjectRecipes;
     use crate::{
         projects::build_recipes,
-        recipes::{RecipeOp, RecipeSource, RecipeTarget},
+        recipes::{RecipeOp, RecipeTarget},
         utils::ScriptedGitClient,
     };
 
@@ -118,13 +118,13 @@ mod tests {
             [Some("api"), Some("web")]
         );
         assert_eq!(
-            recipes[0].source,
-            RecipeSource::LocalRepo(crate::utils::repository_root(
+            recipes[0].cwd(),
+            Some(&crate::utils::repository_root(
                 "//fixture.invalid/repositories/real/api"
             ))
         );
         assert_eq!(
-            recipes[0].op,
+            recipes[0].op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(crate::utils::pinned_range("api-base", "api-head"))
@@ -158,7 +158,7 @@ mod tests {
         .recipes;
 
         assert_eq!(
-            recipes[0].op,
+            recipes[0].op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None }
             }

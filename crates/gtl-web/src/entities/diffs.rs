@@ -29,5 +29,6 @@ pub(crate) fn recipe_kind_label(
     match kind {
         ViewerRecipeKind::Diff => t!(language, "history-kind-diff"),
         ViewerRecipeKind::MergeDiff => t!(language, "history-kind-merge-diff"),
+        ViewerRecipeKind::Text => t!(language, "history-kind-text"),
     }
 }

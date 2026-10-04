@@ -20,13 +20,15 @@ struct HistoryCopy<'record> {
 enum HistoryCopyKind {
     Diff,
     MergeDiff,
+    Text,
 }
 
 /// Formats the stable, complete history record copied by the viewer.
 pub fn format(record: &RecentRenderRecord) -> Result<String, serde_json::Error> {
-    let kind = match &record.recipe.op {
-        RecipeOp::Diff { .. } => HistoryCopyKind::Diff,
-        RecipeOp::MergeDiff { .. } => HistoryCopyKind::MergeDiff,
+    let kind = match record.recipe.op() {
+        Some(RecipeOp::Diff { .. }) => HistoryCopyKind::Diff,
+        Some(RecipeOp::MergeDiff { .. }) => HistoryCopyKind::MergeDiff,
+        None => HistoryCopyKind::Text,
     };
     serde_json::to_string_pretty(&HistoryCopy {
         id: record.id,
@@ -58,12 +60,14 @@ mod tests {
             range_label: "main...release".to_owned(),
             rendered_at: "2026-08-09T10:00:00Z".try_into().unwrap(),
             recipe: Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root(
-                    "//fixture.invalid/repositories/repos/git-tools",
-                )),
-                op: RecipeOp::MergeDiff {
-                    base: Some(crate::utils::git_revision("main")),
-                    pinned: None,
+                source: RecipeSource::LocalRepo {
+                    root: crate::utils::repository_root(
+                        "//fixture.invalid/repositories/repos/git-tools",
+                    ),
+                    op: RecipeOp::MergeDiff {
+                        base: Some(crate::utils::git_revision("main")),
+                        pinned: None,
+                    },
                 },
                 name: Some(crate::utils::project_name("release")),
             },

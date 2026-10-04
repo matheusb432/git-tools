@@ -5,7 +5,8 @@
 use dioxus::CapturedError;
 use gtl_models::{
     failure::{
-        Failure, ProjectFailure, PushFailure, RepositoryFailure, SettingsFailure, ViewerFailure,
+        DiffTextFailure, Failure, ProjectFailure, PushFailure, RemoteDiffFailure,
+        RepositoryFailure, SettingsFailure, ViewerFailure,
     },
     settings::ViewerLanguage,
 };
@@ -30,10 +31,29 @@ pub(crate) const fn failure_severity(failure: &Failure) -> ToastKind {
         Failure::Settings(failure) => settings_severity(failure),
         Failure::Viewer(failure) => viewer_severity(failure),
         Failure::Project(failure) => project_severity(failure),
-        Failure::Repository(RepositoryFailure::SearchFailed { .. }) => ToastKind::Error,
+        Failure::Repository(RepositoryFailure::SearchFailed { .. })
+        | Failure::DiffText(
+            DiffTextFailure::TooLarge { .. }
+            | DiffTextFailure::NoFiles
+            | DiffTextFailure::InvalidFileHeader { .. }
+            | DiffTextFailure::DuplicatePath { .. },
+        ) => ToastKind::Error,
         Failure::Repository(
             RepositoryFailure::NotARepository { .. } | RepositoryFailure::NoRepositories { .. },
-        ) => ToastKind::Warn,
+        )
+        | Failure::DiffText(DiffTextFailure::Missing) => ToastKind::Warn,
+        Failure::RemoteDiff(failure) => remote_diff_severity(failure),
+    }
+}
+
+const fn remote_diff_severity(failure: &RemoteDiffFailure) -> ToastKind {
+    match failure {
+        RemoteDiffFailure::RateLimited => ToastKind::Warn,
+        RemoteDiffFailure::UnsupportedOrigin
+        | RemoteDiffFailure::InvalidRange
+        | RemoteDiffFailure::Unauthenticated
+        | RemoteDiffFailure::NotFound
+        | RemoteDiffFailure::Rejected { .. } => ToastKind::Error,
     }
 }
 

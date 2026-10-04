@@ -6,6 +6,7 @@
 mod artifact_store;
 mod clock;
 mod diff_review_reader;
+mod diff_text_reader;
 mod diff_viewer_client;
 mod extension_filter_store;
 mod file_system_client;
@@ -20,6 +21,7 @@ mod user_settings;
 pub use artifact_store::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, PlacedArtifact};
 pub use clock::Clock;
 pub use diff_review_reader::DiffReviewReader;
+pub use diff_text_reader::DiffTextReader;
 pub use diff_viewer_client::{
     DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerClient,
 };

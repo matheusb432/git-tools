@@ -156,4 +156,8 @@ impl<F: crate::ports::ExtensionFilterReader> crate::ports::ExtensionFilterReader
             None => self.saved.extension_filter(repository),
         }
     }
+
+    fn text_extension_filter(&self) -> ExtensionFilter {
+        self.tab_filter.clone().unwrap_or_default()
+    }
 }

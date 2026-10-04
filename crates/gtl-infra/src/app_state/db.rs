@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 22]> = LazyLock::new(|| {
+pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 26]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -269,6 +269,16 @@ pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 22]> = LazyLock::new(|
         )),
         M::up(include_str!(
             "../../db/migrations/0022_diff_file_reviews.sql"
+        )),
+        M::up(include_str!("../../db/migrations/0023_diff_texts.sql")),
+        M::up(include_str!(
+            "../../db/migrations/0024_diff_text_file_reviews.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0025_text_render_sources.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0026_github_compare_diffs.sql"
         )),
     ]
 });
@@ -395,6 +405,55 @@ mod tests {
             barrier.wait();
             open_app_db(&root).map(|_| ())
         })
+    }
+
+    #[test]
+    fn migration_admits_text_sources_and_preserves_history() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        Migrations::from_slice(&MIGRATIONS_SLICE[..24])
+            .to_latest(&mut connection)
+            .unwrap();
+        connection.execute_batch(r"
+            INSERT INTO render_sources (id, kind, value, created_at)
+            VALUES (7, 'directory', '//fixture.invalid/repositories/repos/project', '2026-09-25T00:00:00Z');
+            INSERT INTO recent_renders (id, source_id, operation_id, target_id, pinned_base, pinned_head, repo_name, range_label, rendered_at)
+            VALUES (1, 7, 1, 1, 'base', 'head', 'project', 'base..head', '2026-09-25T00:00:00Z');
+        ").unwrap();
+
+        MIGRATIONS.to_latest(&mut connection).unwrap();
+
+        let preserved: (String, String) = connection
+            .query_row(
+                "SELECT s.value, r.range_label FROM recent_renders r
+                 JOIN render_sources s ON s.id = r.source_id WHERE r.id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            preserved,
+            (
+                "//fixture.invalid/repositories/repos/project".into(),
+                "base..head".into()
+            )
+        );
+        connection
+            .execute_batch(&format!(
+                "INSERT INTO render_sources (kind, value, created_at)
+                 VALUES ('text', '{}', '2026-09-26T00:00:00Z');
+                 INSERT INTO recent_renders (source_id, operation_id, repo_name, range_label, rendered_at)
+                 VALUES (last_insert_rowid(), (SELECT id FROM render_operations WHERE name = 'text'),
+                         'review.diff', 'review.diff', '2026-09-26T00:00:00Z');",
+                "a".repeat(64)
+            ))
+            .unwrap();
+        let next_id: i64 = connection
+            .query_row("SELECT max(id) FROM render_sources", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(next_id, 8);
     }
 
     #[test]

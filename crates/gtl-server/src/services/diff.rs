@@ -1,11 +1,16 @@
 use gtl_application::{
     diffs::{
         DiffTarget, DiffTargetRequest, RepoRef,
+        remote_diff::{GitHubApiResponse, StoredRemoteDiff},
         render_diff::{self, RenderDiff, RenderDiffOk, RenderDiffOutcome},
         render_diff_subrepos::{
             self, RenderDiffSubrepos, RenderDiffSubreposOk, RenderDiffSubreposOutcome,
         },
         render_merge_diff::{self, RenderMergeDiff},
+        render_text_diff::{self, RenderTextDiff, RenderTextDiffOk},
+        resolve_remote_diff::{self, RemoteDiffResolution, ResolveRemoteDiff},
+        store_diff_text,
+        store_remote_diff::{self, StoreRemoteDiff},
     },
     projects::{
         build_recipes::BuildProjectRecipes,
@@ -13,7 +18,7 @@ use gtl_application::{
         select_comparison_repositories,
     },
     recipes::{
-        Recipe, RecipeBatch, RecipeOp, RecipeTarget,
+        Recipe, RecipeBatch, RecipeOp, RecipeSource, RecipeTarget, TextRecipeSource,
         build_recipe::{self, BuildRecipe},
     },
     repositories::{
@@ -23,7 +28,11 @@ use gtl_application::{
     settings::get_user_settings::{self, GetUserSettings},
 };
 use gtl_models::{
-    failure::RepositoryFailure, git::GitRevision, paths::ProjectName, recipes::RecipeBatchId,
+    diffs::{DIFF_TEXT_BYTES_MAX, DiffText, DiffTextId},
+    failure::{DiffTextFailure, ErrorClass, Failure, RepositoryFailure},
+    git::GitRevision,
+    paths::ProjectName,
+    recipes::RecipeBatchId,
     repository::traversal::RepositoryTraversalScope,
 };
 use gtl_wire::v1::{self, diff_service_server::DiffService};
@@ -31,7 +40,7 @@ use tonic::{Request, Response, Status};
 
 use super::{
     application_notes, artifact, repository_root, required, run_blocking,
-    status::{GrpcResultExt as _, invalid_request, status},
+    status::{GrpcResultExt as _, invalid_request, private, status},
     unexpected,
 };
 use crate::{state::AppState, viewer_process, viewer_runtime};
@@ -227,6 +236,201 @@ impl DiffService for DiffGrpcService {
         Ok(Response::new(render_response(result)))
     }
 
+    async fn store_diff_text(
+        &self,
+        request: Request<tonic::Streaming<v1::StoreDiffTextRequest>>,
+    ) -> Result<Response<v1::StoreDiffTextResponse>, Status> {
+        let permit = self
+            .state
+            .diff_text_uploads
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| status(&Failure::Busy))?;
+        let mut chunks = request.into_inner();
+        let bytes = within_upload_timeout(async {
+            let mut bytes = Vec::new();
+            while let Some(request) = chunks.message().await? {
+                append_upload_chunk(&mut bytes, &request.chunk, "chunk")?;
+            }
+            Ok(bytes)
+        })
+        .await?;
+        let text = String::from_utf8(bytes).map_err(|_| invalid_request("chunk"))?;
+        let text = DiffText::try_new(text).map_err(|_| status(&diff_text_too_large()))?;
+        let text_id = text.id().to_string();
+        let state = self.state.clone();
+        run_blocking(move || {
+            let _permit = permit;
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| unexpected(error, "store diff text"))?;
+            store_diff_text::execute(&text, &mut connection).into_grpc()
+        })
+        .await??;
+        Ok(Response::new(v1::StoreDiffTextResponse { text_id }))
+    }
+
+    async fn resolve_remote_diff(
+        &self,
+        request: Request<v1::ResolveRemoteDiffRequest>,
+    ) -> Result<Response<v1::ResolveRemoteDiffResponse>, Status> {
+        let v1::ResolveRemoteDiffRequest {
+            origin,
+            range,
+            refresh,
+        } = request.into_inner();
+        let state = self.state.clone();
+        let resolution = run_blocking(move || {
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| unexpected(error, "resolve remote diff"))?;
+            resolve_remote_diff::execute(
+                &ResolveRemoteDiff {
+                    origin,
+                    range,
+                    refresh,
+                },
+                &mut connection,
+            )
+            .into_grpc()
+        })
+        .await??;
+        let resolution = match resolution {
+            RemoteDiffResolution::Stored(stored) => {
+                v1::resolve_remote_diff_response::Resolution::Stored(stored_remote_diff(&stored))
+            }
+            RemoteDiffResolution::Fetch(request) => {
+                v1::resolve_remote_diff_response::Resolution::Fetch(v1::GitHubApiRequest {
+                    path: request.path,
+                    accept: request.accept.to_owned(),
+                })
+            }
+        };
+        Ok(Response::new(v1::ResolveRemoteDiffResponse {
+            resolution: Some(resolution),
+        }))
+    }
+
+    async fn store_remote_diff(
+        &self,
+        request: Request<tonic::Streaming<v1::StoreRemoteDiffRequest>>,
+    ) -> Result<Response<v1::StoreRemoteDiffResponse>, Status> {
+        use v1::store_remote_diff_request::Part;
+        let permit = self
+            .state
+            .diff_text_uploads
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| status(&Failure::Busy))?;
+        let mut parts = request.into_inner();
+        let (head, body) = within_upload_timeout(async {
+            let Some(Part::Head(head)) = parts.message().await?.and_then(|request| request.part)
+            else {
+                return Err(invalid_request("head"));
+            };
+            let mut body = Vec::new();
+            while let Some(request) = parts.message().await? {
+                let Some(Part::BodyChunk(chunk)) = request.part else {
+                    return Err(invalid_request("body_chunk"));
+                };
+                append_upload_chunk(&mut body, &chunk, "body_chunk")?;
+            }
+            Ok((head, body))
+        })
+        .await?;
+        let request = StoreRemoteDiff {
+            origin: head.origin,
+            range: head.range,
+            response: GitHubApiResponse {
+                status: u16::try_from(head.status).map_err(|_| invalid_request("head.status"))?,
+                rate_limit_remaining: head.rate_limit_remaining,
+                body,
+            },
+        };
+        let state = self.state.clone();
+        let stored = run_blocking(move || {
+            let _permit = permit;
+            let mut connection = state
+                .database
+                .connection_lock()
+                .map_err(|error| unexpected(error, "store remote diff"))?;
+            store_remote_diff::execute(request, &mut connection).into_grpc()
+        })
+        .await??;
+        Ok(Response::new(v1::StoreRemoteDiffResponse {
+            stored: Some(stored_remote_diff(&stored)),
+        }))
+    }
+
+    async fn render_text_diff(
+        &self,
+        request: Request<v1::RenderTextDiffRequest>,
+    ) -> Result<Response<v1::RenderTextDiffResponse>, Status> {
+        let request = to_render_text_request(request.into_inner())?;
+        let state = self.state.clone();
+        let result = run_blocking(move || {
+            render_text_diff::execute(
+                request,
+                &state.data_root,
+                &state.user_settings,
+                &state.database,
+                &state.artifacts,
+                &state.renderer,
+                &state.clock,
+            )
+        })
+        .await?
+        .into_grpc()?;
+        Ok(Response::new(render_text_response(&result)))
+    }
+
+    async fn present_text_diff(
+        &self,
+        request: Request<v1::PresentTextDiffRequest>,
+    ) -> Result<Response<v1::PresentTextDiffResponse>, Status> {
+        let request = request.into_inner();
+        let render_request = v1::RenderTextDiffRequest {
+            text_id: request.text_id.clone(),
+            label: request.label.clone(),
+            name: request.name.clone(),
+        };
+        let RenderTextDiff { id, label, name } = to_render_text_request(render_request.clone())?;
+        let state = self.state.clone();
+        let lookup = id.clone();
+        let stored = run_blocking(move || {
+            gtl_application::ports::DiffTextReader::diff_text(&state.database, &lookup)
+        })
+        .await?
+        .map_err(|error| unexpected(error, "read stored diff text"))?;
+        if stored.is_none() {
+            return Err(status(&DiffTextFailure::Missing));
+        }
+        let recipe = Recipe {
+            source: RecipeSource::Text(TextRecipeSource { id, label }),
+            name,
+        };
+        let presentation = match present_snapshot(&self.state, vec![recipe])? {
+            SnapshotPresentation::Ready(presentation) => presentation,
+            SnapshotPresentation::ViewerUnavailable(error) => {
+                let response = self
+                    .render_text_diff(Request::new(render_request))
+                    .await?
+                    .into_inner();
+                v1::DiffPresentation {
+                    notes: prepend_fallback_note(response.notes, &error),
+                    outcome: response
+                        .rendered
+                        .map(v1::diff_presentation::Outcome::Rendered),
+                }
+            }
+        };
+        Ok(Response::new(v1::PresentTextDiffResponse {
+            presentation: Some(presentation),
+        }))
+    }
+
     async fn render_merge_diff(
         &self,
         request: Request<v1::RenderMergeDiffRequest>,
@@ -334,6 +538,61 @@ fn to_render_request(request: v1::RenderDiffRequest) -> Result<RenderDiff, Statu
             .transpose()
             .map_err(|_| invalid_request("name"))?,
     })
+}
+
+async fn within_upload_timeout<T>(
+    upload: impl Future<Output = Result<T, Status>>,
+) -> Result<T, Status> {
+    tokio::time::timeout(gtl_wire::diff_text::UPLOAD_TIMEOUT, upload)
+        .await
+        .map_err(|_| private(ErrorClass::DeadlineExceeded, "diff text upload timed out"))?
+}
+
+fn append_upload_chunk(
+    bytes: &mut Vec<u8>,
+    chunk: &[u8],
+    field: &'static str,
+) -> Result<(), Status> {
+    if chunk.len() > gtl_wire::diff_text::CHUNK_BYTES_MAX {
+        return Err(invalid_request(field));
+    }
+    if bytes.len() + chunk.len() > DIFF_TEXT_BYTES_MAX {
+        return Err(status(&diff_text_too_large()));
+    }
+    bytes.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn stored_remote_diff(stored: &StoredRemoteDiff) -> v1::StoredRemoteDiff {
+    v1::StoredRemoteDiff {
+        text_id: stored.id.to_string(),
+        label: stored.label.to_string(),
+    }
+}
+
+fn diff_text_too_large() -> DiffTextFailure {
+    DiffTextFailure::TooLarge {
+        bytes_max: DIFF_TEXT_BYTES_MAX as u64,
+    }
+}
+
+fn to_render_text_request(request: v1::RenderTextDiffRequest) -> Result<RenderTextDiff, Status> {
+    Ok(RenderTextDiff {
+        id: DiffTextId::try_new(request.text_id).map_err(|_| invalid_request("text_id"))?,
+        label: ProjectName::try_new(request.label).map_err(|_| invalid_request("label"))?,
+        name: request
+            .name
+            .map(ProjectName::try_new)
+            .transpose()
+            .map_err(|_| invalid_request("name"))?,
+    })
+}
+
+fn render_text_response(result: &RenderTextDiffOk) -> v1::RenderTextDiffResponse {
+    v1::RenderTextDiffResponse {
+        notes: application_notes(&result.notes),
+        rendered: Some(artifact(&result.artifact)),
+    }
 }
 
 fn to_render_merge_request(request: v1::RenderMergeDiffRequest) -> Result<RenderMergeDiff, Status> {

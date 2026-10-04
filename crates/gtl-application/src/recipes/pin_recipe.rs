@@ -97,14 +97,14 @@ mod tests {
         assert_eq!(
             recipe,
             crate::recipes::Recipe {
-                source: RecipeSource::LocalRepo(crate::utils::repository_root(
-                    "//fixture.invalid/repositories/work/repo"
-                )),
-                op: RecipeOp::Diff {
-                    target: RecipeTarget::Range {
-                        range: crate::utils::git_range("main..HEAD"),
-                        pinned: Some(crate::utils::pinned_range(BASE_ID, HEAD_ID)),
-                    },
+                source: RecipeSource::LocalRepo {
+                    root: crate::utils::repository_root("//fixture.invalid/repositories/work/repo"),
+                    op: RecipeOp::Diff {
+                        target: RecipeTarget::Range {
+                            range: crate::utils::git_range("main..HEAD"),
+                            pinned: Some(crate::utils::pinned_range(BASE_ID, HEAD_ID)),
+                        },
+                    }
                 },
                 name: Some(crate::utils::project_name("repo")),
             }
@@ -183,7 +183,7 @@ mod tests {
                     ScriptedGitClient::applied(HEAD_ID),
                 ],
             );
-            assert_eq!(recipe.op, expected);
+            assert_eq!(recipe.op().cloned().unwrap(), expected);
         }
     }
 
@@ -212,7 +212,7 @@ mod tests {
         );
 
         assert_eq!(
-            base.op,
+            base.op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Base {
                     rev: crate::utils::git_revision("main")
@@ -220,7 +220,7 @@ mod tests {
             }
         );
         assert_eq!(
-            existing.op,
+            existing.op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(crate::utils::pinned_range(
@@ -256,13 +256,13 @@ mod tests {
         );
 
         assert_eq!(
-            unresolved.op,
+            unresolved.op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None }
             }
         );
         assert_eq!(
-            three_dot.op,
+            three_dot.op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Range {
                     range: crate::utils::git_range("main...HEAD"),
@@ -294,7 +294,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            recipe.op,
+            recipe.op().cloned().unwrap(),
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None }
             }

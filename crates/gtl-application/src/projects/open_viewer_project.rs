@@ -57,9 +57,11 @@ pub fn execute(
     work::reserve_open(
         viewer,
         Recipe {
-            source: RecipeSource::LocalRepo(request.project.path),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
+            source: RecipeSource::LocalRepo {
+                root: request.project.path,
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             name: None,
         },

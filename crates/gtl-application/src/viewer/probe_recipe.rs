@@ -24,13 +24,16 @@ pub enum ProbeRecipeError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Checks that the recipe's source directory is still a Git repository before computing it.
+/// Checks that a repository recipe's source directory is still a Git repository before computing
+/// it; stored text needs no probe.
 #[cqrsy::query]
 pub fn execute(
     query: ProbeRecipe,
     git: &impl GitClient,
 ) -> Result<ProbeRecipeOutcome, ProbeRecipeError> {
-    let RecipeSource::LocalRepo(path) = query.recipe.source;
+    let RecipeSource::LocalRepo { root: path, .. } = query.recipe.source else {
+        return Ok(ProbeRecipeOutcome::Ready);
+    };
     let failure = match git.probe_repository(&path)? {
         GitRepositoryState::Repository { .. } => return Ok(ProbeRecipeOutcome::Ready),
         GitRepositoryState::NotFound => ViewerFailure::SourceDirectoryMissing { path: path.into() },

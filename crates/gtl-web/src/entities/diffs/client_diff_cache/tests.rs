@@ -3,7 +3,6 @@ use std::collections::{HashMap, VecDeque};
 use dioxus::prelude::*;
 use gtl_models::{
     diffs::DiffLineCount,
-    git::{BranchName, GitHead, GitRevision},
     viewer::{ViewerRangeGeneration, ViewerSelectionGeneration},
 };
 use gtl_wire::viewer::{
@@ -15,9 +14,7 @@ use gtl_wire::viewer::{
 use super::ClientDiffCache;
 use crate::{
     entities::diffs::{ClientDiffFileState, ClientDiffWorkspace},
-    test_support::{
-        TestResult, absolute_file_path, project_name, repository_relative_path, viewer_tab_id,
-    },
+    test_support::{TestResult, absolute_file_path, repository_relative_path, viewer_tab_id},
 };
 
 #[test]
@@ -31,9 +28,11 @@ fn review_updates_refresh_file_summaries_without_reloading_rows() -> TestResult 
         let rows = original.peek().files[0].rows.unified[0].as_ptr();
         view.files[0].review = Some(gtl_wire::diff_review::DiffFileReview {
             reference: gtl_models::diffs::DiffFileReviewReference {
-                repository: gtl_models::paths::RepositoryRoot::try_new(
-                    absolute_file_path("/repo")?.as_path().to_path_buf(),
-                )?,
+                scope: gtl_models::diffs::DiffReviewScope::Repository(
+                    gtl_models::paths::RepositoryRoot::try_new(
+                        absolute_file_path("/repo")?.as_path().to_path_buf(),
+                    )?,
+                ),
                 path: view.files[0].path.clone(),
                 content_id: gtl_models::diffs::DiffReviewContentId::from_digest([1; 32]),
             },
@@ -370,6 +369,7 @@ fn assert_loading(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView
 fn view(content: u8) -> TestResult<ViewerActiveView> {
     Ok(ViewerActiveView {
         modified_files: false,
+        source: gtl_wire::viewer::ViewerViewSource::Repository,
         row_source: gtl_wire::viewer::ViewerRowSourceState::Ready,
         identity: ViewerViewIdentity {
             tab_id: viewer_tab_id(1)?,
@@ -383,9 +383,6 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
         },
         content_id: ViewerRowContentId::from_digest([content; 32]),
         title: gtl_models::diffs::DiffViewTitle::Diff,
-        repository_name: project_name("repo")?,
-        branch: GitHead::Branch(BranchName::main()),
-        upstream: GitRevision::main(),
         command: ViewerCommandLine {
             lead: "git diff ".to_owned(),
             range: "HEAD".to_owned(),
@@ -396,7 +393,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/main.rs")?,
-            absolute_path: absolute_file_path("/repo/src/main.rs")?,
+            absolute_path: Some(absolute_file_path("/repo/src/main.rs")?),
             anchor_id: "file-0".to_owned(),
             added: DiffLineCount::new(1),
             removed: DiffLineCount::default(),

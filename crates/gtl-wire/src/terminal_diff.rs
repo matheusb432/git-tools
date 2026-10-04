@@ -141,7 +141,11 @@ impl SnapshotBudget {
         review: Option<&crate::diff_review::DiffFileReview>,
     ) -> Result<(), SnapshotError> {
         if let Some(review) = review {
-            self.add_text(&review.reference.repository.to_string_lossy())?;
+            if let gtl_models::diffs::DiffReviewScope::Repository(repository) =
+                &review.reference.scope
+            {
+                self.add_text(&repository.to_string_lossy())?;
+            }
             self.add_text(&review.reference.path.to_string_lossy())?;
             self.bytes = self
                 .bytes

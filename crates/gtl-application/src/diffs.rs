@@ -16,21 +16,28 @@ pub mod fetch_full_context_diff;
 mod file;
 pub mod file_filter;
 pub mod get_diff_file_reviews;
+pub mod get_diff_text;
 pub mod get_repository_extension_filter;
 pub mod open_diff_file_in_configured_editor;
 pub mod present_diff;
 mod range;
 mod range_view;
 pub mod read_terminal_diff;
+pub mod remote_diff;
 pub mod render_diff;
 pub mod render_diff_subrepos;
 pub mod render_merge_diff;
+pub mod render_text_diff;
+pub mod resolve_remote_diff;
 pub(crate) mod review;
 pub mod save_repository_extension_filter;
 pub mod set_diff_extension_filter;
 pub mod set_diff_file_reviewed;
 pub mod source_lines;
+pub mod store_diff_text;
+pub mod store_remote_diff;
 mod target;
+pub(crate) mod text_diff;
 mod unified_diff;
 mod view;
 
@@ -40,7 +47,7 @@ pub use file::{FileDiff, FileStatus};
 pub use target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange};
 pub use view::{
     Cmd, Foot, FullContextDiff, FullContextDiffSource, FullContextDiffState,
-    FullContextDiffTransitionError, View,
+    FullContextDiffTransitionError, RepositoryOrigin, TextOrigin, View, ViewOrigin,
 };
 
 const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";

@@ -50,6 +50,10 @@ pub fn execute(
             .source
             .clone()
             .ok_or(SetDiffExtensionFilterError::SourceUnavailable)?;
+        let repository = view
+            .origin
+            .repository()
+            .ok_or(SetDiffExtensionFilterError::SourceUnavailable)?;
         let mut request = GitDiffRequest {
             spec,
             format: GitDiffFormat::Unified,
@@ -57,7 +61,7 @@ pub fn execute(
                 .shown()
                 .intersection(&view.file_filter.filter.hidden()),
         };
-        let mut files = unified_diff::parse(&git.diff(&view.repo_root, &request)?)?;
+        let mut files = unified_diff::parse(&git.diff(&repository.root, &request)?)?;
         files.retain(|file| missing.contains(&file.path));
         if matches!(view.full_context, FullContextDiffState::Loaded)
             && files
@@ -65,7 +69,7 @@ pub fn execute(
                 .any(|file| file.status() == super::FileStatus::Modified)
         {
             request.format = GitDiffFormat::FullContext;
-            let full = unified_diff::parse(&git.diff(&view.repo_root, &request)?)?;
+            let full = unified_diff::parse(&git.diff(&repository.root, &request)?)?;
             attach_full_context(&mut files, FullContextDiff::from_files(full));
         }
         result.files.extend(files);

@@ -238,7 +238,7 @@ mod tests {
                 source_id: None,
                 id: ViewerDiffFileId::for_index(0),
                 path: repository_relative_path("scripts/run.SH")?,
-                absolute_path: absolute_file_path("/repo/scripts/run.SH")?,
+                absolute_path: Some(absolute_file_path("/repo/scripts/run.SH")?),
                 anchor_id: "f-scripts-run-sh".to_owned(),
                 added: DiffLineCount::new(1),
                 removed: DiffLineCount::default(),

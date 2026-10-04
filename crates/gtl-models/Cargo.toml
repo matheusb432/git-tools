@@ -10,6 +10,7 @@ dunce.workspace = true
 error-meta.workspace = true
 nutype = { workspace = true, features = ["serde"] }
 serde.workspace = true
+sha2.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["serde"] }
