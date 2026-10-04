@@ -5,8 +5,8 @@ use lucide_dioxus::{ChevronDown, ChevronUp, Search, X};
 use crate::shared::{
     i18n::{t, use_language},
     ui::{
-        Button, ButtonSize, ButtonState, ButtonVariant, SearchPanel, TextInput,
-        TextInputLabelVisibility,
+        Button, ButtonSize, ButtonState, ButtonVariant, FieldLabelVisibility, SearchPanel,
+        TextInput,
     },
 };
 
@@ -80,7 +80,7 @@ pub(in crate::views::diffs) fn DiffSearchBar(
                     TextInput {
                         id: input_id,
                         label: t!(language, "diff-search-code"),
-                        label_visibility: TextInputLabelVisibility::Hidden,
+                        label_visibility: FieldLabelVisibility::Hidden,
                         class: "h-9 py-2 pr-2 pl-8",
                         value: query,
                         maxlength,

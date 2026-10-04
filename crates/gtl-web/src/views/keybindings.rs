@@ -15,9 +15,8 @@ use crate::shared::{
     i18n::{t, use_language},
     keyboard::native_keyboard_event_key,
     ui::{
-        Button, ButtonSize, ButtonState, ButtonVariant, Checkbox, FieldError, PanelDialog,
-        TextInput, TextInputLabelVisibility, dialog::use_dialog_slot,
-        panel_dialog::PanelDialogVariant,
+        Button, ButtonSize, ButtonState, ButtonVariant, Checkbox, FieldError, FieldLabelVisibility,
+        PanelDialog, TextInput, dialog::use_dialog_slot, panel_dialog::PanelDialogVariant,
     },
 };
 
@@ -78,7 +77,7 @@ pub(crate) fn KeybindingsEditor(
                     id: "keybindings-search",
                     "data-tour": super::viewer_settings_form::tours::KEYBINDINGS_SEARCH.value(),
                     label: t!(language, "keybindings-search"),
-                    label_visibility: TextInputLabelVisibility::Hidden,
+                    label_visibility: FieldLabelVisibility::Hidden,
                     placeholder: if recording() { t!(language, "keybindings-record-search") } else { t!(language, "keybindings-search-placeholder") },
                     value: query(),
                     autocomplete: "off",

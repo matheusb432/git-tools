@@ -7,7 +7,7 @@ use crate::shared::{
     browser,
     file_extension::FileExtension,
     i18n::{t, use_language},
-    ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, TextInput, TextInputLabelVisibility},
+    ui::{Button, ButtonLayout, ButtonSize, ButtonVariant, FieldLabelVisibility, TextInput},
 };
 
 const SUGGESTIONS_MAX: usize = 12;
@@ -100,7 +100,7 @@ pub(super) fn ExtensionSearch(
             TextInput {
                 id: input_id.clone(),
                 label: t!(language, "extensions-search"),
-                label_visibility: TextInputLabelVisibility::Hidden,
+                label_visibility: FieldLabelVisibility::Hidden,
                 class: "pl-9 pr-8",
                 placeholder: t!(language, "extensions-search-placeholder"),
                 value: query_value,

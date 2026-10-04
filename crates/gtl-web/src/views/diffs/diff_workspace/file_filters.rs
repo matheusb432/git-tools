@@ -7,8 +7,8 @@ use crate::{
         i18n::{t, use_language},
         ui::{
             Button, ButtonLayout, ButtonSize, ButtonVariant, Checkbox, ExtensionSelectionAction,
-            ExtensionSelectionInput, IconPopover, Select, SelectOption, TextInput,
-            TextInputLabelVisibility, popover::PopoverPlacement, select::SelectVariant,
+            ExtensionSelectionInput, FieldLabelVisibility, IconPopover, Select, SelectOption,
+            TextInput, popover::PopoverPlacement, select::SelectVariant,
         },
     },
     views::diffs::{
@@ -136,7 +136,7 @@ fn TextFilterSection(
                 TextInput {
                     id,
                     label: t!(language, "file-filters-text"),
-                    label_visibility: TextInputLabelVisibility::Hidden,
+                    label_visibility: FieldLabelVisibility::Hidden,
                     class: "h-9 py-2 pr-2 pl-8",
                     r#type: "search",
                     value: text,
@@ -251,7 +251,7 @@ fn ChangesSinceSection(
                 TextInput {
                     id: format!("{id}-custom"),
                     label: t!(language, "file-filters-since-custom-label"),
-                    label_visibility: TextInputLabelVisibility::Hidden,
+                    label_visibility: FieldLabelVisibility::Hidden,
                     r#type: "datetime-local",
                     value,
                     disabled: !available,

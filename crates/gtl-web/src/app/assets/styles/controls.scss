@@ -329,6 +329,11 @@
     background-color: var(--del-bg);
     color: var(--del);
   }
+  .control-badge-warning {
+    border-color: var(--warn-line);
+    background-color: var(--warn-bg);
+    color: var(--warn);
+  }
   .control-count-badge {
     background-color: var(--acc-soft);
     text-align: center;
@@ -548,5 +553,12 @@
   }
   .control-text-input[aria-invalid=true] {
     border-color: var(--del);
+  }
+  .control-text-area {
+    display: block;
+    min-height: calc(var(--spacing) * 20);
+    padding-block: calc(var(--spacing) * 2);
+    line-height: calc(var(--spacing) * 5.5);
+    resize: vertical;
   }
 }

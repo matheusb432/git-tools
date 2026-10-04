@@ -11,6 +11,11 @@ pub(crate) enum BadgeVariant {
     // Selected,
     Addition,
     Deletion,
+    #[cfg_attr(
+        not(feature = "component-preview"),
+        expect(dead_code, reason = "used by badge previews")
+    )]
+    Warning,
 }
 
 impl BadgeVariant {
@@ -20,6 +25,7 @@ impl BadgeVariant {
             // Self::Selected => "border-acc bg-acc text-bg",
             Self::Addition => "control-badge-addition",
             Self::Deletion => "control-badge-deletion",
+            Self::Warning => "control-badge-warning",
         }
     }
 }

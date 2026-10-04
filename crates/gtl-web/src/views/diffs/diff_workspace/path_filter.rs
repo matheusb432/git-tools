@@ -6,7 +6,7 @@ use lucide_dioxus::File;
 use super::{DiffWorkspaceContext, file_search::WorkspaceFileMatches, use_workspace_context};
 use crate::shared::{
     i18n::{t, use_language},
-    ui::{ScrollArea, SearchPanel, SearchPanelPlacement, TextInput, TextInputLabelVisibility},
+    ui::{FieldLabelVisibility, ScrollArea, SearchPanel, SearchPanelPlacement, TextInput},
 };
 
 const PATH_FILTER_INPUT_ID: &str = "viewer-path-filter";
@@ -76,7 +76,7 @@ pub(super) fn PathFilter(onnavigate: EventHandler<String>) -> Element {
                 TextInput {
                     id: input_id,
                     label: t!(language, "path-filter-label"),
-                    label_visibility: TextInputLabelVisibility::Hidden,
+                    label_visibility: FieldLabelVisibility::Hidden,
                     value: (workspace.file_filter)(),
                     placeholder: t!(language, "path-filter-label"),
                     role: "combobox",

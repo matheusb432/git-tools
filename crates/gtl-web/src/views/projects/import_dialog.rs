@@ -20,8 +20,8 @@ use crate::{
         field_errors::{FieldErrors, FormField},
         i18n::{t, use_language},
         ui::{
-            Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, TextInput,
-            TextInputLabelVisibility,
+            Button, ButtonSize, ButtonState, ButtonVariant, FieldLabelVisibility, ScrollArea,
+            TextInput,
         },
         viewer_client::{ViewerClientError, captured_client_error},
     },
@@ -469,7 +469,7 @@ fn ProjectImportRow(
                     TextInput {
                         id: "project-import-{index}-id",
                         label: t!(language, "projects-import-id-label", project = row.label.as_str()),
-                        label_visibility: TextInputLabelVisibility::Hidden,
+                        label_visibility: FieldLabelVisibility::Hidden,
                         value: row.project_id,
                         maxlength: "4",
                         disabled: disabled || !editable,
@@ -485,7 +485,7 @@ fn ProjectImportRow(
                     TextInput {
                         id: "project-import-{index}-title",
                         label: t!(language, "projects-import-title-label", project = row.label.as_str()),
-                        label_visibility: TextInputLabelVisibility::Hidden,
+                        label_visibility: FieldLabelVisibility::Hidden,
                         value: row.title,
                         disabled: disabled || !editable,
                         error: row.field_errors.message(ImportRowField::Title, language),

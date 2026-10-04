@@ -3,29 +3,28 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
 use super::text_field::{FieldLabelVisibility, TextFieldDescription, TextFieldFrame};
 
-const TEXT_INPUT_CLASSES: &str = "control-text-input h-9 w-full px-2.5 font-mono";
+const TEXT_AREA_CLASSES: &str = "control-text-input control-text-area w-full px-2.5 font-mono";
 
-/// Renders a labeled single-line text field.
+/// Renders a labeled multi-line text field.
 ///
-/// `id` names the input and derives the ids that `aria-describedby` links: the validation
-/// message from `error` appears below the input, followed by `supporting_content`.
+/// `id` names the textarea and derives the ids that `aria-describedby` links: the validation
+/// message from `error` appears below the textarea, followed by `supporting_content`.
 #[component]
-pub(crate) fn TextInput(
+pub(crate) fn TextArea(
     id: String,
     label: String,
     #[props(default)] label_visibility: FieldLabelVisibility,
     error: Option<String>,
     supporting_content: Option<Element>,
     #[props(extends = GlobalAttributes)]
-    #[props(extends = input)]
+    #[props(extends = textarea)]
     attributes: Vec<Attribute>,
     oninput: Option<EventHandler<FormEvent>>,
-    onchange: Option<EventHandler<FormEvent>>,
     onkeydown: Option<EventHandler<KeyboardEvent>>,
 ) -> Element {
     let description = TextFieldDescription::new(&id, error.is_some(), supporting_content.is_some());
-    let base = attributes!(input {
-        class: TEXT_INPUT_CLASSES,
+    let base = attributes!(textarea {
+        class: TEXT_AREA_CLASSES,
         id,
         aria_invalid: error.is_some().then_some("true"),
         aria_describedby: description.described_by,
@@ -40,7 +39,7 @@ pub(crate) fn TextInput(
             error,
             supporting_content_id: description.supporting_content_id,
             supporting_content,
-            input {
+            textarea {
                 onkeydown: move |event| {
                     if let Some(handler) = onkeydown {
                         handler.call(event);
@@ -48,11 +47,6 @@ pub(crate) fn TextInput(
                 },
                 oninput: move |event| {
                     if let Some(handler) = &oninput {
-                        handler.call(event);
-                    }
-                },
-                onchange: move |event| {
-                    if let Some(handler) = &onchange {
                         handler.call(event);
                     }
                 },
@@ -66,35 +60,38 @@ pub(crate) fn TextInput(
 mod tests {
     use dioxus::prelude::*;
 
-    use super::TextInput;
+    use super::{FieldLabelVisibility, TextArea};
 
     #[test]
-    fn invalid_input_describes_itself_with_its_error_and_supporting_text() {
+    fn invalid_text_area_describes_itself_with_its_error_and_supporting_text() {
         let html = dioxus_ssr::render_element(rsx! {
-            TextInput {
-                id: "branch",
-                label: "Comparison branch",
-                error: "Enter a local branch name.",
-                supporting_content: rsx! { "Used when the current branch has no upstream." },
+            TextArea {
+                id: "review-note",
+                label: "Comment",
+                error: "The comment was not saved.",
+                supporting_content: rsx! { "Ctrl+Enter saves." },
             }
         });
 
-        assert!(html.contains("id=\"branch\""));
+        assert!(html.contains("<textarea"));
+        assert!(html.contains("id=\"review-note\""));
         assert!(html.contains("aria-invalid=\"true\""));
-        assert!(html.contains("aria-describedby=\"branch-error branch-description\""));
-        assert!(html.contains("id=\"branch-error\""));
-        assert!(html.contains("role=\"alert\""));
-        assert!(html.contains("id=\"branch-description\""));
+        assert!(html.contains("aria-describedby=\"review-note-error review-note-description\""));
+        assert!(html.contains("id=\"review-note-error\""));
+        assert!(html.contains("id=\"review-note-description\""));
     }
 
     #[test]
-    fn valid_input_without_supporting_text_describes_nothing() {
+    fn hidden_label_still_names_the_text_area() {
         let html = dioxus_ssr::render_element(rsx! {
-            TextInput { id: "search", label: "Search" }
+            TextArea {
+                id: "review-note",
+                label: "Comment on line 42",
+                label_visibility: FieldLabelVisibility::Hidden,
+            }
         });
 
-        assert!(!html.contains("aria-invalid"));
+        assert!(html.contains("<span class=\"sr-only\">Comment on line 42</span>"));
         assert!(!html.contains("aria-describedby"));
-        assert!(!html.contains("control-field-error"));
     }
 }

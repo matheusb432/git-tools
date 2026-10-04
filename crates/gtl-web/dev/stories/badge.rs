@@ -16,6 +16,7 @@ fn variants() -> Element {
             Badge { variant: BadgeVariant::Neutral, "Neutral" }
             Badge { variant: BadgeVariant::Addition, "+24 lines" }
             Badge { variant: BadgeVariant::Deletion, "-9 lines" }
+            Badge { variant: BadgeVariant::Warning, "outdated" }
         }
     }
 }

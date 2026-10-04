@@ -28,6 +28,12 @@ mod search_panel;
 mod sectioned_surface;
 pub(crate) mod select;
 mod skeleton;
+#[cfg_attr(
+    not(any(test, feature = "component-preview")),
+    expect(dead_code, reason = "used by text area previews")
+)]
+mod text_area;
+mod text_field;
 mod text_input;
 mod toast;
 pub(crate) mod viewer_tab;
@@ -56,7 +62,13 @@ pub(crate) use sectioned_surface::{
 };
 pub(crate) use select::{Select, SelectOption};
 pub(crate) use skeleton::Skeleton;
-pub(crate) use text_input::{TextInput, TextInputLabelVisibility};
+#[cfg_attr(
+    not(feature = "component-preview"),
+    expect(unused_imports, reason = "used by text area previews")
+)]
+pub(crate) use text_area::TextArea;
+pub(crate) use text_field::FieldLabelVisibility;
+pub(crate) use text_input::TextInput;
 pub(crate) use toast::{ToastHandle, ToastHost, ToastKind, ToastText, use_toast};
 pub(crate) use viewer_tab::{ViewerTabItem, ViewerTabSelectionIndicator, viewer_tab_element_id};
 
