@@ -90,6 +90,7 @@ impl ShownFileChanges {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct FileFilterForm {
+    pub(crate) unreviewed: bool,
     pub(crate) shown: ShownFileChanges,
     pub(crate) text: String,
     /// The server applies the cutoff; the form remembers how it was chosen.
@@ -98,12 +99,13 @@ pub(crate) struct FileFilterForm {
 
 impl FileFilterForm {
     pub(crate) fn is_active(&self) -> bool {
-        !self.shown.shows_all() || !self.text.is_empty()
+        self.unreviewed || !self.shown.shows_all() || !self.text.is_empty()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileFilterEdit {
+    Unreviewed(bool),
     Text(String),
     Toggle(FileChangeKind),
     ChangesSince(ChangesSinceChoice),
@@ -113,6 +115,7 @@ pub(crate) enum FileFilterEdit {
 impl FileFilterEdit {
     pub(crate) fn apply(self, form: &mut FileFilterForm) {
         match self {
+            Self::Unreviewed(unreviewed) => form.unreviewed = unreviewed,
             Self::Text(text) => form.text = text,
             Self::Toggle(kind) => form.shown = form.shown.toggled(kind),
             Self::ChangesSince(choice) => form.changes_since = choice,
@@ -184,6 +187,7 @@ mod tests {
         let mut form = FileFilterForm::default();
         FileFilterEdit::Toggle(FileChangeKind::Removed).apply(&mut form);
         FileFilterEdit::Text("create".to_owned()).apply(&mut form);
+        FileFilterEdit::Unreviewed(true).apply(&mut form);
         assert!(form.is_active());
 
         FileFilterEdit::Clear.apply(&mut form);

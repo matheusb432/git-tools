@@ -939,3 +939,13 @@ tour-previous = Previous
 tour-next = Next
 tour-finish = Finish
 tour-close = Close guide
+
+review-mark-reviewed = Mark file reviewed
+review-mark-unreviewed = Mark file unreviewed
+review-file-reviewed = Reviewed
+review-filter-unreviewed = Unreviewed files only
+review-progress = { $reviewed }/{ $total } reviewed
+review-all-reviewed = All files reviewed
+review-all-reviewed-message = Show reviewed files to revisit them.
+review-show-reviewed = Show reviewed files
+keybindings-toggle-file-reviewed = Mark current file reviewed or unreviewed

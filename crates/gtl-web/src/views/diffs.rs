@@ -20,3 +20,4 @@ pub(crate) use diff_workspace::DiffWorkspaceView;
 pub(crate) use file_status::{DiffFileStatus, file_status_text_class};
 pub(crate) use line_changes::{DiffLineChangeBadge, DiffLineChangeKind, DiffLineChangeText};
 pub(crate) use project_diff::ProjectDiffView;
+pub(crate) mod file_review;

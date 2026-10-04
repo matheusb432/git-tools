@@ -57,9 +57,14 @@ impl TerminalDiffService for TerminalDiffGrpcService {
         tokio::spawn(async move {
             let operation = async {
                 let (snapshot, _permit) = tokio::task::spawn_blocking(move || {
-                    read_terminal_diff::execute(&request, &state.git, &state.database)
-                        .into_grpc()
-                        .map(|snapshot| (snapshot, permit))
+                    read_terminal_diff::execute(
+                        &request,
+                        &state.git,
+                        &state.database,
+                        &state.database,
+                    )
+                    .into_grpc()
+                    .map(|snapshot| (snapshot, permit))
                 })
                 .await
                 .map_err(|error| unexpected(error, "read terminal diff"))??;
@@ -107,6 +112,10 @@ async fn send_snapshot(
         send(
             sender,
             Event::File(v1::TerminalDiffFile {
+                review: file
+                    .review
+                    .as_ref()
+                    .map(gtl_wire::proto::diff_review::encode_review),
                 path: file.path.clone(),
                 added: file.added,
                 removed: file.removed,

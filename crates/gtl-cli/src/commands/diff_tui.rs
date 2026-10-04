@@ -66,6 +66,9 @@ async fn session(
 ) -> anyhow::Result<()> {
     let mut pager = Pager::default();
     let mut pending = Some(fetch(request.clone()));
+    let mut pending_review: Option<
+        tokio::task::JoinHandle<anyhow::Result<gtl_wire::diff_review::SetDiffFileReviewed>>,
+    > = None;
     let mut dirty = true;
     let mut loaded = false;
     let mut events = EventStream::new();
@@ -73,6 +76,22 @@ async fn session(
     loop {
         tokio::select! {
             biased;
+            result = async { match &mut pending_review { Some(task) => task.await, None => std::future::pending().await } } => {
+                pending_review = None;
+                match result? {
+                    Ok(request) => {
+                        for file in &mut pager.document.files {
+                            if let Some(review) = file.review.as_mut().filter(|review| review.reference == request.file) {
+                                review.reviewed = request.reviewed;
+                            }
+                        }
+                        pager.browser.list = None;
+                        pager.status = if request.reviewed { "File marked reviewed" } else { "File marked unreviewed" }.into();
+                    },
+                    Err(error) => pager.status = crate::failure::CommandFailure::from_error(&error).text(None),
+                }
+                dirty = true;
+            }
             result = async { match &mut pending { Some(task) => task.await, None => std::future::pending().await } } => {
                 pending = None;
                 match result? {
@@ -100,7 +119,18 @@ async fn session(
                         pending = Some(fetch(request.clone()));
                         pager.status.clear();
                     }
-                    input::Action::Refresh | input::Action::Continue => {}
+                    input::Action::ToggleReview(file) if pending_review.is_none() => {
+                        if let Some(review) = pager.document.files.get(file).and_then(|file| file.review.clone()) {
+                            let request = gtl_wire::diff_review::SetDiffFileReviewed { file: review.reference, reviewed: !review.reviewed };
+                            pending_review = Some(tokio::spawn(async move {
+                                let client = gtl_client::GtlClient::connect_local().await?;
+                                client.set_diff_file_reviewed(request.clone()).await?;
+                                Ok(request)
+                            }));
+                            pager.status = "Saving review progress…".into();
+                        }
+                    }
+                    input::Action::Refresh | input::Action::Continue | input::Action::ToggleReview(_) => {}
                 }
                 tokio::task::consume_budget().await;
             }
@@ -108,6 +138,9 @@ async fn session(
     }
     if let Some(task) = pending {
         task.abort();
+    }
+    if let Some(task) = pending_review {
+        task.await??;
     }
     Ok(())
 }

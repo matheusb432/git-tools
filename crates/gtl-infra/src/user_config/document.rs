@@ -79,6 +79,8 @@ pub(super) enum UserSettingsDocumentKey {
     KeybindingsPinTab,
     #[strum(to_string = "keybindings.close_other_tabs")]
     KeybindingsCloseOtherTabs,
+    #[strum(to_string = "keybindings.toggle_file_reviewed")]
+    KeybindingsToggleFileReviewed,
 
     #[strum(to_string = "tags")]
     DefaultTagPatterns,
@@ -130,7 +132,8 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsPreviousTab
             | Self::KeybindingsCloseTab
             | Self::KeybindingsPinTab
-            | Self::KeybindingsCloseOtherTabs => "keybindings",
+            | Self::KeybindingsCloseOtherTabs
+            | Self::KeybindingsToggleFileReviewed => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable => "tags",
@@ -172,6 +175,7 @@ impl UserSettingsDocumentKey {
             Self::KeybindingsCloseTab => "close_tab",
             Self::KeybindingsPinTab => "pin_tab",
             Self::KeybindingsCloseOtherTabs => "close_other_tabs",
+            Self::KeybindingsToggleFileReviewed => "toggle_file_reviewed",
 
             Self::Projects => "projects",
             Self::ProjectName { .. } => "name",
@@ -211,7 +215,8 @@ impl UserSettingsDocumentKey {
             | Self::KeybindingsPreviousTab
             | Self::KeybindingsCloseTab
             | Self::KeybindingsPinTab
-            | Self::KeybindingsCloseOtherTabs => "keybindings",
+            | Self::KeybindingsCloseOtherTabs
+            | Self::KeybindingsToggleFileReviewed => "keybindings",
             Self::DefaultTagPatterns
             | Self::DefaultTagPatternName
             | Self::DefaultTagPatternTable
@@ -419,6 +424,7 @@ struct RawKeybindingsDocument {
     close_tab: Option<RawSettingValue>,
     pin_tab: Option<RawSettingValue>,
     close_other_tabs: Option<RawSettingValue>,
+    toggle_file_reviewed: Option<RawSettingValue>,
 
     push_diff: Option<RawSettingValue>,
     toggle_files_sidebar: Option<RawSettingValue>,
@@ -659,6 +665,10 @@ fn parse_keybindings(
         UserSettingsDocumentKey::KeybindingsCloseOtherTabs,
         document.close_other_tabs,
     )?;
+    let toggle_file_reviewed = optional_keybinding(
+        UserSettingsDocumentKey::KeybindingsToggleFileReviewed,
+        document.toggle_file_reviewed,
+    )?;
     ViewerKeybindings::try_from_overrides(platform, |action| match action {
         ViewerKeybindingAction::SearchFiles => search_files,
         ViewerKeybindingAction::SearchTextInAllFiles => search_text_in_all_files,
@@ -670,6 +680,7 @@ fn parse_keybindings(
         ViewerKeybindingAction::CloseTab => close_tab,
         ViewerKeybindingAction::PinTab => pin_tab,
         ViewerKeybindingAction::CloseOtherTabs => close_other_tabs,
+        ViewerKeybindingAction::ToggleFileReviewed => toggle_file_reviewed,
     })
     .map_err(|source| match source {
         InvalidViewerKeybindings::AmbiguousModifiers { action } => {
@@ -696,6 +707,9 @@ const fn keybinding_document_key(action: ViewerKeybindingAction) -> UserSettings
         ViewerKeybindingAction::PinTab => UserSettingsDocumentKey::KeybindingsPinTab,
         ViewerKeybindingAction::CloseOtherTabs => {
             UserSettingsDocumentKey::KeybindingsCloseOtherTabs
+        }
+        ViewerKeybindingAction::ToggleFileReviewed => {
+            UserSettingsDocumentKey::KeybindingsToggleFileReviewed
         }
         ViewerKeybindingAction::PushDiff => UserSettingsDocumentKey::KeybindingsPushDiff,
         ViewerKeybindingAction::ToggleFilesSidebar => {

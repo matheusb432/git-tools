@@ -48,6 +48,7 @@ fn mount_rows(criterion: &mut Criterion) {
 
 fn summary(row_count: usize) -> ViewerFileSummary {
     ViewerFileSummary {
+        review: None,
         source_id: None,
         id: ViewerDiffFileId::for_index(0),
         path: require(

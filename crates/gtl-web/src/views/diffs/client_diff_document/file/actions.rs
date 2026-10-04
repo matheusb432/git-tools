@@ -26,6 +26,9 @@ pub(super) fn DiffFileActions(
         span {
             class: "diff-file-actions",
             "data-tour": super::super::tour::READING_ACTIONS.value(),
+            if let Some(review) = summary.read().review.clone() {
+                crate::views::diffs::file_review::FileReviewAction { review }
+            }
             DiffPathCopyMenu { summary, popover_id: copy_popover_id }
             if let Some(onopen) = onopen.filter(|_| can_open_in_editor) {
                 OpenInTextEditorAction { file_id, onopen }
@@ -224,6 +227,7 @@ fn OpenInTextEditorAction(
     let language = use_language();
     rsx! {
         Button {
+            class: "diff-file-open-action",
             size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,
             aria_label: t!(language, "diff-open-in-editor"),

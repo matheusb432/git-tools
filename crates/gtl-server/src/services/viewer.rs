@@ -125,6 +125,13 @@ impl ViewerService for ViewerGrpcService {
         file_filters::set(&self.state, request).await
     }
 
+    async fn set_diff_file_reviewed(
+        &self,
+        request: Request<v1::SetDiffFileReviewedRequest>,
+    ) -> Result<Response<v1::SetDiffFileReviewedResponse>, Status> {
+        review::set(&self.state, request).await
+    }
+
     async fn get_viewer_project_status(
         &self,
         request: Request<v1::GetViewerProjectStatusRequest>,
@@ -612,3 +619,4 @@ impl ViewerService for ViewerGrpcService {
 fn tab_id(raw: u64) -> Result<ViewerTabId, Status> {
     ViewerTabId::try_new(raw).map_err(|_| invalid_request("tab_id"))
 }
+mod review;

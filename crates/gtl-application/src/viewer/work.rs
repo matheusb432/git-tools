@@ -671,9 +671,13 @@ mod tests {
 
         let narrowed = reserve_changes_since(&state, tab_id, Some(cutoff.clone())).unwrap();
         publish_recipe(&state, computed_empty(&narrowed)).unwrap();
-        let shell = get_viewer_shell::execute(&state, &FixedUserSettingsStore::default())
-            .unwrap()
-            .shell;
+        let shell = get_viewer_shell::execute(
+            &state,
+            &FixedUserSettingsStore::default(),
+            &std::collections::HashSet::new(),
+        )
+        .unwrap()
+        .shell;
 
         assert_ne!(narrowed.ticket().generation, opened.ticket().generation);
         assert_eq!(narrowed.changes_since, Some(cutoff.clone()));
@@ -697,10 +701,14 @@ mod tests {
         let label = crate::recipes::recipe_label::pending(reserved.recipe());
         let work = computed_empty(&reserved);
         let shell_feedback = || {
-            get_viewer_shell::execute(&state, &FixedUserSettingsStore::default())
-                .unwrap()
-                .shell
-                .feedback
+            get_viewer_shell::execute(
+                &state,
+                &FixedUserSettingsStore::default(),
+                &std::collections::HashSet::new(),
+            )
+            .unwrap()
+            .shell
+            .feedback
         };
 
         let publication = publish_recipe(&state, work).unwrap();

@@ -113,6 +113,44 @@ pub(crate) fn element_has_visible_focus(id: &str) -> bool {
         .is_some_and(|element| element.matches(":focus-visible").unwrap_or(false))
 }
 
+pub(crate) fn keyboard_target_is_editable(event: &web_sys::KeyboardEvent) -> bool {
+    event
+        .target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .is_some_and(|element| {
+            element
+                .closest(
+                    "input, textarea, select, [contenteditable]:not([contenteditable='false'])",
+                )
+                .ok()
+                .flatten()
+                .is_some()
+        })
+}
+
+pub(crate) fn keyboard_file_anchor(event: &web_sys::KeyboardEvent) -> Option<String> {
+    let element = event
+        .target()?
+        .dyn_into::<web_sys::Element>()
+        .ok()?
+        .closest("[data-file-target], [data-gtl-diff-file]")
+        .ok()??;
+    element
+        .get_attribute("data-file-target")
+        .or_else(|| element.get_attribute("id"))
+}
+
+pub(crate) fn workspace_overlay_is_open() -> bool {
+    document()
+        .and_then(|document| {
+            document
+                .query_selector("dialog[open], [popover]:popover-open:not([role='tooltip'])")
+                .ok()
+                .flatten()
+        })
+        .is_some()
+}
+
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn use_window_keydown(mut handler: impl FnMut(web_sys::KeyboardEvent) + 'static) {
     let _listener = dioxus::dioxus_core::use_hook_with_cleanup(

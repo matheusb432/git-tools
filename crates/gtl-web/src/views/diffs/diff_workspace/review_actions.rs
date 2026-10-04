@@ -10,6 +10,7 @@ use crate::{
     },
     shared::{
         i18n::{t, use_language},
+        keyboard::shortcut_title,
         ui::{Button, ButtonSize, ButtonState, ButtonVariant},
     },
     views::{
@@ -189,20 +190,4 @@ pub(crate) fn ReviewActionDock(
             }
         }
     }
-}
-
-fn shortcut_title(
-    label: &str,
-    keybindings: ViewerKeybindings,
-    action: ViewerKeybindingAction,
-) -> String {
-    if keybindings[action].is_unassigned() {
-        return label.to_owned();
-    }
-    let keys = keybindings
-        .display_keys(action)
-        .map(|key| key.to_string())
-        .collect::<Vec<_>>()
-        .join("+");
-    format!("{label} ({keys})")
 }

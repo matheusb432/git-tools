@@ -50,7 +50,12 @@ fn changed_paths(
     index: Option<&Path>,
 ) -> Option<Vec<RepositoryRelativePath>> {
     let mut names_args = vec!["diff", "--name-only", "-z"];
-    names_args.extend_from_slice(args.get(1..)?);
+    names_args.extend(
+        args.get(1..)?
+            .iter()
+            .copied()
+            .filter(|arg| !matches!(*arg, "--raw" | "--patch")),
+    );
     let output = crate::git_process::run_with_index(repo_path, &names_args, index).ok()?;
     if !output.success() {
         return None;

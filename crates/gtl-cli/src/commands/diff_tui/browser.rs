@@ -36,7 +36,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, pager: &mut Pager, area: Rect) {
             theme::strong(theme::ACCENT),
         ))
         .title_bottom(Line::styled(
-            " Enter opens · / filter ",
+            " Enter opens · / filter · v reviewed ",
             theme::color(theme::MUTED),
         ));
     let inner = block.inner(area);
@@ -158,7 +158,12 @@ fn item(file: &File, width: u16, details: bool) -> ListItem<'static> {
     let (directory, name) = path.rsplit_once('/').unwrap_or(("repository root", &path));
     let changes = format!("+{} −{}", file.added, file.removed);
     let available = usize::from(width).saturating_sub(changes.width() + 1);
-    let name = fit(name, available, false);
+    let name = if file.review.as_ref().is_some_and(|review| review.reviewed) {
+        format!("✓ {name}")
+    } else {
+        name.to_owned()
+    };
+    let name = fit(&name, available, false);
     let spacing = usize::from(width).saturating_sub(name.width() + changes.width());
     let mut lines = vec![Line::from(vec![
         Span::styled(name, theme::strong(theme::TEXT)),

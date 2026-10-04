@@ -908,3 +908,9 @@ viewer_request_command!(
     OpenViewerProjectOk,
     open_commit
 );
+viewer_request_command!(
+    viewer_set_diff_file_reviewed,
+    gtl_wire::diff_review::SetDiffFileReviewed,
+    (),
+    set_diff_file_reviewed
+);

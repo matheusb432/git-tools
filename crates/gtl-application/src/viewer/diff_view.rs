@@ -284,6 +284,7 @@ fn project_file(
 ) -> ViewerFileSummary {
     let status = file.status();
     ViewerFileSummary {
+        review: Some(crate::diffs::review::file_review(&view.repo_root, file)),
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: file.path.clone(),

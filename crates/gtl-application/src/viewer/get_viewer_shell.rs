@@ -29,17 +29,36 @@ pub enum GetViewerShellError {
     #[error(transparent)]
     #[meta(transparent)]
     CommitReload(#[from] work::ReserveCommitError),
+    #[error(transparent)]
+    #[meta(private(Internal))]
+    Reviews(#[from] anyhow::Error),
 }
 
 #[cqrsy::query]
 pub fn execute(
     state: &ViewerState,
     settings: &impl UserSettingsReader,
+    reviews: &impl crate::ports::DiffReviewReader,
 ) -> Result<GetViewerShellOk, GetViewerShellError> {
     let settings = settings.load()?;
     let commit_reload = work::reserve_selected_commit_reload(state)?;
     let full_context = ensure_view_full_context::reserve(state, settings.viewer_render_options())?;
-    let shell = state.inspect(|session| shell::project(session, &settings))??;
+    let mut shell = state.inspect(|session| shell::project(session, &settings))??;
+    if let gtl_wire::viewer::ViewerActiveState::Ready { view } = &mut shell.active {
+        let references = view
+            .files
+            .iter()
+            .filter_map(|file| file.review.as_ref().map(|review| review.reference.clone()))
+            .collect::<Vec<_>>();
+        let reviewed = reviews.reviewed_files(&references)?;
+        for review in view
+            .files
+            .iter_mut()
+            .filter_map(|file| file.review.as_mut())
+        {
+            review.reviewed = reviewed.contains(&review.reference);
+        }
+    }
     Ok(GetViewerShellOk {
         shell,
         commit_reload,

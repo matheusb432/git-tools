@@ -3,8 +3,9 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use gtl_models::{diffs::DiffLineCount, settings::DiffFilesSort};
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{ViewerActiveView, ViewerFileSummary};
-use lucide_dioxus::{ChevronRight, RotateCcw};
+use lucide_dioxus::{Check, ChevronRight, RotateCcw};
 
+use super::file_filters::workspace::WorkspaceFileFilters;
 use crate::{
     shared::{
         date_display::DateDisplayTime,
@@ -132,9 +133,10 @@ pub(super) fn FilesPanel(
                     filter_control,
                 }
                 FilesPanelSummary { totals: model.totals }
+                ReviewProgress {}
                 FilesHiddenNotice {}
                 if model.file_count == 0 {
-                    EmptyNotice { {t!(use_language(), "files-empty")} }
+                    FilesEmptyNotice {}
                 } else {
                     match &model.layout {
                         WorkspaceFilesLayout::Tree(tree) => render_file_tree(tree, false, onnavigate),
@@ -154,6 +156,22 @@ pub(super) fn FilesPanel(
                 }
             }
         }
+    }
+}
+
+#[component]
+fn FilesEmptyNotice() -> Element {
+    let language = use_language();
+    let filters = try_use_context::<super::file_filters::workspace::WorkspaceFileFilters>();
+    let message = if filters.is_some_and(WorkspaceFileFilters::review_complete) {
+        t!(language, "review-all-reviewed")
+    } else if filters.is_some_and(|filters| (filters.active)()) {
+        t!(language, "file-filters-no-matches")
+    } else {
+        t!(language, "files-empty")
+    };
+    rsx! {
+        EmptyNotice { {message} }
     }
 }
 
@@ -341,12 +359,38 @@ fn WorkspaceFileItem(
 
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
+                if file.review.as_ref().is_some_and(|review| review.reviewed) {
+                    span {
+                        class: "diff-files-reviewed-mark",
+                        title: t!(use_language(), "review-file-reviewed"),
+                        aria_label: t!(use_language(), "review-file-reviewed"),
+                        Check { size: 12 }
+                    }
+                }
                 span { class: "{name_class} min-w-0 {color}", "{file_name}" }
                 if let Some(directory) = directory {
                     span { class: "diff-files-file-directory min-w-0", "{directory}" }
                 }
                 DiffFileStatus { status: file.status }
             }
+        }
+    }
+}
+
+#[component]
+fn ReviewProgress() -> Element {
+    let filters = try_use_context::<super::file_filters::workspace::WorkspaceFileFilters>();
+    let (reviewed, total) = filters.map_or((0, 0), |filters| (filters.review_progress)());
+    if reviewed == 0 {
+        return rsx! {};
+    }
+    rsx! {
+        p {
+            class: "diff-review-progress",
+            role: "status",
+            aria_live: "polite",
+            aria_atomic: "true",
+            {t!(use_language(), "review-progress", reviewed = reviewed, total = total)}
         }
     }
 }
@@ -361,6 +405,7 @@ mod tests {
 
     fn file(path: &str, added: u64, removed: u64) -> TestResult<ViewerFileSummary> {
         Ok(ViewerFileSummary {
+            review: None,
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path(path)?,

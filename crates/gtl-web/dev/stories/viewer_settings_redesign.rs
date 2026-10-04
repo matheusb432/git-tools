@@ -386,6 +386,7 @@ fn preview_file(
     initially_expanded: bool,
 ) -> PreviewResult<ViewerFileSummary> {
     Ok(ViewerFileSummary {
+        review: None,
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: RepositoryRelativePath::try_new(PathBuf::from(path))?,

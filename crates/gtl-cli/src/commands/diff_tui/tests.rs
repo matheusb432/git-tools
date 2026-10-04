@@ -7,6 +7,30 @@ use ratatui::{
 
 use super::{Document, Pager, input, render};
 
+#[test]
+fn review_key_marks_the_visible_file_or_the_selected_browser_file() {
+    let mut pager = Pager::default();
+    pager.replace(document());
+    pager.open_file(1);
+    let key = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE);
+    assert!(matches!(
+        input::handle(&mut pager, key),
+        input::Action::ToggleReview(1)
+    ));
+    pager.focus_files();
+    pager.browser.state.select(Some(0));
+    assert!(matches!(
+        input::handle(&mut pager, key),
+        input::Action::ToggleReview(0)
+    ));
+    pager.browser.editing = true;
+    assert!(matches!(
+        input::handle(&mut pager, key),
+        input::Action::Continue
+    ));
+    assert_eq!(pager.browser.filter, "v");
+}
+
 fn row(number: u32, text: &str) -> Row {
     Row {
         kind: RowKind::Context,
@@ -43,6 +67,7 @@ fn document() -> Document {
         notes: Vec::new(),
         files: vec![
             File {
+                review: None,
                 path: "src/first.rs".into(),
                 added: 1,
                 removed: 1,
@@ -50,6 +75,7 @@ fn document() -> Document {
                 full,
             },
             File {
+                review: None,
                 path: "src/second.rs".into(),
                 added: 1,
                 removed: 0,
@@ -97,6 +123,7 @@ fn phone_layout_preserves_source_across_context_wrap_resize_and_refresh() {
     refreshed.files.insert(
         0,
         File {
+            review: None,
             path: "before.txt".into(),
             added: 0,
             removed: 0,

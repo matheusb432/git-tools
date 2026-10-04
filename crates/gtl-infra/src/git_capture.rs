@@ -1,4 +1,8 @@
-use std::path::Path;
+use std::{
+    fmt::Write as _,
+    fs::{File, FileTimes},
+    path::Path,
+};
 
 use anyhow::{Context as _, anyhow};
 use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
@@ -67,13 +71,17 @@ pub(crate) fn diff(
         "--dst-prefix=b/",
         "--no-color",
         "--no-ext-diff",
+        "--full-index",
     ]
     .map(String::from)
     .to_vec();
     match request.format {
         GitDiffFormat::NamesOnly => args.push("--name-only".to_string()),
-        GitDiffFormat::Unified => {}
-        GitDiffFormat::FullContext => args.push("--unified=2147483647".to_string()),
+        GitDiffFormat::Unified => {
+            args.extend(["--unified=3", "--raw", "--no-abbrev", "--patch"].map(String::from));
+        }
+        GitDiffFormat::FullContext => args
+            .extend(["--unified=2147483647", "--raw", "--no-abbrev", "--patch"].map(String::from)),
     }
     let base = match &request.spec {
         GitDiffSpec::AgainstWorkingTree(revision)
@@ -104,14 +112,51 @@ pub(crate) fn diff(
     if request.format == GitDiffFormat::NamesOnly {
         return Ok(output.stdout);
     }
+    let raw = include_metadata_content_ids(&output.stdout)?;
     Ok(utf16::expand_binary_text(
         repo_path,
         &args,
         index.as_deref(),
         &request.spec,
         request.format,
-        output.stdout,
+        raw,
     ))
+}
+
+// Git omits the index header for pure renames and mode changes; reviews still need blob identity.
+fn include_metadata_content_ids(raw: &str) -> anyhow::Result<String> {
+    let mut patches = raw.split("\ndiff --git ");
+    let prefix = patches.next().unwrap_or_default();
+    let mut identities = prefix.lines().filter_map(|line| {
+        let header = line.strip_prefix(':')?.split_once('\t')?.0;
+        let fields = header.split_ascii_whitespace().collect::<Vec<_>>();
+        (fields.len() == 5).then(|| (fields[2], fields[3], fields[1]))
+    });
+    let mut result = String::new();
+    for patch in patches {
+        let (old, new, mode) = identities
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Git patch has no matching raw identity"))?;
+        result.push_str("diff --git ");
+        if patch.lines().any(|line| line.starts_with("index ")) {
+            result.push_str(patch);
+        } else {
+            let (names, body) = patch.split_once('\n').unwrap_or((patch, ""));
+            result.push_str(names);
+            result.push('\n');
+            let new = if new.bytes().all(|byte| byte == b'0') {
+                old
+            } else {
+                new
+            };
+            writeln!(result, "index {old}..{new} {mode}")?;
+            result.push_str(body);
+        }
+        if !result.ends_with('\n') {
+            result.push('\n');
+        }
+    }
+    Ok(result)
 }
 
 /// Builds one pathspec per extension that matches exactly the paths
@@ -150,7 +195,13 @@ fn working_tree_index(repo_path: &Path) -> anyhow::Result<tempfile::TempDir> {
     )?;
     let original = Path::new(original.trim());
     if original.exists() {
+        let modified = original.metadata()?.modified()?;
         std::fs::copy(original, &index)?;
+        // Git uses the index timestamp to detect entries that still need content checks.
+        File::options()
+            .write(true)
+            .open(&index)?
+            .set_times(FileTimes::new().set_modified(modified))?;
     } else {
         let output =
             crate::git_process::run_with_index(repo_path, &["read-tree", "--empty"], Some(&index))?;

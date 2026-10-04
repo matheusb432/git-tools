@@ -540,6 +540,9 @@ fn action_label(action: ViewerKeybindingAction, language: ViewerLanguage) -> Str
         ViewerKeybindingAction::CloseTab => t!(language, "keybindings-close-tab"),
         ViewerKeybindingAction::PinTab => t!(language, "keybindings-pin-tab"),
         ViewerKeybindingAction::CloseOtherTabs => t!(language, "keybindings-close-others"),
+        ViewerKeybindingAction::ToggleFileReviewed => {
+            t!(language, "keybindings-toggle-file-reviewed")
+        }
     }
 }
 

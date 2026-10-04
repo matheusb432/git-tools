@@ -361,10 +361,9 @@ impl ClientDiffCache {
 }
 
 fn rebind_workspace(workspace: Store<ClientDiffWorkspace>, view: &ViewerActiveView) {
-    if *workspace.identity().peek() == view.identity {
-        return;
+    if *workspace.identity().peek() != view.identity {
+        workspace.identity().set(view.identity);
     }
-    workspace.identity().set(view.identity);
     for (file, summary) in workspace.files().iter().zip(&view.files) {
         if *file.summary().peek() != *summary {
             file.summary().set(summary.clone());

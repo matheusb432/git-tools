@@ -69,6 +69,7 @@ pub(crate) fn viewer_file_summary(
     removed: u64,
 ) -> TestResult<ViewerFileSummary> {
     Ok(ViewerFileSummary {
+        review: None,
         source_id: None,
         id: ViewerDiffFileId::for_index(index),
         path: repository_relative_path(path)?,

@@ -217,7 +217,7 @@ INSERT INTO project_render_recency (source_value, rendered_at)
 SELECT value, coalesce(updated_at, created_at) FROM project_sources WHERE kind = 'directory';
 ";
 
-pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 21]> = LazyLock::new(|| {
+pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 22]> = LazyLock::new(|| {
     [
         M::up(SCHEMA_V1),
         M::up(SCHEMA_V2),
@@ -266,6 +266,9 @@ pub(super) static MIGRATIONS_SLICE: LazyLock<[M<'static>; 21]> = LazyLock::new(|
         )),
         M::up(include_str!(
             "../../db/migrations/0021_add_commit_render_target.sql"
+        )),
+        M::up(include_str!(
+            "../../db/migrations/0022_diff_file_reviews.sql"
         )),
     ]
 });

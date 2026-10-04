@@ -108,6 +108,56 @@ fn utf16_be(contents: &str) -> Vec<u8> {
 }
 
 #[test]
+fn same_size_binary_edits_keep_their_content_identity_with_a_racy_index() -> anyhow::Result<()> {
+    use std::{
+        fs::{File, FileTimes},
+        time::{Duration, UNIX_EPOCH},
+    };
+
+    let repository = TestRepository::new();
+    repository.git(&["config", "core.checkStat", "minimal"]);
+    repository.git(&["config", "core.trustctime", "false"]);
+    repository.write("binary.bin", b"\0first");
+    repository.commit_all("base");
+    repository.git(&["switch", "-qc", "feature"]);
+    repository.write("binary.bin", b"\0reviewed");
+    let binary = repository.path().join("binary.bin");
+    let timestamp = UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+    File::options()
+        .write(true)
+        .open(&binary)?
+        .set_times(FileTimes::new().set_modified(timestamp))?;
+    repository.commit_all("reviewed version");
+    repository.write("binary.bin", b"\0changed!");
+    File::options()
+        .write(true)
+        .open(&binary)?
+        .set_times(FileTimes::new().set_modified(timestamp))?;
+    let index = repository.path().join(".git/index");
+    File::options()
+        .write(true)
+        .open(&index)?
+        .set_times(FileTimes::new().set_modified(timestamp))?;
+    let index_before = std::fs::read(&index)?;
+    let changed_blob = repository.git(&["hash-object", "binary.bin"]);
+    let view = compute_view(
+        &repository,
+        DiffTarget::Base(GitRevision::main()),
+        ExtensionFilter::default(),
+    );
+    assert_eq!(view.files.len(), 1);
+    assert!(
+        view.files[0]
+            .lines
+            .iter()
+            .any(|line| line.contains(&changed_blob))
+    );
+    assert_eq!(std::fs::read(&index)?, index_before);
+    assert_eq!(std::fs::metadata(&index)?.modified()?, timestamp);
+    Ok(())
+}
+
+#[test]
 fn utf16_sql_changes_render_as_text_in_commits_and_working_tree() {
     let repository = TestRepository::new();
     let path = "queries/sample.sql";
@@ -319,6 +369,51 @@ fn spaced_paths_keep_their_names_through_changes_and_renames() {
 
     assert_eq!(file_paths(&view), ["dir b/file.txt", "new name.txt"]);
     assert_eq!(view.files[1].status(), FileStatus::Renamed);
+}
+
+#[cfg(unix)]
+#[test]
+fn metadata_only_diffs_identify_the_compared_blobs_and_survive_committing() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let mut fingerprints = Vec::new();
+    for contents in ["first contents\n", "different contents\n"] {
+        let repository = TestRepository::new();
+        repository.git(&["config", "diff.renames", "true"]);
+        repository.write("before.txt", contents);
+        repository.write("mode.txt", contents);
+        let base = repository.commit_all("base");
+        repository.git(&["mv", "before.txt", "renamed.txt"]);
+        std::fs::set_permissions(
+            repository.path().join("mode.txt"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        let working = compute_view(&repository, working_tree(), ExtensionFilter::default());
+        let before = working
+            .files
+            .iter()
+            .map(|file| file.lines.iter().map(str::to_owned).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(before.len(), 2);
+        let head = repository.commit_all("rename and change mode");
+        let committed = compute_view(
+            &repository,
+            range(&format!("{base}..{head}")),
+            ExtensionFilter::default(),
+        );
+        assert_eq!(
+            before,
+            committed
+                .files
+                .iter()
+                .map(|file| file.lines.iter().map(str::to_owned).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
+        );
+        fingerprints.push(before);
+    }
+    assert_ne!(fingerprints[0][0], fingerprints[1][0]);
+    assert_ne!(fingerprints[0][1], fingerprints[1][1]);
 }
 
 #[test]

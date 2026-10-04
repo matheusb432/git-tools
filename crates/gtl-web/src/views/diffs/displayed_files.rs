@@ -39,11 +39,15 @@ pub(crate) fn searchable_files(
     view: &ViewerActiveView,
     sort: DiffFilesSort,
     shown: ShownFileChanges,
+    unreviewed: bool,
 ) -> Vec<ViewerFileSummary> {
     let mut files = view
         .files
         .iter()
-        .filter(|file| shown.shows_status(file.status))
+        .filter(|file| {
+            shown.shows_status(file.status)
+                && (!unreviewed || !file.review.as_ref().is_some_and(|review| review.reviewed))
+        })
         .cloned()
         .collect::<Vec<_>>();
     sort_files(&mut files, sort);
@@ -142,7 +146,11 @@ mod tests {
         shown: ShownFileChanges,
         text_matches: Option<&HashSet<ViewerDiffFileId>>,
     ) -> ViewerActiveView {
-        displayed_view(view, &searchable_files(view, sort, shown), text_matches)
+        displayed_view(
+            view,
+            &searchable_files(view, sort, shown, false),
+            text_matches,
+        )
     }
 
     #[test]
@@ -157,6 +165,57 @@ mod tests {
         );
 
         assert_eq!(displayed, view);
+        Ok(())
+    }
+
+    #[test]
+    fn unreviewed_filter_removes_only_reviewed_files_and_composes_with_change_kinds() -> TestResult
+    {
+        use gtl_models::{diffs::DiffReviewContentId, paths::RepositoryRoot};
+        use gtl_wire::diff_review::{DiffFileReview, DiffFileReviewReference};
+
+        let mut view = view()?;
+        view.files[0].review = Some(DiffFileReview {
+            reference: DiffFileReviewReference {
+                repository: RepositoryRoot::try_new(
+                    crate::test_support::absolute_file_path("/repo")?
+                        .as_path()
+                        .to_path_buf(),
+                )?,
+                path: view.files[0].path.clone(),
+                content_id: DiffReviewContentId::from_digest([1; 32]),
+            },
+            reviewed: true,
+        });
+        let all = searchable_files(
+            &view,
+            DiffFilesSort::Path,
+            ShownFileChanges::default(),
+            false,
+        );
+        assert_eq!(all.len(), 4);
+        let filtered = searchable_files(
+            &view,
+            DiffFilesSort::Path,
+            ShownFileChanges::default(),
+            true,
+        );
+        assert_eq!(
+            filtered
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>(),
+            view.files[1..]
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>()
+        );
+
+        let mut form = FileFilterForm::default();
+        FileFilterEdit::Toggle(FileChangeKind::Added).apply(&mut form);
+        let filtered = searchable_files(&view, DiffFilesSort::Changes, form.shown, true);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].path, view.files[3].path);
         Ok(())
     }
 
@@ -179,7 +238,12 @@ mod tests {
         assert_eq!(
             displayed_view(
                 &view,
-                &searchable_files(&view, DiffFilesSort::Changes, ShownFileChanges::default()),
+                &searchable_files(
+                    &view,
+                    DiffFilesSort::Changes,
+                    ShownFileChanges::default(),
+                    false
+                ),
                 None,
             )
             .content_id,

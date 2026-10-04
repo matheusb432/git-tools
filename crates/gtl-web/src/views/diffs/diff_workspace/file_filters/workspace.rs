@@ -20,6 +20,7 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub(crate) struct WorkspaceFileFilters {
+    pub(crate) review_progress: Memo<(usize, usize)>,
     pub(crate) form: Memo<FileFilterForm>,
     pub(crate) edit: Callback<FileFilterEdit>,
     pub(crate) text: TextFilter,
@@ -27,6 +28,13 @@ pub(crate) struct WorkspaceFileFilters {
     pub(crate) hidden_count: Memo<usize>,
     pub(crate) active: Memo<bool>,
     pub(crate) clear: Callback<()>,
+}
+
+impl WorkspaceFileFilters {
+    pub(crate) fn review_complete(self) -> bool {
+        let (reviewed, total) = (self.review_progress)();
+        self.form.read().unreviewed && total > 0 && reviewed == total
+    }
 }
 
 /// The server-applied cutoff of the active tab.
@@ -47,8 +55,21 @@ pub(in crate::views::diffs::diff_workspace) fn use_workspace_file_filters(
     let tab_id = use_memo(move || source.read().identity.tab_id);
     let form = use_memo(move || forms.form(tab_id()));
     let edit = use_callback(move |edit: FileFilterEdit| forms.edit(tab_id(), edit));
-    let searchable =
-        use_memo(move || searchable_files(&source.read(), files_sort(), form.read().shown));
+    let review_progress = use_memo(move || {
+        let source = source.read();
+        (
+            source
+                .files
+                .iter()
+                .filter(|file| file.review.as_ref().is_some_and(|review| review.reviewed))
+                .count(),
+            source.files.len(),
+        )
+    });
+    let searchable = use_memo(move || {
+        let form = form.read();
+        searchable_files(&source.read(), files_sort(), form.shown, form.unreviewed)
+    });
     let searched_files = use_memo(move || {
         searchable
             .read()
@@ -94,6 +115,7 @@ pub(in crate::views::diffs::diff_workspace) fn use_workspace_file_filters(
         }
     });
     let filters = use_context_provider(|| WorkspaceFileFilters {
+        review_progress,
         form,
         edit,
         text,

@@ -479,6 +479,53 @@ fn active_view_titles_round_trip_and_reject_invalid_parts() -> TestResult {
 }
 
 #[test]
+fn file_review_metadata_round_trips_and_rejects_another_file_or_repository() -> TestResult {
+    let root = if cfg!(windows) { "C:/repo" } else { "/repo" };
+    let mut active = raw_active_view()?;
+    active.files.push(v1::ViewerFileSummary {
+        id: "file-0".into(),
+        path: "src/a.rs".into(),
+        absolute_path: format!("{root}/src/a.rs"),
+        status: v1::ViewerFileStatus::Modified as i32,
+        review: Some(v1::DiffFileReview {
+            reference: Some(v1::DiffFileReviewReference {
+                repository_root: root.into(),
+                file_path: "src/a.rs".into(),
+                content_id: vec![3; 32],
+            }),
+            reviewed: true,
+        }),
+        ..Default::default()
+    });
+    let encoded = encoded_ready_shell(active.clone())?;
+    let decoded = decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+        shell: Some(encoded.clone()),
+    })?;
+    assert_eq!(encode_viewer_shell(decoded)?, encoded);
+    for (repository, path) in [
+        (format!("{root}/other"), "src/a.rs"),
+        (root.into(), "src/b.rs"),
+    ] {
+        let mut invalid = active.clone();
+        invalid.files[0].review = Some(v1::DiffFileReview {
+            reference: Some(v1::DiffFileReviewReference {
+                repository_root: repository,
+                file_path: path.into(),
+                content_id: vec![3; 32],
+            }),
+            reviewed: true,
+        });
+        assert_eq!(
+            decode_get_viewer_shell_response(v1::GetViewerShellResponse {
+                shell: Some(encoded_ready_shell(invalid)?),
+            }),
+            Err(ViewerCodecError::InvalidMessage)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn ready_shell_metadata_survives_protobuf_and_rejects_invalid_content_ids()
 -> Result<(), Box<dyn std::error::Error>> {
     use prost::Message as _;
@@ -557,6 +604,7 @@ fn shell_codec_rejects_invalid_or_conflicting_keybindings() {
                         density: v1::ViewerDiffDensity::Compact as i32,
                     }),
                     keybindings: Some(v1::ViewerKeybindings {
+                        toggle_file_reviewed: None,
                         next_tab: None,
                         previous_tab: None,
                         close_tab: None,

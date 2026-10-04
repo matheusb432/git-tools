@@ -17,6 +17,25 @@ pub enum TerminalDiffError {
 }
 
 impl GtlClient {
+    pub async fn set_diff_file_reviewed(
+        &self,
+        request: gtl_wire::diff_review::SetDiffFileReviewed,
+    ) -> Result<(), ClientError> {
+        let mut request = tonic::Request::new(gtl_wire::proto::diff_review::encode_set(&request));
+        request.set_timeout(Duration::from_secs(5));
+        let mut client = v1::viewer_service_client::ViewerServiceClient::new(self.channel.clone())
+            .max_encoding_message_size(super::MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(super::MAX_RESPONSE_MESSAGE_SIZE);
+        let operation = client.set_diff_file_reviewed(request);
+        tokio::time::timeout(Duration::from_secs(10), operation)
+            .await
+            .map_err(|_| {
+                ClientError::from(tonic::Status::deadline_exceeded(
+                    "saving review progress timed out",
+                ))
+            })??;
+        Ok(())
+    }
     pub async fn read_terminal_diff(
         &self,
         request: v1::ReadTerminalDiffRequest,

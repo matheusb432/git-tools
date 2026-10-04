@@ -70,6 +70,10 @@ and markers. Lines wrap by default;
 `[` and `]` jump between hunks, and `{` and `}` jump between files. Use `/` to search and `n`/`N`
 for the next/previous match. `?` opens scrollable help; `q` exits.
 
+Press `v` to mark the current file reviewed or unreviewed, including the selected file when the file browser has focus.
+Reviewed files show a check, and the header shows your progress.
+Marks save locally and are shared with the desktop viewer; refreshing retains marks only for unchanged file comparisons.
+
 Wide terminals show a file sidebar with filenames, directories, and change counts. On narrow
 terminals, `f` opens the file browser across the screen. Press `/` there to filter filenames.
 Click a file to open it, click any toolbar control to activate it, or use the mouse wheel over

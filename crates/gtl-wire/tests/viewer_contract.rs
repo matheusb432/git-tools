@@ -254,6 +254,7 @@ fn semantic_shell() -> TestResult<ViewerShell> {
                     trail: String::new(),
                 },
                 files: vec![ViewerFileSummary {
+                    review: None,
                     source_id: None,
                     id: ViewerDiffFileId::for_index(0),
                     path: relative_path("src/lib.rs")?,

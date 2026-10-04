@@ -21,6 +21,13 @@ The tab menu offers Refresh and Live. A snapshot keeps the commit IDs it was ope
 Refresh resolves the comparison again, and Live follows changes while you work. Saved tabs and
 history remain available when you reopen the app.
 
+Mark a file reviewed using the circle in its diff header, or press Alt+R for the current file.
+Reviewed files show a check in Files, and the panel shows your progress once you mark a file.
+Choose Unreviewed files only in the existing file filters to focus on the remaining work.
+Marks save locally and are shared with the terminal pager.
+Refresh and Live preserve marks for unchanged content and clear the displayed mark when a file's comparison changes, including binary edits.
+Layout, density, wrapping and theme changes preserve progress.
+
 ## Finding commits
 
 Open Find commits from a project row, or the search icon beside the Commits heading. Search by

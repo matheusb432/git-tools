@@ -576,6 +576,7 @@ fn ApplicationLayoutContent() -> Element {
     crate::views::diffs::use_diff_presentation_provider();
     crate::views::diffs::file_filter_changes::use_file_filter_changes_provider();
     crate::views::diffs::file_filter_form::use_file_filter_forms_provider();
+    crate::views::diffs::file_review::use_file_reviews_provider();
     crate::views::projects::cache::use_status_cache_provider();
     crate::views::push::use_push_provider();
     use_viewer_routes(context);

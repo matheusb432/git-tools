@@ -51,6 +51,12 @@ macro_rules! viewer_query {
 
 viewer_query!(get_shell, ViewerShell, get_shell);
 viewer_request!(
+    set_diff_file_reviewed,
+    gtl_wire::diff_review::SetDiffFileReviewed,
+    (),
+    set_diff_file_reviewed
+);
+viewer_request!(
     list_projects,
     ListViewerProjects,
     ViewerProjectPage,

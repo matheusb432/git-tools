@@ -32,6 +32,7 @@ pub struct Row {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct File {
+    pub review: Option<crate::diff_review::DiffFileReview>,
     pub path: String,
     pub added: u64,
     pub removed: u64,
@@ -68,6 +69,14 @@ impl TerminalDiff {
         let mut paths = HashSet::new();
         for file in &files {
             budget.add_file(&file.path)?;
+            budget.add_review(file.review.as_ref())?;
+            if file
+                .review
+                .as_ref()
+                .is_some_and(|review| review.reference.path.to_str() != Some(file.path.as_str()))
+            {
+                return Err(SnapshotError::Invalid);
+            }
             if !paths.insert(&file.path) {
                 return Err(SnapshotError::Invalid);
             }
@@ -127,6 +136,22 @@ pub struct SnapshotBudget {
 }
 
 impl SnapshotBudget {
+    pub fn add_review(
+        &mut self,
+        review: Option<&crate::diff_review::DiffFileReview>,
+    ) -> Result<(), SnapshotError> {
+        if let Some(review) = review {
+            self.add_text(&review.reference.repository.to_string_lossy())?;
+            self.add_text(&review.reference.path.to_string_lossy())?;
+            self.bytes = self
+                .bytes
+                .saturating_add(std::mem::size_of::<crate::diff_review::DiffFileReview>());
+            if self.bytes > SNAPSHOT_BYTES_MAX {
+                return Err(SnapshotError::TooLarge);
+            }
+        }
+        Ok(())
+    }
     pub fn add_header(&mut self, title: &str, notes: &[String]) -> Result<(), SnapshotError> {
         if notes.len() > SNAPSHOT_FILES_MAX {
             return Err(SnapshotError::TooLarge);

@@ -21,7 +21,7 @@ pub mod commit_search;
 pub mod projects;
 pub mod push;
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 61;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 62;
 
 pub mod file_filters;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
@@ -219,6 +219,8 @@ impl TryFrom<String> for ViewerDiffFileId {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerFileSummary {
+    #[serde(default)]
+    pub review: Option<crate::diff_review::DiffFileReview>,
     pub source_id: Option<ViewerRowContentId>,
     pub id: ViewerDiffFileId,
     pub path: RepositoryRelativePath,

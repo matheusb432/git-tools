@@ -21,6 +21,35 @@ use crate::{
 };
 
 #[test]
+fn review_updates_refresh_file_summaries_without_reloading_rows() -> TestResult {
+    let mut view = view(1)?;
+    let owner = VirtualDom::new(VNode::empty);
+    owner.in_scope(ScopeId::ROOT, || -> TestResult {
+        let cache = cache();
+        let original = cache.select(Some("server-a".into()), &view);
+        complete(cache, &view);
+        let rows = original.peek().files[0].rows.unified[0].as_ptr();
+        view.files[0].review = Some(gtl_wire::diff_review::DiffFileReview {
+            reference: gtl_models::diffs::DiffFileReviewReference {
+                repository: gtl_models::paths::RepositoryRoot::try_new(
+                    absolute_file_path("/repo")?.as_path().to_path_buf(),
+                )?,
+                path: view.files[0].path.clone(),
+                content_id: gtl_models::diffs::DiffReviewContentId::from_digest([1; 32]),
+            },
+            reviewed: true,
+        });
+        let selected = cache.select(Some("server-a".into()), &view);
+        assert_eq!(
+            selected.peek().files[0].summary.review,
+            view.files[0].review
+        );
+        assert_eq!(selected.peek().files[0].rows.unified[0].as_ptr(), rows);
+        Ok(())
+    })
+}
+
+#[test]
 fn same_content_reuses_row_allocation_and_store_across_tabs_and_generations() -> TestResult {
     let mut view = view(1)?;
     let owner = VirtualDom::new(VNode::empty);
@@ -363,6 +392,7 @@ fn view(content: u8) -> TestResult<ViewerActiveView> {
             trail: String::new(),
         },
         files: vec![ViewerFileSummary {
+            review: None,
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/main.rs")?,

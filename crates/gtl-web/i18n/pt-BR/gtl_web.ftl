@@ -957,3 +957,13 @@ tour-previous = Anterior
 tour-next = Próxima
 tour-finish = Concluir
 tour-close = Fechar guia
+
+review-mark-reviewed = Marcar arquivo como revisado
+review-mark-unreviewed = Marcar arquivo como não revisado
+review-file-reviewed = Revisado
+review-filter-unreviewed = Apenas arquivos não revisados
+review-progress = { $reviewed }/{ $total } revisados
+review-all-reviewed = Todos os arquivos revisados
+review-all-reviewed-message = Mostre os arquivos revisados para lê-los novamente.
+review-show-reviewed = Mostrar arquivos revisados
+keybindings-toggle-file-reviewed = Marcar arquivo atual como revisado ou não revisado

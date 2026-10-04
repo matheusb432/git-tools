@@ -14,7 +14,7 @@ use super::{
     theme,
 };
 
-const HELP: &str = "READING A DIFF\n\nj/k or arrows   Scroll\nSpace/b        Page down/up\ng/G            Start/end\n[/]            Previous/next hunk\n{/}            Previous/next file\nf or Tab       Focus file browser\n/              Search\nn/N            Next/previous match\nw              Toggle wrapping\nh/l or arrows  Pan unwrapped lines\nc              Toggle full context\nr              Refresh comparison\nq or Ctrl-C    Quit\n\nMOUSE\n\nClick a control to activate it.\nClick a file to open it.\nClick Filter files to type a filter.\nScroll the wheel over either pane.\nClick or drag the diff scrollbar.\n\nEsc closes the current panel.\nPress ? or Esc to return";
+const HELP: &str = "READING A DIFF\n\nj/k or arrows   Scroll\nSpace/b        Page down/up\ng/G            Start/end\n[/]            Previous/next hunk\n{/}            Previous/next file\nf or Tab       Focus file browser\n/              Search\nn/N            Next/previous match\nw              Toggle wrapping\nh/l or arrows  Pan unwrapped lines\nc              Toggle full context\nr              Refresh comparison\nv              Mark file reviewed/unreviewed\nq or Ctrl-C    Quit\n\nMOUSE\n\nClick a control to activate it.\nClick a file to open it.\nClick Filter files to type a filter.\nScroll the wheel over either pane.\nClick or drag the diff scrollbar.\n\nEsc closes the current panel.\nPress ? or Esc to return";
 
 pub(super) fn help_scroll_max(width: u16, page: usize) -> u16 {
     let rows: usize = HELP
@@ -58,7 +58,18 @@ fn header(frame: &mut Frame<'_>, pager: &Pager, loading: bool) {
     } else {
         &pager.document.title
     };
-    let label = if loading { "  ◌ loading" } else { "" };
+    let reviewed = pager
+        .document
+        .files
+        .iter()
+        .filter(|file| file.review.as_ref().is_some_and(|review| review.reviewed))
+        .count();
+    let progress = if reviewed > 0 {
+        format!("  {reviewed}/{} reviewed", pager.document.files.len())
+    } else {
+        String::new()
+    };
+    let label = format!("{progress}{}", if loading { "  ◌ loading" } else { "" });
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
@@ -94,6 +105,16 @@ fn diff(frame: &mut Frame<'_>, pager: &mut Pager, loading: bool) {
         || "Changes".into(),
         |entry| printable(&pager.document.files[entry.file].path),
     );
+    let path = if pager
+        .layout
+        .entry_at(pager.offset)
+        .and_then(|entry| pager.document.files[entry.file].review.as_ref())
+        .is_some_and(|review| review.reviewed)
+    {
+        format!("✓ {path}")
+    } else {
+        path
+    };
     let title = format!(
         " {} ",
         browser::fit(

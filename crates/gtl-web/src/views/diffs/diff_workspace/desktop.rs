@@ -31,7 +31,10 @@ use crate::{
             use_toast,
         },
     },
-    views::{diffs::ClientDiffDocument, projects::ComparisonBranchEditor},
+    views::{
+        diffs::{ClientDiffDocument, file_filter_form::FileFilterEdit},
+        projects::ComparisonBranchEditor,
+    },
 };
 
 #[component]
@@ -254,8 +257,46 @@ fn ReadyWorkspace(
         },
         true,
     );
+    let reviews = use_context::<crate::views::diffs::file_review::FileReviewController>();
     let shortcuts = use_callback(move |event: web_sys::KeyboardEvent| {
         if event.default_prevented() || event.is_composing() {
+            return;
+        }
+        if native_keyboard_event_matches(
+            &event,
+            keybindings,
+            ViewerKeybindingAction::ToggleFileReviewed,
+        ) {
+            if !viewer.actions_enabled()
+                || browser::keyboard_target_is_editable(&event)
+                || browser::workspace_overlay_is_open()
+            {
+                return;
+            }
+            event.prevent_default();
+            if !event.repeat() {
+                let view = workspace.view.peek();
+                let anchor_id = browser::keyboard_file_anchor(&event);
+                let path = presentation
+                    .anchor(view.identity.tab_id)
+                    .map(|anchor| anchor.file);
+                let file = anchor_id
+                    .as_ref()
+                    .and_then(|anchor_id| {
+                        view.files.iter().find(|file| file.anchor_id == *anchor_id)
+                    })
+                    .or_else(|| {
+                        path.as_ref().and_then(|path| {
+                            view.files
+                                .iter()
+                                .find(|file| file.path.to_string_lossy() == *path)
+                        })
+                    })
+                    .or_else(|| view.files.first());
+                if let Some(review) = file.and_then(|file| file.review.clone()) {
+                    reviews.toggle(review);
+                }
+            }
             return;
         }
         for (action, sidebar, panel) in [
@@ -415,6 +456,14 @@ fn ReadyWorkspace(
             oncommits: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
         }
     };
+    let review_complete = file_filters.review_complete();
+    let show_files = move |_: MouseEvent| {
+        if review_complete {
+            file_filters.edit.call(FileFilterEdit::Unreviewed(false));
+        } else {
+            file_filters.clear.call(());
+        }
+    };
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
@@ -425,13 +474,20 @@ fn ReadyWorkspace(
                         if file_count == 0 && (file_filters.active)() {
                             PageNotice {
                                 class: "h-full min-h-48 px-5",
-                                title: t!(language, "file-filters-no-matches"),
-                                message: t!(language, "file-filters-no-matches-message"),
+                                role: "status",
+                                title: if review_complete { t!(language, "review-all-reviewed") } else { t!(language, "file-filters-no-matches") },
+                                message: if review_complete { t!(language, "review-all-reviewed-message") } else { t!(language, "file-filters-no-matches-message") },
                                 Button {
                                     class: "mx-auto mt-4",
                                     variant: ButtonVariant::Outline,
-                                    onclick: move |_| file_filters.clear.call(()),
-                                    {t!(language, "file-filters-clear")}
+                                    onclick: show_files,
+                                    {
+                                        if review_complete {
+                                            t!(language, "review-show-reviewed")
+                                        } else {
+                                            t!(language, "file-filters-clear")
+                                        }
+                                    }
                                 }
                             }
                         } else if file_count == 0 {

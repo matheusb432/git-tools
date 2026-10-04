@@ -117,6 +117,7 @@ pub(crate) fn use_client_diff_workspace(
 ) -> ClientDiffWorkspaceController {
     let identity = use_memo(move || view.read().identity);
     let source = use_memo(move || view.read().row_source);
+    let summaries = use_memo(move || view.read().files.clone());
     let cache = use_context::<ClientDiffCache>();
     let viewer = use_context::<crate::app::application_layout::ViewerContext>();
     let key = use_memo(move || ClientDiffCacheKey {
@@ -130,6 +131,7 @@ pub(crate) fn use_client_diff_workspace(
         let key = key();
         let demand = demand();
         let _source = source();
+        let _summaries = summaries();
         load_workspace(cache, key, view, workspace, identity, demand)
     });
     ClientDiffWorkspaceController {

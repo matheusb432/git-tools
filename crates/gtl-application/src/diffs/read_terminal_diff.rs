@@ -43,6 +43,7 @@ pub fn execute(
     request: &ReadTerminalDiff,
     git: &impl GitClient,
     preferences: &impl RepositoryPreferenceReader,
+    reviews: &impl crate::ports::DiffReviewReader,
 ) -> Result<TerminalDiff, ReadTerminalDiffError> {
     let root = git.top_level(&request.cwd)?;
     let filter = preferences.extension_filter(&root)?;
@@ -64,8 +65,19 @@ pub fn execute(
         .collect::<Vec<_>>();
     let mut budget = SnapshotBudget::default();
     budget.add_header(&title, &notes)?;
+    let references = view
+        .files
+        .iter()
+        .map(|file| super::review::file_review(&view.repo_root, file).reference)
+        .collect::<Vec<_>>();
+    let reviewed = reviews.reviewed_files(&references)?;
     let mut files = Vec::new();
-    for file in view.files {
+    for (file, reference) in view.files.into_iter().zip(references) {
+        let review = Some(gtl_wire::diff_review::DiffFileReview {
+            reviewed: reviewed.contains(&reference),
+            reference,
+        });
+        budget.add_review(review.as_ref())?;
         let path = file.path.to_string_lossy().into_owned();
         budget.add_file(&path)?;
         let compact = project_rows(&file.lines, file.path.as_path(), &mut budget)?;
@@ -79,6 +91,7 @@ pub fn execute(
             return Err(ReadTerminalDiffError::Changed);
         }
         files.push(File {
+            review,
             path,
             added: file.added.value(),
             removed: file.removed.value(),

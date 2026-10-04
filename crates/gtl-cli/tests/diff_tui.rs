@@ -50,6 +50,10 @@ fn reviews_refreshes_and_restores_the_terminal_through_the_cli() -> Result<()> {
     session.set_expect_timeout(Some(Duration::from_secs(15)));
     session.get_process_mut().set_window_size(40, 12)?;
     wait_screen(&mut session, &mut parser, "code.rs")?;
+    session.send("v")?;
+    wait_screen(&mut session, &mut parser, "File marked reviewed")?;
+    session.send("v")?;
+    wait_screen(&mut session, &mut parser, "File marked unreviewed")?;
     session.send("]")?;
     wait_screen(&mut session, &mut parser, "changed_thirty")?;
     assert_keyword_color(&parser, "pub")?;

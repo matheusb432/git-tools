@@ -7,6 +7,9 @@ mod support;
 #[path = "viewer/cli_review.rs"]
 mod cli_review;
 
+#[path = "viewer/diff_review_progress.rs"]
+mod diff_review_progress;
+
 #[path = "viewer/desktop_scroll_baseline.rs"]
 mod desktop_scroll_baseline;
 

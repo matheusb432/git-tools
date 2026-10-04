@@ -5,6 +5,7 @@ pub mod artifact_store;
 pub mod clock;
 pub mod data_root;
 pub mod detached_process;
+mod diff_review_reader;
 mod extension_filter_store;
 pub mod file_system;
 mod git_capture;

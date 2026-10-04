@@ -16,6 +16,7 @@ service ViewerService {
   rpc StartViewerPush(StartViewerPushRequest) returns (StartViewerPushResponse);
   rpc GetViewerFileFilters(GetViewerFileFiltersRequest) returns (GetViewerFileFiltersResponse);
   rpc SetViewerFileFilters(SetViewerFileFiltersRequest) returns (SetViewerFileFiltersResponse);
+  rpc SetDiffFileReviewed(SetDiffFileReviewedRequest) returns (SetDiffFileReviewedResponse);
   rpc RenameViewerSnapshot(RenameViewerSnapshotRequest) returns (RenameViewerSnapshotResponse);
   rpc SetViewerTabPinned(SetViewerTabPinnedRequest) returns (SetViewerTabPinnedResponse);
   rpc CloseOtherViewerTabs(CloseOtherViewerTabsRequest) returns (CloseOtherViewerTabsResponse);
@@ -263,6 +264,7 @@ enum ViewerFileStatus {
 }
 
 message ViewerFileSummary {
+  optional DiffFileReview review = 12;
   optional bytes source_id = 11;
   string id = 1;
   string path = 2;
@@ -275,6 +277,24 @@ message ViewerFileSummary {
   bool initially_expanded = 9;
   uint32 row_count = 10;
 }
+
+message DiffFileReviewReference {
+  string repository_root = 1;
+  string file_path = 2;
+  bytes content_id = 3;
+}
+
+message DiffFileReview {
+  DiffFileReviewReference reference = 1;
+  bool reviewed = 2;
+}
+
+message SetDiffFileReviewedRequest {
+  DiffFileReviewReference file = 1;
+  optional bool reviewed = 2;
+}
+
+message SetDiffFileReviewedResponse {}
 
 message ViewerCommandLine {
   string lead = 1;
@@ -435,6 +455,7 @@ message ViewerKeybindings {
   optional string close_tab = 9;
   optional string pin_tab = 10;
   optional string close_other_tabs = 11;
+  optional string toggle_file_reviewed = 12;
 
   optional string push_diff = 6;
   string toggle_files_sidebar = 4;

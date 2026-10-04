@@ -6,7 +6,7 @@ use crate::{
     shared::{
         i18n::{t, use_language},
         ui::{
-            Button, ButtonLayout, ButtonSize, ButtonVariant, ExtensionSelectionAction,
+            Button, ButtonLayout, ButtonSize, ButtonVariant, Checkbox, ExtensionSelectionAction,
             ExtensionSelectionInput, IconPopover, Select, SelectOption, TextInput,
             TextInputLabelVisibility, popover::PopoverPlacement, select::SelectVariant,
         },
@@ -30,6 +30,8 @@ pub(crate) fn FileFiltersMenu(
     ontext: EventHandler<String>,
     shown: ShownFileChanges,
     ontoggle: EventHandler<FileChangeKind>,
+    #[props(default)] unreviewed: bool,
+    #[props(default)] onunreviewed: EventHandler<bool>,
     changes_since: ChangesSinceSelection,
     #[props(default)] changes_since_value: String,
     #[props(default = true)] changes_since_available: bool,
@@ -71,6 +73,14 @@ pub(crate) fn FileFiltersMenu(
                     ontext,
                 }
                 ChangeKindSection { shown, ontoggle }
+                section { class: "file-filters-section",
+                    Checkbox {
+                        id: format!("{id}-unreviewed"),
+                        label: t!(language, "review-filter-unreviewed"),
+                        checked: unreviewed,
+                        onchange: move |checked| onunreviewed.call(checked),
+                    }
+                }
                 ChangesSinceSection {
                     id: format!("{id}-since"),
                     selection: changes_since,

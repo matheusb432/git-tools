@@ -35,6 +35,7 @@ message TerminalDiffFile {
   string path = 1;
   uint64 added = 2;
   uint64 removed = 3;
+  optional DiffFileReview review = 4;
 }
 
 message TerminalDiffRows {

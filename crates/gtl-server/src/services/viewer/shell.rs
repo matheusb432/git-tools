@@ -10,7 +10,8 @@ use super::super::status::{GrpcResultExt as _, invalid_request, private, status}
 use crate::{state::AppState, viewer_runtime};
 
 pub(super) fn project_shell(state: &AppState) -> Result<v1::ViewerShell, Status> {
-    let result = get_viewer_shell::execute(&state.viewer, &state.user_settings).into_grpc()?;
+    let result = get_viewer_shell::execute(&state.viewer, &state.user_settings, &state.database)
+        .into_grpc()?;
     if let Some(work) = result.commit_reload {
         viewer_runtime::spawn_commit(state.clone(), work);
     }

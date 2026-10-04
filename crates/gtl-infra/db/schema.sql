@@ -12,6 +12,14 @@ JOIN project_sources USING ([source_id])
 WHERE projects.[paused_at] IS NULL
   AND projects.[unmanaged_at] IS NULL;
 
+CREATE TABLE diff_file_reviews (
+    id INTEGER PRIMARY KEY,
+    repository_root TEXT NOT NULL CHECK (length(repository_root) > 0),
+    file_path TEXT NOT NULL CHECK (length(file_path) > 0),
+    content_id BLOB NOT NULL CHECK (length(content_id) = 32),
+    UNIQUE (repository_root, file_path, content_id)
+) STRICT;
+
 CREATE TABLE project_groups (
     [project_id] TEXT NOT NULL
         REFERENCES projects ([id]) ON DELETE CASCADE,

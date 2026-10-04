@@ -234,6 +234,7 @@ mod tests {
     pub(super) fn test_file() -> TestResult<ClientDiffFile> {
         Ok(ClientDiffFile {
             summary: ViewerFileSummary {
+                review: None,
                 source_id: None,
                 id: ViewerDiffFileId::for_index(0),
                 path: repository_relative_path("scripts/run.SH")?,

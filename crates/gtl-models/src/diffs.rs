@@ -4,6 +4,7 @@ mod commit;
 mod counts;
 mod extension_filter;
 mod kind;
+mod review_content_id;
 mod view_title;
 
 pub use commit::{
@@ -16,4 +17,5 @@ pub use extension_filter::{
     FileExtensions, ParseExtensionFilterModeError,
 };
 pub use kind::DiffKind;
+pub use review_content_id::{DiffFileReviewReference, DiffReviewContentId};
 pub use view_title::DiffViewTitle;

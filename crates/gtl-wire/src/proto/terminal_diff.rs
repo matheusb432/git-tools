@@ -84,7 +84,14 @@ impl SnapshotDecoder {
             }
             Event::File(file) if self.header.is_some() => {
                 self.budget.add_file(&file.path)?;
+                let review = file
+                    .review
+                    .map(super::diff_review::decode_review)
+                    .transpose()
+                    .map_err(|_| SnapshotError::Invalid)?;
+                self.budget.add_review(review.as_ref())?;
                 self.files.push(terminal_diff::File {
+                    review,
                     path: file.path,
                     added: file.added,
                     removed: file.removed,
@@ -148,6 +155,7 @@ mod tests {
         accept(
             &mut decoder,
             Event::File(v1::TerminalDiffFile {
+                review: None,
                 path: "a.rs".into(),
                 added: 1,
                 removed: 0,
@@ -202,6 +210,7 @@ mod tests {
         accept(
             &mut decoder,
             Event::File(v1::TerminalDiffFile {
+                review: None,
                 path: "a.rs".into(),
                 added: 0,
                 removed: 0,

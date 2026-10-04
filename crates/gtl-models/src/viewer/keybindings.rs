@@ -14,10 +14,11 @@ pub enum ViewerKeybindingAction {
     CloseTab,
     PinTab,
     CloseOtherTabs,
+    ToggleFileReviewed,
 }
 
 impl ViewerKeybindingAction {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::SearchFiles,
         Self::SearchTextInAllFiles,
         Self::ToggleFilesSidebar,
@@ -28,6 +29,7 @@ impl ViewerKeybindingAction {
         Self::CloseTab,
         Self::PinTab,
         Self::CloseOtherTabs,
+        Self::ToggleFileReviewed,
     ];
     const COUNT: usize = Self::ALL.len();
 
@@ -43,6 +45,7 @@ impl ViewerKeybindingAction {
             Self::CloseTab => 7,
             Self::PinTab => 8,
             Self::CloseOtherTabs => 9,
+            Self::ToggleFileReviewed => 10,
         }
     }
 
@@ -81,6 +84,10 @@ impl ViewerKeybindingAction {
                 key: Some(ViewerKey::Character('w')),
                 modifiers: ViewerModifiers::only(control),
             },
+            Self::ToggleFileReviewed => ViewerKeybinding {
+                key: Some(ViewerKey::Character('r')),
+                modifiers: ViewerModifiers::only(ViewerModifier::Alt),
+            },
             Self::PinTab | Self::CloseOtherTabs => ViewerKeybinding {
                 key: Some(ViewerKey::Character(if matches!(self, Self::PinTab) {
                     'p'
@@ -106,6 +113,7 @@ impl fmt::Display for ViewerKeybindingAction {
             Self::CloseTab => "close_tab",
             Self::PinTab => "pin_tab",
             Self::CloseOtherTabs => "close_other_tabs",
+            Self::ToggleFileReviewed => "toggle_file_reviewed",
         })
     }
 }
@@ -745,6 +753,8 @@ struct SerializedViewerKeybindings {
     pin_tab: Option<ViewerKeybinding>,
     #[serde(default)]
     close_other_tabs: Option<ViewerKeybinding>,
+    #[serde(default)]
+    toggle_file_reviewed: Option<ViewerKeybinding>,
 }
 
 impl Serialize for ViewerKeybindings {
@@ -764,6 +774,7 @@ impl Serialize for ViewerKeybindings {
             close_tab: Some(self[ViewerKeybindingAction::CloseTab]),
             pin_tab: Some(self[ViewerKeybindingAction::PinTab]),
             close_other_tabs: Some(self[ViewerKeybindingAction::CloseOtherTabs]),
+            toggle_file_reviewed: Some(self[ViewerKeybindingAction::ToggleFileReviewed]),
         }
         .serialize(serializer)
     }
@@ -786,6 +797,7 @@ impl<'de> Deserialize<'de> for ViewerKeybindings {
             ViewerKeybindingAction::CloseTab => value.close_tab,
             ViewerKeybindingAction::PinTab => value.pin_tab,
             ViewerKeybindingAction::CloseOtherTabs => value.close_other_tabs,
+            ViewerKeybindingAction::ToggleFileReviewed => value.toggle_file_reviewed,
         })
         .map_err(D::Error::custom)
     }

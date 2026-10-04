@@ -10,6 +10,7 @@ use super::{
 pub(super) enum Action {
     Continue,
     Refresh,
+    ToggleReview(usize),
     Quit,
 }
 
@@ -28,6 +29,15 @@ pub(super) fn handle(pager: &mut Pager, key: KeyEvent) -> Action {
             Action::Continue
         }
         Mode::Files => {
+            if !pager.browser.editing && key.code == KeyCode::Char('v') {
+                pager.mode = Mode::Files;
+                return pager
+                    .browser
+                    .state
+                    .selected()
+                    .and_then(|index| pager.browser.matches.get(index))
+                    .map_or(Action::Continue, |file| Action::ToggleReview(*file));
+            }
             picker_key(pager, key);
             Action::Continue
         }
@@ -86,6 +96,12 @@ fn pager_key(pager: &mut Pager, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return Action::Quit,
         KeyCode::Char('r') => return Action::Refresh,
+        KeyCode::Char('v') => {
+            return pager
+                .layout
+                .entry_at(pager.offset)
+                .map_or(Action::Continue, |entry| Action::ToggleReview(entry.file));
+        }
         KeyCode::Down | KeyCode::Char('j') => pager.scroll(true, 1),
         KeyCode::Up | KeyCode::Char('k') => pager.scroll(false, 1),
         KeyCode::PageDown | KeyCode::Char(' ') => pager.scroll(true, pager.page),

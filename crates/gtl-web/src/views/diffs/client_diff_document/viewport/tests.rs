@@ -45,6 +45,7 @@ fn loaded_file() -> TestResult<ClientDiffFile> {
         .collect::<TestResult<Vec<_>>>()?;
     Ok(ClientDiffFile {
         summary: ViewerFileSummary {
+            review: None,
             source_id: None,
             id: ViewerDiffFileId::for_index(0),
             path: repository_relative_path("src/rows.rs")?,

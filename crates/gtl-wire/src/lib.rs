@@ -24,4 +24,5 @@ pub mod v1 {
 #[cfg(feature = "grpc")]
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("gtl_descriptor");
 
+pub mod diff_review;
 pub mod doctor;

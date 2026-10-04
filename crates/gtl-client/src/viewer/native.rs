@@ -149,6 +149,17 @@ impl ViewerClient {
         proto::viewer::file_filters::decode_filters(response).map_err(Into::into)
     }
 
+    pub async fn set_diff_file_reviewed(
+        &mut self,
+        request: gtl_wire::diff_review::SetDiffFileReviewed,
+    ) -> Result<(), ViewerClientError> {
+        self.client
+            .set_diff_file_reviewed(proto::diff_review::encode_set(&request))
+            .await
+            .map_err(|error| decode_status(&error))?;
+        Ok(())
+    }
+
     pub async fn set_file_filters(
         &mut self,
         request: gtl_wire::viewer::file_filters::SetViewerFileFilters,

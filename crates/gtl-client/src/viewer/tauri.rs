@@ -88,6 +88,7 @@ pub struct ViewerClient {
 
 impl ViewerClient {
     viewer_unary_methods! {
+        set_diff_file_reviewed(gtl_wire::diff_review::SetDiffFileReviewed) -> () => "viewer_set_diff_file_reviewed";
         get_push_availability(gtl_wire::viewer::ViewerViewIdentity) -> gtl_wire::viewer::push::ViewerPushState => "viewer_get_push_availability";
         create_push(gtl_wire::viewer::push::CreateViewerPush) -> gtl_wire::viewer::push::ViewerPushRequest => "viewer_create_push";
         get_push(gtl_wire::viewer::push::ViewerPushRequest) -> gtl_wire::viewer::push::ViewerPushStatus => "viewer_get_push";

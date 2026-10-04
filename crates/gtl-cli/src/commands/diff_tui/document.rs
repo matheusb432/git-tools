@@ -305,6 +305,7 @@ mod tests {
                 path: "code.rs".into(),
                 added: 0,
                 removed: 0,
+                review: None,
                 compact: [text, "", "short"]
                     .into_iter()
                     .map(|text| Row {

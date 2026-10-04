@@ -99,6 +99,22 @@ fn keybinding_matches(
     !input.composing && keybindings.matches_keypress(action, input.key, input.modifiers)
 }
 
+pub(crate) fn shortcut_title(
+    label: &str,
+    keybindings: ViewerKeybindings,
+    action: ViewerKeybindingAction,
+) -> String {
+    if keybindings[action].is_unassigned() {
+        return label.to_owned();
+    }
+    let keys = keybindings
+        .display_keys(action)
+        .map(|key| key.to_string())
+        .collect::<Vec<_>>()
+        .join("+");
+    format!("{label} ({keys})")
+}
+
 #[cfg(test)]
 mod tests {
     use gtl_models::viewer::{

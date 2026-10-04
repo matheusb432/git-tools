@@ -271,6 +271,7 @@ fn encode_viewer_active_view(
             .into_iter()
             .map(|file| {
                 Ok(v1::ViewerFileSummary {
+                    review: file.review.as_ref().map(super::diff_review::encode_review),
                     source_id: file.source_id.map(|value| value.into_digest().to_vec()),
                     id: file.id.as_str().to_owned(),
                     path: file.path.to_string_lossy().into_owned(),
@@ -1358,6 +1359,9 @@ fn encode_viewer_keybindings(keybindings: ViewerKeybindings) -> v1::ViewerKeybin
         close_tab: Some(keybindings[ViewerKeybindingAction::CloseTab].to_string()),
         pin_tab: Some(keybindings[ViewerKeybindingAction::PinTab].to_string()),
         close_other_tabs: Some(keybindings[ViewerKeybindingAction::CloseOtherTabs].to_string()),
+        toggle_file_reviewed: Some(
+            keybindings[ViewerKeybindingAction::ToggleFileReviewed].to_string(),
+        ),
 
         push_diff: Some(keybindings[ViewerKeybindingAction::PushDiff].to_string()),
         toggle_files_sidebar: keybindings[ViewerKeybindingAction::ToggleFilesSidebar].to_string(),
@@ -1439,6 +1443,12 @@ fn decode_viewer_keybindings(
         .map(str::parse::<ViewerKeybinding>)
         .transpose()
         .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let toggle_file_reviewed = keybindings
+        .toggle_file_reviewed
+        .as_deref()
+        .map(str::parse::<ViewerKeybinding>)
+        .transpose()
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
     ViewerKeybindings::try_from_overrides(platform, |action| match action {
         ViewerKeybindingAction::ToggleFilesSidebar => Some(toggle_files_sidebar),
         ViewerKeybindingAction::ToggleCommitsSidebar => Some(toggle_commits_sidebar),
@@ -1450,6 +1460,7 @@ fn decode_viewer_keybindings(
         ViewerKeybindingAction::CloseTab => close_tab,
         ViewerKeybindingAction::PinTab => pin_tab,
         ViewerKeybindingAction::CloseOtherTabs => close_other_tabs,
+        ViewerKeybindingAction::ToggleFileReviewed => toggle_file_reviewed,
     })
     .map_err(|_| ViewerCodecError::InvalidMessage)
 }
@@ -1583,7 +1594,21 @@ fn decode_viewer_active_view(
 fn decode_viewer_file_summary(
     file: v1::ViewerFileSummary,
 ) -> Result<ViewerFileSummary, ViewerCodecError> {
+    let path = RepositoryRelativePath::try_new(PathBuf::from(file.path))
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let absolute_path = AbsoluteFilePath::try_new(PathBuf::from(file.absolute_path))
+        .map_err(|_| ViewerCodecError::InvalidMessage)?;
+    let review = file
+        .review
+        .map(super::diff_review::decode_review)
+        .transpose()?;
+    if review.as_ref().is_some_and(|review| {
+        review.reference.path != path || review.reference.repository.join(&path) != absolute_path
+    }) {
+        return Err(ViewerCodecError::InvalidMessage);
+    }
     Ok(ViewerFileSummary {
+        review,
         source_id: file
             .source_id
             .map(|value| {
@@ -1597,10 +1622,8 @@ fn decode_viewer_file_summary(
             .id
             .try_into()
             .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        path: RepositoryRelativePath::try_new(PathBuf::from(file.path))
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
-        absolute_path: AbsoluteFilePath::try_new(PathBuf::from(file.absolute_path))
-            .map_err(|_| ViewerCodecError::InvalidMessage)?,
+        path,
+        absolute_path,
         anchor_id: file.anchor_id,
         added: DiffLineCount::new(u64::from(file.added)),
         removed: DiffLineCount::new(u64::from(file.removed)),

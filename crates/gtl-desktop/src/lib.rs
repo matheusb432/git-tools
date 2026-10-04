@@ -294,6 +294,7 @@ pub fn run() -> anyhow::Result<()> {
             viewer_edit_settings,
             viewer_get_file_filters,
             viewer_set_file_filters,
+            viewer_ipc::viewer_set_diff_file_reviewed,
             viewer_open_diff_file,
             viewer_read_settings_file,
             viewer_stream_rows_start,

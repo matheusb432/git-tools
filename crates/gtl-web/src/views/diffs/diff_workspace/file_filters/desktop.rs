@@ -78,6 +78,8 @@ pub(in crate::views::diffs::diff_workspace) fn WorkspaceFileFiltersMenu(id: Stri
             text_maxlength: VIEWER_SEARCH_QUERY_MAX_BYTES.to_string(),
             ontext: move |text| filters.text.set_query.call(text),
             shown: form.shown,
+            unreviewed: form.unreviewed,
+            onunreviewed: move |checked| filters.edit.call(FileFilterEdit::Unreviewed(checked)),
             ontoggle: move |kind| filters.edit.call(FileFilterEdit::Toggle(kind)),
             changes_since: ChangesSinceSelection::new(changes_since.as_ref(), &form.changes_since),
             changes_since_value,
