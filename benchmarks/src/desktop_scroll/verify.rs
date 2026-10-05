@@ -589,10 +589,10 @@ fn verify_commit_metadata(
         compare("commit ID", fields[0], expected.commit_id.as_str())?;
         compare("author name", fields[1], IDENTITY_NAME)?;
         compare("author email", fields[2], IDENTITY_EMAIL)?;
-        compare("author timestamp", fields[3], expected.authored_at.as_str())?;
+        compare_git_timestamp("author timestamp", fields[3], expected.authored_at.as_str())?;
         compare("committer name", fields[4], IDENTITY_NAME)?;
         compare("committer email", fields[5], IDENTITY_EMAIL)?;
-        compare(
+        compare_git_timestamp(
             "committer timestamp",
             fields[6],
             expected.authored_at.as_str(),
@@ -828,6 +828,21 @@ fn nonempty_lines(output: &str) -> Vec<&str> {
         .collect()
 }
 
+fn compare_git_timestamp(
+    label: &str,
+    actual: &str,
+    expected: &str,
+) -> Result<(), DesktopScrollFixtureError> {
+    if actual
+        .strip_suffix('Z')
+        .zip(expected.strip_suffix("+00:00"))
+        .is_some_and(|(actual, expected)| actual == expected)
+    {
+        return Ok(());
+    }
+    compare(label, actual, expected)
+}
+
 fn compare<T>(label: &str, actual: &T, expected: &T) -> Result<(), DesktopScrollFixtureError>
 where
     T: PartialEq + std::fmt::Debug + ?Sized,
@@ -838,4 +853,29 @@ where
     Err(invalid(format!(
         "{label} is {actual:?}, expected {expected:?}"
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compare_git_timestamp;
+
+    #[test]
+    fn commit_timestamps_accept_utc_suffixes() {
+        let expected = "2026-01-02T12:00:00+00:00";
+        for actual in [expected, "2026-01-02T12:00:00Z"] {
+            assert!(compare_git_timestamp("author timestamp", actual, expected).is_ok());
+        }
+    }
+
+    #[test]
+    fn commit_timestamps_reject_changed_time_or_offset() {
+        let expected = "2026-01-02T12:00:00+00:00";
+        for actual in [
+            "2026-01-02T12:00:01Z",
+            "2026-01-02T12:00:00+01:00",
+            "2026-01-02T12:00:00",
+        ] {
+            assert!(compare_git_timestamp("author timestamp", actual, expected).is_err());
+        }
+    }
 }
