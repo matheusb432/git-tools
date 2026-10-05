@@ -108,6 +108,9 @@ pub enum ReserveRecipeError {
     #[error("viewer tab is not available")]
     #[meta(failure = Failure::Gone { resource: Resource::ViewerTab })]
     UnknownTab,
+    #[error("a diff supplied as text has no commit dates to filter")]
+    #[meta(failure = Failure::InvalidRequest { field: "changes_since".to_owned() })]
+    NoCommitDates,
 }
 
 #[derive(Debug, thiserror::Error, ErrorMeta)]
@@ -208,9 +211,11 @@ pub fn reserve_changes_since(
     changes_since: Option<gtl_models::timestamps::MachineTimestamp>,
 ) -> Result<ReservedRecipeWork, ReserveRecipeError> {
     state.update(|session| {
-        if !session.set_changes_since(tab_id, changes_since) {
-            return Err(ReserveRecipeError::UnknownTab);
+        let tab = session.tab(tab_id).ok_or(ReserveRecipeError::UnknownTab)?;
+        if changes_since.is_some() && tab.recipe.cwd().is_none() {
+            return Err(ReserveRecipeError::NoCommitDates);
         }
+        session.set_changes_since(tab_id, changes_since);
         reserve_refresh_in_session(session, tab_id)
     })?
 }
@@ -694,6 +699,50 @@ mod tests {
         ));
         assert_eq!(
             reserve_changes_since(&state, tab_id, None)
+                .unwrap()
+                .changes_since,
+            None
+        );
+    }
+
+    #[test]
+    fn text_diff_rejects_a_commit_date_cutoff_without_changing_the_tab() {
+        let state = ViewerState::new();
+        let text = gtl_models::diffs::DiffText::try_new("diff --git a/x b/x\n".into()).unwrap();
+        let opened = reserve_open(
+            &state,
+            Recipe {
+                source: RecipeSource::Text(crate::recipes::TextRecipeSource {
+                    id: text.id().clone(),
+                    label: crate::utils::project_name("patch"),
+                }),
+                name: None,
+            },
+            RecipeBatchId::generate(),
+        )
+        .unwrap();
+        let ticket = opened.ticket();
+        let version = state.version().unwrap();
+        let cutoff =
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-09-28T00:00:00Z").unwrap();
+
+        let error = reserve_changes_since(&state, ticket.tab_id, Some(cutoff)).unwrap_err();
+
+        assert_eq!(
+            error.classify().into_failure(),
+            Failure::InvalidRequest {
+                field: "changes_since".into(),
+            }
+        );
+        assert_eq!(state.version().unwrap(), version);
+        state
+            .inspect(|session| {
+                assert_eq!(session.current_ticket(ticket.tab_id), Some(ticket));
+                assert_eq!(session.tab_changes_since(ticket.tab_id), None);
+            })
+            .unwrap();
+        assert_eq!(
+            reserve_changes_since(&state, ticket.tab_id, None)
                 .unwrap()
                 .changes_since,
             None

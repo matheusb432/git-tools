@@ -5,8 +5,6 @@ use super::text_field::{FieldLabelVisibility, TextFieldDescription, TextFieldFra
 
 const TEXT_AREA_CLASSES: &str = "control-text-input control-text-area w-full px-2.5 font-mono";
 
-/// Renders a labeled multi-line text field.
-///
 /// `id` names the textarea and derives the ids that `aria-describedby` links: the validation
 /// message from `error` appears below the textarea, followed by `supporting_content`.
 #[component]
@@ -61,6 +59,7 @@ mod tests {
     use dioxus::prelude::*;
 
     use super::{FieldLabelVisibility, TextArea};
+    use crate::test_support::TestResult;
 
     #[test]
     fn invalid_text_area_describes_itself_with_its_error_and_supporting_text() {
@@ -82,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_label_still_names_the_text_area() {
+    fn hidden_label_still_names_the_text_area() -> TestResult {
         let html = dioxus_ssr::render_element(rsx! {
             TextArea {
                 id: "review-note",
@@ -91,7 +90,15 @@ mod tests {
             }
         });
 
-        assert!(html.contains("<span class=\"sr-only\">Comment on line 42</span>"));
+        let label = html
+            .split_once("<label")
+            .and_then(|(_, label)| label.split_once("</label>"))
+            .map(|(label, _)| label)
+            .ok_or("the text area has no wrapping label")?;
+        assert!(label.contains("Comment on line 42"));
+        assert!(label.contains("<textarea"));
+        assert!(label.contains("id=\"review-note\""));
         assert!(!html.contains("aria-describedby"));
+        Ok(())
     }
 }

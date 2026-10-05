@@ -698,7 +698,7 @@ file-filters-since-last-7-days = Últimos 7 dias
 file-filters-since-custom = Personalizado…
 file-filters-since-custom-label = Data e hora de início das alterações
 file-filters-since-description = Mostra só as alterações com commit depois deste momento. Alterações sem commit continuam visíveis.
-file-filters-since-unavailable = Arquivos modificados mostram só alterações sem commit.
+file-filters-since-unavailable = Filtros por data precisam de uma comparação de commits de um repositório local.
 file-filters-extensions = Extensões
 file-filters-hidden-count =
     { $count ->

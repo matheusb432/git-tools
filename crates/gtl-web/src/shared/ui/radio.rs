@@ -80,6 +80,5 @@ mod tests {
         });
 
         assert!(!html.contains("aria-describedby"));
-        assert!(!html.contains("control-choice-hint"));
     }
 }

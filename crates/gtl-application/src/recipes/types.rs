@@ -24,7 +24,6 @@ pub enum RecipeSource {
     Text(TextRecipeSource),
 }
 
-/// Stored diff text and the label its renders show.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TextRecipeSource {
     pub id: DiffTextId,

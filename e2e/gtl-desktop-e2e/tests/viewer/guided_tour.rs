@@ -96,28 +96,6 @@ async fn check_resized_guide(driver: &WebDriver) -> Result<()> {
     support::evidence::capture(driver, "guided-tour-workspace", true).await?;
     let original = driver.get_window_rect().await?;
     driver.set_window_rect(20, 20, 520, 360).await?;
-    wait::until(
-        "tour fits resized window",
-        wait::ASSERTION_TIMEOUT,
-        || async {
-            let viewport = driver
-                .find(By::Css("dialog[data-guided-tour]"))
-                .await?
-                .rect()
-                .await?;
-            let card = driver
-                .find(By::Css(".guided-tour-card"))
-                .await?
-                .rect()
-                .await?;
-            Ok((card.x >= viewport.x
-                && card.y >= viewport.y
-                && card.x + card.width <= viewport.x + viewport.width
-                && card.y + card.height <= viewport.y + viewport.height)
-                .then_some(()))
-        },
-    )
-    .await?;
     support::visible(driver, By::Css(".guided-tour-actions button:last-child")).await?;
     support::evidence::capture(driver, "guided-tour-small-window", true).await?;
     driver

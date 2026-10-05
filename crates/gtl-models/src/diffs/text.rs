@@ -28,7 +28,6 @@ const DIFF_TEXT_ID_CHARACTER_COUNT: usize = 64;
 )]
 pub struct DiffTextId(String);
 
-/// Reports that raw input cannot represent a SHA-256 diff text identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("diff text ID must contain exactly 64 ASCII hexadecimal characters")]
 pub struct DiffTextIdError;

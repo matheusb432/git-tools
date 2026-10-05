@@ -682,7 +682,7 @@ file-filters-since-last-7-days = Last 7 days
 file-filters-since-custom = Custom…
 file-filters-since-custom-label = Changed since date and time
 file-filters-since-description = Shows only changes committed after this time. Uncommitted changes stay visible.
-file-filters-since-unavailable = Modified files show only uncommitted changes.
+file-filters-since-unavailable = Date filters require a comparison of local repository commits.
 file-filters-extensions = Extensions
 file-filters-hidden-count =
     { $count ->

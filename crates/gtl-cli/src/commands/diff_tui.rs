@@ -279,7 +279,7 @@ impl Pager {
                 });
         self.layout = Layout::new(
             &self.document,
-            usize::from(self.width).max(24),
+            usize::from(self.width).max(22),
             self.wrap,
             self.full,
         );
@@ -304,7 +304,7 @@ impl Pager {
         let anchor = self.layout.anchor(&self.document, self.offset);
         self.layout = Layout::new(
             &self.document,
-            usize::from(self.width).max(24),
+            usize::from(self.width).max(22),
             self.wrap,
             self.full,
         );

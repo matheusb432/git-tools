@@ -317,6 +317,7 @@ fn WorkspaceFileItem(
     show_directory: bool,
     onnavigate: EventHandler<String>,
 ) -> Element {
+    let language = use_language();
     let workspace = super::use_workspace_context();
     let file = use_memo(use_reactive((&file_index,), move |(file_index,)| {
         workspace.view.read().files.get(file_index).cloned()
@@ -362,8 +363,8 @@ fn WorkspaceFileItem(
                 if file.review.as_ref().is_some_and(|review| review.reviewed) {
                     span {
                         class: "diff-files-reviewed-mark",
-                        title: t!(use_language(), "review-file-reviewed"),
-                        aria_label: t!(use_language(), "review-file-reviewed"),
+                        title: t!(language, "review-file-reviewed"),
+                        aria_label: t!(language, "review-file-reviewed"),
                         Check { size: 12 }
                     }
                 }
@@ -379,6 +380,7 @@ fn WorkspaceFileItem(
 
 #[component]
 fn ReviewProgress() -> Element {
+    let language = use_language();
     let filters = try_use_context::<super::file_filters::workspace::WorkspaceFileFilters>();
     let (reviewed, total) = filters.map_or((0, 0), |filters| (filters.review_progress)());
     if reviewed == 0 {
@@ -390,7 +392,7 @@ fn ReviewProgress() -> Element {
             role: "status",
             aria_live: "polite",
             aria_atomic: "true",
-            {t!(use_language(), "review-progress", reviewed = reviewed, total = total)}
+            {t!(language, "review-progress", reviewed = reviewed, total = total)}
         }
     }
 }

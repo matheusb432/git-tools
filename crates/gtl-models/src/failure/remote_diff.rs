@@ -16,7 +16,6 @@ pub enum RemoteDiffFailure {
     Unauthenticated,
     /// GitHub has no such repository or revisions visible to the credentials.
     NotFound,
-    /// GitHub's API rate limit is exhausted.
     RateLimited,
     /// GitHub refused or failed the comparison with an HTTP `status`.
     Rejected {

@@ -8,14 +8,18 @@ use super::{ErrorClass, ExternalDiagnostic, Failure, PublicFailure};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffTextFailure {
-    /// The text exceeds the accepted size.
-    TooLarge { bytes_max: u64 },
+    TooLarge {
+        bytes_max: u64,
+    },
     /// The text has no `diff --git` file section.
     NoFiles,
     /// A `diff --git` header names a path that cannot be read.
-    InvalidFileHeader { diagnostic: ExternalDiagnostic },
-    /// Two file sections name the same path.
-    DuplicatePath { path: String },
+    InvalidFileHeader {
+        diagnostic: ExternalDiagnostic,
+    },
+    DuplicatePath {
+        path: String,
+    },
     /// The stored text was removed after its last viewer tab and history entry closed.
     Missing,
 }

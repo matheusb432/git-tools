@@ -131,7 +131,7 @@ pub(crate) fn use_client_diff_workspace(
         let key = key();
         let demand = demand();
         let _source = source();
-        let _summaries = summaries();
+        let _summaries = summaries.read();
         load_workspace(cache, key, view, workspace, identity, demand)
     });
     ClientDiffWorkspaceController {

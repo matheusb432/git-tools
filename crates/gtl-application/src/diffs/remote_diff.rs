@@ -145,7 +145,6 @@ impl fmt::Display for GitHubCompareRange {
     }
 }
 
-/// Identifies one cached remote diff.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RemoteDiffKey {
     pub repository: GitHubRepository,
@@ -202,7 +201,6 @@ pub struct GitHubApiResponse {
     pub body: Vec<u8>,
 }
 
-/// A remote diff stored as diff text, with the label its views show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredRemoteDiff {
     pub id: DiffTextId,

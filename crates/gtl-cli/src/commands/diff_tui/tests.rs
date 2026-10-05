@@ -90,19 +90,46 @@ fn press(pager: &mut Pager, key: char) {
     let _ = input::handle(pager, KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
 }
 
-fn screen(pager: &mut Pager, width: u16, height: u16) -> String {
+fn screen_buffer(pager: &mut Pager, width: u16, height: u16) -> ratatui::buffer::Buffer {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     pager.resize(width, height);
     terminal
         .draw(|frame| render::draw(frame, pager, false))
         .unwrap();
-    terminal
-        .backend()
-        .buffer()
+    terminal.backend().buffer().clone()
+}
+
+fn screen(pager: &mut Pager, width: u16, height: u16) -> String {
+    screen_buffer(pager, width, height)
         .content
         .iter()
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>()
+}
+
+#[test]
+fn wrapped_source_keeps_every_character_at_the_minimum_terminal_width() {
+    let source = "abcdefghijklmnopqrstuvwx";
+    let mut document = document();
+    document.files.truncate(1);
+    document.files[0].path = "x.rs".into();
+    document.files[0].compact = vec![row(1, source)];
+    let mut pager = Pager::default();
+    pager.resize(24, 12);
+    pager.replace(document);
+
+    for width in [24, 25] {
+        let buffer = screen_buffer(&mut pager, width, 12);
+        let content = pager.screen.content;
+        let gutter = u16::try_from(pager.layout.gutter).unwrap();
+        let mut rendered = String::new();
+        for row in content.y..content.bottom() {
+            for column in content.x + gutter..content.right() {
+                rendered.push_str(buffer[(column, row)].symbol());
+            }
+        }
+        assert!(rendered.contains(source), "{rendered}");
+    }
 }
 
 #[test]

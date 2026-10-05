@@ -201,11 +201,20 @@ fn join_reader(reader: JoinHandle<std::io::Result<Vec<u8>>>) -> anyhow::Result<V
         .context("reading gh api output")
 }
 
-/// Splits `gh api --include` output into the status line, headers, and body.
 fn parse_included_response(mut stdout: Vec<u8>) -> anyhow::Result<GitHubResponse> {
-    let mut status = None;
+    let status_line_end = stdout
+        .iter()
+        .position(|&byte| byte == b'\n')
+        .context("gh api response ended inside its headers")?;
+    let status_line = String::from_utf8_lossy(&stdout[..status_line_end]);
+    let status_line = status_line.trim_end_matches('\r');
+    let status = status_line
+        .split(' ')
+        .nth(1)
+        .and_then(|code| code.parse::<u16>().ok())
+        .with_context(|| format!("gh api printed an invalid status line: {status_line}"))?;
     let mut rate_limit_remaining = None;
-    let mut line_start = 0;
+    let mut line_start = status_line_end + 1;
     let body_start = loop {
         let line_end = stdout[line_start..]
             .iter()
@@ -214,14 +223,7 @@ fn parse_included_response(mut stdout: Vec<u8>) -> anyhow::Result<GitHubResponse
             .context("gh api response ended inside its headers")?;
         let line = String::from_utf8_lossy(&stdout[line_start..line_end]);
         let line = line.trim_end_matches('\r');
-        if status.is_none() {
-            status = Some(
-                line.split(' ')
-                    .nth(1)
-                    .and_then(|code| code.parse::<u16>().ok())
-                    .with_context(|| format!("gh api printed an invalid status line: {line}"))?,
-            );
-        } else if line.is_empty() {
+        if line.is_empty() {
             break line_end + 1;
         } else if let Some((name, value)) = line.split_once(':')
             && name.trim().eq_ignore_ascii_case("x-ratelimit-remaining")
@@ -232,7 +234,7 @@ fn parse_included_response(mut stdout: Vec<u8>) -> anyhow::Result<GitHubResponse
     };
     let body = stdout.split_off(body_start);
     Ok(GitHubResponse {
-        status: status.context("gh api printed no status line")?,
+        status,
         rate_limit_remaining,
         body,
     })

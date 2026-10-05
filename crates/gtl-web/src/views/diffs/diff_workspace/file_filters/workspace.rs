@@ -3,7 +3,9 @@ use gtl_models::{
     diffs::ExtensionFilter, settings::DiffFilesSort, timestamps::MachineTimestamp,
     viewer::ViewerTabId,
 };
-use gtl_wire::viewer::{SetViewerChangesSince, ViewerActiveView, ViewerDiffFileId};
+use gtl_wire::viewer::{
+    SetViewerChangesSince, ViewerActiveView, ViewerDiffFileId, ViewerViewSource,
+};
 
 use crate::{
     app::application_layout::ViewerContext,
@@ -158,7 +160,10 @@ fn use_changes_since_filter(
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
     let applied = use_memo(move || source.read().changes_since.clone());
-    let available = use_memo(move || !source.read().modified_files);
+    let available = use_memo(move || {
+        let source = source.read();
+        source.source == ViewerViewSource::Repository && !source.modified_files
+    });
     let apply = use_callback(move |changes_since: Option<MachineTimestamp>| {
         let request = SetViewerChangesSince {
             tab_id: *tab_id.peek(),
