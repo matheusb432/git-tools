@@ -32,13 +32,39 @@ if ($action -eq 'Failure') {
 
 if ($action -eq 'Stop' -or $action -eq 'Uninstall') {
     if ($existing) {
-        Stop-ScheduledTask -TaskName $taskName
-        $deadline = [DateTime]::UtcNow.AddSeconds(12)
-        while ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running') {
-            if ([DateTime]::UtcNow -ge $deadline) { throw 'gtl-server did not stop within 12 seconds' }
-            Start-Sleep -Milliseconds 100
+        $servers = @()
+        try {
+            if ($existing.Actions.Count -gt 0 -and $existing.Actions[0].Arguments) {
+                $arguments = $existing.Actions[0].Arguments
+                $launchers = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+                    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($arguments) }
+                foreach ($launcher in $launchers) {
+                    $owner = Invoke-CimMethod -InputObject $launcher -MethodName GetOwnerSid
+                    if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne $identity.User.Value) { continue }
+                    foreach ($child in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$($launcher.ProcessId) AND Name='gtl-server.exe'")) {
+                        $process = Get-Process -Id $child.ProcessId -ErrorAction SilentlyContinue
+                        if ($process) {
+                            try {
+                                $null = $process.Handle
+                                $servers += $process
+                            } catch [System.InvalidOperationException] {
+                                $process.Dispose()
+                            }
+                        }
+                    }
+                }
+            }
+            Stop-ScheduledTask -TaskName $taskName
+            $deadline = [DateTime]::UtcNow.AddSeconds(12)
+            while ((Get-ScheduledTask -TaskName $taskName).State -eq 'Running' -or
+                ($servers | Where-Object { -not $_.HasExited })) {
+                if ([DateTime]::UtcNow -ge $deadline) { throw 'gtl-server did not stop within 12 seconds' }
+                Start-Sleep -Milliseconds 100
+            }
+            if ($action -eq 'Uninstall') { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
+        } finally {
+            foreach ($server in $servers) { $server.Dispose() }
         }
-        if ($action -eq 'Uninstall') { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
     }
     exit 0
 }

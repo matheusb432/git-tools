@@ -111,9 +111,8 @@ impl Registration {
 mod tests {
     use super::*;
 
-    async fn run_start_case(case: &str) -> std::process::Output {
+    async fn run_task_case(action: &str, case: &str, harness: &str) -> std::process::Output {
         let registration = Registration::discover().unwrap();
-        let harness = include_str!("../../tests/support/windows_task_start.ps1");
         let script = format!(
             "try {{\n{harness}\nexit 0\n}} catch {{ [Console]::Error.WriteLine($_.ToString()); exit 1 }}"
         );
@@ -134,7 +133,7 @@ mod tests {
                 "-EncodedCommand",
                 &encode(&script),
             ])
-            .env("GTL_SERVER_ACTION", "Start")
+            .env("GTL_SERVER_ACTION", action)
             .env("GTL_TASK_START_CASE", case)
             .env("GTL_TASK_START_SCRIPT", encode(SCRIPT));
         super::super::output(&mut command).await.unwrap()
@@ -142,7 +141,12 @@ mod tests {
 
     #[tokio::test]
     async fn start_waits_for_running_after_a_previous_task_failure() {
-        let result = run_start_case("waiting").await;
+        let result = run_task_case(
+            "Start",
+            "waiting",
+            include_str!("../../tests/support/windows_task_start.ps1"),
+        )
+        .await;
         assert!(
             result.status.success(),
             "{}",
@@ -152,8 +156,28 @@ mod tests {
 
     #[tokio::test]
     async fn start_reports_failure_from_the_new_task_run() {
-        let result = run_start_case("failure").await;
+        let result = run_task_case(
+            "Start",
+            "failure",
+            include_str!("../../tests/support/windows_task_start.ps1"),
+        )
+        .await;
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("LastTaskResult=1"));
+    }
+
+    #[tokio::test]
+    async fn stop_waits_for_the_server_after_the_task_reports_ready() {
+        let result = run_task_case(
+            "Stop",
+            "waiting",
+            include_str!("../../tests/support/windows_task_stop.ps1"),
+        )
+        .await;
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
 }
