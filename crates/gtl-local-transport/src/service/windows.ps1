@@ -45,8 +45,21 @@ if ($action -eq 'Stop' -or $action -eq 'Uninstall') {
 
 if ($action -eq 'Start') {
     if (-not $existing) { throw "gtl-server is not installed - run $env:GTL_SERVER_INSTALL_COMMAND" }
+    $previousRunTime = (Get-ScheduledTaskInfo -TaskName $taskName).LastRunTime
     Start-ScheduledTask -TaskName $taskName
-    exit 0
+    $deadline = [DateTime]::UtcNow.AddSeconds(12)
+    while ($true) {
+        $info = Get-ScheduledTaskInfo -TaskName $taskName
+        $task = Get-ScheduledTask -TaskName $taskName
+        if ($task.State -eq 'Running') { exit 0 }
+        if ($task.State -eq 'Ready' -and $info.LastRunTime -gt $previousRunTime -and $info.LastTaskResult -notin @(0, 267009)) {
+            throw ('gtl-server failed during startup: LastTaskResult=' + $info.LastTaskResult)
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw ('gtl-server did not start within 12 seconds: LastTaskResult=' + $info.LastTaskResult)
+        }
+        Start-Sleep -Milliseconds 100
+    }
 }
 
 if ($action -ne 'Install') { throw 'unknown server action' }
