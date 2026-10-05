@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "gtl-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -4141,7 +4141,7 @@ dependencies = [
 
 [[package]]
 name = "gtl-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "gtk",
@@ -4271,7 +4271,7 @@ dependencies = [
 
 [[package]]
 name = "gtl-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
